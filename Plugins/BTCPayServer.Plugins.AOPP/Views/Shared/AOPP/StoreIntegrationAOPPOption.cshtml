@@ -1,0 +1,57 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Plugins.AOPP
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@inject AOPPService AOPPService
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+    AOPPSettings settings = null;
+    if (!string.IsNullOrEmpty(storeId))
+    {
+        try
+        {
+            settings = await AOPPService.GetAOPPForStore(storeId);
+        }
+        catch (Exception)
+        {
+        }
+    }
+}
+@if (!string.IsNullOrEmpty(storeId))
+{
+    <li class="list-group-item bg-tile ">
+        <div class="d-flex align-items-center">
+            <span class="d-flex flex-wrap flex-fill flex-column flex-sm-row">
+                <strong class="me-3">
+                    AOPP
+                </strong>
+                <span title="" class="d-flex me-3">
+                    <span class="text-secondary">Allows your customers to pay with altcoins that are not supported by BTCPay Server.</span>
+                </span>
+            </span>
+            <span class="d-flex align-items-center fw-semibold">
+                @if (settings?.Enabled is true)
+                {
+                    <span class="d-flex align-items-center text-success">
+                        <span class="me-2 btcpay-status btcpay-status--enabled"></span>
+                        Enabled
+                    </span>
+                    <span class="text-light ms-3 me-2">|</span>
+                    <a lass="btn btn-link px-1 py-1 fw-semibold" asp-controller="AOPP" asp-action="UpdateAOPPSettings" asp-route-storeId="@storeId">
+                        Modify
+                    </a>
+                }
+                else
+                {
+                    <span class="d-flex align-items-center text-danger">
+                        <span class="me-2 btcpay-status btcpay-status--disabled"></span>
+                        Disabled
+                    </span>
+                    <a class="btn btn-primary btn-sm ms-4 px-3 py-1 fw-semibold" asp-controller="AOPP" asp-action="UpdateAOPPSettings" asp-route-storeId="@storeId">
+                        Setup
+                    </a>
+                }
+            </span>
+        </div>
+    </li>
+}

@@ -1,0 +1,6 @@
+[submodule "submodules/walletwasabi"]
+	path = submodules/walletwasabi
+	url = https://github.com/kukks/walletwasabi
+[submodule "submodules/btcpayserver"]
+	path = submodules/btcpayserver
+	url = https://github.com/btcpayserver/btcpayserver

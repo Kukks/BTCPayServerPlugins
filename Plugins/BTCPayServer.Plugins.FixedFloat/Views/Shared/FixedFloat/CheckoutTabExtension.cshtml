@@ -1,0 +1,14 @@
+@using BTCPayServer.Plugins.FixedFloat
+@using Newtonsoft.Json
+@using Newtonsoft.Json.Linq
+@inject FixedFloatService FixedFloatService
+@{
+    var storeId = ((JObject)JObject.Parse(JsonConvert.SerializeObject(Model)))["StoreId"].Value<string>();
+    var settings = await FixedFloatService.GetFixedFloatForStore(storeId);
+    if (settings?.Enabled is true)
+    {
+        <div class="payment-tabs__tab py-0" id="FixedFloat-tab" v-on:click="switchTab('FixedFloat')" v-bind:class="{ 'active': currentTab == 'FixedFloat'}" v-if="!srvModel.paymentMethodId.endsWith('LNURLPAY')">
+            <span>{{$t("Altcoins (FixedFloat)")}}</span>
+        </div>
+    }
+}

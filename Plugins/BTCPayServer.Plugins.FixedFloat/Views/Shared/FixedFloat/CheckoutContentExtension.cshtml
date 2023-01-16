@@ -1,0 +1,19 @@
+@using BTCPayServer.Plugins.FixedFloat
+@using Newtonsoft.Json
+@using Newtonsoft.Json.Linq
+@inject FixedFloatService FixedFloatService
+@{
+    var storeId = ((JObject)JObject.Parse(JsonConvert.SerializeObject(Model)))["StoreId"].Value<string>();
+    var settings = await FixedFloatService.GetFixedFloatForStore(storeId);
+    if (settings?.Enabled is true)
+    {
+        <div id="FixedFloat" class="bp-view payment manual-flow" style="padding:0" :class="{ active: currentTab == 'undefined' || currentTab == 'FixedFloat' }">
+            <fixed-float inline-template
+                        :to-currency="srvModel.paymentMethodId"
+                        :to-currency-due="srvModel.btcDue * (1 + (@settings.AmountMarkupPercentage / 100)) "
+                        :to-currency-address="srvModel.btcAddress">
+                <iframe :src="url" style="min-height:600px;width:100%;border:none" allowtransparency="true"></iframe>
+            </fixed-float>
+        </div>
+    }
+}

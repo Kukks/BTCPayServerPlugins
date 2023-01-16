@@ -1,0 +1,73 @@
+﻿@using BTCPayServer.Client.Models
+@model BTCPayServer.Plugins.LSP.LSPController.LSPConnectPage
+@inject ContentSecurityPolicies contentSecurityPolicies
+@using BTCPayServer.Security
+@using NBitcoin
+@{
+    var nonce = RandomUtils.GetUInt256().ToString().Substring(0, 32);
+    contentSecurityPolicies.Add("script-src", $"'nonce-{nonce}'");
+    contentSecurityPolicies.AllowUnsafeHashes();
+    Layout = "_LayoutSimple";
+    var reloadPage = false;
+}
+
+<style>
+footer {
+    display: none;
+}
+ @if (!string.IsNullOrEmpty(Model.Settings.CustomCSS))
+ {
+     @Safe.Raw(Model.Settings.CustomCSS)
+ }
+
+</style>
+<div class="container d-flex h-100">
+    <div class="justify-content-center align-self-center text-center mx-auto px-2 w-100 m-auto">
+        <partial name="_StatusMessage"/>
+        <div class="mb-4 d-print-none d-flex justify-content-center">
+
+            <h1 >Thank you!</h1>
+        </div>
+        @if (Model.Status == InvoiceStatus.Processing)
+        {
+            reloadPage = true;
+            <div class="alert alert-info">
+                The invoice has detected a payment but is still waiting to be settled. This page will refresh periodically until it is settled.
+            </div>
+        }
+        else if (Model.Status != InvoiceStatus.Settled)
+        {
+            <div class="alert alert-danger">
+                The invoice is not settled.
+            </div>
+        }
+        else
+        {
+            Model.Invoice.Metadata.TryGetValue("inbound", out var inbound);
+            <div class="d-inline-flex flex-column" style="width:256px">
+                <div class="qr-container mb-2">
+                    @await Component.InvokeAsync("QRCode", new {data = Model.LNURL.ToUpperInvariant()})
+                </div>
+
+                <p class="mx-auto">Scan this QR with your wallet to proceed with opening the channel.</p>
+                <a class="btn btn-secondary mt-3" href=@Model.LNURL>Open in wallet</a>
+                <p class="text-muted">Opening a channel of at least @inbound.ToString() sats.</p>
+            </div>
+        }
+        <div class="row">
+            <div class="powered__by__btcpayserver col-12">
+                Powered by <a target="_blank" href="https://github.com/btcpayserver/btcpayserver" rel="noreferrer noopener">BTCPay Server</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (reloadPage)
+{
+    <script type="text/javascript" nonce="@nonce">       
+        setTimeout(function(){
+            
+            window.location.reload();
+        }, 3000); 
+    </script>
+}

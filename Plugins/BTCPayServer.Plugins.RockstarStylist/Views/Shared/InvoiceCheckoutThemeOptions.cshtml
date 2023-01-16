@@ -1,0 +1,26 @@
+@using BTCPayServer.Plugins.RockstarStylist
+@using BTCPayServer.Security
+@using NBitcoin
+@inject ContentSecurityPolicies contentSecurityPolicies
+@inject RockstarStyleProvider RockstarStyleProvider
+@{
+    var nonce = RandomUtils.GetUInt256().ToString().Substring(0, 32);
+    contentSecurityPolicies.Add("script-src", $"'nonce-{nonce}'");
+    var themes = await RockstarStyleProvider.Get(); 
+}
+@foreach (var theme in themes)
+{
+    <div>
+        <a href="#" class="set-theme-custom"  data-theme="@theme.CssUrl">@theme.StyleName</a>
+        (<a href="@theme.PreviewUrl" target="_blank">Preview</a>)
+    </div>
+}
+
+<script type="text/javascript" nonce="@nonce">
+    document.addEventListener("DOMContentLoaded", () => {
+        delegate('click', '.set-theme-custom', e => {
+            const data = e.target.closest('.set-theme-custom').getAttribute('data-theme');
+            document.getElementById('CustomCSS').value = data;
+        });
+    });
+</script>

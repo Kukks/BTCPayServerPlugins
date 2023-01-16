@@ -1,0 +1,59 @@
+@using BTCPayServer.Client
+@using BTCPayServer.Plugins.TicketTailor
+@using Microsoft.AspNetCore.Routing
+@using BTCPayServer.Abstractions.Contracts
+@inject IScopeProvider ScopeProvider
+@inject TicketTailorService TicketTailorService
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+
+    TicketTailorSettings settings = null;
+    if (!string.IsNullOrEmpty(storeId))
+    {
+        try
+        {
+            settings = await TicketTailorService.GetTicketTailorForStore(storeId);
+        }
+        catch (Exception)
+        {
+        }
+    }
+}
+@if (!string.IsNullOrEmpty(storeId))
+{
+    <li class="list-group-item bg-tile ">
+        <div class="d-flex align-items-center">
+            <span class="d-flex flex-wrap flex-fill flex-column flex-sm-row">
+                <strong class="me-3">
+                    Ticket Tailor
+                </strong>
+                <span title="" class="d-flex me-3">
+                    <span class="text-secondary">Sell tickets on Ticket Tailor using BTCPay Server</span>
+                </span>
+            </span>
+            <span class="d-flex align-items-center fw-semibold">
+                @if (settings?.ApiKey is not null)
+                {
+                    <span class="d-flex align-items-center text-success">
+                        <span class="me-2 btcpay-status btcpay-status--enabled"></span>
+                        Active
+                    </span>
+                    <span class="text-light ms-3 me-2">|</span>
+                    <a lass="btn btn-link px-1 py-1 fw-semibold" asp-controller="TicketTailor" asp-action="UpdateTicketTailorSettings" asp-route-storeId="@storeId">
+                        Modify
+                    </a>
+                }
+                else
+                {
+                    <span class="d-flex align-items-center text-danger">
+                        <span class="me-2 btcpay-status btcpay-status--disabled"></span>
+                        Disabled
+                    </span>
+                    <a class="btn btn-primary btn-sm ms-4 px-3 py-1 fw-semibold" asp-controller="TicketTailor" asp-action="UpdateTicketTailorSettings" asp-route-storeId="@storeId">
+                        Setup
+                    </a>
+                }
+            </span>
+        </div>
+    </li>
+}

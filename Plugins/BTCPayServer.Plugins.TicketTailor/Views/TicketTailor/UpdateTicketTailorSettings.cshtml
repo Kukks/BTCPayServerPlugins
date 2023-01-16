@@ -1,0 +1,134 @@
+﻿@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Client
+@using BTCPayServer.Plugins.TicketTailor
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using Microsoft.AspNetCore.Routing
+@using BTCPayServer.Abstractions.Contracts
+@model BTCPayServer.Plugins.TicketTailor.UpdateTicketTailorSettingsViewModel
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+    Layout = "../Shared/_NavLayout.cshtml";
+    ViewData["NavPartialName"] = "../UIStores/_Nav";
+    ViewData.SetActivePage("TicketTailor", "Update Store TicketTailor Settings", null);
+    Model.SpecificTickets ??= new List<SpecificTicket>();
+
+}
+
+<h2 class="mt-1 mb-4">@ViewData["Title"]</h2>
+@if (ViewContext.ModelState.IsValid && Model.EventId is not null)
+{
+    <div class="alert alert-warning">
+        Please ensure that emails in your store are configured if you wish to send the tickets via email to customers as TicketTailor does not handle it for tickets issued via its API.
+        <br/>
+        Ensure that the url used for btcpayserver is accessible publicly.
+    </div>
+}
+<div class="row">
+    <div class="col-xl-8 col-xxl-constrain">
+        <form method="post">
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+
+            <div class="form-group">
+                <label asp-for="ApiKey" class="form-label" data-required>TicketTailor API Key</label>
+                <input asp-for="ApiKey" class="form-control" required/>
+                <span asp-validation-for="ApiKey" class="text-danger"></span>
+            </div>
+
+            @if (Model.Events is not null)
+            {
+                <div class="form-group">
+                    <label asp-for="EventId" class="form-label" data-required>Event</label>
+                    <select asp-for="EventId" asp-items="Model.Events" class="form-select"></select>
+                </div>
+            }
+
+            @if (Model.EventId is not null)
+            {
+                <div class="form-group form-check">
+                    <input asp-for="ShowDescription" type="checkbox" class="form-check-input"/>
+                    <label asp-for="ShowDescription" class="form-check-label">Show TicketTailor event description</label>
+                    <span asp-validation-for="ShowDescription" class="text-danger"></span>
+                </div>
+                <div class="form-group form-check">
+                    <input asp-for="BypassAvailabilityCheck" type="checkbox" class="form-check-input"/>
+                    <label asp-for="BypassAvailabilityCheck" class="form-check-label">Bypass availability checks of TicketTailor (such as when in draft mode)</label>
+                    <span asp-validation-for="BypassAvailabilityCheck" class="text-danger"></span>
+                </div>
+
+                <div class="form-group">
+                    <label asp-for="CustomCSS" class="form-label">Additional Custom CSS</label>
+                    <textarea asp-for="CustomCSS" rows="10" cols="40" class="form-control"></textarea>
+                    <span asp-validation-for="CustomCSS" class="text-danger"></span>
+                </div>
+
+                @if (Model.TicketTypes?.Any() is true)
+                {
+                    var uniqueRemaining = Model.TicketTypes.Where(type => Model.SpecificTickets?.Any(ticket => ticket.TicketTypeId == type.Id) is false);
+                    <div class="row mt-4">
+                        <div class="h4 w-100">Specific tickets</div>
+                        <p>Specific tickets allow you to override explicitly which tickets you wish to allow to sell, and also override the price, name, and description of these tickets.</p>
+                        @if (uniqueRemaining.Any())
+                        {
+                            SelectList sl = new SelectList(uniqueRemaining, nameof(TicketTailorClient.TicketType.Id), nameof(TicketTailorClient.TicketType.Name));
+                            <div class="form-group">
+
+                                <div class="input-group">
+                                    <select asp-for="NewSpecificTicket" asp-items="@sl" class="form-select"></select>
+
+                                    <button type="submit" value="add-specific-ticket" name="command" class="btn btn-outline-primary input-group-btn">Add</button>
+                                </div>
+                            </div>
+                        }
+                        @for (var index = 0; index < Model.SpecificTickets.Count; index++)
+                        {
+                            var specific = Model.SpecificTickets[index];
+                            var ticketType = Model.TicketTypes.SingleOrDefault(type => type.Id == specific.TicketTypeId);
+                            if (ticketType is null)
+                            {
+                                continue;
+                            }
+                            <div class="card">
+                                <div class="card-header h5">
+                                    @ticketType.Name
+                                </div>
+                                <div class="card-body">
+                                    <div class="form-group pt-2">
+                                        <div class="input-group">
+                                            <input asp-for="SpecificTickets[index].TicketTypeId" type="hidden"/>
+                                            <input class="form-control" asp-for="SpecificTickets[index].Price" type="number" step="any" min="0" placeholder="Custom price"/>
+                                            <input class="form-control" asp-for="SpecificTickets[index].Name" type="text" placeholder="Custom name"/>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <textarea class="form-control richtext" asp-for="SpecificTickets[index].Description" type="text"  placeholder="Custom description"></textarea>
+                                    </div>
+                                    <div class="form-group form-check">
+                                        <input asp-for="SpecificTickets[index].Hidden" type="checkbox" class="form-check-input"/>
+                                        <label asp-for="SpecificTickets[index].Hidden" class="form-check-label">Hidden</label>
+                                        <span asp-validation-for="SpecificTickets[index].Hidden" class="text-danger"></span>
+                                    </div>
+                                </div>
+                                <div class="card-footer">
+                                    <button type="submit" value="remove-specific-ticket:@index" name="command" class="btn btn-outline-danger">Remove</button>     
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            }
+            <div class="form-group mt-4">
+                <input type="submit" value="Save" name="command" class="btn btn-primary"/>
+                @if (this.ViewContext.ModelState.IsValid && Model.EventId is not null)
+                {
+                    <a class="btn btn-secondary" href=" @Url.Action("View", "TicketTailor", new {storeId})">
+                        Ticket purchase page
+                    </a>
+                }
+            </div>
+        </form>
+    </div>
+</div>
+
+<partial name="_ValidationScriptsPartial"/>

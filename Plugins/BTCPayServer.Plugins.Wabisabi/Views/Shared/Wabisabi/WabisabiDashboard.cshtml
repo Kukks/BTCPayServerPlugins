@@ -1,0 +1,460 @@
+﻿@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Client
+@using BTCPayServer.Client.Models
+@using BTCPayServer.Common
+@using BTCPayServer.Plugins.Wabisabi
+@using BTCPayServer.Security
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using NBitcoin
+@using WalletWasabi.Blockchain.Analysis
+@model object
+@inject IScopeProvider ScopeProvider
+@inject BTCPayServerClient Client
+@inject WabisabiService WabisabiService;
+@inject WalletProvider WalletProvider;
+@inject WabisabiCoordinatorClientInstanceManager WabisabiCoordinatorClientInstanceManager
+@inject ContentSecurityPolicies contentSecurityPolicies
+@inject IExplorerClientProvider ExplorerClientProvider
+
+@{
+    var available = true;
+    @if (((dynamic) Model).CryptoCode != "BTC" || ((dynamic) Model).WalletEnabled is not true)
+    {
+        return;
+    }
+
+    @if (!(await ExplorerClientProvider.GetExplorerClient("BTC").GetStatusAsync()).IsFullySynched)
+    {
+        available = false;
+        return;
+    }
+    var storeId = ScopeProvider.GetCurrentStoreId();
+    // var methods = await Client.GetStoreOnChainPaymentMethods(storeId, true);
+    // var method = methods.FirstOrDefault(data => data.CryptoCode == "BTC");
+    var nonce = RandomUtils.GetUInt256().ToString().Substring(0, 32);
+    contentSecurityPolicies.Add("script-src", $"'nonce-{nonce}'");
+    contentSecurityPolicies.AllowUnsafeHashes();
+    var mainnet = ExplorerClientProvider.GetExplorerClient("BTC").Network.NBitcoinNetwork.ChainName == ChainName.Mainnet;
+
+}
+@if (available)
+{
+    @functions
+    {
+        void PrintCoin(BTCPayWallet.CoinjoinData.CoinjoinDataCoin coin, bool mainnet)
+        {
+            var op = OutPoint.Parse(coin.Outpoint);
+            <tr>
+                <td>
+                    <a href="@NBXInternalDestinationProvider.ComputeTxUrl(mainnet, op.Hash.ToString(), op.N.ToString())" target="_blank" class="text-break">
+                        @coin.Outpoint
+                    </a>
+
+                </td>
+                <td>
+                    @coin.Amount
+                </td>
+                <td>
+                    @if (string.IsNullOrEmpty(coin.PayoutId))
+                    {
+                        @coin.AnonymitySet
+                    }
+                    else
+                    {
+                        @($"Payment ({coin.PayoutId})")
+                    }
+                </td>
+            </tr>
+        }
+    }
+    {
+        var settings = await WabisabiService.GetWabisabiForStore(storeId);
+        var enabledSettings = settings.Settings.Where(coordinatorSettings => coordinatorSettings.Enabled);
+        var cjHistory = await Client.GetOnChainWalletObjects(storeId, "BTC", new GetWalletObjectsRequest()
+        {
+            Type = "coinjoin"
+        }).ContinueWith(task => task.Result.Select(data => (data, data.Data.ToObject<BTCPayWallet.CoinjoinData>())).OrderByDescending(tuple => tuple.Item2.Timestamp));
+
+
+        @if (!enabledSettings.Any())
+        {
+            <div class="widget">
+                <header>
+                    <h3>Coinjoin</h3>
+                    <a asp-controller="WabisabiStore" asp-action="UpdateWabisabiStoreSettings" asp-route-storeId="@storeId" class="fw-semibold">
+                        Manage
+                    </a>
+                </header>
+                <p class="text-secondary my-3">
+                    There are no configured coinjoin coordinators
+                </p>
+                <a asp-controller="WabisabiStore" asp-action="UpdateWabisabiStoreSettings" asp-route-storeId="@storeId" class="fw-semibold">
+                    Configure coinjoin settings
+                </a>
+            </div>
+        }
+        else
+        {
+            <div class="widget store-wallet-balance">
+                <header>
+                    <h3>Coinjoin history</h3>
+                </header>
+                @if (!cjHistory.Any())
+                {
+                    <p class="text-secondary mt-3 mb-0">
+                        There are no recent transactions.
+                    </p>
+                }
+                else
+                {
+                    <div class="table-responsive-sm my-0">
+
+                        <table class="table table-hover mt-3 mb-0 d-block" style="overflow-y: scroll; max-height: 500px;">
+                            <thead>
+                            <tr>
+                                <th class="w-125px">Round</th>
+                                <th class="w-125px">Timestamp</th>
+                                <th class="w-125px">Coordinator</th>
+                                <th class="w-125px">Transaction</th>
+                                <th class="text-nowrap">In</th>
+                                <th class="text-nowrap">Out</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            @foreach (var cj in cjHistory)
+                            {
+                                var cjData = cj.Item2;
+                                var cjInWeightedAverage = @CoinjoinAnalyzer.WeightedAverage.Invoke(@cjData.CoinsIn.Select(coin => new CoinjoinAnalyzer.AmountWithAnonymity(coin.AnonymitySet, new Money(coin.Amount, MoneyUnit.BTC))));
+                                var cjOutWeightedAverage = @CoinjoinAnalyzer.WeightedAverage.Invoke(@cjData.CoinsOut.Select(coin => new CoinjoinAnalyzer.AmountWithAnonymity(coin.AnonymitySet, new Money(coin.Amount, MoneyUnit.BTC))));
+                                <tr>
+                                    <td>
+                                        <a class="text-break" data-bs-toggle="collapse" data-bs-target="#txcoins-@cjData.Round">@cjData.Round</a>
+                                    </td>
+                                    <td>
+                                        <span class="text-break">@cjData.Timestamp</span>
+                                    </td>
+                                    <td>
+                                        <span class="text-break">@cjData.CoordinatorName</span>
+                                    </td>
+                                    <td>
+                                        <a href="@NBXInternalDestinationProvider.ComputeTxUrl(mainnet, cjData.Transaction)" target="_blank" class="text-break">
+                                            @cjData.Transaction
+                                        </a>
+                                    </td>
+                                    <td>
+                                        <span class="">@cjData.CoinsIn.Length (@cjData.CoinsIn.Sum(coin => coin.Amount) BTC) (@cjInWeightedAverage anonset wavg)</span>
+                                    </td>
+                                    <td>
+                                        <span class="">@cjData.CoinsOut.Length (@cjData.CoinsOut.Sum(coin => coin.Amount) BTC) (@cjOutWeightedAverage anonset wavg)</span>
+                                    </td>
+
+                                </tr>
+
+                                <tr id="txcoins-@cjData.Round" class="collapse">
+                                    <td colspan="6">
+                                        <table class="table mb-0">
+
+                                            <thead>
+                                            <tr>
+                                                <th colspan="3">Inputs</th>
+                                            </tr>
+                                            <tr>
+                                                <th class="w-125px">utxo</th>
+                                                <th >Amount</th>
+                                                <th >Anonset</th>
+                                            </tr>
+                                            </thead>
+                                            @foreach (var c in cjData.CoinsIn)
+                                            {
+                                                PrintCoin(c, mainnet);
+                                            }
+
+
+                                        </table>
+                                        <table class="table mb-0">
+
+                                            <thead>
+                                            <tr>
+                                                <th colspan="3">Outputs</th>
+                                            </tr>
+                                            <tr>
+                                                <th class="w-125px">utxo</th>
+                                                <th >Amount</th>
+                                                <th >Anonset</th>
+                                            </tr>
+                                            </thead>
+                                            @foreach (var c in cjData.CoinsOut)
+                                            {
+                                                PrintCoin(c, mainnet);
+                                            }
+
+
+                                        </table>
+                                    </td>
+                                </tr>
+                            }
+                            </tbody>
+                        </table>
+
+
+                    </div>
+                }
+            </div>
+
+            var wallet = (BTCPayWallet) await WalletProvider.GetWalletAsync(storeId);
+
+            var coins = await wallet.GetAllCoins();
+            var privacy = wallet.GetPrivacyPercentage(coins, wallet.AnonymitySetTarget);
+
+            var privacyPercentage = Math.Round(privacy * 100);
+            var colorCoins = coins.GroupBy(coin => coin.CoinColor(wallet.AnonymitySetTarget)).ToDictionary(grouping => grouping.Key, grouping => grouping);
+            <div class="widget store-numbers">
+
+            @if (wallet is BTCPayWallet btcPayWallet)
+            {
+                @if (btcPayWallet.OnChainPaymentMethodData?.Enabled is not true)
+                {
+                    <div class="alert alert-danger d-flex align-items-center" role="alert">
+                        <vc:icon symbol="warning"/>
+                        <span class="ms-3">This wallet is not enabled in your store settings and will not be able to participate in coinjoins..</span>
+                    </div>
+                }
+                else if (!((BTCPayKeyChain) wallet.KeyChain).KeysAvailable)
+                {
+                    <div class="alert alert-danger d-flex align-items-center" role="alert">
+                        <vc:icon symbol="warning"/>
+                        <span class="ms-3">This wallet is not a hot wallet and will not be able to participate in coinjoins.</span>
+                    </div>
+                }
+            }
+            <header>
+                <h4>Coinjoin stats</h4>
+                <a asp-controller="WabisabiStore" asp-action="UpdateWabisabiStoreSettings" asp-route-storeId="@storeId" class="fw-semibold">
+                    Configure coinjoin settings
+                </a>
+
+            </header>
+            <div class="w-100">
+
+            <div>
+                <h6 class="mb-2">Privacy progress</h6>
+                <div class="progress mb-2 position-relative" style="height: 2rem;">
+                    <div class="w-100 text-center position-absolute bg-transparent progress-bar h-100"> @privacyPercentage%</div>
+                    <div class="progress-bar bg-success" role="progressbar" style="width: @privacyPercentage%"></div>
+                </div>
+            </div>
+            <div>
+                <h6 class="mb-2">Coins per privacy</h6>
+                <div class="progress mb-2" style="height: 2rem;">
+                    @foreach (var cc in colorCoins)
+                    {
+                        var cssClass = cc.Key == AnonsetType.Green ? "bg-success" : cc.Key == AnonsetType.Orange ? "bg-warning" :
+                            "bg-danger";
+                        var text = cc.Key == AnonsetType.Green ? "private" : cc.Key == AnonsetType.Orange ? "semi-private" :
+                            "non-private";
+
+                        var tooltiptext = $"{cc.Value.Count()} {text} coins";
+                        text = cc.Value.Count().ToString();
+                        var percentage = decimal.Divide(cc.Value.Count(), coins.Count()) * 100;
+                        <div class="progress-bar @cssClass" role="progressbar" style="width: @percentage%" data-bs-toggle="tooltip" title="@tooltiptext">@text</div>
+                    }
+                </div>
+            </div>
+            <div>
+                <h6 class="mb-2">Value per privacy</h6>
+                <div class="progress mb-2" style="height: 2rem;">
+                    @foreach (var cc in colorCoins)
+                    {
+                        var cssClass = cc.Key == AnonsetType.Green ? "bg-success" : cc.Key == AnonsetType.Orange ? "bg-warning" :
+                            "bg-danger";
+                        var text = cc.Key == AnonsetType.Green ? "private" : cc.Key == AnonsetType.Orange ? "semi-private" :
+                            "non-private";
+                        var percentage = decimal.Divide(cc.Value.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)), coins.TotalAmount().ToDecimal(MoneyUnit.BTC)) * 100;
+                        var tooltiptext = $"{cc.Value.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC))} {text} BTC";
+
+                        text = cc.Value.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)).ToString();
+                        <div class="progress-bar @cssClass" role="progressbar" style="width: @percentage%" data-bs-toggle="tooltip" title="@tooltiptext">@text</div>
+                    }
+                </div>
+            </div>
+            @{
+                var coinjoined = @coins.CoinJoinInProcess();
+            }
+            @if (coinjoined.Any())
+            {
+                var count = @coins.CoinJoinInProcess().Count();
+                var totalCount = @coins.Count();
+                var sum = @coinjoined.TotalAmount().ToDecimal(MoneyUnit.BTC);
+                var totalSum = @coins.TotalAmount().ToDecimal(MoneyUnit.BTC);
+                var sumPercentage = decimal.Divide(sum, totalSum) * 100;
+                var countPercentage = decimal.Divide(count, totalCount) * 100;
+
+                <div>
+                    <h6 class="mb-2">Coins currently joining</h6>
+                    <div class="progress mb-2 position-relative" style="height: 2rem;">
+                        <div class="w-100 text-center position-absolute bg-transparent progress-bar h-100">@count </div>
+                        <div class="progress-bar bg-info progress-bar-striped progress-bar-animated w-100" role="progressbar"></div>
+                    </div>
+                </div>
+                <div>
+                    <h6 class="mb-2">Value currently joining</h6>
+                    <div class="progress mb-2 position-relative" style="height: 2rem;">
+                        <div class="w-100 text-center position-absolute bg-transparent progress-bar h-100">@sum BTC</div>
+                        <div class="progress-bar bg-info progress-bar-striped progress-bar-animated w-100" role="progressbar"></div>
+
+
+                    </div>
+                </div>
+            }
+
+
+            <!-- Modal -->
+            <div class="modal fade" id="coins" data-bs-keyboard="false" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h1 class="modal-title fs-5">Your coins</h1>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            @{
+                                var clusters = coins
+                                    .GroupBy(coin => coin.HdPubKey.Cluster);
+                            }
+                            @* <table class="table table-striped"> *@
+                            @*     <thead> *@
+                            @*     <tr> *@
+                            @*         <th colspan="3">Clusters</th> *@
+                            @*     </tr> *@
+                            @*     <tr> *@
+                            @*         <th> *@
+                            @*             Anonset *@
+                            @*         </th> *@
+                            @*         <th> *@
+                            @*             Value *@
+                            @*         </th> *@
+                            @*         <th> *@
+                            @*             Labels *@
+                            @*         </th> *@
+                            @*     </tr> *@
+                            @*     </thead> *@
+                            @* *@
+                            @*                                    @foreach (var cluster in clusters) *@
+                            @*                                    { *@
+                            @*                                        var wavg = *@
+                            @*                                        CoinjoinAnalyzer.WeightedAverage(cluster.Select(coin => new CoinjoinAnalyzer.AmountWithAnonymity(coin.AnonymitySet, coin.Amount))); *@
+                            @*                                         *@
+                            @*                                        <tr> *@
+                            @*                                            <td> *@
+                            @*                                                @wavg *@
+                            @*                                            </td> *@
+                            @*                                            <td> *@
+                            @*                                                @cluster.Sum(c => c.Amount.ToDecimal(MoneyUnit.BTC)) *@
+                            @*                                            </td> *@
+                            @*                                            <td> *@
+                            @*                                                @cluster.Key.Labels.ToString() *@
+                            @*                                            </td> *@
+                            @*                                        </tr> *@
+                            @*                                    } *@
+                            @*                                </table> *@
+                            <table class="table">
+                                <thead>
+
+                                <tr>
+                                    <th colspan="3">Coins</th>
+                                </tr>
+                                <tr>
+                                    <th>
+                                        Anonset
+                                    </th>
+                                    <th>
+                                        Value
+                                    </th>
+                                    <th>
+                                        Labels
+                                    </th>
+                                </tr>
+                                </thead>
+
+                                @foreach (var coin in coins.OrderByDescending(coin => coin.AnonymitySet).ThenByDescending(coin => coin.Amount))
+                                {
+                                    <tr>
+                                        <td>
+                                            @coin.AnonymitySet
+                                        </td>
+                                        <td>
+                                            @coin.Amount.ToDecimal(MoneyUnit.BTC) BTC
+                                        </td>
+                                        <td>
+                                            @coin.HdPubKey.Label.ToString()
+                                        </td>
+                                    </tr>
+                                }
+                            </table>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="list-group list-group-flush mb-2">
+                <h5 class="list-group-item-heading text-muted">Enabled coordinators</h5>
+
+                @{
+                    foreach (var setting in enabledSettings)
+                    {
+                       
+                        if (! WabisabiCoordinatorClientInstanceManager.HostedServices.TryGetValue(setting.Coordinator, out var coordinator))
+                        {
+                            continue;
+                        }
+                        <div class="list-group-item">
+                            <h6>@coordinator.CoordinatorDisplayName</h6>
+                            <div class="row ">
+                                <span class="text-muted col-sm-12 col-md-9 p-0 text-break">
+                                    @coordinator.Coordinator
+                                </span>
+
+                                @if (!coordinator.WasabiCoordinatorStatusFetcher.Connected)
+                                {
+                                    <p class="text-danger mb-0 col-sm-12 col-md-3 p-0 text-break">Not connected</p>
+                                }
+                                else
+                                {
+                                    <p class="text-success mb-0 col-sm-12 col-md-3 p-0 text-break">Connected</p>
+                                }
+                            </div>
+                            @{
+                                if (WalletProvider.BannedCoins.TryGetValue(coordinator.CoordinatorName, out var bannedCoinsList))
+                                {
+                                    var bannedCoins = coins.Where(coin => bannedCoinsList.ContainsKey(coin.Outpoint));
+                                    @if (bannedCoins.Any())
+                                    {
+                                        <div>
+                                            <h6 class="mb-2">Coins currently banned (for disrupting rounds)</h6>
+                                            <div class="progress mb-2 position-relative" style="height: 2rem;">
+                                                <div class="w-100 text-center position-absolute bg-transparent progress-bar h-100">@bannedCoins.Count() </div>
+                                                <div class="progress-bar bg-danger w-100" role="progressbar"></div>
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            }
+                           
+
+                        </div>
+                    }
+                }
+            </div>
+
+            <button type="button" class="btn btn-text p-1" data-bs-toggle="modal" data-bs-target="#coins">
+                View coins
+            </button>
+
+
+            </div>
+            </div>
+        }
+    }
+}

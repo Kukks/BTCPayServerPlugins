@@ -1,0 +1,55 @@
+﻿@using BTCPayServer.Abstractions.Extensions
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using BTCPayServer.Abstractions.Contracts
+@model BTCPayServer.Plugins.FujiOracle.FujiOracleSettings
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+    Layout = "../Shared/_NavLayout.cshtml";
+    ViewData["NavPartialName"] = "../UIStores/_Nav";
+    ViewData.SetActivePage("Fuji Oracle", "Update Fuji Oracle Settings", null);
+
+}
+
+<h2 class="mt-1 mb-4">@ViewData["Title"]</h2>
+<div class="row">
+    <div class="col-xl-8 col-xxl-constrain">
+        <form method="post">
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+
+            <div class="form-group">
+                <label asp-for="Key" class="form-label" data-required>Key to sign with (in hex)</label>
+
+                <div class="input-group">
+                    <input asp-for="Key" class="form-control"/>
+                    <button class="btn btn-outline-primary" type="submit" name="command" value="generate">Generate</button>
+                </div>
+                
+                <span asp-validation-for="Key" class="text-danger"></span>
+            </div>
+            <div class="form-group form-check">
+                <label asp-for="Enabled" class="form-check-label"></label>
+                <input asp-for="Enabled" type="checkbox" class="form-check-input"/>
+            </div>
+
+            <div class="row mt-4">
+                <div class="h4 w-100 d-flex justify-content-between">
+                    Pairs <button type="submit" value="add-pair" name="command" class="btn btn-outline-primary btn-sm">Add</button>
+                </div>
+
+                @for (var index = 0; index < Model.Pairs.Count; index++)
+                {
+                    <div class="input-group">
+                        <input class="form-control" asp-for="Pairs[index]" type="text" placeholder="BTC_USD"/>
+
+                        <button type="submit" value="remove-pair:@index" name="command" class="btn btn-outline-danger">Remove</button>
+                    </div>
+                }
+            </div>
+            <div class="form-group mt-4">
+                <input type="submit" value="Save" name="command" class="btn btn-primary"/>
+            </div>
+        </form>
+    </div>
+</div>
+

@@ -1,0 +1,16 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+}
+@if (!string.IsNullOrEmpty(storeId))
+{
+    <li class="nav-item">
+        <a asp-area="" asp-controller="SideShift" asp-action="UpdateSideShiftSettings" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("SideShift")" id="Nav-SideShift">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" alt="SideShift" class="icon"><g transform="translate(6,6)"><path d="M13.19 1.91A8 8 0 0 0 1.9 13.2L13.2 1.9Z" fill="currentColor"/><path d="M2.76 14.05a8 8 0 0 0 11.29-11.3l-11.3 11.3Z" fill="currentColor"/></g></svg>
+            <span>SideShift</span>
+        </a>
+    </li>
+}

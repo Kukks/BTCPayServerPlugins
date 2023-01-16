@@ -1,0 +1,40 @@
+@using BTCPayServer.Plugins.AOPP
+@using Newtonsoft.Json
+@using Newtonsoft.Json.Linq
+@inject AOPPService AOPPService
+@{
+    var storeId = ((JObject)JObject.Parse(JsonConvert.SerializeObject(Model)))["StoreId"].Value<string>();
+    var settings = await AOPPService.GetAOPPForStore(storeId);
+    if (settings?.Enabled is true)
+    {
+        <div id="AOPP" class="bp-view payment manual-flow"  v-bind:class="{ 'active': currentTab == 'AOPP'}">
+            <AOPP inline-template v-if="currentTab == 'AOPP'" v-bind:srv-model="srvModel">
+                <form class="manual__step-one refund-address-form contact-email-form aopp-form" id="aopp-form" name="aopp-form" novalidate="" v-on:submit.prevent="onSubmit">
+                            <div class="manual__step-one__header">
+                                <span>{{$t("AOPP")}}</span>
+                            </div>
+                            <div class="manual__step-one__instructions">
+                                <span class="initial-label" v-show="!aoppAddressInputInvalid">
+                                    <span>If you are sending funds from an exchange that requiores that you "verify" the withdrawal access, you can use this tool to bypass this madness. You even earn bonus points if they try to pass that data over to a chain surveillance service, by poisoning their clusters. </span>
+                                </span>
+                                <span class="submission-error-label" v-show="aoppAddressInputInvalid">{{$t("Please enter a valid aopp address")}}</span>
+                            </div>
+                            <div class="input-wrapper">
+                                <input class="bp-input email-input"
+                                       v-bind:class="{ 'ng-pristine ng-submitted ng-touched': !aoppAddressInputDirty,  'ng-invalid form-input-invalid': aoppAddressInputInvalid }" id="aoppAddressFormInput"
+                                       v-bind:placeholder="$t('AOPP url')" type="url" v-model="aoppAddressInput"
+                                       v-on:change="onaoppChange">
+                                <bp-loading-button>
+                                    <button type="submit" class="action-button" style="margin-top: 15px;" v-bind:disabled="aoppAddressFormSubmitting" v-bind:class="{ 'loading': aoppAddressFormSubmitting }">
+                                        <span class="button-text">{{$t("Submit")}}</span>
+                                        <div class="loader-wrapper">
+                                            <partial name="Checkout-Spinner" />
+                                        </div>
+                                    </button>
+                                </bp-loading-button>
+                            </div>
+                        </form>
+            </AOPP>
+        </div>
+    }
+}

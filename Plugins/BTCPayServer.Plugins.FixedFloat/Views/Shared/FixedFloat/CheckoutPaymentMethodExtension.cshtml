@@ -1,0 +1,16 @@
+@using BTCPayServer.Plugins.FixedFloat
+@using Newtonsoft.Json
+@using Newtonsoft.Json.Linq
+@inject FixedFloatService FixedFloatService
+@{
+    const string id = "FixedFloat";
+    var storeId = ((JObject)JObject.Parse(JsonConvert.SerializeObject(Model)))["StoreId"].Value<string>();
+    var settings = await FixedFloatService.GetFixedFloatForStore(storeId);
+    
+    if (settings?.Enabled is true)
+    {
+        <a href="#@id" class="btcpay-pill m-0 payment-method" :class="{ active: pmId === '@id' }" v-on:click.prevent="changePaymentMethod('@id')">
+            @id
+        </a>
+    }
+}

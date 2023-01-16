@@ -1,0 +1,54 @@
+﻿@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using WalletWasabi.Backend.Controllers
+@using Microsoft.AspNetCore.Mvc.ModelBinding
+@model WalletWasabi.Backend.Controllers.WabisabiCoordinatorSettings
+@inject WabisabiCoordinatorService WabisabiCoordinatorService
+
+@{
+    Layout = "../Shared/_NavLayout.cshtml";
+    ViewData["NavPartialName"] = "../UIServer/_Nav";
+}
+
+<h2 class="mb-4">Coinjoin coordinator configuration</h2>
+
+<form method="post">
+    <div class="row">
+        <div class="form-group form-check">
+            <label asp-for="Enabled" class="form-check-label">Enable Coordinator</label>
+            <input asp-for="Enabled" type="checkbox" class="form-check-input"/>
+        </div> 
+        <div class="form-group form-check">
+            <label asp-for="NostrRelay" class="form-label">Nostr Relay</label>
+            <input asp-for="NostrRelay" type="text" class="form-control"/>
+        </div> 
+        <div class="form-group">
+            <label asp-for="NostrIdentity" class="form-label">nostr privkey</label>
+            <div class="input-group input-group-sm">
+                <input asp-for="NostrIdentity" type="text" class="form-control" />
+                <button name="command" value="generate-nostr-key" type="submit" class="btn btn-secondary btn-sm">Generate</button>
+            </div>
+        </div>
+    </div>
+    <div class="row ">
+        <div class="col-xxl-constrain">
+            <div class="form-group pt-3">
+                <label class="form-label" for="config">Config</label>
+
+                @if (ViewData.ModelState.TryGetValue("config", out var error) && error.Errors.Any())
+                {
+                    <span class="text-danger">@string.Join("\n", error.Errors)</span>
+                }
+                <textarea rows="10" cols="40" class="form-control valid" id="config" name="config" spellcheck="false" aria-invalid="false">
+@Html.Raw(WabisabiCoordinatorService.WabiSabiCoordinator.Config.ToString())
+</textarea>
+            </div>
+        </div>
+    </div>
+    <button name="command" type="submit" value="save" class="btn btn-primary mt-2">Save</button>
+
+
+</form>
+
+@section PageFootContent {
+    <partial name="_ValidationScriptsPartial"/>
+}

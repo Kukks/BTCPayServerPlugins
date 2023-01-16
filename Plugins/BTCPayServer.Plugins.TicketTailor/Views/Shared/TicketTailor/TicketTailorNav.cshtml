@@ -1,0 +1,17 @@
+@using BTCPayServer.Plugins.TicketTailor
+@inject IScopeProvider ScopeProvider
+@using BTCPayServer.Abstractions.Contracts
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+    var isActive = !string.IsNullOrEmpty(storeId) && ViewContext.RouteData.Values.TryGetValue("Controller", out var controller) &&  controller is not null && 
+        nameof(TicketTailorController).StartsWith(controller?.ToString(), StringComparison.InvariantCultureIgnoreCase);
+}
+@if (!string.IsNullOrEmpty(storeId))
+{
+    <li class="nav-item">
+        <a asp-area="" asp-controller="TicketTailor" asp-action="UpdateTicketTailorSettings" asp-route-storeId="@storeId" class="nav-link js-scroll-trigger @(isActive? "active": string.Empty)">
+            <img style="width:14px; margin-right: 10px;" class="icon" src="~/Resources/assets/tt.png" />
+            <span>TicketTailor</span>
+        </a>
+    </li>
+}

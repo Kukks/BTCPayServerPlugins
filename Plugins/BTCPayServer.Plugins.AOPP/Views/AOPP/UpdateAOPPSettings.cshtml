@@ -1,0 +1,23 @@
+﻿@model BTCPayServer.Plugins.AOPP.UpdateAOPPSettingsViewModel
+@{
+    Layout = "../Shared/_NavLayout.cshtml";
+    ViewData["NavPartialName"] = "../UIStores/_Nav";
+}
+
+<h2 class="mb-4">@ViewData["PageTitle"]</h2>
+
+<div class="row">
+    <div class="col-md-10">
+        <form method="post">
+           <div class="form-group form-check">
+                <label asp-for="Enabled" class="form-check-label"></label>
+                <input asp-for="Enabled" type="checkbox" class="form-check-input"/>
+            </div>
+            <button name="command" type="submit" value="save" class="btn btn-primary">Submit</button>
+        </form>
+    </div>
+</div>
+
+@section PageFootContent {
+    <partial name="_ValidationScriptsPartial" />
+}

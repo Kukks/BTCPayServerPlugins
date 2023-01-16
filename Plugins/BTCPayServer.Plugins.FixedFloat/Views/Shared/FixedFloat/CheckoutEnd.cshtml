@@ -1,0 +1,12 @@
+@using BTCPayServer.Plugins.FixedFloat
+@using Newtonsoft.Json
+@using Newtonsoft.Json.Linq
+@inject FixedFloatService FixedFloatService
+@{
+    var storeId = ((JObject)JObject.Parse(JsonConvert.SerializeObject(Model)))["StoreId"].Value<string>();
+    var settings = await FixedFloatService.GetFixedFloatForStore(storeId);
+    if (settings?.Enabled is true)
+    {
+        <script src="~/Resources/js/fixedFloatComponent.js"></script>
+    }
+}

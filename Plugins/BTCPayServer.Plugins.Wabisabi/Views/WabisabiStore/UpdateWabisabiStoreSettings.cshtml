@@ -1,0 +1,322 @@
+﻿@using BTCPayServer.Plugins.Wabisabi
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Security
+@using NBitcoin
+@using System.Security.Claims
+@using BTCPayServer
+@using BTCPayServer.Client
+@using BTCPayServer.Common
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using WalletWasabi.Backend.Controllers
+@model BTCPayServer.Plugins.Wabisabi.WabisabiStoreSettings
+@inject ContentSecurityPolicies contentSecurityPolicies
+@inject WabisabiCoordinatorClientInstanceManager WabisabiCoordinatorClientInstanceManager
+@inject IScopeProvider _scopeProvider
+@inject IExplorerClientProvider ExplorerClientProvider;
+@inject IBTCPayServerClientFactory ClientFactory
+@inject WalletProvider WalletProvider
+@{
+    var storeId = _scopeProvider.GetCurrentStoreId();
+    Layout = "../Shared/_NavLayout.cshtml";
+    ViewData["NavPartialName"] = "../UIStores/_Nav";
+    ViewData.SetActivePage("Plugins", "BTCPayServer.Views.Stores.StoreNavPages", "Wabisabi coinjoin support", storeId);
+    var nonce = RandomUtils.GetUInt256().ToString().Substring(0, 32);
+    contentSecurityPolicies.Add("script-src", $"'nonce-{nonce}'");
+    contentSecurityPolicies.AllowUnsafeHashes();
+    var explorerClient = ExplorerClientProvider.GetExplorerClient("BTC");
+    var userid = Context.User.Claims.Single(claim => claim.Type == ClaimTypes.NameIdentifier).Value;
+    var anyEnabled = Model.Settings.Any(settings => settings.Enabled);
+    var Client = await ClientFactory.Create(userid, storeId);
+    ScriptPubKeyType? scriptType = null;
+    try
+    {
+        var pm = await Client.GetStoreOnChainPaymentMethod(storeId, "BTC");
+        scriptType = explorerClient.Network.DerivationStrategyFactory.Parse(pm.DerivationScheme).ScriptPubKeyType();
+    }
+    catch (Exception e)
+    {
+    }
+    Client = await ClientFactory.Create(userid);
+    var stores = (await Client.GetStores())
+        .Where(data => data.Id != storeId)
+        .ToDictionary(s => s.Id, async s =>
+        {
+            try
+            {
+                var sclient = await ClientFactory.Create(userid, s.Id, storeId);
+                var pm = await sclient.GetStoreOnChainPaymentMethod(s.Id, "BTC");
+                if (explorerClient.Network.DerivationStrategyFactory.Parse(pm.DerivationScheme).ScriptPubKeyType() != scriptType)
+                {
+                    return null;
+                }
+                return s.Name;
+            }
+            catch (Exception e)
+            {
+                return null;
+            }
+        });
+    await Task.WhenAll(stores.Values);
+    var selectStores =
+        stores.Where(pair => pair.Value.Result is not null)
+            .Select(pair => new SelectListItem(pair.Value.Result, pair.Key, Model.MixToOtherWallet == pair.Key)).Prepend(new SelectListItem("None", ""));
+}
+
+
+<h2 class="mb-4">Coinjoin configuration</h2>
+
+<form method="post">
+    @{
+        var wallet = await WalletProvider.GetWalletAsync(storeId);
+        if (wallet is BTCPayWallet btcPayWallet)
+        {
+            @if (btcPayWallet.OnChainPaymentMethodData?.Enabled is not true)
+            {
+                <div class="alert alert-danger d-flex align-items-center" role="alert">
+                    <vc:icon symbol="warning"/>
+                    <span class="ms-3">This wallet is not enabled in your store settings and will not be able to participate in coinjoins..</span>
+
+                    <button name="command" type="submit" value="check" class="btn btn-text">Refresh</button>
+                </div>
+            }
+            else if (!((BTCPayKeyChain) wallet.KeyChain).KeysAvailable)
+            {
+                <div class="alert alert-danger d-flex align-items-center" role="alert">
+                    <vc:icon symbol="warning"/>
+                    <span class="ms-3">This wallet is not a hot wallet and will not be able to participate in coinjoins.</span>
+
+                    <button name="command" type="submit" value="check" class="btn btn-text">Refresh</button>
+                </div>
+            }
+        }
+    }
+
+
+<div class="@(anyEnabled ? "" : "d-none") card card-body coordinator-settings">
+    <div class="row">
+        <div class="col-sm-12 col-md-6">
+            <div class="form-check">
+                <input class="form-check-input plebModeRadio"
+                       type="radio" asp-for="PlebMode" value="true">
+                <label class="form-check-label" asp-for="PlebMode">
+                    Pleb mode
+                </label>
+                <p class="text-muted">I just want to coinjoin.</p>
+            </div>
+        </div>
+        <div class="col-sm-12 col-md-6">
+            <div class="form-check">
+                <input class="form-check-input plebModeRadio" asp-for="PlebMode" type="radio"value="false">
+                <label class="form-check-label" asp-for="PlebMode">
+                    Scientist mode
+                </label>
+                <p class="text-muted">The world is broken and I need to be vigilant about my bitcoin practices.</p>
+            </div>
+        </div>
+    </div>
+    <div id="advanced" class="@(Model.PlebMode ? "d-none" : "")">
+        <div class="form-group">
+
+            <label asp-for="AnonymitySetTarget" class="form-check-label">Use Anon score model</label>
+            <input type="number" class="form-control" asp-for="AnonymitySetTarget" placeholder="target anon score">
+
+            <p class="text-muted">Scores your coinjoined utxos based on how many other utxos in the coinjoin (and other previous coinjoin rounds) had the same value.<br/> Anonset score computation is not an exact science, and when using coordinators with massive liquidity, is not that important as all rounds (past, present, future) contribute to your privacy.</p>
+        </div>
+        <div class="form-group form-check">
+            <label asp-for="ConsolidationMode" class="form-check-label">Coinsolidation mode</label>
+            <input asp-for="ConsolidationMode" type="checkbox" class="form-check-input"/>
+            <p class="text-muted">Feed as many coins to the coinjoin as possible.</p>
+        </div>
+        <div class="form-group form-check">
+            <label asp-for="RedCoinIsolation" class="form-check-label">Cautious coinjoin entry mode </label>
+            <input asp-for="RedCoinIsolation" type="checkbox" class="form-check-input"/>
+            <p class="text-muted">Only allow a single non-private coin into a coinjoin.</p>
+        </div>
+        <div class="form-group form-check">
+            <label asp-for="BatchPayments" class="form-check-label">Batch payments</label>
+            <input asp-for="BatchPayments" type="checkbox" class="form-check-input"/>
+            <p class="text-muted">Batch your pending payments (on-chain payouts awaiting payment) inside coinjoins.</p>
+        </div>
+        <div class="form-group ">
+            <label asp-for="MixToOtherWallet" class="form-check-label">Send to other wallet</label>
+            <select asp-for="MixToOtherWallet" asp-items="selectStores" class="form-select"></select>
+            <p class="text-muted">Send coins that have been created in a coinjoin in a standard denomination to another wallet</p>
+        </div>
+
+        <div class="list-group  form-group">
+            <div class="list-group-item font-weight-bold">Only mix coins with these labels</div>
+            @if (Model.InputLabelsAllowed?.Any() is not true)
+            {
+                <div class="list-group-item">No label filter applied</div>
+            }
+            else
+            {
+                @for (var xIndex = 0; xIndex < Model.InputLabelsAllowed.Count; xIndex++)
+                {
+                    <div class="list-group-item">
+                        <div class="input-group input-group-sm">
+                            <input asp-for="InputLabelsAllowed[xIndex]" type="text" class="form-control"/>
+                            <button name="command" value="include-label-remove:@Model.InputLabelsAllowed[xIndex]" type="submit" class="btn btn-secondary btn-sm">Remove</button>
+                        </div>
+                    </div>
+                }
+            }
+            <div class="list-group-item">
+                <button name="command" value="include-label-add" type="submit" class="btn btn-secondary btn-sm">Add</button>
+            </div>
+        </div>
+        <div class="list-group  form-group">
+            <div class="list-group-item font-weight-bold">Only mix coins without these labels</div>
+            @if (Model.InputLabelsExcluded?.Any() is not true)
+            {
+                <div class="list-group-item">No label filter applied</div>
+            }
+            else
+            {
+                @for (var xIndex = 0; xIndex < Model.InputLabelsExcluded.Count; xIndex++)
+                {
+                    <div class="list-group-item">
+
+                        <div class="input-group input-group-sm">
+                            <input asp-for="InputLabelsExcluded[xIndex]" type="text" class="form-control"/>
+                            <button name="command" value="exclude-label-remove:@Model.InputLabelsExcluded[xIndex]" type="submit" class="btn btn-secondary btn-sm">Remove</button>
+                        </div>
+                    </div>
+                }
+            }
+            <div class="list-group-item">
+                <button name="command" value="exclude-label-add" type="submit" class="btn btn-secondary btn-sm">Add</button>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+    @for (var index = 0; index < Model.Settings.Count; index++)
+    {
+        <input asp-for="Settings[index].Coordinator" type="hidden"/>
+        var s = Model.Settings[index];
+
+        if (! WabisabiCoordinatorClientInstanceManager.HostedServices.TryGetValue(s.Coordinator, out var coordinator))
+        {
+            continue;
+        }
+        <div class="card  mt-3">
+            <div class="card-header d-flex justify-content-between">
+                <div>
+                    <div class="d-flex">
+
+                        <h3>@coordinator.CoordinatorDisplayName</h3>
+
+                    </div>
+
+                    <span class="text-muted">@coordinator.Coordinator</span>
+                    <div>
+                        @if (!coordinator.WasabiCoordinatorStatusFetcher.Connected)
+                        {
+                            <p>Coordinator Status: Not connected</p>
+                        }
+                        else
+                        {
+                            <p>
+                                Coordinator Status: Connected
+                                <a href="@(coordinator.Coordinator)api/v4/Wasabi/legaldocuments"
+                                   target="_blank" rel="noreferrer noopener">
+                                    T&C
+                                </a>
+                            </p>
+                        }
+                    </div>
+                </div>
+                <div class="form-group form-check form">
+                    <input asp-for="Settings[index].Enabled" type="checkbox" class="form-check-input form-control-lg toggle-settings" data-coordinator="@s.Coordinator"/>
+                    
+                </div>
+                @if (coordinator.CoordinatorName != "local" && coordinator.CoordinatorName != "zksnacks")
+                {
+                    <button name="command" type="submit" value="remove-coordinator:@(coordinator.CoordinatorName)" class="btn btn-link btn-danger" permission="@Policies.CanModifyServerSettings">Remove</button>
+                }
+            </div>
+
+
+        </div>
+    }
+    @if (ViewBag.DiscoveredCoordinators is List<DiscoveredCoordinator> discoveredCoordinators)
+    {
+        foreach (var coordinator in discoveredCoordinators)
+        {
+            
+            <div class="card  mt-3" permission="@Policies.CanModifyServerSettings">
+                <div class="card-header d-flex justify-content-between">
+                    <div>
+                        <div class="d-flex">
+
+                            <h3>@coordinator.Name</h3>
+
+                        </div>
+
+                        <span class="text-muted">@coordinator.Uri</span>
+                    </div>
+                    <div class="form-group form-check">
+                        <button name="command" type="submit" value="add-coordinator:@coordinator.Name:@coordinator.Uri" class="btn btn-primary btn-lg">Add</button>
+                    </div>
+                </div>
+
+
+            </div>
+            
+        }
+    }
+    <button name="command" type="submit" value="save" class="btn btn-primary mt-2">Save</button>
+    <a asp-controller="WabisabiCoordinatorConfig" asp-action="UpdateWabisabiSettings" class="btn btn-secondary mt-2" permission="@Policies.CanModifyServerSettings" >Coordinator runner</a>
+    <button name="command" type="submit" value="discover" class="btn btn-secondary mt-2"  permission="@Policies.CanModifyServerSettings">Discover coordinators over Nostr</button>
+    <a  class="btn btn-secondary mt-2" href="https://gist.github.com/nopara73/bb17e89d7dc9af536ca41f50f705d329" rel="noreferrer noopener" target="_blank">Enable Discrete payments - Coming soon</a>
+
+
+</form>
+
+
+@section PageFootContent {
+    <partial name="_ValidationScriptsPartial"/>
+}
+
+<script type="text/javascript" nonce="@nonce">
+
+ function handlePlebModeChange(evt){
+     const isPlebMode = evt.target.value === "true";
+     
+     const el = document.querySelector(`#advanced`);
+     if (isPlebMode){
+        el.classList.add("d-none");
+     }else{
+     
+        el.classList.remove("d-none");
+     }
+ }
+ 
+  function handleCoordinatorEnabled(evt){
+      let enabled = evt.target.checked;
+      if (!enabled){
+        
+      for (const settings of document.querySelectorAll("input.toggle-settings")) {
+        if (settings.checked){
+            enabled = true;
+            break;
+      }
+          }}
+      const el = document.querySelector(`.coordinator-settings`);
+      if (!enabled){
+         el.classList.add("d-none");
+      }else{      
+         el.classList.remove("d-none");
+      }
+  }
+
+ document.addEventListener("DOMContentLoaded", function () {
+     document.querySelectorAll("input.toggle-settings").forEach(value => value.addEventListener("change", handleCoordinatorEnabled));
+            document.querySelectorAll("input.plebModeRadio").forEach(value => value.addEventListener("change", handlePlebModeChange));
+        });
+ 
+
+</script>

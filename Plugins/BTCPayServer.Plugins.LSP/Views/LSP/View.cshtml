@@ -1,0 +1,88 @@
+﻿@using Microsoft.AspNetCore.Routing
+@using BTCPayServer.Plugins.LSP
+@model BTCPayServer.Plugins.LSP.LSPViewModel
+@inject ContentSecurityPolicies contentSecurityPolicies
+@inject IScopeProvider ScopeProvider
+@using BTCPayServer.Security
+@using NBitcoin
+@using BTCPayServer.Abstractions.Contracts
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+    var nonce = RandomUtils.GetUInt256().ToString().Substring(0, 32);
+    contentSecurityPolicies.Add("script-src", $"'nonce-{nonce}'");
+    contentSecurityPolicies.AllowUnsafeHashes();
+    Layout = "_LayoutSimple";
+
+}
+<style>
+footer {
+    display: none;
+}
+ @if (!string.IsNullOrEmpty(Model.Settings.CustomCSS))
+ {
+     @Safe.Raw(Model.Settings.CustomCSS)
+ }
+
+</style>
+<script nonce="@nonce">
+const baseFee = @Model.Settings.BaseFee ;
+const rate = @Model.Settings.FeePerSat ;
+document.addEventListener("DOMContentLoaded", function () {
+    document.getElementById("inbound").addEventListener("input", ev => {
+        compute(ev.target.value);
+    });
+    
+    function compute(inbound){
+        const cost = Math.ceil(baseFee + ( rate ===0? 0 : (rate * inbound)));
+        document.getElementById("cost").textContent = `Cost: ${cost} sats`;
+    }
+    compute(document.getElementById("inbound").value);
+    
+});
+</script>
+
+<div class="container d-flex h-100">
+    <div class="justify-content-center align-self-center text-center mx-auto px-2 py-3 w-100 m-auto">
+        <partial name="_StatusMessage"/>
+
+        <h1 >@Model.Settings.Title</h1>
+        @if (!string.IsNullOrEmpty(Model.Settings.Description))
+        {
+            <div class="row" id="description">
+                <div class="overflow-hidden col-12">@Safe.Raw(Model.Settings.Description)</div>
+            </div>
+        }
+        <form method="post" asp-controller="LSP" asp-action="Purchase" asp-antiforgery="false" asp-route-storeId="@storeId">
+            <div class="row g-2 mb-4 justify-content-center" id="form-email-container">
+
+                <div class="col-sm-12  col-md-8">
+                    <div class="form-floating">
+                        <input required type="email" name="email" class="form-control"/>
+                        <label >Email</label>
+                    </div>
+                </div>
+                <div class="col-sm-12  col-md-8">
+                    <div class="form-floating">
+                        <input required type="number" id="inbound" name="inbound" value="@Model.Settings.Minimum" min="@Model.Settings.Minimum" max="@Model.Settings.Maximum" class="form-control"/>
+                        <label >Inbound Sats</label>
+                    </div>
+                </div>
+
+                <div class="col-sm-12  col-md-8">
+                    <p class="mb-0">Base fee: @Model.Settings.BaseFee sats, fee per inbound sat: @Model.Settings.FeePerSat sats</p>
+                    <p class="mb-2 w-100" id="cost"></p>
+                </div>
+                <div class="col-sm-12 col-md-6">
+                    <button type="submit" class="btn btn-primary btn-lg">Purchase</button>
+                </div>
+            </div>
+        </form>
+
+
+        <div class="row">
+            <div class="powered__by__btcpayserver col-12">
+                Powered by <a target="_blank" href="https://github.com/btcpayserver/btcpayserver" rel="noreferrer noopener">BTCPay Server</a>
+            </div>
+        </div>
+    </div>
+</div>

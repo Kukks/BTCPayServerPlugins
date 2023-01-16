@@ -1,0 +1,163 @@
+﻿@using Microsoft.AspNetCore.Routing
+@using BTCPayServer.Plugins.TicketTailor
+@model BTCPayServer.Plugins.TicketTailor.TicketTailorViewModel
+
+@inject BTCPayServer.Security.ContentSecurityPolicies csp;
+@{
+    Layout = "_LayoutSimple";
+    var available = Model.Settings.BypassAvailabilityCheck || (Model.Event.Unavailable != "true" && Model.Event.TicketsAvailable == "true");
+    Model.Settings.SpecificTickets ??= new List<SpecificTicket>();
+}
+<style>
+
+
+        .card-deck {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-gap: 1.5rem;
+        }
+
+        .card-deck .card:only-of-type {
+            max-width: 320px;
+            margin: auto !important;
+        }
+        
+        
+footer {
+                  display: none;
+               }
+               
+               @if (!string.IsNullOrEmpty(Model.Settings.CustomCSS))
+               {
+                   @Safe.Raw(Model.Settings.CustomCSS)
+               }
+
+</style>
+<div class="container d-flex h-100">
+    <div class="justify-content-center align-self-center text-center mx-auto px-2 py-3 w-100 m-auto">
+        <partial name="_StatusMessage"/>
+
+        <h1 >@Model.Event.Title</h1>
+        <h2 class="text-muted mb-4">@Model.Event.Start.Formatted - @Model.Event.EventEnd.Formatted</h2>
+        @if (Model.Settings.ShowDescription && !string.IsNullOrEmpty(Model.Event.Description))
+        {
+            <div class="row" id="ticket-tailor-description">
+                <div class="overflow-hidden col-12">@Safe.Raw(Model.Event.Description)</div>
+            </div>
+        }
+        <form method="post" asp-controller="TicketTailor" asp-action="Purchase" asp-antiforgery="false" asp-route-storeId="@Context.GetRouteValue("storeId")">
+            <div class="row g-2 mb-4 justify-content-center" id="ticket-form-email-container">
+
+                <div class="col-sm-12  col-md-8">
+                    <div class="form-floating">
+                        <input required type="email" name="email" class="form-control"/>
+                        <label >Email</label>
+                    </div>
+                </div>
+
+            </div>
+            <div class="row g-2 justify-content-center" id="ticket-form-name-container">
+                <div class="col-sm-6 col-md-4">
+                    <div class="form-floating">
+                        <input type="text" minlength="3" name="firstName" required class="form-control">
+                        <label >First name</label>
+                    </div>
+                </div>
+                <div class="col-sm-6 col-md-4">
+                    <div class="form-floating">
+                        <input type="text" minlength="3" name="lastName" required class="form-control">
+                        <label>Last name</label>
+                    </div>
+                </div>
+            </div>
+            <div class="card-deck my-3 mx-auto" id="ticket-options-container">
+
+                @for (int x = 0; x < Model.Event.TicketTypes.Count; x++)
+                {
+                    var item = Model.Event.TicketTypes[x];
+                    var availableToShow = new[] {"on_sale", "sold_out", "unavailable"}.Contains(item.Status);
+                    var specific = false;
+
+                    if (Model.Settings.SpecificTickets?.Any() is true)
+                    {
+                        var matched = Model.Settings.SpecificTickets.FirstOrDefault(ticket => ticket.TicketTypeId == item.Id);
+                        if (matched is null || matched.Hidden)
+                        {
+                            continue;
+                        }
+                        if (matched.Price is not null)
+                        {
+                            item.Price = matched.Price.Value;
+                        }
+                        if (!string.IsNullOrEmpty(matched.Name))
+                        {
+                            item.Name = matched.Name;
+                        }
+                        if (!string.IsNullOrEmpty(matched.Description))
+                        {
+                            item.Description = matched.Description;
+                        }
+                        availableToShow = true;
+                        specific = true;
+                    }
+                    if (!availableToShow)
+                    {
+                        continue;
+                    }
+                    <div class="card px-0" data-id="@x">
+
+                        @{ CardBody(item.Name, item.Description); }
+                        <div class="card-footer bg-transparent border-0 pb-3">
+
+                            <div class="w-100 pt-2 text-center">
+                                @if (available && (item.Status == "on_sale" || specific) && item.Quantity > 0)
+                                {
+                                    <button name="ticketTypeId" value="@item.Id" class="btn btn-primary text-nowrap" type="submit">
+                                        @if (item.Price == 0)
+                                        {
+                                            <span>FREE</span>
+                                        }
+                                        else
+                                        {
+                                            <span>Buy for @item.Price @Model.Event.Currency.ToUpperInvariant()</span>
+                                        }
+                                    </button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-secondary text-nowrap" type="button" disabled="disabled">Unavailable</button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </form>
+
+       
+        <div class="row">
+            <div class="col-12" id="fiat-page-link">
+                <a href="@Model.Event.Url">Back to fiat ticket page</a>
+            </div>
+            <div class="powered__by__btcpayserver col-12">
+                Powered by <a target="_blank" href="https://github.com/btcpayserver/btcpayserver" rel="noreferrer noopener">BTCPay Server</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+@functions {
+
+
+    private void CardBody(string title, string description)
+    {
+        <div class="card-body my-auto pb-0">
+            <h5 class="card-title">@title</h5>
+            @if (!String.IsNullOrWhiteSpace(description))
+            {
+                <p class="card-text">@Html.Raw(description)</p>
+            }
+        </div>
+    }
+
+}

@@ -1,0 +1,26 @@
+@using BTCPayServer.Plugins.SideShift
+@using Newtonsoft.Json
+@using Newtonsoft.Json.Linq
+@inject SideShiftService SideShiftService
+@{
+    var storeId = ((JObject)JObject.Parse(JsonConvert.SerializeObject(Model)))["StoreId"].Value<string>();
+    var settings = await SideShiftService.GetSideShiftForStore(storeId);
+    if (settings?.Enabled is true)
+    {
+        <div id="sideshift" class="bp-view payment manual-flow" :class="{ active: currentTab == 'undefined' || currentTab == 'sideshift' }">
+            <div class="manual__step-two__instructions">
+                <span>
+                    {{$t("ConversionTab_BodyTop", srvModel)}}
+                    <br/><br/>
+                    {{$t("ConversionTab_BodyDesc", srvModel)}}
+                </span>
+            </div>
+            <side-shift inline-template
+                        :to-currency="srvModel.paymentMethodId"
+                        :to-currency-due="srvModel.btcDue * (1 + (@settings.AmountMarkupPercentage / 100)) "
+                        :to-currency-address="srvModel.btcAddress">
+                <a v-on:click="openDialog($event)" href="#" class="action-button btn btn-secondary rounded-pill w-100 mt-4">{{$t("Pay with SideShift")}}</a>
+            </side-shift>
+        </div>
+    }
+}

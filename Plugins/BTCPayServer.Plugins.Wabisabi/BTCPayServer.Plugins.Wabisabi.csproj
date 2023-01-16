@@ -1,0 +1,48 @@
+﻿
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>10</LangVersion>
+  </PropertyGroup>
+
+  <!-- Plugin specific properties -->
+  <PropertyGroup>
+    <Title>Wabisabi Coinjoin</Title>
+    <Description>Allows you to integrate your btcpayserver store with coinjoins.</Description>
+    <Authors>Kukks</Authors>
+    <Version>1.0.10</Version>
+  </PropertyGroup>
+
+  <!-- Plugin development properties -->
+  <PropertyGroup>
+    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+    <PreserveCompilationContext>false</PreserveCompilationContext>
+    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+  </PropertyGroup>
+
+  <!-- This will make sure that referencing BTCPayServer doesn't put any artifact in the published directory -->
+  <ItemDefinitionGroup>
+    <ProjectReference>
+      <Properties>StaticWebAssetsEnabled=false</Properties>
+      <Private>false</Private>
+      <ExcludeAssets>runtime;native;build;buildTransitive;contentFiles</ExcludeAssets>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+
+
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <EmbeddedResource Include="Resources\**" />
+    <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
+    <ProjectReference Include="..\..\submodules\walletwasabi\WalletWasabi\WalletWasabi.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Resources" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="NNostr.Client" Version="0.0.17" />
+  </ItemGroup>
+
+</Project>

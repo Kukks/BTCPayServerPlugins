@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+    <PreserveCompilationContext>false</PreserveCompilationContext>
+    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    <AssemblyVersion>0.0.10</AssemblyVersion>
+
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Configurations>Debug;Release;Altcoins-Release;Altcoins-Debug</Configurations>
+    <Platforms>AnyCPU</Platforms>
+  </PropertyGroup>
+
+  <!-- Default similar to Debug/Release -->
+  <PropertyGroup Condition=" '$(Configuration)' == 'Altcoins-Release' ">
+    <Optimize Condition=" '$(Optimize)' == '' ">true</Optimize>
+    <Altcoins>true</Altcoins>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Altcoins-Debug'">
+    <DefineConstants>$(DefineConstants);DEBUG</DefineConstants>
+    <Altcoins>true</Altcoins>
+  </PropertyGroup>
+  <!-- -->
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\..\BTCPayServer.Abstractions\BTCPayServer.Abstractions.csproj" />
+    <EmbeddedResource Include="Resources\**" />
+    <ProjectReference Include="..\..\BTCPayServer.Common\BTCPayServer.Common.csproj" />
+    <ProjectReference Include="..\..\Wasabi\WalletWasabi\WalletWasabi.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Resources" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="NNostr.Client" Version="0.0.17" />
+  </ItemGroup>
+
+</Project>

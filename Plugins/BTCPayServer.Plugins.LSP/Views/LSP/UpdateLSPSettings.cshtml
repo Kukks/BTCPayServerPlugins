@@ -1,0 +1,78 @@
+﻿@using BTCPayServer.Abstractions.Extensions
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using BTCPayServer.Abstractions.Contracts
+@model BTCPayServer.Plugins.LSP.LSPSettings
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+    Layout = "../Shared/_NavLayout.cshtml";
+    ViewData["NavPartialName"] = "../UIStores/_Nav";
+    ViewData.SetActivePage("LSP", "Update Store LSP Settings", null);
+}
+
+<h2 class="mt-1 mb-4">@ViewData["Title"]</h2>
+<div class="row">
+    <div class="col-xl-8 col-xxl-constrain">
+        <form method="post">
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+            <div class="form-group form-check">
+                <input type="checkbox" class="form-check-input" asp-for="Enabled"/>
+                <label asp-for="Enabled" class="form-check-label"></label>
+                <span asp-validation-for="Enabled" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Title" class="form-label" data-required>LSP Title</label>
+                <input asp-for="Title" class="form-control" required/>
+                <span asp-validation-for="Title" class="text-danger"></span>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="Description" class="form-label"></label>
+                <textarea asp-for="Description" rows="10" cols="40" class="form-control richtext"></textarea>
+                <span asp-validation-for="Description" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="CustomCSS" class="form-label">Additional Custom CSS</label>
+                <textarea asp-for="CustomCSS" rows="10" cols="40" class="form-control"></textarea>
+                <span asp-validation-for="CustomCSS" class="text-danger"></span>
+            </div>
+            <div class="row">
+                <div class="form-group col-md-6 col-sm-12">
+                    <label asp-for="Minimum" class="form-label"></label>
+                    <input asp-for="Minimum" class="form-control" type="number" inputmode="numeric" min="1" style="max-width:16ch;"/>
+                    <span asp-validation-for="Minimum" class="text-danger"></span>
+                </div>
+                <div class="form-group col-md-6 col-sm-12">
+                    <label asp-for="Maximum" class="form-label"></label>
+                    <input asp-for="Maximum" class="form-control" type="number" inputmode="numeric" min="1" style="max-width:16ch;"/>
+                    <span asp-validation-for="Maximum" class="text-danger"></span>
+                </div>
+                <div class="form-group col-md-6 col-sm-12">
+                    <label asp-for="BaseFee" class="form-label"></label>
+                    <input asp-for="BaseFee" class="form-control" type="number" inputmode="numeric" style="max-width:16ch;"/>
+                    <span asp-validation-for="BaseFee" class="text-danger"></span>
+                </div>
+                <div class="form-group col-md-6 col-sm-12">
+                    <label asp-for="FeePerSat" class="form-label"></label>
+                    <input asp-for="FeePerSat" class="form-control" type="number" min="0" step="any" inputmode="numeric" style="max-width:16ch;"/>
+                    <span asp-validation-for="FeePerSat" class="text-danger"></span>
+                </div>
+            </div>
+            <div class="form-group mt-4">
+                <input type="submit" value="Save" name="command" class="btn btn-primary"/>
+                @if (this.ViewContext.ModelState.IsValid && Model.Enabled)
+                {
+                    <a class="btn btn-secondary" href=" @Url.Action("View", "LSP", new {storeId})">
+                        Purchase page
+                    </a>
+                }
+            </div>
+        </form>
+    </div>
+</div>
+
+@section PageFootContent {
+    <link href="~/vendor/summernote/summernote-bs5.css" rel="stylesheet" asp-append-version="true"/>
+    <script src="~/vendor/summernote/summernote-bs5.js" asp-append-version="true"></script>
+    <partial name="_ValidationScriptsPartial"/>
+}

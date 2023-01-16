@@ -1,0 +1,14 @@
+@using BTCPayServer.Plugins.AOPP
+@using Newtonsoft.Json
+@using Newtonsoft.Json.Linq
+@inject AOPPService AOPPService
+@{
+    var storeId = ((JObject)JObject.Parse(JsonConvert.SerializeObject(Model)))["StoreId"].Value<string>();
+    var settings = await AOPPService.GetAOPPForStore(storeId);
+    if (settings?.Enabled is true)
+    {
+        <div class="payment-tabs__tab" id="AOPP-tab" v-on:click="switchTab('AOPP')" v-bind:class="{ 'active': currentTab == 'AOPP'}" v-if="srvModel.paymentMethodId.indexOf('_') === -1">
+            <span>{{$t("AOPP")}}</span>
+        </div>
+    }
+}

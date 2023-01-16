@@ -1,0 +1,19 @@
+@using BTCPayServer.Plugins.LSP
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using BTCPayServer.Abstractions.Contracts
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+    var isActive = !string.IsNullOrEmpty(storeId) && ViewContext.RouteData.Values.TryGetValue("Controller", out var controller) &&  controller is not null && 
+        nameof(LSPController).StartsWith(controller?.ToString(), StringComparison.InvariantCultureIgnoreCase);
+}
+@if (!string.IsNullOrEmpty(storeId))
+{
+    <li class="nav-item">
+        <a asp-area="" asp-controller="LSP" asp-action="UpdateLSPSettings" asp-route-storeId="@storeId" class="nav-link js-scroll-trigger @(isActive? "active": string.Empty)">
+            <svg role="img" class="icon">
+            </svg>
+            <span>LSP</span>
+        </a>
+    </li>
+}

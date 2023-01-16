@@ -1,0 +1,14 @@
+@inject ContentSecurityPolicies contentSecurityPolicies
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Security
+@using NBitcoin
+@{
+    var nonce = RandomUtils.GetUInt256().ToString().Substring(0, 32);
+    contentSecurityPolicies.Add("script-src", $"'nonce-{nonce}'");
+    var url = Context.Request.GetAbsoluteUri(Url.Action("SubmitLNURLWithdrawForInvoice", "NFC"));
+}
+
+<script type="text/javascript" nonce="@nonce">
+    window.lnurlWithdrawSubmitUrl = '@url';
+</script>
+<script src="~/Resources/js/lnurlwnfc.js"></script>

@@ -1,0 +1,13 @@
+@using BTCPayServer.Plugins.AOPP
+@using Newtonsoft.Json
+@using Newtonsoft.Json.Linq
+@inject AOPPService AOPPService
+@{
+
+    var storeId = ((JObject)JObject.Parse(JsonConvert.SerializeObject(Model)))["StoreId"].Value<string>();
+    var settings = await AOPPService.GetAOPPForStore(storeId);
+    if (settings?.Enabled is true)
+    {
+        <script src="~/Resources/js/aoppComponent.js"></script>
+    }
+}

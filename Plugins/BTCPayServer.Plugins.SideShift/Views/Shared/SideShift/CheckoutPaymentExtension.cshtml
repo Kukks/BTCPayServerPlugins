@@ -1,0 +1,69 @@
+@using BTCPayServer.Plugins.SideShift
+@using Newtonsoft.Json
+@using Newtonsoft.Json.Linq
+@inject BTCPayServer.Security.ContentSecurityPolicies csp
+@inject SideShiftService SideShiftService
+@{
+    var storeId = ((JObject)JObject.Parse(JsonConvert.SerializeObject(Model)))["StoreId"].Value<string>();
+    var settings = await SideShiftService.GetSideShiftForStore(storeId);
+}
+@if (settings?.Enabled is true)
+{
+    csp.Add("script-src", "https://sideshift.ai");
+    csp.Add("script-src", "*.sideshift.ai");
+    
+    <template id="side-shift-checkout-template">
+        <div class="payment-box">
+            <p v-html="content"></p>
+            <button type="button" v-on:click="openDialog" class="btn btn-primary rounded-pill w-100">{{$t("Pay with SideShift")}}</button>
+        </div>
+    </template>
+    <script>
+        Vue.component("SideShiftCheckout", {
+            template: "#side-shift-checkout-template",
+            props: ["model"],
+            computed: {
+                content () {
+                    return this.$i18n.i18next.t("conversion_body", this.model).replace(/\n/ig, '<br>');
+                },
+                currency () {
+                    return this.model.paymentMethodId;
+                },
+                settleMethodId () {
+                    if (this.currency.toLowerCase() === "lbtc") {
+                        return 'liquid';
+                    } else if (this.currency.toLowerCase() === "usdt") {
+                        return "usdtla";
+                    } else if (this.currency.endsWith('LightningLike') || this.currency.endsWith('LNURLPay')) {
+                        return "ln";
+                    } else {
+                        return this.currency.replace('_BTCLike', '').replace('_MoneroLike', '').replace('_ZcashLike', '').toLowerCase();
+                    }
+                },
+                type () {
+                    return this.model.isUnsetTopUp
+                        ? undefined
+                        : 'fixed';
+                },
+                amountDue () {
+                    return this.model.isUnsetTopUp
+                        ? undefined
+                        : this.model.btcDue * (1 + (@settings.AmountMarkupPercentage / 100));
+                }
+            },
+            methods: {
+                openDialog () {
+                    window.__SIDESHIFT__ = {
+                        parentAffiliateId: "qg0OrfHJV",
+                        defaultSettleMethodId: this.settleMethodId,
+                        settleAddress: this.model.btcAddress,
+                        settleAmount: this.amountDue,
+                        type: this.type
+                    };
+                    window.sideshift.show();
+                }
+            }
+        });
+    </script>
+    <script src="https://sideshift.ai/static/js/main.js" defer></script>
+}
