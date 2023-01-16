@@ -3,7 +3,29 @@
     <TargetFramework>net6.0</TargetFramework>
     <LangVersion>10</LangVersion>
   </PropertyGroup>
+  <PropertyGroup>
+    <Configurations>Debug;Release;Altcoins-Release;Altcoins-Debug</Configurations>
+    <Platforms>AnyCPU</Platforms>
+  </PropertyGroup>
 
+  <!-- Default similar to Debug/Release -->
+  <PropertyGroup Condition=" '$(Configuration)' == 'Altcoins-Release' ">
+    <Optimize Condition=" '$(Optimize)' == '' ">true</Optimize>
+    <Altcoins>true</Altcoins>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Altcoins-Debug'">
+    <DefineConstants>$(DefineConstants);DEBUG</DefineConstants>
+    <Altcoins>true</Altcoins>
+  </PropertyGroup>
+  <!-- -->
+
+  <PropertyGroup Condition="( '$(Configuration)' == 'Debug' Or '$(Configuration)' == 'Altcoins-Debug') And '$(RazorCompileOnBuild)' != 'true' And '$(DotNetWatchBuild)' != 'true' And '$(DesignTimeBuild)' != 'true'">
+    <RazorCompileOnBuild>false</RazorCompileOnBuild>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Altcoins)' == 'true'">
+    <DefineConstants>$(DefineConstants);ALTCOINS</DefineConstants>
+  </PropertyGroup>
   <!-- Plugin specific properties -->
   <PropertyGroup>
     <Title>"Liquid+</Title>

@@ -2,7 +2,7 @@
 
 var plugins = Directory.GetDirectories("../../../../Plugins");
 Console.WriteLine(string.Join(',',plugins));
-var p = string.Join(';', plugins.Select(s => $"{Path.GetFullPath(s)}/bin/Debug/net6.0/{Path.GetFileName(s)}.dll" ));;
+var p = string.Join(';', plugins.Select(s => $"{Path.GetFullPath(s)}/bin/Altcoins-Debug/net6.0/{Path.GetFileName(s)}.dll" ));;
 var fileContents = $"{{ \"DEBUG_PLUGINS\": \"{p}\"}}";
 var content = JsonSerializer.Serialize(new
 {
