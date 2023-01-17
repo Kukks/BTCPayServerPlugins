@@ -10,7 +10,7 @@
 
   <!-- Plugin specific properties -->
   <PropertyGroup>
-    <Title>Wabisabi Coinjoin</Title>
+    <Product>Wabisabi Coinjoin</Product>
     <Description>Allows you to integrate your btcpayserver store with coinjoins.</Description>
     <Authors>Kukks</Authors>
     <Version>1.0.10</Version>
@@ -35,26 +35,21 @@
 
 
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <EmbeddedResource Include="Resources\**" />
     <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
-    <ProjectReference Include="..\..\submodules\walletwasabi\WalletWasabi\WalletWasabi.csproj" />
-  </ItemGroup>
-  <ItemGroup>
-    <PackageReference Include="NNostr.Client" Version="0.0.17" />
-  </ItemGroup>
-  <ItemGroup>
-    <_ContentIncludedByDefault Remove="Views\Shared\Wabisabi\StoreIntegrationWabisabiOption.cshtml" />
-    <_ContentIncludedByDefault Remove="Views\Shared\Wabisabi\WabisabiDashboard.cshtml" />
-    <_ContentIncludedByDefault Remove="Views\Shared\Wabisabi\WabisabiNav.cshtml" />
-    <_ContentIncludedByDefault Remove="Views\Shared\Wabisabi\WabisabiServerNavvExtension.cshtml" />
-    <_ContentIncludedByDefault Remove="Views\WabisabiCoordinatorConfig\UpdateWabisabiSettings.cshtml" />
-    <_ContentIncludedByDefault Remove="Views\WabisabiStore\Spend.cshtml" />
-    <_ContentIncludedByDefault Remove="Views\WabisabiStore\UpdateWabisabiStoreSettings.cshtml" />
-    <_ContentIncludedByDefault Remove="Views\_ViewImports.cshtml" />
+    <ProjectReference Include="..\..\submodules\walletwasabi\WalletWasabi\WalletWasabi.csproj">
+      <Properties>StaticWebAssetsEnabled=false</Properties>
+      <Private>true</Private>
+      <ExcludeAssets>runtime;contentFiles</ExcludeAssets>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Resources" />
   </ItemGroup>
-
+  <ItemGroup>
+    <PackageReference Include="NNostr.Client" Version="0.0.17" />
+  </ItemGroup>
+  <Target Name="DeleteExampleFile" AfterTargets="Publish">
+    <RemoveDir Directories="$(PublishDir)\Microservices" />
+  </Target>
 </Project>

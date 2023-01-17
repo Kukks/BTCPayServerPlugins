@@ -7,17 +7,10 @@ namespace BTCPayServer.Plugins.LSP
 {
     public class LSPPlugin : BaseBTCPayServerPlugin
     {
-        public override string Identifier => "BTCPayServer.Plugins.LSP";
-        public override string Name => "LSP";
-        
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
         {
-            new() {Identifier = nameof(BTCPayServer), Condition = ">=1.6.0.0"}
+            new() { Identifier = nameof(BTCPayServer), Condition = ">=1.7.4" }
         };
-
-        public override string Description =>
-            "Allows you to become an LSP selling lightning channels with inbound liquidity";
-
         public override void Execute(IServiceCollection applicationBuilder)
         {
             applicationBuilder.AddSingleton<LSPService>();

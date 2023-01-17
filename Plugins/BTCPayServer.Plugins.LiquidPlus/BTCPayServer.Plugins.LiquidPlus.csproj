@@ -28,7 +28,7 @@
   </PropertyGroup>
   <!-- Plugin specific properties -->
   <PropertyGroup>
-    <Title>"Liquid+</Title>
+    <Product>Liquid+</Product>
     <Description>Enhanced support for the liquid network.</Description>
     <Authors>Kukks</Authors>
     <Version>1.0.8</Version>

@@ -14,15 +14,10 @@ namespace BTCPayServer.Plugins.LiquidPlus
 {
     public class LiquidPlusPlugin : BaseBTCPayServerPlugin
     {
-        public override string Identifier { get; } = "BTCPayServer.Plugins.LiquidPlus";
-        public override string Name { get; } = "Liquid+";
-
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
         {
-            new IBTCPayServerPlugin.PluginDependency() { Identifier = nameof(BTCPayServer), Condition = ">=1.7.0.0" }
+            new() { Identifier = nameof(BTCPayServer), Condition = ">=1.7.4" }
         };
-        public override string Description { get; } = "Enhanced support for the liquid network.";
-
         public override void Execute(IServiceCollection services)
         {
             services.AddSingleton<IUIExtension>(new UIExtension("LiquidNav", "store-integrations-nav"));

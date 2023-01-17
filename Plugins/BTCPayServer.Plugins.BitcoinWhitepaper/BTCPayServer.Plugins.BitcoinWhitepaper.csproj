@@ -8,7 +8,7 @@
 
     <!-- Plugin specific properties -->
     <PropertyGroup>
-        <Title>Bitcoin Whitepaper</Title>
+        <Product>Bitcoin Whitepaper</Product>
         <Description>This makes the Bitcoin whitepaper available on your BTCPay Server.</Description>
         <Authors>Kukks</Authors>
         <Version>1.0.2</Version>

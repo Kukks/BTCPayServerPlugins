@@ -9,7 +9,7 @@
 
   <!-- Plugin specific properties -->
   <PropertyGroup>
-    <Title>LNURL NFC Support</Title>
+    <Product>LNURL NFC Support</Product>
     <Description>Allows you to support contactless card payments over NFC and LNURL Withdraw!</Description>
     <Authors>Kukks</Authors>
     <Version>1.0.8</Version>

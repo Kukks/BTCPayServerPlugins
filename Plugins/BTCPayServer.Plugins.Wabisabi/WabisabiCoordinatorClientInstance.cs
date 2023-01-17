@@ -20,6 +20,7 @@ using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.WabiSabi.Client.RoundStateAwaiters;
 using WalletWasabi.WabiSabi.Client.StatusChangedEvents;
 using WalletWasabi.WebClients.Wasabi;
+using HttpClientFactory = WalletWasabi.WebClients.Wasabi.HttpClientFactory;
 
 namespace BTCPayServer.Plugins.Wabisabi;
 

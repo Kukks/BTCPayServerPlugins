@@ -9,7 +9,7 @@
 
   <!-- Plugin specific properties -->
   <PropertyGroup>
-    <Title>AOPP</Title>
+    <Product>AOPP</Product>
     <Description>Allows you to support the AOPP protocol in invoices to allow customers to bypass stupid KYC rules.</Description>
     <Authors>Kukks</Authors>
     <Version>1.0.1</Version>

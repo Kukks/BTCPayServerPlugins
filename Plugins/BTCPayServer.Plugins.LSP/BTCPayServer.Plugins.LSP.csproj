@@ -9,7 +9,7 @@
 
   <!-- Plugin specific properties -->
   <PropertyGroup>
-    <Title>LSP</Title>
+    <Product>LSP</Product>
     <Description>Allows you to become an LSP selling lightning channels with inbound liquidity</Description>
     <Authors>Kukks</Authors>
     <Version>1.0.0</Version>

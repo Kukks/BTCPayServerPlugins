@@ -36,19 +36,10 @@ namespace BTCPayServer.Plugins.Wabisabi;
 
 public class WabisabiPlugin : BaseBTCPayServerPlugin
 {
-    public override string Identifier => "BTCPayServer.Plugins.Wabisabi";
-    public override string Name => "Coinjoin";
-
-
     public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
     {
-        new() {Identifier = nameof(BTCPayServer), Condition = ">=1.7.3.0"}
+        new() { Identifier = nameof(BTCPayServer), Condition = ">=1.7.4" }
     };
-
-    public override string Description =>
-        "Allows you to integrate your btcpayserver store with coinjoins.";
-
-
     public override void Execute(IServiceCollection applicationBuilder)
     {
         var utxoLocker = new LocalisedUTXOLocker();

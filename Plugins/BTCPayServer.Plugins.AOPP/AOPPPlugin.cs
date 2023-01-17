@@ -7,18 +7,10 @@ namespace BTCPayServer.Plugins.AOPP
 {
     public class AOPPPlugin : BaseBTCPayServerPlugin
     {
-        public override string Identifier => "BTCPayServer.Plugins.AOPP";
-        public override string Name => "AOPP";
-
-
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
         {
-            new() { Identifier = nameof(BTCPayServer), Condition = ">=1.6.0.0" }
+            new() { Identifier = nameof(BTCPayServer), Condition = ">=1.7.4" }
         };
-
-        public override string Description =>
-            "Allows you to support the AOPP protocol in invoices to allow customers to bypass stupid KYC rules.";
-
         public override void Execute(IServiceCollection applicationBuilder)
         {
             applicationBuilder.AddSingleton<AOPPService>();
