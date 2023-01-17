@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Payments.PayJoin;
@@ -10,9 +11,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
+using WalletWasabi.Backend.Controllers;
 using WalletWasabi.Services;
 using WalletWasabi.Tor.Socks5.Pool.Circuits;
 using WalletWasabi.Userfacing;
+using WalletWasabi.WabiSabi.Backend.PostRequests;
 using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.WabiSabi.Client.RoundStateAwaiters;
 using WalletWasabi.WabiSabi.Client.StatusChangedEvents;
@@ -67,11 +70,16 @@ public class WabisabiCoordinatorClientInstanceManager:IHostedService
         }
     }
 
-
-
+    
     public  void AddCoordinator(string displayName, string name,
         Func<IServiceProvider, Uri> fetcher, string termsConditions = null)
     {
+        if (termsConditions is null && name == "zksnacks")
+        {
+            termsConditions = new HttpClient().GetStringAsync("https://wasabiwallet.io/api/v4/Wasabi/legaldocuments")
+                .Result;
+
+        }
         if (HostedServices.ContainsKey(name))
         {
             return;
@@ -79,7 +87,7 @@ public class WabisabiCoordinatorClientInstanceManager:IHostedService
         var instance = new WabisabiCoordinatorClientInstance(
             displayName,
             name, fetcher.Invoke(_provider), _provider.GetService<ILoggerFactory>(), _provider, UTXOLocker,
-            _provider.GetService<WalletProvider>());
+            _provider.GetService<WalletProvider>(), termsConditions);
         if (HostedServices.TryAdd(instance.CoordinatorName, instance))
         {
             if(started)
@@ -107,19 +115,21 @@ public class WabisabiCoordinatorClientInstance
     public string CoordinatorName { get; set; }
     public Uri Coordinator { get; set; }
     public WalletProvider WalletProvider { get; }
+    public string TermsConditions { get; set; }
     public HttpClientFactory WasabiHttpClientFactory { get; set; }
     public RoundStateUpdater RoundStateUpdater { get; set; }
     public WasabiCoordinatorStatusFetcher WasabiCoordinatorStatusFetcher { get; set; }
     public CoinJoinManager CoinJoinManager { get; set; }
 
     public WabisabiCoordinatorClientInstance(string coordinatorDisplayName,
-        string coordinatorName, 
-        Uri coordinator, 
-        ILoggerFactory loggerFactory, 
-        IServiceProvider serviceProvider, 
+        string coordinatorName,
+        Uri coordinator,
+        ILoggerFactory loggerFactory,
+        IServiceProvider serviceProvider,
         IUTXOLocker utxoLocker,
-        WalletProvider walletProvider)
+        WalletProvider walletProvider, string termsConditions, string coordinatorIdentifier = "CoinJoinCoordinatorIdentifier")
     {
+        
         _utxoLocker = utxoLocker;
         var config = serviceProvider.GetService<IConfiguration>();
         var socksEndpoint = config.GetValue<string>("socksendpoint");
@@ -132,17 +142,42 @@ public class WabisabiCoordinatorClientInstance
         CoordinatorName = coordinatorName;
         Coordinator = coordinator;
         WalletProvider = walletProvider;
+        TermsConditions = termsConditions;
         _logger = loggerFactory.CreateLogger(coordinatorName);
-        WasabiHttpClientFactory = new HttpClientFactory(torEndpoint, () => Coordinator);
-        var roundStateUpdaterCircuit = new PersonCircuit();
-        var roundStateUpdaterHttpClient =
-            WasabiHttpClientFactory.NewHttpClient(Mode.SingleCircuitPerLifetime, roundStateUpdaterCircuit);
-        var sharedWabisabiClient =  new WabiSabiHttpApiClient(roundStateUpdaterHttpClient);
+        IWabiSabiApiRequestHandler sharedWabisabiClient;
+        if (coordinatorName == "local")
+        {
+            sharedWabisabiClient = serviceProvider.GetRequiredService<WabiSabiController>();
+            
+        }
+        else
+        {
+            WasabiHttpClientFactory = new HttpClientFactory(torEndpoint, () => Coordinator);
+            var roundStateUpdaterCircuit = new PersonCircuit();
+            var roundStateUpdaterHttpClient =
+                WasabiHttpClientFactory.NewHttpClient(Mode.SingleCircuitPerLifetime, roundStateUpdaterCircuit);
+            sharedWabisabiClient = new WabiSabiHttpApiClient(roundStateUpdaterHttpClient);
+            CoinJoinManager = new CoinJoinManager(coordinatorName,WalletProvider, RoundStateUpdater, WasabiHttpClientFactory,
+                WasabiCoordinatorStatusFetcher, coordinatorIdentifier);
+        }
+        
         WasabiCoordinatorStatusFetcher = new WasabiCoordinatorStatusFetcher(sharedWabisabiClient, _logger);
         
         RoundStateUpdater = new RoundStateUpdater(TimeSpan.FromSeconds(5),sharedWabisabiClient, WasabiCoordinatorStatusFetcher);
-        CoinJoinManager = new CoinJoinManager(coordinatorName,WalletProvider, RoundStateUpdater, WasabiHttpClientFactory,
-            WasabiCoordinatorStatusFetcher, "CoinJoinCoordinatorIdentifier");
+        if (coordinatorName == "local")
+        {
+            CoinJoinManager = new CoinJoinManager(coordinatorName, WalletProvider, RoundStateUpdater,
+                sharedWabisabiClient,
+                WasabiCoordinatorStatusFetcher, coordinatorIdentifier);
+        }
+        else
+        {
+            
+            CoinJoinManager = new CoinJoinManager(coordinatorName, WalletProvider, RoundStateUpdater,
+                WasabiHttpClientFactory,
+                WasabiCoordinatorStatusFetcher, coordinatorIdentifier);
+        }
+
         CoinJoinManager.StatusChanged += OnStatusChanged;
         CoinJoinManager.OnBan += (sender, args) =>
         {

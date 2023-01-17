@@ -41,10 +41,20 @@
     <ProjectReference Include="..\..\submodules\walletwasabi\WalletWasabi\WalletWasabi.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Resources" />
+    <PackageReference Include="NNostr.Client" Version="0.0.17" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="NNostr.Client" Version="0.0.17" />
+    <_ContentIncludedByDefault Remove="Views\Shared\Wabisabi\StoreIntegrationWabisabiOption.cshtml" />
+    <_ContentIncludedByDefault Remove="Views\Shared\Wabisabi\WabisabiDashboard.cshtml" />
+    <_ContentIncludedByDefault Remove="Views\Shared\Wabisabi\WabisabiNav.cshtml" />
+    <_ContentIncludedByDefault Remove="Views\Shared\Wabisabi\WabisabiServerNavvExtension.cshtml" />
+    <_ContentIncludedByDefault Remove="Views\WabisabiCoordinatorConfig\UpdateWabisabiSettings.cshtml" />
+    <_ContentIncludedByDefault Remove="Views\WabisabiStore\Spend.cshtml" />
+    <_ContentIncludedByDefault Remove="Views\WabisabiStore\UpdateWabisabiStoreSettings.cshtml" />
+    <_ContentIncludedByDefault Remove="Views\_ViewImports.cshtml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Resources" />
   </ItemGroup>
 
 </Project>

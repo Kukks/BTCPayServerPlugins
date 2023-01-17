@@ -23,6 +23,7 @@ using Microsoft.Extensions.Options;
 using NBitcoin;
 using NBitcoin.RPC;
 using NBXplorer;
+using NBXplorer.Models;
 using Newtonsoft.Json.Linq;
 using NNostr.Client;
 using WalletWasabi.Bases;
@@ -43,8 +44,6 @@ public class WabisabiCoordinatorService : PeriodicRunner
     private readonly IMemoryCache _memoryCache;
     private readonly WabisabiCoordinatorClientInstanceManager _instanceManager;
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IConfiguration _configuration;
-    private readonly IServiceProvider _serviceProvider;
 
     public readonly IdempotencyRequestCache IdempotencyRequestCache;
 
@@ -54,8 +53,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
     public WabisabiCoordinatorService(ISettingsRepository settingsRepository,
         IOptions<DataDirectories> dataDirectories, IExplorerClientProvider clientProvider, IMemoryCache memoryCache,
         WabisabiCoordinatorClientInstanceManager instanceManager,
-        IHttpClientFactory httpClientFactory,
-        IConfiguration configuration, IServiceProvider serviceProvider) : base(TimeSpan.FromMinutes(15))
+        IHttpClientFactory httpClientFactory) : base(TimeSpan.FromMinutes(15))
     {
         _settingsRepository = settingsRepository;
         _dataDirectories = dataDirectories;
@@ -63,13 +61,11 @@ public class WabisabiCoordinatorService : PeriodicRunner
         _memoryCache = memoryCache;
         _instanceManager = instanceManager;
         _httpClientFactory = httpClientFactory;
-        _configuration = configuration;
-        _serviceProvider = serviceProvider;
         IdempotencyRequestCache = new(memoryCache);
     }
 
-    private WabisabiCoordinatorSettings cachedSettings; 
-    
+    private WabisabiCoordinatorSettings cachedSettings;
+
     public async Task<WabisabiCoordinatorSettings> GetSettings()
     {
         return cachedSettings ??= (await _settingsRepository.GetSettingAsync<WabisabiCoordinatorSettings>(
@@ -93,10 +89,14 @@ public class WabisabiCoordinatorService : PeriodicRunner
                     break;
             }
         }
+        else if (existing.Enabled &&
+                 _instanceManager.HostedServices.TryGetValue("local", out var instance))
+        {
+            instance.TermsConditions = wabisabiCoordinatorSettings.TermsConditions;
+        }
 
         await this.ActionAsync(CancellationToken.None);
         await _settingsRepository.UpdateSetting(wabisabiCoordinatorSettings, nameof(WabisabiCoordinatorSettings));
-        
     }
 
     public class BtcPayRpcClient : CachedRpcClient
@@ -118,6 +118,37 @@ public class WabisabiCoordinatorService : PeriodicRunner
             }
 
             return result;
+        }
+
+        public override async Task<uint256> SendRawTransactionAsync(Transaction transaction,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await _explorerClient.BroadcastAsync(transaction, cancellationToken);
+            if (!result.Success)
+            {
+                throw new RPCException((RPCErrorCode)result.RPCCode, result.RPCMessage, null);
+            }
+
+            return transaction.GetHash();
+        }
+
+        public override async Task<EstimateSmartFeeResponse> EstimateSmartFeeAsync(int confirmationTarget,
+            EstimateSmartFeeMode estimateMode = EstimateSmartFeeMode.Conservative,
+            CancellationToken cancellationToken = default)
+        {
+
+            string cacheKey = $"{nameof(EstimateSmartFeeAsync)}:{confirmationTarget}:{estimateMode}";
+
+            return await IdempotencyRequestCache.GetCachedResponseAsync(
+                cacheKey,
+                action: async (_, cancellationToken) =>
+                {
+                    var result = await _explorerClient.GetFeeRateAsync(confirmationTarget, cancellationToken);
+                    return new EstimateSmartFeeResponse() {FeeRate = result.FeeRate, Blocks = result.BlockCount};
+                },
+                options: CacheOptionsWithExpirationToken(size: 1, expireInSeconds: 60),
+                cancellationToken).ConfigureAwait(false);
+
         }
     }
 
@@ -148,60 +179,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
     public async Task StartCoordinator(CancellationToken cancellationToken)
     {
         await HostedServices.StartAllAsync(cancellationToken);
-
-        var host = await _serviceProvider.GetService<Task<IWebHost>>();
-        Console.Error.WriteLine("ADDRESSES:" +
-                                host.ServerFeatures.Get<IServerAddressesFeature>().Addresses.FirstOrDefault());
-        string rootPath = _configuration.GetValue<string>("rootpath", "/");
-        var serverAddress = host.ServerFeatures.Get<IServerAddressesFeature>().Addresses.FirstOrDefault();
-        _instanceManager.AddCoordinator("Local Coordinator", "local", provider =>
-        {
-            if (!string.IsNullOrEmpty(serverAddress))
-            {
-                var serverAddressUri = new Uri(serverAddress);
-                if (new[] {UriHostNameType.IPv4, UriHostNameType.IPv6}.Contains(serverAddressUri.HostNameType))
-                {
-                    var ipEndpoint = IPEndPoint.Parse(serverAddressUri.Host);
-                    if (Equals(ipEndpoint.Address, IPAddress.Any))
-                    {
-                        ipEndpoint.Address = IPAddress.Loopback;
-                    }
-
-                    if (Equals(ipEndpoint.Address, IPAddress.IPv6Any))
-                    {
-                        ipEndpoint.Address = IPAddress.Loopback;
-                    }
-
-                    UriBuilder builder = new(serverAddressUri);
-                    builder.Host = ipEndpoint.Address.ToString();
-                    builder.Path = $"{rootPath}plugins/wabisabi-coordinator/";
-
-                    Console.Error.WriteLine($"COORD URL-1: {builder.Uri}");
-                    return builder.Uri;
-                }
-            }
-
-
-            Uri result;
-            var rawBind = _configuration.GetValue("bind", IPAddress.Loopback.ToString())
-                .Split(":", StringSplitOptions.RemoveEmptyEntries);
-
-            var bindAddress = IPAddress.Parse(rawBind.First());
-            if (Equals(bindAddress, IPAddress.Any))
-            {
-                bindAddress = IPAddress.Loopback;
-            }
-
-            if (Equals(bindAddress, IPAddress.IPv6Any))
-            {
-                bindAddress = IPAddress.IPv6Loopback;
-            }
-
-            int bindPort = rawBind.Length > 2 ? int.Parse(rawBind[1]) : _configuration.GetValue("port", 443);
-            result = new Uri($"https://{bindAddress}:{bindPort}{rootPath}plugins/wabisabi-coordinator/");
-            Console.Error.WriteLine($"COORD URL: {result}");
-            return result;
-        });
+        _instanceManager.AddCoordinator("Local Coordinator", "local", _ => null, cachedSettings.TermsConditions);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -211,52 +189,11 @@ public class WabisabiCoordinatorService : PeriodicRunner
 
     protected override async Task ActionAsync(CancellationToken cancel)
     {
-        var network = _clientProvider.GetExplorerClient("BTC").Network.NBitcoinNetwork.Name.ToLower();
+        var network = _clientProvider.GetExplorerClient("BTC").Network.NBitcoinNetwork;
         var s = await GetSettings();
         if (s.Enabled && !string.IsNullOrEmpty(s.NostrIdentity) && s.NostrRelay is not null)
         {
-            try
-            {
-
-            var key = NostrExtensions.ParseKey(s.NostrIdentity);
-            var client = new NostrClient(s.NostrRelay);
-            await client.ConnectAndWaitUntilConnected(cancel);
-            _= client.ListenForMessages();
-            var evt = new NostrEvent()
-            {
-                Kind = WabisabiStoreController.coordinatorEventKind,
-                PublicKey = key.CreatePubKey().ToXOnlyPubKey().ToHex(),
-                CreatedAt = DateTimeOffset.UtcNow,
-                Tags = new List<NostrEventTag>()
-                {
-                    new()
-                    {
-                        TagIdentifier = "uri",
-                        Data =  new List<string>()
-                        {
-                            "https://somewhere.com"
-                        }
-                    },
-                    new()
-                    {
-                        TagIdentifier = "network",
-                        Data =  new List<string>()
-                        {
-                            network
-                        }
-                    }
-                }
-            };
-            await evt.ComputeIdAndSign(key);
-            await client.PublishEvent(evt, cancel);
-            client.Dispose();
-            
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine(e);
-                throw;
-            }
+            await Nostr.Publish(s.NostrRelay, network, s.NostrIdentity, s.UriToAdvertise, s.CoordinatorDescription,cancel);
         }
     }
 }

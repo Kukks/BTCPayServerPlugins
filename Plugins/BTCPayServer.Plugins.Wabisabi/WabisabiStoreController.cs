@@ -67,7 +67,6 @@ namespace BTCPayServer.Plugins.Wabisabi
             return View(Wabisabi);
         }
 
-        public const int coordinatorEventKind = 15750;
 
         [HttpPost("")]
         public async Task<IActionResult> UpdateWabisabiStoreSettings(string storeId, WabisabiStoreSettings vm,
@@ -86,63 +85,13 @@ namespace BTCPayServer.Plugins.Wabisabi
                 case "discover":
                     coordSettings = await _wabisabiCoordinatorService.GetSettings();
                     var relay = commandIndex ??
-                                (await _wabisabiCoordinatorService.GetSettings())?.NostrRelay.ToString();
+                                coordSettings?.NostrRelay.ToString();
 
                     if (Uri.TryCreate(relay, UriKind.Absolute, out var relayUri))
                     {
-                        using var nostrClient = new NostrClient(relayUri);
-                        await nostrClient.CreateSubscription("nostr-wabisabi-coordinators",
-                            new[]
-                            {
-                                new NostrSubscriptionFilter()
-                                {
-                                    Kinds = new[] {coordinatorEventKind},
-                                    Since = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromHours(1)),
-                                }
-                            });
-                        var cts = new CancellationTokenSource(TimeSpan.FromMinutes(1));
-                        await nostrClient.ConnectAndWaitUntilConnected(cts.Token);
-                        _ = nostrClient.ListenForMessages();
-                        var result = new List<NostrEvent>();
-                        var tcs = new TaskCompletionSource();
-                        Stopwatch stopwatch = new();
-                        stopwatch.Start();
-                        nostrClient.MessageReceived += (sender, s) =>
-                        {
-                            if (JArray.Parse(s).FirstOrDefault()?.Value<string>() == "EOSE")
-                            {
-                                tcs.SetResult();
-                            }
-                        };
-                        nostrClient.EventsReceived += (sender, tuple) =>
-                        {
-                            stopwatch.Restart();
-                            result.AddRange(tuple.events);
-                        };
-                        while (!tcs.Task.IsCompleted && !cts.IsCancellationRequested &&
-                               stopwatch.ElapsedMilliseconds < 10000)
-                        {
-                            await Task.Delay(1000, cts.Token);
-                        }
-
-                        nostrClient.Dispose();
-
-                        var network = _explorerClientProvider.GetExplorerClient("BTC").Network.NBitcoinNetwork.Name
-                            .ToLower();
-                        ViewBag.DiscoveredCoordinators = result.Where(@event =>
-                            @event.CreatedAt < DateTimeOffset.UtcNow.AddMinutes(15) &&
-                            @event.Verify() &&
-                            @event.Tags.Any(tag =>
-                                tag.TagIdentifier == "uri" &&
-                                tag.Data.Any(s => Uri.IsWellFormedUriString(s, UriKind.Absolute))) &&
-                            @event.Tags.Any(tag =>
-                                tag.TagIdentifier == "network" && tag.Data.FirstOrDefault() == network)
-                        ).Select(@event => new DiscoveredCoordinator()
-                        {
-                            Name = @event.PublicKey,
-                            Uri = new Uri(@event.GetTaggedData("uri")
-                                .First(s => Uri.IsWellFormedUriString(s, UriKind.Absolute)))
-                        }).Where(discoveredCoordinator => string.IsNullOrEmpty(coordSettings.NostrIdentity) ||  discoveredCoordinator.Name !=  coordSettings.PubKey?.ToHex()).ToList();
+                        ViewBag.DiscoveredCoordinators =await Nostr.Discover(relayUri,
+                            _explorerClientProvider.GetExplorerClient("BTC").Network.NBitcoinNetwork,
+                            coordSettings.Key?.CreateXOnlyPubKey().ToHex(), CancellationToken.None);
                     }
                     else
                     {
