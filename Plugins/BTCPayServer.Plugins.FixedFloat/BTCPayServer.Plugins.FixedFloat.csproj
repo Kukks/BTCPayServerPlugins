@@ -1,12 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
-  <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
-    <LangVersion>10</LangVersion>
-    <Configurations>Debug;Release;Altcoins-Debug</Configurations>
-    <Platforms>AnyCPU</Platforms>
-  </PropertyGroup>
-
+  <Import Project="../../submodules/btcpayserver/Build/Common.csproj" />
   <!-- Plugin specific properties -->
   <PropertyGroup>
     <Product>FixedFloat</Product>

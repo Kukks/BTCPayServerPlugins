@@ -6,7 +6,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
-        <Configurations>Debug;Release;Altcoins-Debug</Configurations>
+        <Configurations>Debug;Release;Altcoins-Debug;Altcoins-Release</Configurations>
         <Platforms>AnyCPU</Platforms>
     </PropertyGroup>
 

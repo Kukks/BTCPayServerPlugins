@@ -1,13 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
-
-  <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
-    <LangVersion>10</LangVersion>
-    <Configurations>Debug;Release;Altcoins-Debug</Configurations>
-    <Platforms>AnyCPU</Platforms>
-  </PropertyGroup>
-
-  <!-- Plugin specific properties -->
+  <Import Project="../../submodules/btcpayserver/Build/Common.csproj" />
   <PropertyGroup>
     <Product>AOPP</Product>
     <Description>Allows you to support the AOPP protocol in invoices to allow customers to bypass stupid KYC rules.</Description>
