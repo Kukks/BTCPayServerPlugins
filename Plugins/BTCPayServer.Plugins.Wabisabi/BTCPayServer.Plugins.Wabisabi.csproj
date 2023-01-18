@@ -1,6 +1,22 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
 
-    <Import Project="../../submodules/btcpayserver/Build/Common.csproj"/>
+    <PropertyGroup>
+        <TargetFramework>net6.0</TargetFramework>
+        <LangVersion>10</LangVersion>
+        <Configurations>Debug;Release;Altcoins-Release;Altcoins-Debug</Configurations>
+        <Platforms>AnyCPU</Platforms>
+    </PropertyGroup>
+
+    <!-- Default similar to Debug/Release -->
+    <PropertyGroup Condition=" '$(Configuration)' == 'Altcoins-Release' ">
+        <Optimize Condition=" '$(Optimize)' == '' ">true</Optimize>
+        <Altcoins>true</Altcoins>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Configuration)' == 'Altcoins-Debug'">
+        <DefineConstants>$(DefineConstants);DEBUG</DefineConstants>
+        <Altcoins>true</Altcoins>
+    </PropertyGroup>
+    <!-- -->
 
     <!-- Plugin specific properties -->
     <PropertyGroup>
@@ -12,13 +28,9 @@
 
     <!-- Plugin development properties -->
     <PropertyGroup>
-
-        <GenerateRuntimeConfigDevFile>true</GenerateRuntimeConfigDevFile>
         <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
         <PreserveCompilationContext>false</PreserveCompilationContext>
         <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
-        <MvcRazorExcludeRefAssembliesFromPublish>False</MvcRazorExcludeRefAssembliesFromPublish>
-        <MvcRazorCompileOnPublish>false</MvcRazorCompileOnPublish>
     </PropertyGroup>
 
     <!-- This will make sure that referencing BTCPayServer doesn't put any artifact in the published directory -->

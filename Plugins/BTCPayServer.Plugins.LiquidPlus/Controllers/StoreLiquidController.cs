@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,8 +12,10 @@ using BTCPayServer.Client;
 using BTCPayServer.Common;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using NBitcoin;
 using NBXplorer;
+using XX;
 
 namespace BTCPayServer.Plugins.LiquidPlus.Controllers
 {
@@ -259,6 +262,21 @@ public class GenerateLiquidImportScripts
                 Array.Empty<GenerateLiquidImportScriptWalletKeyVm>();
 
             public Dictionary<string, string> Scripts { get; set; } = new Dictionary<string, string>();
+        }
+    }
+}
+namespace XX
+{
+    public static class ModelStateExtensions
+    {
+        public static void AddModelError<TModel, TProperty>(this TModel source,
+            Expression<Func<TModel, TProperty>> ex,
+            string message,
+            ControllerBase controller)
+        {
+            var provider = (ModelExpressionProvider)controller.HttpContext.RequestServices.GetService(typeof(ModelExpressionProvider));
+            var key = provider.GetExpressionText(ex);
+            controller.ModelState.AddModelError(key, message);
         }
     }
 }

@@ -1,7 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
-  <Import Project="../../submodules/btcpayserver/Build/Common.csproj" />
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>10</LangVersion>
+    <Configurations>Debug;Release;Altcoins-Release;Altcoins-Debug</Configurations>
+    <Platforms>AnyCPU</Platforms>
+  </PropertyGroup>
 
+  <!-- Default similar to Debug/Release -->
+  <PropertyGroup Condition=" '$(Configuration)' == 'Altcoins-Release' ">
+    <Optimize Condition=" '$(Optimize)' == '' ">true</Optimize>
+    <Altcoins>true</Altcoins>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Altcoins-Debug'">
+    <DefineConstants>$(DefineConstants);DEBUG</DefineConstants>
+    <Altcoins>true</Altcoins>
+  </PropertyGroup>
+  <!-- -->
   <!-- Plugin specific properties -->
   <PropertyGroup>
     <Product>SideShift</Product>
@@ -9,7 +24,6 @@
     <Authors>Kukks</Authors>
     <Version>1.0.9</Version>
   </PropertyGroup>
-
   <!-- Plugin development properties -->
   <PropertyGroup>
     <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
@@ -26,12 +40,12 @@
     </ProjectReference>
   </ItemDefinitionGroup>
 
+
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
-    <EmbeddedResource Include="Resources\**" />
+    <EmbeddedResource Include="Resources\**"/>
+    <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj"/>
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Views\Shared" />
+    <Folder Include="Resources"/>
   </ItemGroup>
 </Project>

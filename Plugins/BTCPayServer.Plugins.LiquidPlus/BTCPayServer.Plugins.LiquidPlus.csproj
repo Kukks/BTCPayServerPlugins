@@ -1,55 +1,53 @@
-<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <Project Sdk="Microsoft.NET.Sdk.Razor">
 
-  <Import Project="../../submodules/btcpayserver/Build/Common.csproj" />
+    <PropertyGroup>
+      <TargetFramework>net6.0</TargetFramework>
+      <LangVersion>10</LangVersion>
+      <Configurations>Debug;Release;Altcoins-Release;Altcoins-Debug</Configurations>
+      <Platforms>AnyCPU</Platforms>
+    </PropertyGroup>
 
-  <!-- Default similar to Debug/Release -->
-  <PropertyGroup Condition=" '$(Configuration)' == 'Altcoins-Release' ">
-    <Optimize Condition=" '$(Optimize)' == '' ">true</Optimize>
-    <Altcoins>true</Altcoins>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)' == 'Altcoins-Debug'">
-    <DefineConstants>$(DefineConstants);DEBUG</DefineConstants>
-    <Altcoins>true</Altcoins>
-  </PropertyGroup>
-  <!-- -->
+    <!-- Default similar to Debug/Release -->
+    <PropertyGroup Condition=" '$(Configuration)' == 'Altcoins-Release' ">
+      <Optimize Condition=" '$(Optimize)' == '' ">true</Optimize>
+      <Altcoins>true</Altcoins>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Configuration)' == 'Altcoins-Debug'">
+      <DefineConstants>$(DefineConstants);DEBUG</DefineConstants>
+      <Altcoins>true</Altcoins>
+    </PropertyGroup>
 
-  <PropertyGroup Condition="( '$(Configuration)' == 'Debug' Or '$(Configuration)' == 'Altcoins-Debug') And '$(RazorCompileOnBuild)' != 'true' And '$(DotNetWatchBuild)' != 'true' And '$(DesignTimeBuild)' != 'true'">
-    <RazorCompileOnBuild>false</RazorCompileOnBuild>
-  </PropertyGroup>
+    <!-- Plugin specific properties -->
+    <PropertyGroup>
+      <Product>Liquid+</Product>
+      <Description>Enhanced support for the liquid network.</Description>
+      <Authors>Kukks</Authors>
+      <Version>1.0.8</Version>
+    </PropertyGroup>
 
-  <PropertyGroup Condition="'$(Altcoins)' == 'true'">
-    <DefineConstants>$(DefineConstants);ALTCOINS</DefineConstants>
-  </PropertyGroup>
-  <!-- Plugin specific properties -->
-  <PropertyGroup>
-    <Product>Liquid+</Product>
-    <Description>Enhanced support for the liquid network.</Description>
-    <Authors>Kukks</Authors>
-    <Version>1.0.8</Version>
-  </PropertyGroup>
+    <!-- Plugin development properties -->
+    <PropertyGroup>
+      <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+      <PreserveCompilationContext>false</PreserveCompilationContext>
+      <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    </PropertyGroup>
 
-  <!-- Plugin development properties -->
-  <PropertyGroup>
-    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
-    <PreserveCompilationContext>false</PreserveCompilationContext>
-    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
-  </PropertyGroup>
+    <!-- This will make sure that referencing BTCPayServer doesn't put any artifact in the published directory -->
+    <ItemDefinitionGroup>
+      <ProjectReference>
+        <Properties>StaticWebAssetsEnabled=false</Properties>
+        <Private>false</Private>
+        <ExcludeAssets>runtime;native;build;buildTransitive;contentFiles</ExcludeAssets>
+      </ProjectReference>
+    </ItemDefinitionGroup>
 
-  <!-- This will make sure that referencing BTCPayServer doesn't put any artifact in the published directory -->
-  <ItemDefinitionGroup>
-    <ProjectReference>
-      <Properties>StaticWebAssetsEnabled=false</Properties>
-      <Private>false</Private>
-      <ExcludeAssets>runtime;native;build;buildTransitive;contentFiles</ExcludeAssets>
-    </ProjectReference>
-  </ItemDefinitionGroup>
 
-  <ItemGroup>  
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
-    <EmbeddedResource Include="Resources\**" />
-  </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Views\Shared" />
-  </ItemGroup>
-</Project>
+    <ItemGroup>
+      <EmbeddedResource Include="Resources\**"/>
+      <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj"/>
+    </ItemGroup>
+    <ItemGroup>
+      <Folder Include="Resources"/>
+    </ItemGroup>
+  </Project>
+

@@ -1,36 +1,52 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
-  <Import Project="../../submodules/btcpayserver/Build/Common.csproj" />
-  <!-- Plugin specific properties -->
-  <PropertyGroup>
-    <Product>FixedFloat</Product>
-    <Description>Allows you to embed a FixedFloat conversion screen to allow customers to pay with altcoins.</Description>
-    <Authors>Kukks</Authors>
-    <Version>1.0.6</Version>
-  </PropertyGroup>
+    <PropertyGroup>
+        <TargetFramework>net6.0</TargetFramework>
+        <LangVersion>10</LangVersion>
+        <Configurations>Debug;Release;Altcoins-Release;Altcoins-Debug</Configurations>
+        <Platforms>AnyCPU</Platforms>
+    </PropertyGroup>
 
-  <!-- Plugin development properties -->
-  <PropertyGroup>
-    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
-    <PreserveCompilationContext>false</PreserveCompilationContext>
-    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
-  </PropertyGroup>
+    <!-- Default similar to Debug/Release -->
+    <PropertyGroup Condition=" '$(Configuration)' == 'Altcoins-Release' ">
+        <Optimize Condition=" '$(Optimize)' == '' ">true</Optimize>
+        <Altcoins>true</Altcoins>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Configuration)' == 'Altcoins-Debug'">
+        <DefineConstants>$(DefineConstants);DEBUG</DefineConstants>
+        <Altcoins>true</Altcoins>
+    </PropertyGroup>
 
-  <!-- This will make sure that referencing BTCPayServer doesn't put any artifact in the published directory -->
-  <ItemDefinitionGroup>
-    <ProjectReference>
-      <Properties>StaticWebAssetsEnabled=false</Properties>
-      <Private>false</Private>
-      <ExcludeAssets>runtime;native;build;buildTransitive;contentFiles</ExcludeAssets>
-    </ProjectReference>
-  </ItemDefinitionGroup>
-  
-  <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
-    <EmbeddedResource Include="Resources\**" />
-  </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Views\Shared" />
-  </ItemGroup>
+    <!-- Plugin specific properties -->
+    <PropertyGroup>
+        <Product>FixedFloat</Product>
+        <Description>Allows you to embed a FixedFloat conversion screen to allow customers to pay with altcoins.</Description>
+        <Authors>Kukks</Authors>
+        <Version>1.0.6</Version>
+    </PropertyGroup>
+    <!-- Plugin development properties -->
+    <PropertyGroup>
+        <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+        <PreserveCompilationContext>false</PreserveCompilationContext>
+        <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    </PropertyGroup>
+
+    <!-- This will make sure that referencing BTCPayServer doesn't put any artifact in the published directory -->
+    <ItemDefinitionGroup>
+        <ProjectReference>
+            <Properties>StaticWebAssetsEnabled=false</Properties>
+            <Private>false</Private>
+            <ExcludeAssets>runtime;native;build;buildTransitive;contentFiles</ExcludeAssets>
+        </ProjectReference>
+    </ItemDefinitionGroup>
+
+
+    <ItemGroup>
+        <EmbeddedResource Include="Resources\**"/>
+        <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj"/>
+    </ItemGroup>
+    <ItemGroup>
+        <Folder Include="Resources"/>
+    </ItemGroup>
 </Project>
+

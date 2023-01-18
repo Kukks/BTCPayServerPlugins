@@ -12,7 +12,6 @@
     <option name="ADDITIONAL_IIS_EXPRESS_ARGUMENTS" value="" />
     <method v="2">
       <option name="Build Solution" enabled="true" />
-      <option name="RunConfigurationTask" enabled="true" run_configuration_name="wabi publish" run_configuration_type="DotNetFolderPublish" />
     </method>
   </configuration>
 </component>

@@ -17,7 +17,6 @@ public class WabisabiStoreSettings
     public bool ConsolidationMode { get; set; } = false;
     public bool RedCoinIsolation { get; set; } = false;
     public int AnonymitySetTarget { get; set; } = 5;
-    public double MaxFee { get; set; } = 5;
 
     public bool BatchPayments { get; set; } = true;
 
