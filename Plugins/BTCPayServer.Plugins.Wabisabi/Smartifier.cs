@@ -6,6 +6,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client.Models;
+using BTCPayServer.Services;
+using BTCPayServer.Services.Wallets;
 using NBitcoin;
 using NBXplorer;
 using NBXplorer.DerivationStrategy;
@@ -20,16 +22,20 @@ namespace BTCPayServer.Plugins.Wabisabi;
 
 public class Smartifier
 {
+    private readonly WalletRepository _walletRepository;
     private readonly ExplorerClient _explorerClient;
     public DerivationStrategyBase DerivationScheme { get; }
     private readonly IBTCPayServerClientFactory _btcPayServerClientFactory;
     private readonly string _storeId;
     private readonly Action<object, PropertyChangedEventArgs> _coinOnPropertyChanged;
 
-    public Smartifier(ExplorerClient explorerClient, DerivationStrategyBase derivationStrategyBase,
+    public Smartifier(
+        WalletRepository walletRepository,
+        ExplorerClient explorerClient, DerivationStrategyBase derivationStrategyBase,
         IBTCPayServerClientFactory btcPayServerClientFactory, string storeId, 
         Action<object, PropertyChangedEventArgs> coinOnPropertyChanged)
     {
+        _walletRepository = walletRepository;
         _explorerClient = explorerClient;
         DerivationScheme = derivationStrategyBase;
         _btcPayServerClientFactory = btcPayServerClientFactory;
@@ -45,25 +51,26 @@ public class Smartifier
     public readonly  ConcurrentDictionary<OutPoint, Task<SmartCoin>> Coins = new();
     private readonly Task<RootedKeyPath> _accountKeyPath;
 
-    public async Task LoadCoins(List<OnChainWalletUTXOData> coins, int current = 1)
+    public async Task LoadCoins(List<ReceivedCoin> coins, int current ,
+        Dictionary<OutPoint, List<Attachment>> utxoLabels)
     {
         coins = coins.Where(data => data is not null).ToList();
         if (current > 3)
         {
             return;
         }
-        var txs = coins.Select(data => data.Outpoint.Hash).Distinct();
+        var txs = coins.Select(data => data.OutPoint.Hash).Distinct();
         foreach (uint256 tx in txs)
         {
             cached.TryAdd(tx, _explorerClient.GetTransactionAsync(DerivationScheme, tx));
         }
 
-        foreach (OnChainWalletUTXOData coin in coins)
+        foreach (var coin in coins)
         {
             var client = await _btcPayServerClientFactory.Create(null, _storeId);
-            var tx = await Transactions.GetOrAdd(coin.Outpoint.Hash, async uint256 =>
+            var tx = await Transactions.GetOrAdd(coin.OutPoint.Hash, async uint256 =>
             {
-                var unsmartTx = await cached[coin.Outpoint.Hash];
+                var unsmartTx = await cached[coin.OutPoint.Hash];
                 if (unsmartTx is null)
                 {
                     return null;
@@ -71,9 +78,6 @@ public class Smartifier
                 var smartTx = new SmartTransaction(unsmartTx.Transaction,
                     unsmartTx.Height is null ? Height.Mempool : new Height((uint)unsmartTx.Height.Value),
                     unsmartTx.BlockHash, firstSeen: unsmartTx.Timestamp);
-                //var indexesOfOurSpentInputs = unsmartTx.Inputs.Select(output => (uint)output.Inputndex).ToArray();
-                // var ourSpentUtxos = unsmartTx.Transaction.Inputs.AsIndexedInputs()
-                //     .Where(@in => indexesOfOurSpentInputs.Contains(@in.Index)).ToDictionary(@in=> @in.Index,@in => @in);
 
 
                 var ourSpentUtxos = new Dictionary<MatchedOutput, IndexedTxIn>();
@@ -105,43 +109,29 @@ public class Smartifier
                             }
                         }
                     }
-                }      
-                var utxoObjects = await client.GetOnChainWalletObjects(_storeId, "BTC",
-                    new GetWalletObjectsRequest()
-                    {
-                        Ids = ourSpentUtxos.Select(point => point.Value.PrevOut.ToString()).ToArray(),
-                        Type = "utxo",
-                        IncludeNeighbourData = true
-                    });
-                var labelsOfOurSpentUtxos =utxoObjects.ToDictionary(data => data.Id,
-                    data => data.Links.Where(link => link.Type == "label"));
-                
-                
-                await LoadCoins(unsmartTx.Inputs.Select(output =>
+                }
+                var inputsToLoad = unsmartTx.Inputs.Select(output =>
                 {
                     if (!ourSpentUtxos.TryGetValue(output, out var outputtxin))
                     {
                         return null;
                     }
+
                     var outpoint = outputtxin.PrevOut;
-                    var labels = labelsOfOurSpentUtxos
-                        .GetValueOrDefault(outpoint.ToString(),
-                            new List<OnChainWalletObjectData.OnChainWalletObjectLink>())
-                        .ToDictionary(link => link.Id, link => new LabelData());
-                    return new OnChainWalletUTXOData()
+                    return new ReceivedCoin()
                     {
                         Timestamp = DateTimeOffset.Now,
                         Address =
-                            output.Address?.ToString() ?? _explorerClient.Network
-                                .CreateAddress(DerivationScheme, output.KeyPath, output.ScriptPubKey)
-                                .ToString(),
+                            output.Address ?? _explorerClient.Network
+                                .CreateAddress(DerivationScheme, output.KeyPath, output.ScriptPubKey),
                         KeyPath = output.KeyPath,
-                        Amount = ((Money)output.Value).ToDecimal(MoneyUnit.BTC),
-                        Outpoint = outpoint,
-                        Labels = labels,
+                        Value = output.Value,
+                        OutPoint = outpoint,
                         Confirmations = unsmartTx.Confirmations
                     };
-                }).ToList(),current+1);
+                }).ToList();
+                
+                await LoadCoins(inputsToLoad,current+1,  await BTCPayWallet.GetUtxoLabels(_walletRepository, _storeId, inputsToLoad.ToArray()));
                 foreach (MatchedOutput input in unsmartTx.Inputs)
                 {
                     if (!ourSpentUtxos.TryGetValue(input, out var outputtxin))
@@ -159,19 +149,18 @@ public class Smartifier
                 return smartTx;
             });
 
-            var smartCoin = await Coins.GetOrAdd(coin.Outpoint, async point =>
+            var smartCoin = await Coins.GetOrAdd(coin.OutPoint, async point =>
             {
-
-                var unsmartTx = await cached[coin.Outpoint.Hash];
+                utxoLabels.TryGetValue(coin.OutPoint, out var labels);
+                var unsmartTx = await cached[coin.OutPoint.Hash];
                 var pubKey = DerivationScheme.GetChild(coin.KeyPath).GetExtPubKeys().First().PubKey;
                 var kp = (await _accountKeyPath).Derive(coin.KeyPath).KeyPath;
-                var hdPubKey = new HdPubKey(pubKey, kp, new SmartLabel(coin.Labels.Keys.ToList()),
+                var hdPubKey = new HdPubKey(pubKey, kp, new SmartLabel(labels?.Select(attachment => attachment.Id).ToArray()?? Array.Empty<string>()),
                     current == 1 ? KeyState.Clean : KeyState.Used);
-                var anonsetLabel = coin.Labels.Keys.FirstOrDefault(s => s.StartsWith("anonset-"))
-                    ?.Split("-", StringSplitOptions.RemoveEmptyEntries)?.ElementAtOrDefault(1) ?? "1";
+                var anonsetLabel = labels?.FirstOrDefault(s => s.Id.StartsWith("anonset-"))?.Id.Split("-", StringSplitOptions.RemoveEmptyEntries)?.ElementAtOrDefault(1) ?? "1";
                 hdPubKey.SetAnonymitySet(double.Parse(anonsetLabel));
 
-                var c =  new SmartCoin(tx, coin.Outpoint.N, hdPubKey);
+                var c =  new SmartCoin(tx, coin.OutPoint.N, hdPubKey);
                 c.PropertyChanged += CoinPropertyChanged;
                 return c;
             });

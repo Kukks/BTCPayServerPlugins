@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading;
@@ -9,27 +8,40 @@ using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
+using BTCPayServer.Data;
+using BTCPayServer.HostedServices;
+using BTCPayServer.Payments;
 using BTCPayServer.Payments.PayJoin;
+using BTCPayServer.Services;
+using BTCPayServer.Services.Wallets;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
 using NBXplorer;
 using NBXplorer.DerivationStrategy;
 using NBXplorer.Models;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using WalletWasabi.Blockchain.Analysis;
 using WalletWasabi.Blockchain.Analysis.Clustering;
 using WalletWasabi.Blockchain.Keys;
 using WalletWasabi.Blockchain.TransactionOutputs;
 using WalletWasabi.Blockchain.Transactions;
+using WalletWasabi.Extensions;
 using WalletWasabi.Models;
+using WalletWasabi.WabiSabi.Backend.Rounds;
 using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.Wallets;
 
 namespace BTCPayServer.Plugins.Wabisabi;
 
 
-public class BTCPayWallet : IWallet
+public class BTCPayWallet : IWallet, IDestinationProvider
 {
+    private readonly WalletRepository _walletRepository;
+    private readonly BitcoinLikePayoutHandler _bitcoinLikePayoutHandler;
+    private readonly BTCPayNetworkJsonSerializerSettings _btcPayNetworkJsonSerializerSettings;
+    private readonly Services.Wallets.BTCPayWallet _btcPayWallet;
+    private readonly PullPaymentHostedService _pullPaymentHostedService;
     public OnChainPaymentMethodData OnChainPaymentMethodData;
     public readonly DerivationStrategyBase DerivationScheme;
     public readonly ExplorerClient ExplorerClient;
@@ -39,15 +51,30 @@ public class BTCPayWallet : IWallet
     public readonly ILogger Logger;
     private static readonly BlockchainAnalyzer BlockchainAnalyzer = new();
 
-    public BTCPayWallet(OnChainPaymentMethodData onChainPaymentMethodData, DerivationStrategyBase derivationScheme,
-        ExplorerClient explorerClient, BTCPayKeyChain keyChain,
-        IDestinationProvider destinationProvider, IBTCPayServerClientFactory btcPayServerClientFactory, string storeId,
-        WabisabiStoreSettings wabisabiStoreSettings, IUTXOLocker utxoLocker,
-        ILoggerFactory loggerFactory, Smartifier smartifier,
+    public BTCPayWallet(
+        WalletRepository walletRepository,
+        BitcoinLikePayoutHandler bitcoinLikePayoutHandler,
+        BTCPayNetworkJsonSerializerSettings btcPayNetworkJsonSerializerSettings,
+        Services.Wallets.BTCPayWallet btcPayWallet,
+        PullPaymentHostedService pullPaymentHostedService,
+        OnChainPaymentMethodData onChainPaymentMethodData, 
+        DerivationStrategyBase derivationScheme,
+        ExplorerClient explorerClient, 
+        BTCPayKeyChain keyChain,
+        IBTCPayServerClientFactory btcPayServerClientFactory, 
+        string storeId,
+        WabisabiStoreSettings wabisabiStoreSettings, 
+        IUTXOLocker utxoLocker,
+        ILoggerFactory loggerFactory, 
+        Smartifier smartifier,
         ConcurrentDictionary<string, Dictionary<OutPoint, DateTimeOffset>> bannedCoins)
     {
         KeyChain = keyChain;
-        DestinationProvider = destinationProvider;
+        _walletRepository = walletRepository;
+        _bitcoinLikePayoutHandler = bitcoinLikePayoutHandler;
+        _btcPayNetworkJsonSerializerSettings = btcPayNetworkJsonSerializerSettings;
+        _btcPayWallet = btcPayWallet;
+        _pullPaymentHostedService = pullPaymentHostedService;
         OnChainPaymentMethodData = onChainPaymentMethodData;
         DerivationScheme = derivationScheme;
         ExplorerClient = explorerClient;
@@ -72,7 +99,7 @@ public class BTCPayWallet : IWallet
     }
 
     public IKeyChain KeyChain { get; }
-    public IDestinationProvider DestinationProvider { get; }
+    public IDestinationProvider DestinationProvider => this;
 
     public int AnonymitySetTarget => WabisabiStoreSettings.PlebMode? 2:  WabisabiStoreSettings.AnonymitySetTarget;
     public bool ConsolidationMode => !WabisabiStoreSettings.PlebMode && WabisabiStoreSettings.ConsolidationMode;
@@ -93,10 +120,11 @@ public class BTCPayWallet : IWallet
     public async Task<CoinsView> GetAllCoins()
     {
         await _savingProgress;
-        var client = await BtcPayServerClientFactory.Create(null, StoreId);
-        var utxos = await client.GetOnChainWalletUTXOs(StoreId, "BTC");
-        await _smartifier.LoadCoins(utxos.ToList());
-        var coins = await Task.WhenAll(_smartifier.Coins.Where(pair => utxos.Any(data => data.Outpoint == pair.Key))
+        
+        var utxos = await _btcPayWallet.GetUnspentCoins(DerivationScheme);
+        var utxoLabels = await GetUtxoLabels(_walletRepository, StoreId,utxos);
+        await _smartifier.LoadCoins(utxos.ToList(), 1, utxoLabels);
+        var coins = await Task.WhenAll(_smartifier.Coins.Where(pair => utxos.Any(data => data.OutPoint == pair.Key))
             .Select(pair => pair.Value));
 
         return new CoinsView(coins);
@@ -140,31 +168,40 @@ public class BTCPayWallet : IWallet
             {
                 return Array.Empty<SmartCoin>();
             }
-
-            var client = await BtcPayServerClientFactory.Create(null, StoreId);
-            var utxos = await client.GetOnChainWalletUTXOs(StoreId, "BTC");
-            var objs = client.GetOnChainWalletObjects(StoreId, "BTC",
-                new GetWalletObjectsRequest()
-                {
-                    Type = "utxo", Ids = utxos.Select(data => data.Outpoint.ToString()).ToArray()
-                });
+            
+            var utxos = await   _btcPayWallet.GetUnspentCoins(DerivationScheme, true, CancellationToken.None);
+            var utxoLabels = await GetUtxoLabels(_walletRepository, StoreId,utxos);
             if (!WabisabiStoreSettings.PlebMode)
             {
                 if (WabisabiStoreSettings.InputLabelsAllowed?.Any() is true)
                 {
+
                     utxos = utxos.Where(data =>
-                        !WabisabiStoreSettings.InputLabelsAllowed.Any(s => data.Labels.ContainsKey(s)));
+                        utxoLabels.TryGetValue(data.OutPoint, out var opLabels) &&
+                        opLabels.Any(
+                            attachment => WabisabiStoreSettings.InputLabelsAllowed.Any(s => attachment.Id == s))).ToArray();
                 }
 
                 if (WabisabiStoreSettings.InputLabelsExcluded?.Any() is true)
                 {
+                    
                     utxos = utxos.Where(data =>
-                        WabisabiStoreSettings.InputLabelsExcluded.All(s => !data.Labels.ContainsKey(s)));
+                        !utxoLabels.TryGetValue(data.OutPoint, out var opLabels) ||
+                        opLabels.All(
+                            attachment => WabisabiStoreSettings.InputLabelsExcluded.All(s => attachment.Id != s))).ToArray();
                 }
             }
 
-            var locks = await UtxoLocker.FindLocks(utxos.Select(data => data.Outpoint).ToArray());
-            utxos = utxos.Where(data => !locks.Contains(data.Outpoint)).Where(data => data.Confirmations > 0);
+            if (WabisabiStoreSettings.PlebMode || !WabisabiStoreSettings.CrossMixBetweenCoordinators)
+            {
+                utxos = utxos.Where(data =>
+                        !utxoLabels.TryGetValue(data.OutPoint, out var opLabels) ||
+                        !opLabels.Any(attachment => attachment.Type == "coinjoin" && attachment.Data?.Value<string>("CoordinatorName")  == coordinatorName))
+                    .ToArray();
+            }
+
+            var locks = await UtxoLocker.FindLocks(utxos.Select(data => data.OutPoint).ToArray());
+            utxos = utxos.Where(data => !locks.Contains(data.OutPoint)).Where(data => data.Confirmations > 0).ToArray();
             if (_bannedCoins.TryGetValue(coordinatorName, out var bannedCoins))
             {
                 var expired = bannedCoins.Where(pair => pair.Value < DateTimeOffset.Now).ToArray();
@@ -174,16 +211,16 @@ public class BTCPayWallet : IWallet
 
                 }
 
-                utxos = utxos.Where(data => !bannedCoins.ContainsKey(data.Outpoint));
+                utxos = utxos.Where(data => !bannedCoins.ContainsKey(data.OutPoint)).ToArray();
             }
-            await _smartifier.LoadCoins(utxos.Where(data => data.Confirmations>0).ToList());
+            await _smartifier.LoadCoins(utxos.Where(data => data.Confirmations>0).ToList(), 1, utxoLabels);
             
-            var resultX =  await Task.WhenAll(_smartifier.Coins.Where(pair =>  utxos.Any(data => data.Outpoint == pair.Key))
+            var resultX =  await Task.WhenAll(_smartifier.Coins.Where(pair =>  utxos.Any(data => data.OutPoint == pair.Key))
                 .Select(pair => pair.Value));
 
             foreach (SmartCoin c in resultX)
             {
-                var utxo = utxos.Single(coin => coin.Outpoint == c.Outpoint);
+                var utxo = utxos.Single(coin => coin.OutPoint == c.Outpoint);
                 c.Height = new Height((uint) utxo.Confirmations);
             }
             
@@ -194,6 +231,28 @@ public class BTCPayWallet : IWallet
             Logger.LogError(e, "Could not compute coin candidate");
             return Array.Empty<SmartCoin>();
         }
+    }
+
+    public static async Task<Dictionary<OutPoint, List<Attachment>>> GetUtxoLabels(WalletRepository walletRepository, string storeId ,ReceivedCoin[] utxos)
+    {
+        var walletTransactionsInfoAsync = await walletRepository.GetWalletTransactionsInfo(new WalletId(storeId, "BTC"),
+            utxos.SelectMany(GetWalletObjectsQuery.Get).Distinct().ToArray());
+
+        var utxoLabels = utxos.Select(coin =>
+            {
+                walletTransactionsInfoAsync.TryGetValue(coin.OutPoint.Hash.ToString(), out var info1);
+                walletTransactionsInfoAsync.TryGetValue(coin.Address.ToString(), out var info2);
+                walletTransactionsInfoAsync.TryGetValue(coin.OutPoint.ToString(), out var info3);
+                var info = walletRepository.Merge(info1, info2, info3);
+                if (info is null)
+                {
+                    return (coin.OutPoint, null);
+                }
+
+                return (coin.OutPoint, info.Attachments);
+            }).Where(tuple => tuple.Attachments is not null)
+            .ToDictionary(tuple => tuple.OutPoint, tuple => tuple.Attachments);
+        return utxoLabels;
     }
 
 
@@ -471,4 +530,141 @@ public class BTCPayWallet : IWallet
         Logger.LogInformation($"unlocked utxos: {string.Join(',', unlocked)}");
     }
 
+public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count, bool preferTaproot, bool mixedOutputs)
+    {
+        if (!WabisabiStoreSettings.PlebMode && !string.IsNullOrEmpty(WabisabiStoreSettings.MixToOtherWallet) && mixedOutputs)
+        {
+            try
+            {
+                var mixClient = await BtcPayServerClientFactory.Create(null, WabisabiStoreSettings.MixToOtherWallet);
+                var pm = await mixClient.GetStoreOnChainPaymentMethod(WabisabiStoreSettings.MixToOtherWallet,
+                    "BTC");
+                
+               var deriv =   ExplorerClient.Network.DerivationStrategyFactory.Parse(pm.DerivationScheme);
+               if (deriv.ScriptPubKeyType() == DerivationScheme.ScriptPubKeyType())
+               {
+                   return  await  Task.WhenAll(Enumerable.Repeat(0, count).Select(_ =>
+                       _btcPayWallet.ReserveAddressAsync(WabisabiStoreSettings.MixToOtherWallet, deriv, "coinjoin"))).ContinueWith(task => task.Result.Select(information => information.Address));
+               }
+            }
+            
+            catch (Exception e)
+            {
+                WabisabiStoreSettings.MixToOtherWallet = null;
+            }
+        }
+        return  await  Task.WhenAll(Enumerable.Repeat(0, count).Select(_ =>
+            _btcPayWallet.ReserveAddressAsync(StoreId ,DerivationScheme, "coinjoin"))).ContinueWith(task => task.Result.Select(information => information.Address));
+    }
+
+    public async Task<IEnumerable<PendingPayment>> GetPendingPaymentsAsync( UtxoSelectionParameters roundParameters)
+    {
+        
+        
+        try
+        {
+           var payouts = (await _pullPaymentHostedService.GetPayouts(new PullPaymentHostedService.PayoutQuery()
+           {
+               States = new [] {PayoutState.AwaitingPayment},
+               Stores = new []{StoreId},
+               PaymentMethods = new []{"BTC"}
+           })).Select(async data =>
+           {
+               
+               var  claim = await _bitcoinLikePayoutHandler.ParseClaimDestination(new PaymentMethodId("BTC", PaymentTypes.BTCLike),
+                   data.Destination, CancellationToken.None);
+
+               if (!string.IsNullOrEmpty(claim.error) || claim.destination is not IBitcoinLikeClaimDestination bitcoinLikeClaimDestination )
+               {
+                   return null;
+               }
+
+               var payoutBlob = data.GetBlob(_btcPayNetworkJsonSerializerSettings);
+               var value = new Money(payoutBlob.CryptoAmount.Value, MoneyUnit.BTC);
+               if (!roundParameters.AllowedOutputAmounts.Contains(value) ||
+                   !roundParameters.AllowedOutputScriptTypes.Contains(bitcoinLikeClaimDestination.Address.ScriptPubKey.GetScriptType()))
+               {
+                   return null;
+               }
+               return new PendingPayment()
+               {
+                   Identifier = data.Id,
+                   Destination = bitcoinLikeClaimDestination.Address,
+                   Value =value,
+                   PaymentStarted = PaymentStarted(data.Id),
+                   PaymentFailed = PaymentFailed(data.Id),
+                   PaymentSucceeded = PaymentSucceeded(data.Id),
+               };
+           }).Where(payment => payment is not null).ToArray();
+           return await Task.WhenAll(payouts);
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            return Array.Empty<PendingPayment>();
+        }
+    }
+
+    private Action<(uint256 roundId, uint256 transactionId, int outputIndex)> PaymentSucceeded(string payoutId)
+    {
+        
+        return tuple =>
+            _pullPaymentHostedService.MarkPaid( new HostedServices.MarkPayoutRequest()
+            {
+                PayoutId = payoutId,
+                State = PayoutState.InProgress,
+                Proof = JObject.FromObject(new PayoutTransactionOnChainBlob()
+                {
+                    Candidates = new HashSet<uint256>()
+                    {
+                        tuple.transactionId
+                    },
+                    TransactionId = tuple.transactionId
+                })
+            });
+    }
+
+    private Action PaymentFailed(string payoutId)
+    {
+        return () =>
+        {
+            _pullPaymentHostedService.MarkPaid(new HostedServices.MarkPayoutRequest()
+            {
+                PayoutId = payoutId,
+                State = PayoutState.AwaitingPayment
+            });
+        };
+    }
+
+    private Func<Task<bool>> PaymentStarted(string payoutId)
+    {
+        return async () =>
+        {
+            try
+            {
+                await _pullPaymentHostedService.MarkPaid( new HostedServices.MarkPayoutRequest()
+                {
+                    PayoutId = payoutId,
+                    State = PayoutState.InProgress,
+                    Proof = JObject.FromObject(new WabisabiPaymentProof())
+                });
+                return true;
+            }
+            catch (Exception e)
+            {
+                return false;
+            }
+        };
+    }
+
+    public class WabisabiPaymentProof
+    {
+        [JsonProperty("proofType")]
+        public string ProofType { get; set; } = "Wabisabi";
+        [JsonConverter(typeof(NBitcoin.JsonConverters.UInt256JsonConverter))]
+        public uint256 TransactionId { get; set; }
+        [JsonProperty(ItemConverterType = typeof(NBitcoin.JsonConverters.UInt256JsonConverter), NullValueHandling = NullValueHandling.Ignore)]
+        public HashSet<uint256> Candidates { get; set; } = new HashSet<uint256>();
+        public string Link { get; set; }
+    }
 }

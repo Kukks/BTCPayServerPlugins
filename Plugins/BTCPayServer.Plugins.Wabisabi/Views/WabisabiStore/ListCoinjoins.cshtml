@@ -1,0 +1,11 @@
+﻿
+@using BTCPayServer.Components
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Views.Stores
+@model BTCPayServer.Plugins.Wabisabi.CoinjoinsViewModel
+@{
+    ViewData.SetActivePage(StoreNavPages.Plugins);
+}
+
+<partial name="Wabisabi/CoinjoinHistoryTable" model="Model.Coinjoins" />
+<vc:pager view-model="Model"></vc:pager>

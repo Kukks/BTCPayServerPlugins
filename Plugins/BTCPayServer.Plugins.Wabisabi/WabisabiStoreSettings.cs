@@ -19,7 +19,8 @@ public class WabisabiStoreSettings
     public int AnonymitySetTarget { get; set; } = 5;
 
     public bool BatchPayments { get; set; } = true;
-
+    public int ExtraJoinProbability { get; set; } = 0;
+    public bool CrossMixBetweenCoordinators { get; set; } = false;
 
 }
 

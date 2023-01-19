@@ -8,7 +8,12 @@ using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Common;
+using BTCPayServer.Data;
+using BTCPayServer.Events;
+using BTCPayServer.HostedServices;
 using BTCPayServer.Payments.PayJoin;
+using BTCPayServer.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
 using NBXplorer;
@@ -16,29 +21,39 @@ using WalletWasabi.Bases;
 using WalletWasabi.Blockchain.TransactionOutputs;
 using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.Wallets;
+using MarkPayoutRequest = BTCPayServer.Client.Models.MarkPayoutRequest;
+using PayoutData = BTCPayServer.Data.PayoutData;
 
 namespace BTCPayServer.Plugins.Wabisabi;
 
 public class WalletProvider : PeriodicRunner,IWalletProvider
 {
     private Dictionary<string, WabisabiStoreSettings>? _cachedSettings;
+    private readonly IServiceProvider _serviceProvider;
+    private readonly IStoreRepository _storeRepository;
     private readonly IBTCPayServerClientFactory _btcPayServerClientFactory;
     private readonly IExplorerClientProvider _explorerClientProvider;
     public IUTXOLocker UtxoLocker { get; set; }
     private readonly ILoggerFactory _loggerFactory;
+    private readonly EventAggregator _eventAggregator;
 
-    public WalletProvider(IStoreRepository storeRepository, IBTCPayServerClientFactory btcPayServerClientFactory,
-        IExplorerClientProvider explorerClientProvider, ILoggerFactory loggerFactory, IUTXOLocker utxoLocker ) : base(TimeSpan.FromMinutes(5))
+    public WalletProvider(
+        IServiceProvider serviceProvider,
+        IStoreRepository storeRepository, 
+        IBTCPayServerClientFactory btcPayServerClientFactory,
+        IExplorerClientProvider explorerClientProvider, 
+        ILoggerFactory loggerFactory, 
+        IUTXOLocker utxoLocker, 
+        EventAggregator eventAggregator ) : base(TimeSpan.FromMinutes(5))
     {
         UtxoLocker = utxoLocker;
+        _serviceProvider = serviceProvider;
+        _storeRepository = storeRepository;
         _btcPayServerClientFactory = btcPayServerClientFactory;
         _explorerClientProvider = explorerClientProvider;
         _loggerFactory = loggerFactory;
-        initialLoad = Task.Run(async () =>
-        {
-            _cachedSettings =
-                await storeRepository.GetSettingsAsync<WabisabiStoreSettings>(nameof(WabisabiStoreSettings));
-        });
+        _eventAggregator = eventAggregator;
+        
     }
 
     public readonly  ConcurrentDictionary<string, Task<IWallet?>> LoadedWallets = new();
@@ -80,14 +95,17 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
 
             var keychain = new BTCPayKeyChain(explorerClient, derivationStrategy, masterKey, accountKey);
 
-            var destinationProvider =
-                new NBXInternalDestinationProvider(explorerClient, _btcPayServerClientFactory, derivationStrategy, client, name,
-                    wabisabiStoreSettings);
 
-            var smartifier = new Smartifier(explorerClient, derivationStrategy, _btcPayServerClientFactory, name,
+            var smartifier = new Smartifier(_serviceProvider.GetRequiredService<WalletRepository>(),explorerClient, derivationStrategy, _btcPayServerClientFactory, name,
                 CoinOnPropertyChanged);
 
-            return (IWallet)new BTCPayWallet(pm, derivationStrategy, explorerClient, keychain, destinationProvider,
+            return (IWallet)new BTCPayWallet(
+                _serviceProvider.GetRequiredService<WalletRepository>(),
+                _serviceProvider.GetRequiredService<BitcoinLikePayoutHandler>(),
+                _serviceProvider.GetRequiredService<BTCPayNetworkJsonSerializerSettings>(),
+                _serviceProvider.GetRequiredService<Services.Wallets.BTCPayWalletProvider>().GetWallet("BTC"),
+                _serviceProvider.GetRequiredService<PullPaymentHostedService>(),
+                pm, derivationStrategy, explorerClient, keychain,
                 _btcPayServerClientFactory, name, wabisabiStoreSettings, UtxoLocker,
                 _loggerFactory, smartifier, BannedCoins);
             
@@ -96,6 +114,8 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     }
 
     private Task initialLoad = null;
+    private IEventAggregatorSubscription _subscription;
+
     public async Task<IEnumerable<IWallet>> GetWalletsAsync()
     {
         var explorerClient = _explorerClientProvider.GetExplorerClient("BTC");
@@ -135,26 +155,31 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     public async Task ResetWabisabiStuckPayouts()
     {
         var wallets = await GetWalletsAsync();
-        foreach (BTCPayWallet wallet in wallets)
+        
+        var pullPaymentHostedService =  _serviceProvider.GetRequiredService<PullPaymentHostedService>();
+        var payouts = await pullPaymentHostedService.GetPayouts(new PullPaymentHostedService.PayoutQuery()
         {
-            var client = await _btcPayServerClientFactory.Create(null, wallet.StoreId);
-            var payouts = await client.GetStorePayouts(wallet.StoreId);
-            var inProgressPayouts = payouts.Where(data =>
-                data.State == PayoutState.InProgress && data.PaymentMethod == "BTC" &&
-                data.PaymentProof?.Value<string>("proofType") == "Wabisabi");
-            foreach (PayoutData payout in inProgressPayouts)
+            States = new PayoutState[]
             {
-                try
+                PayoutState.InProgress
+            },
+            PaymentMethods = new[] {"BTC"},
+            Stores = wallets.Select(wallet => ((BTCPayWallet) wallet).StoreId).ToArray()
+        });
+        var inProgressPayouts = payouts
+            .Where(data => data.GetProofBlobJson()?.Value<string>("proofType") == "Wabisabi").ToArray();
+        foreach (PayoutData payout in inProgressPayouts)
+        {
+            try
+            {
+                await pullPaymentHostedService.MarkPaid(new HostedServices.MarkPayoutRequest()
                 {
-                    var paymentproof =
-                        payout.PaymentProof.ToObject<NBXInternalDestinationProvider.WabisabiPaymentProof>();
-                    if (paymentproof.Candidates?.Any() is not true)
-                        await client.MarkPayout(wallet.StoreId, payout.Id,
-                            new MarkPayoutRequest() {State = PayoutState.AwaitingPayment});
-                }
-                catch (Exception e)
-                {
-                }
+                    State = PayoutState.AwaitingPayment,
+                    PayoutId = payout.Id
+                });
+            }
+            catch (Exception e)
+            {
             }
         }
     }
@@ -253,5 +278,23 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
                 offsets.TryAdd(args.Utxo, args.BannedTime);
                 return offsets;
             });
+    }
+    
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        initialLoad = Task.Run(async () =>
+        {
+            _cachedSettings =
+                await _storeRepository.GetSettingsAsync<WabisabiStoreSettings>(nameof(WabisabiStoreSettings));
+        }, cancellationToken);
+        _subscription = _eventAggregator.SubscribeAsync<WalletChangedEvent>(@event =>
+            Check(@event.WalletId.StoreId, cancellationToken));
+        return base.StartAsync(cancellationToken);
+    }
+
+    public override Task StopAsync(CancellationToken cancellationToken)
+    {
+        _subscription?.Dispose();
+        return base.StopAsync(cancellationToken);
     }
 }

@@ -11,6 +11,7 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Common;
+using BTCPayServer.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
@@ -176,7 +177,19 @@ namespace BTCPayServer.Plugins.Wabisabi
                     return View(vm);
             }
         }
+        [Route("coinjoins")]
+        public async Task<IActionResult> ListCoinjoins(string storeId, CoinjoinsViewModel viewModel, [FromServices] WalletRepository walletRepository)
+        {
+            var objects =await  _WabisabiService.GetCoinjoinHistory(storeId);
 
+            viewModel ??= new CoinjoinsViewModel();
+            viewModel.Coinjoins = objects
+                .Skip(viewModel.Skip)
+                .Take(viewModel.Count).ToList();
+            viewModel.Total = objects.Count();
+            return View(viewModel);
+        }
+        
         [HttpGet("spend")]
         public async Task<IActionResult> Spend(string storeId)
         {

@@ -118,7 +118,7 @@
     <div id="advanced" class="@(Model.PlebMode ? "d-none" : "")">
         <div class="form-group">
 
-            <label asp-for="AnonymitySetTarget" class="form-check-label">Use Anon score model</label>
+            <label asp-for="AnonymitySetTarget" class="form-label">Use Anon score model</label>
             <input type="number" class="form-control" asp-for="AnonymitySetTarget" placeholder="target anon score">
 
             <p class="text-muted">Scores your coinjoined utxos based on how many other utxos in the coinjoin (and other previous coinjoin rounds) had the same value.<br /> Anonset score computation is not an exact science, and when using coordinators with massive liquidity, is not that important as all rounds (past, present, future) contribute to your privacy.</p>
@@ -137,6 +137,16 @@
             <label asp-for="BatchPayments" class="form-check-label">Batch payments</label>
             <input asp-for="BatchPayments" type="checkbox" class="form-check-input" />
             <p class="text-muted">Batch your pending payments (on-chain payouts awaiting payment) inside coinjoins.</p>
+        </div>
+        <div class="form-group form-check">
+            <label asp-for="CrossMixBetweenCoordinators" class="form-check-label">Mix funds between different coordinators</label>
+            <input asp-for="CrossMixBetweenCoordinators" type="checkbox" class="form-check-input" />
+            <p class="text-muted">Whether to allow mixed coins to be mixed within different coordinators for greater privacy (Warning: This will make your coins to lose the free remix within the same coordinator)</p>
+        </div>
+        <div class="form-group form-check">
+            <label asp-for="ExtraJoinProbability" class="form-label">ExtraJoin Probability</label>
+            <input asp-for="ExtraJoinProbability" type="number" min="0" max="100" class="form-control" />
+            <p class="text-muted">Percentage probability of joining a round even if you have no payments to batch and all coins are private (Warning: a high probability will quickly eat up your balance in mining fees) </p>
         </div>
         <div class="form-group ">
             <label asp-for="MixToOtherWallet" class="form-check-label">Send to other wallet</label>

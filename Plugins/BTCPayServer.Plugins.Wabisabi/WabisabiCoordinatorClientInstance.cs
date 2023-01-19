@@ -158,8 +158,7 @@ public class WabisabiCoordinatorClientInstance
             var roundStateUpdaterHttpClient =
                 WasabiHttpClientFactory.NewHttpClient(Mode.SingleCircuitPerLifetime, roundStateUpdaterCircuit);
             sharedWabisabiClient = new WabiSabiHttpApiClient(roundStateUpdaterHttpClient);
-            CoinJoinManager = new CoinJoinManager(coordinatorName,WalletProvider, RoundStateUpdater, WasabiHttpClientFactory,
-                WasabiCoordinatorStatusFetcher, coordinatorIdentifier);
+           
         }
         
         WasabiCoordinatorStatusFetcher = new WasabiCoordinatorStatusFetcher(sharedWabisabiClient, _logger);
@@ -168,14 +167,12 @@ public class WabisabiCoordinatorClientInstance
         if (coordinatorName == "local")
         {
             CoinJoinManager = new CoinJoinManager(coordinatorName, WalletProvider, RoundStateUpdater,
-                sharedWabisabiClient,
+                sharedWabisabiClient, null,
                 WasabiCoordinatorStatusFetcher, coordinatorIdentifier);
         }
         else
         {
-            
-            CoinJoinManager = new CoinJoinManager(coordinatorName, WalletProvider, RoundStateUpdater,
-                WasabiHttpClientFactory,
+            CoinJoinManager = new CoinJoinManager(coordinatorName,WalletProvider, RoundStateUpdater,null,  WasabiHttpClientFactory,
                 WasabiCoordinatorStatusFetcher, coordinatorIdentifier);
         }
 

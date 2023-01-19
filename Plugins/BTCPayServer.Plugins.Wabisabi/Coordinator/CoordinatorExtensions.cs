@@ -1,8 +1,7 @@
-﻿using System;
-using System.Net.Http;
-using System.Reflection;
-using BTCPayServer.Abstractions.Contracts;
+﻿using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Services;
+using BTCPayServer.Configuration;
+using BTCPayServer.Services;
 using Microsoft.Extensions.DependencyInjection;
 using WalletWasabi.WabiSabi.Models.Serialization;
 
@@ -24,20 +23,19 @@ public static class CoordinatorExtensions
 
         services.AddSingleton<IUIExtension>(new UIExtension("Wabisabi/WabisabiServerNavvExtension", "server-nav"));
 
-        Type t = Assembly.GetEntryAssembly().GetType("BTCPayServer.Services.Socks5HttpClientHandler");
 
         services.AddHttpClient("wabisabi-coordinator-scripts-no-redirect.onion")
             .ConfigurePrimaryHttpMessageHandler(provider =>
             {
-                var handler = (HttpClientHandler)ActivatorUtilities.CreateInstance(provider, t);
+
+                var handler = new Socks5HttpClientHandler(provider.GetRequiredService<BTCPayServerOptions>());
                 handler.AllowAutoRedirect = false;
                 return handler;
             });
-        
          services.AddHttpClient("wabisabi-coordinator-scripts.onion")
             .ConfigurePrimaryHttpMessageHandler(provider =>
             {
-                var handler = (HttpClientHandler)ActivatorUtilities.CreateInstance(provider, t);
+                var handler = new Socks5HttpClientHandler(provider.GetRequiredService<BTCPayServerOptions>());
                 handler.AllowAutoRedirect = false;
                 return handler;
             });
