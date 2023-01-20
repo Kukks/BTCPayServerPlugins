@@ -6,18 +6,6 @@
 <PropertyGroup>
   <TargetFramework>net6.0</TargetFramework>
   <LangVersion>10</LangVersion>
-  <Configurations>Debug;Release;Altcoins-Release;Altcoins-Debug</Configurations>
-  <Platforms>AnyCPU</Platforms>
-</PropertyGroup>
-
-<!-- Default similar to Debug/Release -->
-<PropertyGroup Condition=" '$(Configuration)' == 'Altcoins-Release' ">
-  <Optimize Condition=" '$(Optimize)' == '' ">true</Optimize>
-  <Altcoins>true</Altcoins>
-</PropertyGroup>
-<PropertyGroup Condition="'$(Configuration)' == 'Altcoins-Debug'">
-  <DefineConstants>$(DefineConstants);DEBUG</DefineConstants>
-  <Altcoins>true</Altcoins>
 </PropertyGroup>
 
   <!-- Plugin specific properties -->
