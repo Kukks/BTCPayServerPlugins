@@ -3,6 +3,8 @@
     <PropertyGroup>
       <TargetFramework>net6.0</TargetFramework>
       <LangVersion>10</LangVersion>
+      <Configurations>Debug;Release;Altcoins-Debug;Altcoins-Release</Configurations>
+      <Platforms>AnyCPU</Platforms>
     </PropertyGroup>
 
     <!-- Plugin specific properties -->
@@ -30,14 +32,26 @@
     </ItemDefinitionGroup>
 
 
+      <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+          <Altcoins>true</Altcoins>
+      </PropertyGroup>
+
+      <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+          <Altcoins>true</Altcoins>
+      </PropertyGroup>
+
+      <PropertyGroup Condition="'$(Altcoins)' == 'true'">
+          <DefineConstants>$(DefineConstants);ALTCOINS</DefineConstants>
+      </PropertyGroup>
     <ItemGroup>
-      <EmbeddedResource Include="Resources\**"/>
+      <EmbeddedResource Include="Resources\**" />
       <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj">
         <Properties>Altcoins=true</Properties>
+          <Altcoins>true</Altcoins>
       </ProjectReference>
     </ItemGroup>
     <ItemGroup>
-      <Folder Include="Resources"/>
+      <Folder Include="Resources" />
     </ItemGroup>
   </Project>
 
