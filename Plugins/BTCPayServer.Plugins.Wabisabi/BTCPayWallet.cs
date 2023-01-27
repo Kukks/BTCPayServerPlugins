@@ -292,6 +292,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
                 }
             }
 
+            anonset = anonset < 1 ? 1 : anonset;
             return (labels, anonset, cjData);
 
         });
@@ -324,12 +325,12 @@ public class BTCPayWallet : IWallet, IDestinationProvider
 
     private Task _savingProgress = Task.CompletedTask;
 
-    public async Task RegisterCoinjoinTransaction(CoinJoinResult result, string coordinatorName)
+    public async Task RegisterCoinjoinTransaction(SuccessfulCoinJoinResult result, string coordinatorName)
     {
         _savingProgress = RegisterCoinjoinTransactionInternal(result, coordinatorName);
         await _savingProgress;
     }
-    private async Task RegisterCoinjoinTransactionInternal(CoinJoinResult result, string coordinatorName)
+    private async Task RegisterCoinjoinTransactionInternal(SuccessfulCoinJoinResult result, string coordinatorName)
     {
         try
         {
@@ -351,7 +352,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
             
 
             Dictionary<IndexedTxOut, PendingPayment> indexToPayment = new();
-            foreach (var script in result.RegisteredOutputs)
+            foreach (var script in result.OutputScripts)
             {
                 var txout = result.UnsignedCoinJoin.Outputs.AsIndexedOutputs()
                     .Single(@out => @out.TxOut.ScriptPubKey == script);
@@ -372,13 +373,13 @@ public class BTCPayWallet : IWallet, IDestinationProvider
             await Task.WhenAll(scriptInfos.Select(t => t.Item2));
             var scriptInfos2 = scriptInfos.Where(tuple => tuple.Item2.Result is not null).ToDictionary(tuple => tuple.txout.TxOut.ScriptPubKey);
             var smartTx = new SmartTransaction(result.UnsignedCoinJoin, new Height(HeightType.Unknown));
-            result.RegisteredCoins.ForEach(coin =>
+            result.Coins.ForEach(coin =>
             {
                 coin.HdPubKey.SetKeyState(KeyState.Used);
                 coin.SpenderTransaction = smartTx;
                 smartTx.TryAddWalletInput(coin);
             });
-            result.RegisteredOutputs.ForEach(s =>
+            result.OutputScripts.ForEach(s =>
             {
                 if (scriptInfos2.TryGetValue(s, out var si))
                 {
@@ -446,6 +447,10 @@ public class BTCPayWallet : IWallet, IDestinationProvider
                 new WalletId(StoreId, "BTC"),
                 result.UnsignedCoinJoin.GetHash(),
                 attachments);
+            
+            
+            var mixedCoins = smartTx.WalletOutputs.Where(coin =>
+                coin.AnonymitySet > 1 && BlockchainAnalyzer.StdDenoms.Contains(coin.TxOut.Value.Satoshi));
              if (storeIdForutxo != StoreId)
             {
                 await _walletRepository.AddWalletTransactionAttachment(
@@ -453,20 +458,32 @@ public class BTCPayWallet : IWallet, IDestinationProvider
                     result.UnsignedCoinJoin.GetHash(),
                     new List<Attachment>()
                     {
-                        new Attachment("coinjoin", result.RoundId.ToString(), null),
+                        new Attachment("coinjoin", result.RoundId.ToString(), JObject.FromObject(new CoinjoinData()
+                        {
+                            Transaction =  result.UnsignedCoinJoin.GetHash().ToString(),
+                            Round = result.RoundId.ToString(),
+                            CoinsOut = mixedCoins.Select(coin => new CoinjoinData.CoinjoinDataCoin()
+                            {
+                                AnonymitySet = coin.AnonymitySet,
+                                Amount = coin.Amount.ToDecimal(MoneyUnit.BTC),
+                                Outpoint = coin.Outpoint.ToString()
+                            }).ToArray(),
+                            CoordinatorName = coordinatorName
+                        })),
                         new Attachment(coordinatorName, null, null)
                     });
             }
 
 
-             var mixedCoins = smartTx.WalletOutputs.Where(coin =>
-                 coin.AnonymitySet > 1 && BlockchainAnalyzer.StdDenoms.Contains(coin.TxOut.Value.Satoshi));
              
              foreach (var mixedCoin in mixedCoins)
              {
                 await  _walletRepository.AddWalletTransactionAttachment(new WalletId(storeIdForutxo, "BTC"),
                      mixedCoin.Outpoint.ToString(),
-                     new[] {new Attachment("anonset", mixedCoin.AnonymitySet.ToString())}, "utxo");
+                     new[] {new Attachment("anonset", mixedCoin.AnonymitySet.ToString(), JObject.FromObject(new
+                     {
+                         Tooltip = $"This coin has an anonset score of {mixedCoin.AnonymitySet.ToString()} (anonset-{mixedCoin.AnonymitySet.ToString()})"
+                     }))}, "utxo");
 
              }
             

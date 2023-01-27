@@ -46,6 +46,8 @@ Reputation risks: as the coordinator, the user may be associated with illegal ac
             {
                 Wabisabi = await _wabisabiCoordinatorService.GetSettings();
                 
+                ViewBag.Config = _wabisabiCoordinatorService.WabiSabiCoordinator.Config.ToString();
+                
             }
             catch (Exception)
             {
@@ -80,6 +82,7 @@ Reputation risks: as the coordinator, the user may be associated with illegal ac
         public async Task<IActionResult> UpdateWabisabiSettings(WabisabiCoordinatorSettings vm,
             string command, string config)
         {
+            ViewBag.Config = config;
             switch (command)
             {
                 case "nostr-current-url":

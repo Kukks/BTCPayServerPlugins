@@ -202,23 +202,23 @@ public class WabisabiCoordinatorClientInstance
                 
                 var result = completedEventArgs.CoinJoinResult;
                 
-                if (completedEventArgs.CompletionStatus == CompletionStatus.Success)
+                if (completedEventArgs.CompletionStatus == CompletionStatus.Success && result is SuccessfulCoinJoinResult successfulCoinJoinResult)
                 {
                     Task.Run(async () =>
                     {
                         
                         var wallet = (BTCPayWallet) e.Wallet;
-                        await wallet.RegisterCoinjoinTransaction(result, CoordinatorName);
+                        await wallet.RegisterCoinjoinTransaction(successfulCoinJoinResult, CoordinatorName);
                                     
                     });
                 }
-                else
+                else if(result is DisruptedCoinJoinResult disruptedCoinJoinResult )
                 {
                     Task.Run(async () =>
                     {
                         // _logger.LogInformation("unlocking coins because round failed");
                         await _utxoLocker.TryUnlock(
-                            result.RegisteredCoins.Select(coin => coin.Outpoint).ToArray());
+                            disruptedCoinJoinResult.SignedCoins.Select(coin => coin.Outpoint).ToArray());
                     });
                     break;
                 }

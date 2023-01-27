@@ -281,7 +281,10 @@
                                         <th scope="row">Minimum inputs</th><td>@round.MinInputCountByRound</td>
                                     </tr>
                                     <tr>
-                                        <th scope="row">Max inputs</th><td>@round.MaxInputCountByRound</td>
+                                        <th scope="row">Maximum inputs</th><td>@round.MaxInputCountByRound</td>
+                                    </tr>
+                                    <tr>
+                                        <th scope="row">Maximum round registration time</th><td>@round.StandardInputRegistrationTimeout.ToString()</td>
                                     </tr>
 
                                 </table>
@@ -293,7 +296,7 @@
                         </div>
                     </div>
                 </div>
-                <a class="w-100 px-2 cursor-pointer"
+                <a class="px-2 cursor-pointer"
                    data-bs-toggle="modal" data-bs-target="#config-@s.Coordinator">
                     Coordinator Config
                 </a>
@@ -302,7 +305,7 @@
             </div>
             <div class="form-group form-check form">
                 <input asp-for="Settings[index].Enabled" type="checkbox" class="form-check-input form-control-lg toggle-settings" data-coordinator="@s.Coordinator" disabled="@(!coordinator.WasabiCoordinatorStatusFetcher.Connected)" />
-                <a class="w-100 px-2 position-absolute bottom-0 cursor-pointer"
+                <a class="px-2 position-absolute bottom-0 cursor-pointer"
                    data-bs-toggle="modal" data-bs-target="#terms-@s.Coordinator"
                    style="
                         right: 0;
