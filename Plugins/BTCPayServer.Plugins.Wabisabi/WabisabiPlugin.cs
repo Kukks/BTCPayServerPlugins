@@ -12,6 +12,7 @@ using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
 using BTCPayServer.Common;
 using BTCPayServer.Payments.PayJoin;
+using BTCPayServer.Services.Stores;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
@@ -71,7 +72,7 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
         applicationBuilder.AddSingleton<WabisabiService>();
         applicationBuilder.AddSingleton<WalletProvider>(provider => new(
             provider,
-            provider.GetRequiredService<IStoreRepository>(),
+            provider.GetRequiredService<StoreRepository>(),
             provider.GetRequiredService<IBTCPayServerClientFactory>(),
             provider.GetRequiredService<IExplorerClientProvider>(),
             provider.GetRequiredService<ILoggerFactory>(),

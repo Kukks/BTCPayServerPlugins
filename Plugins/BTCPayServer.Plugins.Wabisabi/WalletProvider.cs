@@ -13,11 +13,14 @@ using BTCPayServer.Events;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Payments.PayJoin;
 using BTCPayServer.Services;
+using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
 using NBXplorer;
+using NBXplorer.Models;
 using WalletWasabi.Bases;
+using WalletWasabi.Blockchain.Analysis;
 using WalletWasabi.Blockchain.TransactionOutputs;
 using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.Wallets;
@@ -30,7 +33,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
 {
     private Dictionary<string, WabisabiStoreSettings>? _cachedSettings;
     private readonly IServiceProvider _serviceProvider;
-    private readonly IStoreRepository _storeRepository;
+    private readonly StoreRepository _storeRepository;
     private readonly IBTCPayServerClientFactory _btcPayServerClientFactory;
     private readonly IExplorerClientProvider _explorerClientProvider;
     public IUTXOLocker UtxoLocker { get; set; }
@@ -39,7 +42,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
 
     public WalletProvider(
         IServiceProvider serviceProvider,
-        IStoreRepository storeRepository, 
+        StoreRepository storeRepository, 
         IBTCPayServerClientFactory btcPayServerClientFactory,
         IExplorerClientProvider explorerClientProvider, 
         ILoggerFactory loggerFactory, 
@@ -101,13 +104,15 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
 
             return (IWallet)new BTCPayWallet(
                 _serviceProvider.GetRequiredService<WalletRepository>(),
+                _serviceProvider.GetRequiredService<BTCPayNetworkProvider>(),
                 _serviceProvider.GetRequiredService<BitcoinLikePayoutHandler>(),
                 _serviceProvider.GetRequiredService<BTCPayNetworkJsonSerializerSettings>(),
                 _serviceProvider.GetRequiredService<Services.Wallets.BTCPayWalletProvider>().GetWallet("BTC"),
                 _serviceProvider.GetRequiredService<PullPaymentHostedService>(),
                 pm, derivationStrategy, explorerClient, keychain,
                 _btcPayServerClientFactory, name, wabisabiStoreSettings, UtxoLocker,
-                _loggerFactory, smartifier, BannedCoins);
+                _loggerFactory, smartifier, 
+                _serviceProvider.GetRequiredService<StoreRepository>(), BannedCoins);
             
         });
         
@@ -115,6 +120,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
 
     private Task initialLoad = null;
     private IEventAggregatorSubscription _subscription;
+    private IEventAggregatorSubscription _subscription2;
 
     public async Task<IEnumerable<IWallet>> GetWalletsAsync()
     {
@@ -289,12 +295,19 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
         }, cancellationToken);
         _subscription = _eventAggregator.SubscribeAsync<WalletChangedEvent>(@event =>
             Check(@event.WalletId.StoreId, cancellationToken));
+        _subscription2 = _eventAggregator.SubscribeAsync<NewTransactionEvent>(HandleNewTransaction);
         return base.StartAsync(cancellationToken);
+    }
+
+    private Task HandleNewTransaction(NewTransactionEvent arg)
+    {
+        throw new NotImplementedException();
     }
 
     public override Task StopAsync(CancellationToken cancellationToken)
     {
         _subscription?.Dispose();
+        _subscription2?.Dispose();
         return base.StopAsync(cancellationToken);
     }
 }

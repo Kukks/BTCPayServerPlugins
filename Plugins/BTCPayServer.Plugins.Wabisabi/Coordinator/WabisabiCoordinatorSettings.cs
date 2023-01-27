@@ -11,7 +11,7 @@ public class WabisabiCoordinatorSettings
     public bool Enabled { get; set; } = false;
     
     public string NostrIdentity { get; set; }
-    public Uri NostrRelay { get; set; } = new Uri("wss://relay.damus.io");
+    public Uri NostrRelay { get; set; } = new Uri("wss://relay.nostr.info");
     
     public List<DiscoveredCoordinator> DiscoveredCoordinators { get; set; } = new();
     

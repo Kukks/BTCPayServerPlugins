@@ -3,7 +3,11 @@
     <PropertyGroup>
         <TargetFramework>net6.0</TargetFramework>
         <LangVersion>10</LangVersion>
+        <Configurations>Debug;Release</Configurations>
+        <Platforms>AnyCPU</Platforms>
     </PropertyGroup>
+
+
 
     <!-- Plugin specific properties -->
     <PropertyGroup>
@@ -43,7 +47,7 @@
         <Folder Include="Resources" />
     </ItemGroup>
     <ItemGroup>
-        <PackageReference Include="NNostr.Client" Version="0.0.17" />
+        <PackageReference Include="NNostr.Client" Version="0.0.18" />
     </ItemGroup>
     <Target Name="DeleteExampleFile" AfterTargets="Publish">
         <RemoveDir Directories="$(PublishDir)\Microservices" />

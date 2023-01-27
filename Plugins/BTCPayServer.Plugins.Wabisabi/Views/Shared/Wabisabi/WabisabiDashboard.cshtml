@@ -42,7 +42,7 @@
     {
         var settings = await WabisabiService.GetWabisabiForStore(storeId);
         var enabledSettings = settings.Settings.Where(coordinatorSettings => coordinatorSettings.Enabled);
-        var cjHistory = (await WabisabiService.GetCoinjoinHistory(storeId)).Take(10);
+        var cjHistory = (await WabisabiService.GetCoinjoinHistory(storeId)).Take(10).ToList();
 
         @if (!enabledSettings.Any())
         {
@@ -196,7 +196,7 @@
 
 
             <!-- Modal -->
-            <div class="modal fade" id="coins" data-bs-keyboard="false" tabindex="-1">
+            <div class="modal modal-lg fade" id="coins" data-bs-keyboard="false" tabindex="-1">
                 <div class="modal-dialog">
                     <div class="modal-content">
                         <div class="modal-header">

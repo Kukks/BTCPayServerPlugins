@@ -7,5 +7,9 @@
     ViewData.SetActivePage(StoreNavPages.Plugins);
 }
 
-<partial name="Wabisabi/CoinjoinHistoryTable" model="Model.Coinjoins" />
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h3 class="mb-0">Coinjoin History</h3>
+</div>
+
+<partial name="Wabisabi/CoinjoinHistoryTable" model="Model.Coinjoins.ToList()" />
 <vc:pager view-model="Model"></vc:pager>

@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client.Models;
+using BTCPayServer.Data;
 using BTCPayServer.Services;
 using BTCPayServer.Services.Wallets;
 using NBitcoin;
@@ -52,7 +53,7 @@ public class Smartifier
     private readonly Task<RootedKeyPath> _accountKeyPath;
 
     public async Task LoadCoins(List<ReceivedCoin> coins, int current ,
-        Dictionary<OutPoint, List<Attachment>> utxoLabels)
+        Dictionary<OutPoint, (HashSet<string> labels, double anonset, BTCPayWallet.CoinjoinData coinjoinData)> utxoLabels)
     {
         coins = coins.Where(data => data is not null).ToList();
         if (current > 3)
@@ -129,7 +130,7 @@ public class Smartifier
                         OutPoint = outpoint,
                         Confirmations = unsmartTx.Confirmations
                     };
-                }).ToList();
+                }).Where(receivedCoin => receivedCoin is not null).ToList();
                 
                 await LoadCoins(inputsToLoad,current+1,  await BTCPayWallet.GetUtxoLabels(_walletRepository, _storeId, inputsToLoad.ToArray()));
                 foreach (MatchedOutput input in unsmartTx.Inputs)
@@ -155,11 +156,11 @@ public class Smartifier
                 var unsmartTx = await cached[coin.OutPoint.Hash];
                 var pubKey = DerivationScheme.GetChild(coin.KeyPath).GetExtPubKeys().First().PubKey;
                 var kp = (await _accountKeyPath).Derive(coin.KeyPath).KeyPath;
-                var hdPubKey = new HdPubKey(pubKey, kp, new SmartLabel(labels?.Select(attachment => attachment.Id).ToArray()?? Array.Empty<string>()),
-                    current == 1 ? KeyState.Clean : KeyState.Used);
-                var anonsetLabel = labels?.FirstOrDefault(s => s.Id.StartsWith("anonset-"))?.Id.Split("-", StringSplitOptions.RemoveEmptyEntries)?.ElementAtOrDefault(1) ?? "1";
-                hdPubKey.SetAnonymitySet(double.Parse(anonsetLabel));
 
+                var hdPubKey = new HdPubKey(pubKey, kp, new SmartLabel(labels.labels?? new HashSet<string>()),
+                    current == 1 ? KeyState.Clean : KeyState.Used);
+
+                hdPubKey.SetAnonymitySet(labels.anonset);
                 var c =  new SmartCoin(tx, coin.OutPoint.N, hdPubKey);
                 c.PropertyChanged += CoinPropertyChanged;
                 return c;

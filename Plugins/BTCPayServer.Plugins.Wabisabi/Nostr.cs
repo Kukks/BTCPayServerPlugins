@@ -21,12 +21,18 @@ public class Nostr
         string key,
         Uri coordinatorUri,
         string description,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken )
     {
+
+        var ct = CancellationTokenSource
+            .CreateLinkedTokenSource(cancellationToken, new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token)
+            .Token;
         var privateKey = NostrExtensions.ParseKey(key);
         var client = new NostrClient(relayUri);
-        await client.ConnectAndWaitUntilConnected(cancellationToken);
+        await client.ConnectAndWaitUntilConnected(ct);
         _ = client.ListenForMessages();
+        TaskCompletionSource tcs = new TaskCompletionSource();
+       
         var evt = new NostrEvent()
         {
             Kind = Kind,
@@ -40,7 +46,32 @@ public class Nostr
             }
         };
         await evt.ComputeIdAndSign(privateKey);
-        await client.PublishEvent(evt, cancellationToken);
+        client.EventsReceived += (sender, tuple) =>
+        {
+            if (tuple.events.Any(@event => @event.Id == evt.Id))
+            {
+                tcs.TrySetResult();
+            }
+        };
+        client.MessageReceived += (sender, tuple) =>
+        {
+            if (tuple.StartsWith($"[\"OK\",\"{evt.Id}\",true"))
+            {
+                
+                tcs.TrySetResult();
+            }
+            Console.WriteLine(tuple);
+        };
+        await client.CreateSubscription("ack", new[]
+        {
+            new NostrSubscriptionFilter()
+            {
+                Ids = new[] {evt.Id}
+            }
+        }, ct);
+        await client.PublishEvent(evt, ct);
+        await tcs.Task.WithCancellation(ct);
+        await client.CloseSubscription("ack", ct);
         client.Dispose();
     }
 

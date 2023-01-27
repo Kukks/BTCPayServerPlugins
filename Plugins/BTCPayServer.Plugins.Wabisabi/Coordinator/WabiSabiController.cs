@@ -1,12 +1,9 @@
 using System;
-using System.Collections.Generic;
 using Microsoft.AspNetCore.Mvc;
 using System.Linq;
-using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using WalletWasabi.Backend.Filters;
 using WalletWasabi.Cache;
 using WalletWasabi.WabiSabi.Backend.PostRequests;
