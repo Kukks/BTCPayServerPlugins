@@ -12,7 +12,6 @@
   <PropertyGroup>
     <Product>LSP</Product>
     <Description>Allows you to become an LSP selling lightning channels with inbound liquidity</Description>
-    <Authors>Kukks</Authors>
     <Version>1.0.0</Version>
   </PropertyGroup>
 <!-- Plugin development properties -->

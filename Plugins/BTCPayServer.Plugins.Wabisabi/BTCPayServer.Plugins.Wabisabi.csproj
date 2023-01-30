@@ -13,7 +13,6 @@
     <PropertyGroup>
         <Product>Wabisabi Coinjoin</Product>
         <Description>Allows you to integrate your btcpayserver store with coinjoins.</Description>
-        <Authors>Kukks</Authors>
         <Version>1.0.10</Version>
     </PropertyGroup>
 

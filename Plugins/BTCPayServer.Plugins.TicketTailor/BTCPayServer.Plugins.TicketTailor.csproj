@@ -9,7 +9,6 @@
     <PropertyGroup>
         <Product>TicketTailor</Product>
         <Description>Allows you to integrate with TicketTailor.com to sell tickets for Bitcoin</Description>
-        <Authors>Kukks</Authors>
         <Version>1.0.5</Version>
     </PropertyGroup>
     <!-- Plugin development properties -->
