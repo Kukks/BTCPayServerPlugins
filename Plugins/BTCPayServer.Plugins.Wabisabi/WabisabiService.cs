@@ -4,6 +4,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client;
+using BTCPayServer.Data.Data;
+using BTCPayServer.PayoutProcessors;
 using BTCPayServer.Services;
 using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json.Linq;
@@ -17,17 +19,22 @@ namespace BTCPayServer.Plugins.Wabisabi
         private readonly WabisabiCoordinatorClientInstanceManager _coordinatorClientInstanceManager;
         private readonly WalletProvider _walletProvider;
         private readonly WalletRepository _walletRepository;
+        private readonly PayoutProcessorService _payoutProcessorService;
+        private readonly EventAggregator _eventAggregator;
         private string[] _ids => _coordinatorClientInstanceManager.HostedServices.Keys.ToArray();
 
         public WabisabiService( IStoreRepository storeRepository, 
             WabisabiCoordinatorClientInstanceManager coordinatorClientInstanceManager,
             WalletProvider walletProvider,
-            WalletRepository walletRepository)
+            WalletRepository walletRepository,PayoutProcessorService payoutProcessorService, EventAggregator eventAggregator)
         {
             _storeRepository = storeRepository;
             _coordinatorClientInstanceManager = coordinatorClientInstanceManager;
             _walletProvider = walletProvider;
             _walletRepository = walletRepository;
+            _payoutProcessorService = payoutProcessorService;
+            _eventAggregator = eventAggregator;
+            _eventAggregator.Subscribe()
         }
         
         public async Task<WabisabiStoreSettings> GetWabisabiForStore(string storeId)
@@ -52,7 +59,8 @@ namespace BTCPayServer.Plugins.Wabisabi
 
         public async Task SetWabisabiForStore(string storeId, WabisabiStoreSettings wabisabiSettings)
         {
-            
+            var paybatching = wabisabiSettings.PlebMode || wabisabiSettings.BatchPayments &&
+                wabisabiSettings.Settings.Any(settings => settings.Enabled);
             foreach (var setting in wabisabiSettings.Settings)
             {
                 if (setting.Enabled) continue;
@@ -71,7 +79,23 @@ namespace BTCPayServer.Plugins.Wabisabi
             }
             
             await _walletProvider.SettingsUpdated(storeId, wabisabiSettings);
-         
+           var existingProcessor = (await  _payoutProcessorService.GetProcessors(new PayoutProcessorService.PayoutProcessorQuery()
+           {
+               Stores = new[] {storeId},
+               Processors = new[] {"Wabisabi"},
+
+           })).FirstOrDefault();
+            _eventAggregator.Publish(new PayoutProcessorUpdated()
+            {
+                Id = existingProcessor?.Id,
+                Data = paybatching? new PayoutProcessorData()
+                {
+                    Id = existingProcessor?.Id,
+                    Processor = "Wabisabi",
+                    StoreId = storeId,
+                    PaymentMethod = "BTC",
+                }: null
+            });
         }
         
 

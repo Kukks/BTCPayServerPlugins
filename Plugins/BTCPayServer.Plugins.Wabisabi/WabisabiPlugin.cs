@@ -11,9 +11,13 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
 using BTCPayServer.Common;
+using BTCPayServer.Data.Data;
+using BTCPayServer.Payments;
 using BTCPayServer.Payments.PayJoin;
+using BTCPayServer.PayoutProcessors;
 using BTCPayServer.Services.Stores;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Formatters;
@@ -21,6 +25,7 @@ using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
 using Microsoft.Extensions.Options;
@@ -90,6 +95,7 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
         applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Wabisabi/WabisabiDashboard",
             "dashboard"));
 
+        applicationBuilder.AddSingleton<IPayoutProcessorFactory, WabisabiPayoutProcessor>();
         Logger.SetMinimumLevel(LogLevel.Info);
         Logger.SetModes(LogMode.DotNetLoggers);
 
@@ -97,6 +103,50 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
         base.Execute(applicationBuilder);
     }
 
+    public class WabisabiPayoutProcessor: IPayoutProcessorFactory
+    {
+        private readonly LinkGenerator _linkGenerator;
+
+        public WabisabiPayoutProcessor(LinkGenerator linkGenerator)
+        {
+            _linkGenerator = linkGenerator;
+        }
+        public string Processor { get; } = "Wabisabi";
+        public string FriendlyName { get; } = "Coinjoin";
+        public string ConfigureLink(string storeId, PaymentMethodId paymentMethodId, HttpRequest request)
+        {
+           return  _linkGenerator.GetUriByAction(
+                nameof(WabisabiStoreController.UpdateWabisabiStoreSettings),
+                "WabisabiStore",
+                new { storeId},
+                request.Scheme,
+                request.Host,
+                request.PathBase);
+        }
+
+        public IEnumerable<PaymentMethodId> GetSupportedPaymentMethods()
+        {
+            return new[] {new PaymentMethodId("BTC", PaymentTypes.BTCLike)};
+        }
+
+        public Task<IHostedService> ConstructProcessor(PayoutProcessorData settings)
+        {
+            return Task.FromResult<IHostedService>(new ShellSerice());
+        }
+        public class ShellSerice:IHostedService
+        {
+            public Task StartAsync(CancellationToken cancellationToken)
+            {
+                return Task.CompletedTask;
+            }
+
+            public Task StopAsync(CancellationToken cancellationToken)
+            {
+                return Task.CompletedTask;
+            }
+        }
+    }
+    
 
     public override void Execute(IApplicationBuilder applicationBuilder,
         IServiceProvider applicationBuilderApplicationServices)
