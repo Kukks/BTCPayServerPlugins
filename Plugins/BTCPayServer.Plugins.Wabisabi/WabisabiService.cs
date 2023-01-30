@@ -34,7 +34,6 @@ namespace BTCPayServer.Plugins.Wabisabi
             _walletRepository = walletRepository;
             _payoutProcessorService = payoutProcessorService;
             _eventAggregator = eventAggregator;
-            _eventAggregator.Subscribe()
         }
         
         public async Task<WabisabiStoreSettings> GetWabisabiForStore(string storeId)

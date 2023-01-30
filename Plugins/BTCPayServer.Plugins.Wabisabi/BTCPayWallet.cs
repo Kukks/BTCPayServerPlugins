@@ -336,6 +336,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         {
             var stopwatch = new Stopwatch();
             stopwatch.Start();
+            var txHash = result.UnsignedCoinJoin.GetHash();
             var kp = await ExplorerClient.GetMetadataAsync<RootedKeyPath>(DerivationScheme,
                 WellknownMetadataKeys.AccountKeyPath);
 
@@ -409,7 +410,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
             {
                 Round = result.RoundId.ToString(),
                 CoordinatorName = coordinatorName,
-                Transaction = result.UnsignedCoinJoin.GetHash().ToString(),
+                Transaction = txHash.ToString(),
                 CoinsIn =   smartTx.WalletInputs.Select(coin => new CoinjoinData.CoinjoinDataCoin()
                 {
                     AnonymitySet = coin.AnonymitySet,
@@ -455,12 +456,12 @@ public class BTCPayWallet : IWallet, IDestinationProvider
             {
                 await _walletRepository.AddWalletTransactionAttachment(
                     new WalletId(storeIdForutxo, "BTC"),
-                    result.UnsignedCoinJoin.GetHash(),
+                    txHash,
                     new List<Attachment>()
                     {
                         new Attachment("coinjoin", result.RoundId.ToString(), JObject.FromObject(new CoinjoinData()
                         {
-                            Transaction =  result.UnsignedCoinJoin.GetHash().ToString(),
+                            Transaction =  txHash.ToString(),
                             Round = result.RoundId.ToString(),
                             CoinsOut = mixedCoins.Select(coin => new CoinjoinData.CoinjoinDataCoin()
                             {

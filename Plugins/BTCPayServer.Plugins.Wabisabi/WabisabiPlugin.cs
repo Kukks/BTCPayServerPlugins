@@ -94,6 +94,8 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
             "store-integrations-nav"));
         applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Wabisabi/WabisabiDashboard",
             "dashboard"));
+        applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Wabisabi/WabisabiWalletSend",
+            "onchain-wallet-send"));
 
         applicationBuilder.AddSingleton<IPayoutProcessorFactory, WabisabiPayoutProcessor>();
         Logger.SetMinimumLevel(LogLevel.Info);

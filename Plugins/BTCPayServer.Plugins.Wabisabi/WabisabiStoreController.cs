@@ -11,6 +11,8 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Common;
+using BTCPayServer.Filters;
+using BTCPayServer.Models.WalletViewModels;
 using BTCPayServer.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -90,7 +92,7 @@ namespace BTCPayServer.Plugins.Wabisabi
 
                     if (Uri.TryCreate(relay, UriKind.Absolute, out var relayUri))
                     {
-                        ViewBag.DiscoveredCoordinators =await Nostr.Discover(relayUri,
+                        ViewBag.DiscoveredCoordinators = await Nostr.Discover(relayUri,
                             _explorerClientProvider.GetExplorerClient("BTC").Network.NBitcoinNetwork,
                             coordSettings.Key?.CreateXOnlyPubKey().ToHex(), CancellationToken.None);
                     }
@@ -177,10 +179,12 @@ namespace BTCPayServer.Plugins.Wabisabi
                     return View(vm);
             }
         }
+
         [Route("coinjoins")]
-        public async Task<IActionResult> ListCoinjoins(string storeId, CoinjoinsViewModel viewModel, [FromServices] WalletRepository walletRepository)
+        public async Task<IActionResult> ListCoinjoins(string storeId, CoinjoinsViewModel viewModel,
+            [FromServices] WalletRepository walletRepository)
         {
-            var objects =await  _WabisabiService.GetCoinjoinHistory(storeId);
+            var objects = await _WabisabiService.GetCoinjoinHistory(storeId);
 
             viewModel ??= new CoinjoinsViewModel();
             viewModel.Coinjoins = objects
@@ -189,7 +193,8 @@ namespace BTCPayServer.Plugins.Wabisabi
             viewModel.Total = objects.Count();
             return View(viewModel);
         }
-        
+
+        [XFrameOptions(XFrameOptionsAttribute.XFrameOptions.SameOrigin)]
         [HttpGet("spend")]
         public async Task<IActionResult> Spend(string storeId)
         {
@@ -201,6 +206,7 @@ namespace BTCPayServer.Plugins.Wabisabi
             return View(new SpendViewModel() { });
         }
 
+        [XFrameOptions(XFrameOptionsAttribute.XFrameOptions.SameOrigin)]
         [HttpPost("spend")]
         public async Task<IActionResult> Spend(string storeId, SpendViewModel spendViewModel, string command)
         {
@@ -274,7 +280,7 @@ namespace BTCPayServer.Plugins.Wabisabi
             {
                 if (spendViewModel.SelectedCoins?.Any() is true)
                 {
-                    coins = (CoinsView)coins.FilterBy(coin =>
+                    coins = (CoinsView) coins.FilterBy(coin =>
                         spendViewModel.SelectedCoins.Contains(coin.Outpoint.ToString()));
                 }
             }
@@ -290,11 +296,11 @@ namespace BTCPayServer.Plugins.Wabisabi
                 var defaultCoinSelector = new DefaultCoinSelector();
                 var defaultSelection =
                     (defaultCoinSelector.Select(coins.Select(coin => coin.Coin).ToArray(),
-                        new Money((decimal)spendViewModel.Amount, MoneyUnit.BTC)) ?? Array.Empty<ICoin>())
-                        .ToArray();
+                        new Money((decimal) spendViewModel.Amount, MoneyUnit.BTC)) ?? Array.Empty<ICoin>())
+                    .ToArray();
                 var selector = new SmartCoinSelector(coins.ToList());
                 var smartSelection = selector.Select(defaultSelection,
-                    new Money((decimal)spendViewModel.Amount, MoneyUnit.BTC));
+                    new Money((decimal) spendViewModel.Amount, MoneyUnit.BTC));
                 spendViewModel.SelectedCoins = smartSelection.Select(coin => coin.Outpoint.ToString()).ToArray();
                 return View(spendViewModel);
             }
@@ -326,7 +332,27 @@ namespace BTCPayServer.Plugins.Wabisabi
             return View(spendViewModel);
         }
 
+        [HttpGet("select-coins")]
+        public async Task<IActionResult> ComputeCoinSelection(string storeId, decimal amount)
+        {
+            if ((await _walletProvider.GetWalletAsync(storeId)) is not BTCPayWallet wallet)
+            {
+                return NotFound();
+            }
 
+            
+            var coins = await wallet.GetAllCoins();
+            var defaultCoinSelector = new DefaultCoinSelector();
+            var defaultSelection =
+                (defaultCoinSelector.Select(coins.Select(coin => coin.Coin).ToArray(),
+                    new Money(amount, MoneyUnit.BTC)) ?? Array.Empty<ICoin>())
+                .ToArray();
+            var selector = new SmartCoinSelector(coins.ToList());
+            var smartSelection = selector.Select(defaultSelection,
+                new Money((decimal) amount, MoneyUnit.BTC));
+            return Ok(smartSelection.Select(coin => coin.Outpoint.ToString()).ToArray());
+        }
+        
         public class SpendViewModel
         {
             public string Destination { get; set; }
