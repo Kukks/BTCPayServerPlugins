@@ -5,8 +5,7 @@ using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
-using BTCPayServer.Client.Models;
-using BTCPayServer.Data;
+using BTCPayServer.Payments.PayJoin;
 using BTCPayServer.Services;
 using BTCPayServer.Services.Wallets;
 using NBitcoin;
@@ -26,25 +25,21 @@ public class Smartifier
     private readonly WalletRepository _walletRepository;
     private readonly ExplorerClient _explorerClient;
     public DerivationStrategyBase DerivationScheme { get; }
-    private readonly IBTCPayServerClientFactory _btcPayServerClientFactory;
     private readonly string _storeId;
-    private readonly Action<object, PropertyChangedEventArgs> _coinOnPropertyChanged;
+    private readonly IUTXOLocker _utxoLocker;
 
     public Smartifier(
         WalletRepository walletRepository,
-        ExplorerClient explorerClient, DerivationStrategyBase derivationStrategyBase,
-        IBTCPayServerClientFactory btcPayServerClientFactory, string storeId, 
-        Action<object, PropertyChangedEventArgs> coinOnPropertyChanged)
+        ExplorerClient explorerClient, DerivationStrategyBase derivationStrategyBase, string storeId,
+        IUTXOLocker utxoLocker)
     {
         _walletRepository = walletRepository;
         _explorerClient = explorerClient;
         DerivationScheme = derivationStrategyBase;
-        _btcPayServerClientFactory = btcPayServerClientFactory;
         _storeId = storeId;
-        _coinOnPropertyChanged = coinOnPropertyChanged;
+        _utxoLocker = utxoLocker;
         _accountKeyPath = _explorerClient.GetMetadataAsync<RootedKeyPath>(DerivationScheme,
             WellknownMetadataKeys.AccountKeyPath);
-        
     }
 
     private ConcurrentDictionary<uint256, Task<TransactionInformation>> cached = new();
@@ -68,7 +63,6 @@ public class Smartifier
 
         foreach (var coin in coins)
         {
-            var client = await _btcPayServerClientFactory.Create(null, _storeId);
             var tx = await Transactions.GetOrAdd(coin.OutPoint.Hash, async uint256 =>
             {
                 var unsmartTx = await cached[coin.OutPoint.Hash];
@@ -157,11 +151,11 @@ public class Smartifier
                 var pubKey = DerivationScheme.GetChild(coin.KeyPath).GetExtPubKeys().First().PubKey;
                 var kp = (await _accountKeyPath).Derive(coin.KeyPath).KeyPath;
 
-                var hdPubKey = new HdPubKey(pubKey, kp, new SmartLabel(labels.labels?? new HashSet<string>()),
+                var hdPubKey = new HdPubKey(pubKey, kp, new SmartLabel(labels.labels ?? new HashSet<string>()),
                     current == 1 ? KeyState.Clean : KeyState.Used);
 
                 hdPubKey.SetAnonymitySet(labels.anonset);
-                var c =  new SmartCoin(tx, coin.OutPoint.N, hdPubKey);
+                var c = new SmartCoin(tx, coin.OutPoint.N, hdPubKey);
                 c.PropertyChanged += CoinPropertyChanged;
                 return c;
             });
@@ -172,6 +166,22 @@ public class Smartifier
 
     private void CoinPropertyChanged(object sender, PropertyChangedEventArgs e)
     {
-        _coinOnPropertyChanged.Invoke(sender, e);
+        if (sender is SmartCoin smartCoin)
+        {
+            if (e.PropertyName == nameof(SmartCoin.CoinJoinInProgress))
+            {
+                // _logger.LogInformation($"{smartCoin.Outpoint}.CoinJoinInProgress = {smartCoin.CoinJoinInProgress}");
+                if (_utxoLocker is not null)
+                {
+                    _ = (smartCoin.CoinJoinInProgress
+                        ? _utxoLocker.TryLock(smartCoin.Outpoint)
+                        : _utxoLocker.TryUnlock(smartCoin.Outpoint)).ContinueWith(task =>
+                    {
+                        // _logger.LogInformation(
+                        //     $"{(task.Result ? "Success" : "Fail")}: {(smartCoin.CoinJoinInProgress ? "" : "un")}locking coin for coinjoin: {smartCoin.Outpoint} ");
+                    });
+                }
+            }
+        }
     }
 }

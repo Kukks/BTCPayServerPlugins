@@ -254,7 +254,7 @@
                                         <td>@(round.CoordinationFeeRate.Rate * 100)%
                                             @if (round.CoordinationFeeRate.PlebsDontPayThreshold > 0)
                                             {
-                                                @Safe.Raw($"+ Free under {round.CoordinationFeeRate.PlebsDontPayThreshold.ToDecimal(MoneyUnit.BTC)} BTC")<br/>
+                                                @Safe.Raw($"+ Free under {round.CoordinationFeeRate.PlebsDontPayThreshold.ToDecimal(MoneyUnit.BTC)} BTC")
                                             }
                                             + Free remixing
                                         </td>

@@ -42,7 +42,7 @@
     {
         var settings = await WabisabiService.GetWabisabiForStore(storeId);
         var enabledSettings = settings.Settings.Where(coordinatorSettings => coordinatorSettings.Enabled);
-        var cjHistory = (await WabisabiService.GetCoinjoinHistory(storeId)).Take(10).ToList();
+        var cjHistory = (await WabisabiService.GetCoinjoinHistory(storeId)).Take(5).ToList();
 
         @if (!enabledSettings.Any())
         {
@@ -63,7 +63,9 @@
         }
         else
         {
-            <div class="widget store-wallet-balance">
+            <div class="widget store-wallet-balance " style="
+    max-height: 500px;
+    overflow-y: auto;">
                 <header>
                     <h3>Recent Coinjoins</h3>
                     @if (cjHistory.Any())

@@ -21,7 +21,14 @@ public class WabisabiStoreSettings
     public bool BatchPayments { get; set; } = true;
     public int ExtraJoinProbability { get; set; } = 0;
     public bool CrossMixBetweenCoordinators { get; set; } = false;
+    public CrossMixMode CrossMixBetweenCoordinatorsMode { get; set; } = CrossMixMode.WhenFree;
 
+    public enum CrossMixMode
+    {
+        WhenFree,
+        Never,
+        Always,
+    }
 }
 
 public class WabisabiStoreCoordinatorSettings

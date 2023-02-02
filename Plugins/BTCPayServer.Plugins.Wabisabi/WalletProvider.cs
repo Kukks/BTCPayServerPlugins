@@ -137,26 +137,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
             .Where(wallet => wallet is not null);
     }
 
-    private void CoinOnPropertyChanged(object sender, PropertyChangedEventArgs e)
-    {
-        if (sender is SmartCoin smartCoin)
-        {
-            if (e.PropertyName == nameof(SmartCoin.CoinJoinInProgress))
-            {
-                // _logger.LogInformation($"{smartCoin.Outpoint}.CoinJoinInProgress = {smartCoin.CoinJoinInProgress}");
-                if (UtxoLocker is not null)
-                {
-                    _ = (smartCoin.CoinJoinInProgress
-                        ? UtxoLocker.TryLock(smartCoin.Outpoint)
-                        : UtxoLocker.TryUnlock(smartCoin.Outpoint)).ContinueWith(task =>
-                    {
-                        // _logger.LogInformation(
-                        //     $"{(task.Result ? "Success" : "Fail")}: {(smartCoin.CoinJoinInProgress ? "" : "un")}locking coin for coinjoin: {smartCoin.Outpoint} ");
-                    });
-                }
-            }
-        }
-    }
+    
 
     public async Task ResetWabisabiStuckPayouts()
     {
