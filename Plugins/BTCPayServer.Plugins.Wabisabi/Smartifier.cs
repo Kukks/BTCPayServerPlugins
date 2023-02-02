@@ -42,7 +42,7 @@ public class Smartifier
             WellknownMetadataKeys.AccountKeyPath);
     }
 
-    private ConcurrentDictionary<uint256, Task<TransactionInformation>> cached = new();
+    public readonly  ConcurrentDictionary<uint256, Task<TransactionInformation>> CachedTransactions = new();
     public readonly ConcurrentDictionary<uint256, Task<SmartTransaction>> Transactions = new();
     public readonly  ConcurrentDictionary<OutPoint, Task<SmartCoin>> Coins = new();
     private readonly Task<RootedKeyPath> _accountKeyPath;
@@ -58,14 +58,15 @@ public class Smartifier
         var txs = coins.Select(data => data.OutPoint.Hash).Distinct();
         foreach (uint256 tx in txs)
         {
-            cached.TryAdd(tx, _explorerClient.GetTransactionAsync(DerivationScheme, tx));
+            if(!CachedTransactions.ContainsKey(tx))
+                CachedTransactions.TryAdd(tx, _explorerClient.GetTransactionAsync(DerivationScheme, tx));
         }
 
         foreach (var coin in coins)
         {
             var tx = await Transactions.GetOrAdd(coin.OutPoint.Hash, async uint256 =>
             {
-                var unsmartTx = await cached[coin.OutPoint.Hash];
+                var unsmartTx = await CachedTransactions[coin.OutPoint.Hash];
                 if (unsmartTx is null)
                 {
                     return null;
@@ -85,7 +86,7 @@ public class Smartifier
                     potentialMatches.TryAdd(matchedInput, potentialMatchesForInput.ToArray());
                     foreach (IndexedTxIn potentialMatchForInput in potentialMatchesForInput)
                     {
-                        var ti = await cached.GetOrAdd(potentialMatchForInput.PrevOut.Hash,
+                        var ti = await CachedTransactions.GetOrAdd(potentialMatchForInput.PrevOut.Hash,
                             _explorerClient.GetTransactionAsync(DerivationScheme,
                                 potentialMatchForInput.PrevOut.Hash));
 
@@ -147,7 +148,7 @@ public class Smartifier
             var smartCoin = await Coins.GetOrAdd(coin.OutPoint, async point =>
             {
                 utxoLabels.TryGetValue(coin.OutPoint, out var labels);
-                var unsmartTx = await cached[coin.OutPoint.Hash];
+                var unsmartTx = await CachedTransactions[coin.OutPoint.Hash];
                 var pubKey = DerivationScheme.GetChild(coin.KeyPath).GetExtPubKeys().First().PubKey;
                 var kp = (await _accountKeyPath).Derive(coin.KeyPath).KeyPath;
 
@@ -159,6 +160,11 @@ public class Smartifier
                 c.PropertyChanged += CoinPropertyChanged;
                 return c;
             });
+            
+            utxoLabels.TryGetValue(coin.OutPoint, out var labels);
+            smartCoin.HdPubKey.SetLabel(new SmartLabel(labels.labels ?? new HashSet<string>()));
+            smartCoin.HdPubKey.SetKeyState(current == 1 ? KeyState.Clean : KeyState.Used);
+            smartCoin.HdPubKey.SetAnonymitySet(labels.anonset);
             tx.TryAddWalletOutput(smartCoin);
             
         }
@@ -184,4 +190,5 @@ public class Smartifier
             }
         }
     }
+
 }

@@ -97,7 +97,9 @@
 
             var privacyPercentage = Math.Round(privacy * 100);
             var colorCoins = coins.GroupBy(coin => coin.CoinColor(wallet.AnonymitySetTarget)).ToDictionary(grouping => grouping.Key, grouping => grouping);
-            <div class="widget store-numbers">
+            <div class="widget store-numbers" style="
+                                                  max-height: 500px;
+                                                  overflow-y: auto;">
 
             @if (wallet is BTCPayWallet btcPayWallet)
             {
@@ -300,17 +302,17 @@
                         <div class="list-group-item">
                             <h6>@coordinator.CoordinatorDisplayName</h6>
                             <div class="row ">
-                                <span class="text-muted col-sm-12 col-md-9 p-0 text-break">
+                                <span class="text-muted col-sm-12 col-xxl-9 p-0 text-break">
                                     @coordinator.Coordinator
                                 </span>
 
                                 @if (!coordinator.WasabiCoordinatorStatusFetcher.Connected)
                                 {
-                                    <p class="text-danger mb-0 col-sm-12 col-md-3 p-0 text-break">Not connected</p>
+                                    <p class="text-danger mb-0 col-sm-12 col-xxl-3 p-0 text-break">Not connected</p>
                                 }
                                 else
                                 {
-                                    <p class="text-success mb-0 col-sm-12 col-md-3 p-0 text-break">Connected</p>
+                                    <p class="text-success mb-0 col-sm-12 col-xxl-3 p-0 text-break">Connected</p>
                                 }
                             </div>
                             @{

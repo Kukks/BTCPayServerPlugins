@@ -99,8 +99,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
             var keychain = new BTCPayKeyChain(explorerClient, derivationStrategy, masterKey, accountKey);
 
 
-            var smartifier = new Smartifier(_serviceProvider.GetRequiredService<WalletRepository>(),explorerClient, derivationStrategy, _btcPayServerClientFactory, name,
-                CoinOnPropertyChanged);
+            var smartifier = new Smartifier(_serviceProvider.GetRequiredService<WalletRepository>(),explorerClient, derivationStrategy, name, UtxoLocker);
 
             return (IWallet)new BTCPayWallet(
                 _serviceProvider.GetRequiredService<WalletRepository>(),
@@ -112,7 +111,8 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
                 pm, derivationStrategy, explorerClient, keychain,
                 _btcPayServerClientFactory, name, wabisabiStoreSettings, UtxoLocker,
                 _loggerFactory, smartifier, 
-                _serviceProvider.GetRequiredService<StoreRepository>(), BannedCoins);
+                _serviceProvider.GetRequiredService<StoreRepository>(), BannedCoins,
+                _eventAggregator);
             
         });
         
@@ -276,13 +276,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
         }, cancellationToken);
         _subscription = _eventAggregator.SubscribeAsync<WalletChangedEvent>(@event =>
             Check(@event.WalletId.StoreId, cancellationToken));
-        _subscription2 = _eventAggregator.SubscribeAsync<NewTransactionEvent>(HandleNewTransaction);
         return base.StartAsync(cancellationToken);
-    }
-
-    private Task HandleNewTransaction(NewTransactionEvent arg)
-    {
-        throw new NotImplementedException();
     }
 
     public override Task StopAsync(CancellationToken cancellationToken)

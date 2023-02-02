@@ -36,7 +36,7 @@ using WalletWasabi.Wallets;
 namespace BTCPayServer.Plugins.Wabisabi;
 
 
-public class BTCPayWallet : IWallet, IDestinationProvider
+public class BTCPayWallet : IWallet, IDestinationProvider 
 {
     private readonly WalletRepository _walletRepository;
     private readonly BTCPayNetworkProvider _btcPayNetworkProvider;
@@ -53,25 +53,24 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     public readonly ILogger Logger;
     public static readonly BlockchainAnalyzer BlockchainAnalyzer = new();
 
-    public BTCPayWallet(
-        WalletRepository walletRepository,
+    public BTCPayWallet(WalletRepository walletRepository,
         BTCPayNetworkProvider btcPayNetworkProvider,
         BitcoinLikePayoutHandler bitcoinLikePayoutHandler,
         BTCPayNetworkJsonSerializerSettings btcPayNetworkJsonSerializerSettings,
         Services.Wallets.BTCPayWallet btcPayWallet,
         PullPaymentHostedService pullPaymentHostedService,
-        OnChainPaymentMethodData onChainPaymentMethodData, 
+        OnChainPaymentMethodData onChainPaymentMethodData,
         DerivationStrategyBase derivationScheme,
-        ExplorerClient explorerClient, 
+        ExplorerClient explorerClient,
         BTCPayKeyChain keyChain,
-        IBTCPayServerClientFactory btcPayServerClientFactory, 
+        IBTCPayServerClientFactory btcPayServerClientFactory,
         string storeId,
-        WabisabiStoreSettings wabisabiStoreSettings, 
+        WabisabiStoreSettings wabisabiStoreSettings,
         IUTXOLocker utxoLocker,
-        ILoggerFactory loggerFactory, 
+        ILoggerFactory loggerFactory,
         Smartifier smartifier,
-        StoreRepository storeRepository, 
-        ConcurrentDictionary<string, Dictionary<OutPoint, DateTimeOffset>> bannedCoins)
+        StoreRepository storeRepository,
+        ConcurrentDictionary<string, Dictionary<OutPoint, DateTimeOffset>> bannedCoins, EventAggregator eventAggregator)
     {
         KeyChain = keyChain;
         _walletRepository = walletRepository;
@@ -90,7 +89,18 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         _smartifier = smartifier;
         _storeRepository = storeRepository;
         _bannedCoins = bannedCoins;
+        _eventAggregator = eventAggregator;
         Logger = loggerFactory.CreateLogger($"BTCPayWallet_{storeId}");
+
+        _eventAggregator.SubscribeAsync<NewTransactionEvent>(async evt =>
+        {
+            if (evt.DerivationStrategy != DerivationScheme)
+            {
+                return;
+            }
+
+            _smartifier.OnNewTransaction(evt.TransactionData.TransactionHash, evt);
+        });
     }
 
     public string StoreId { get; set; }
@@ -153,6 +163,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     public readonly Smartifier _smartifier;
     private readonly StoreRepository _storeRepository;
     private readonly ConcurrentDictionary<string, Dictionary<OutPoint, DateTimeOffset>> _bannedCoins;
+    private readonly EventAggregator _eventAggregator;
 
     public IRoundCoinSelector GetCoinSelector()
     {
@@ -199,13 +210,14 @@ public class BTCPayWallet : IWallet, IDestinationProvider
                 }
             }
 
-            if (WabisabiStoreSettings.PlebMode || !WabisabiStoreSettings.CrossMixBetweenCoordinators)
+            if (WabisabiStoreSettings.PlebMode || WabisabiStoreSettings.CrossMixBetweenCoordinatorsMode != WabisabiStoreSettings.CrossMixMode.Always)
             {
                 utxos = utxos.Where(data =>
                         !utxoLabels.TryGetValue(data.OutPoint, out var opLabels) ||
                         opLabels.coinjoinData is null ||
-                        opLabels.coinjoinData.CoordinatorName == coordinatorName
-                        )
+                        opLabels.coinjoinData.CoordinatorName == coordinatorName ||
+                        //the next criteria is handled in our coin selector as we dnt yet have access to round parameters
+                        (WabisabiStoreSettings.CrossMixBetweenCoordinatorsMode == WabisabiStoreSettings.CrossMixMode.WhenFree))
                     .ToArray();
             }
 
@@ -327,6 +339,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
 
     public async Task RegisterCoinjoinTransaction(SuccessfulCoinJoinResult result, string coordinatorName)
     {
+        await _savingProgress;
         _savingProgress = RegisterCoinjoinTransactionInternal(result, coordinatorName);
         await _savingProgress;
     }
@@ -487,7 +500,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
                      }))}, "utxo");
 
              }
-            
+            _smartifier.Transactions.AddOrReplace(txHash, Task.FromResult(smartTx));
             //
             // var kp = await ExplorerClient.GetMetadataAsync<RootedKeyPath>(DerivationScheme,
             //     WellknownMetadataKeys.AccountKeyPath);

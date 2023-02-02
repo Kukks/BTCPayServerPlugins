@@ -138,15 +138,19 @@
             <input asp-for="BatchPayments" type="checkbox" class="form-check-input" />
             <p class="text-muted">Batch your pending payments (on-chain payouts awaiting payment) inside coinjoins.</p>
         </div>
-        <div class="form-group form-check">
-            <label asp-for="CrossMixBetweenCoordinators" class="form-check-label">Mix funds between different coordinators</label>
-            <input asp-for="CrossMixBetweenCoordinators" type="checkbox" class="form-check-input" />
+        <div class="form-group">
+            <label asp-for="CrossMixBetweenCoordinatorsMode" class="form-label">Mix funds between different coordinators</label>
+            <select asp-for="CrossMixBetweenCoordinatorsMode"  class="form-select">
+                <option value="@WabisabiStoreSettings.CrossMixMode.WhenFree">Cross mix when free</option>
+                <option value="@WabisabiStoreSettings.CrossMixMode.Always">Always cross mix</option>
+                <option value="@WabisabiStoreSettings.CrossMixMode.Never">Never cross mix</option>
+            </select>
             <p class="text-muted">Whether to allow mixed coins to be mixed within different coordinators for greater privacy (Warning: This will make your coins to lose the free remix within the same coordinator)</p>
         </div>
         <div class="form-group">
-            <label asp-for="ExtraJoinProbability" class="form-label">ExtraJoin Probability</label>
-            <input asp-for="ExtraJoinProbability" type="number" min="0" max="100" class="form-control" />
-            <p class="text-muted">Percentage probability of joining a round even if you have no payments to batch and all coins are private (Warning: a high probability will quickly eat up your balance in mining fees, suggestion:1-3%) </p>
+            <label asp-for="ExtraJoinProbability" class="form-label">Continuous Coinjoin</label>
+            <input asp-for="ExtraJoinProbability" type="number" min="0" max="100" step="any" class="form-control" />
+            <p class="text-muted">Percentage (100 = 1% reality) probability of joining a round even if you have no payments to batch and all coins are private, prevents timing analysis. (Warning: a high probability will quickly eat up your balance in mining fees) </p>
         </div>
         <div class="form-group ">
             <label asp-for="MixToOtherWallet" class="form-check-label">Send to other wallet</label>
@@ -251,12 +255,10 @@
 
                                     <tr>
                                         <th scope="row">Fee charged</th>
-                                        <td>@(round.CoordinationFeeRate.Rate * 100)%
-                                            @if (round.CoordinationFeeRate.PlebsDontPayThreshold > 0)
-                                            {
-                                                @Safe.Raw($"+ Free under {round.CoordinationFeeRate.PlebsDontPayThreshold.ToDecimal(MoneyUnit.BTC)} BTC")
-                                            }
-                                            + Free remixing
+                                        @{
+                                            var fee = $"{round.CoordinationFeeRate.Rate * 100}% + Free remixing {(round.CoordinationFeeRate.PlebsDontPayThreshold <= 0? string.Empty : $"+ Free under {round.CoordinationFeeRate.PlebsDontPayThreshold.ToDecimal(MoneyUnit.BTC)} BTC")}";
+                                        }
+                                        <td>@(fee)
                                         </td>
                                     </tr>
                                     <tr>

@@ -43,6 +43,24 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                     var percentageLeft = (effV.ToDecimal(MoneyUnit.BTC) / coin.Amount.ToDecimal(MoneyUnit.BTC));
                     // filter out low value coins where 50% of the value would be eaten up by fees
                     return effV > 0 && percentageLeft >= 0.5m;
+                })
+                .Where(coin =>
+                {
+                    
+                    if (!coin.HdPubKey.Label.Contains("coinjoin") || coin.HdPubKey.Label.Contains(utxoSelectionParameters.CoordinatorName))
+                    {
+                        return true;
+                    }
+
+                    if (_wallet.WabisabiStoreSettings.PlebMode ||
+                        _wallet.WabisabiStoreSettings.CrossMixBetweenCoordinatorsMode ==
+                        WabisabiStoreSettings.CrossMixMode.WhenFree)
+                    {
+                        return coin.Amount <= utxoSelectionParameters.CoordinationFeeRate.PlebsDontPayThreshold;
+                    }
+
+                    return false;
+                    
                 });
         var payments =
             _wallet.BatchPayments
@@ -127,7 +145,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             // {
             //still good to have a chance to proceed with a join to reduce timing analysis
 
-            var rand = Random.Shared.Next(1, 101);
+            var rand = Random.Shared.Next(1, 1001);
             if (rand > _wallet.WabisabiStoreSettings.ExtraJoinProbability)
             {
                 _logger.LogInformation($"All coins are private and we have no pending payments. Skipping join.");
