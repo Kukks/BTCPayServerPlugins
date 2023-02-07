@@ -92,15 +92,6 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         _eventAggregator = eventAggregator;
         Logger = loggerFactory.CreateLogger($"BTCPayWallet_{storeId}");
 
-        _eventAggregator.SubscribeAsync<NewTransactionEvent>(async evt =>
-        {
-            if (evt.DerivationStrategy != DerivationScheme)
-            {
-                return;
-            }
-
-            _smartifier.OnNewTransaction(evt.TransactionData.TransactionHash, evt);
-        });
     }
 
     public string StoreId { get; set; }

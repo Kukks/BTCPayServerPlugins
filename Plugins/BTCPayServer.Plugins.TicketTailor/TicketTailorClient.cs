@@ -1,4 +1,5 @@
-﻿using System;
+﻿#nullable enable
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
@@ -6,11 +7,10 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
 using NBitcoin.DataEncoders;
-using NBitcoin.Logging;
 
 namespace BTCPayServer.Plugins.TicketTailor;
 
@@ -37,10 +37,11 @@ public class TicketTailorClient : IDisposable
         return await _httpClient.GetFromJsonAsync<Event>($"/v1/events/{id}");
     }
 
-    public async Task<(IssuedTicket, string)> CreateTicket(IssueTicketRequest request)
+    public async Task<(IssuedTicket?, string? error)> CreateTicket(IssueTicketRequest request)
     {
         var data = JsonSerializer.SerializeToElement(request).EnumerateObject().Select(property =>
-            new KeyValuePair<string, string>(property.Name, property.Value.GetString())).Where(pair =>pair.Value != null);
+                new KeyValuePair<string, string>(property.Name, property.Value.GetString()))
+            .Where(pair => pair.Value != null);
 
 
         var response = await _httpClient.PostAsync($"/v1/issued_tickets", new FormUrlEncodedContent(data.ToArray()));
@@ -49,8 +50,54 @@ public class TicketTailorClient : IDisposable
             var error = await response.Content.ReadAsStringAsync();
             return (null, error);
         }
+
         return (await response.Content.ReadFromJsonAsync<IssuedTicket>(), null);
-    } 
+    }
+
+    public async Task<(Hold?, string? error)> CreateHold(CreateHoldRequest request)
+    {
+        var data = new Dictionary<string, string>();
+        data.Add("note", request.Note);
+        data.Add("event_id", request.EventId);
+        foreach (var i in request.TicketTypeId.Where(pair => pair.Value > 0))
+        {
+            data.Add($"ticket_type_id[{i.Key}]", i.Value.ToString());
+        }
+
+        var response = await _httpClient.PostAsync($"/v1/holds", new FormUrlEncodedContent(data));
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync();
+            return (null, error);
+        }
+
+        return (await response.Content.ReadFromJsonAsync<Hold>(), null);
+    }
+
+
+
+    public async Task<Hold?> GetHold(string holdId)
+    {
+        var response = await _httpClient.GetAsync($"/v1/holds/{holdId}");
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+
+        return await response.Content.ReadFromJsonAsync<Hold>();
+    }
+
+    public async Task<bool> DeleteHold(string holdId)
+    {
+        var response = await _httpClient.DeleteAsync($"/v1/holds/{holdId}");
+        if (!response.IsSuccessStatusCode)
+        {
+            return false;
+        }
+        return (await  response.Content.ReadFromJsonAsync<JsonObject>()).TryGetPropertyValue("deleted", out var jDeleted) &&
+               jDeleted.GetValue<string>() == "true";
+    }
 
 
     public async Task<IssuedTicket> GetTicket(string id)
@@ -72,12 +119,37 @@ public class TicketTailorClient : IDisposable
     public class IssueTicketRequest
     {
         [JsonPropertyName("event_id")] public string EventId { get; set; }
-        [JsonPropertyName("ticket_type_id")] public string TicketTypeId { get; set; }
         [JsonPropertyName("email")] public string Email { get; set; }
         [JsonPropertyName("full_name")] public string FullName { get; set; }
         [JsonPropertyName("reference")] public string Reference { get; set; }
-        [JsonPropertyName("barcode")] public string BarCode { get; set; }
+        [JsonPropertyName("hold_id")] public string HoldId { get; set; }
+        [JsonPropertyName("ticket_type_id")] public string TicketTypeId { get; set; }
     }
+
+    public class Hold
+    {
+
+        [JsonPropertyName("id")] public string Id { get; set; }
+        [JsonPropertyName("note")] public string Note { get; set; }
+        [JsonPropertyName("total_on_hold")] public int TotalOnHold { get; set; }
+        [JsonPropertyName("quantities")] public HoldQuantity[] Quantities { get; set; }
+    }
+
+    public class HoldQuantity
+    {
+
+        [JsonPropertyName("ticket_type_id")] public string TicketTypeId { get; set; }
+        [JsonPropertyName("quantity")] public int Quantity { get; set; }
+    }
+
+    public class CreateHoldRequest
+    {
+
+        [JsonPropertyName("event_id")] public string EventId { get; set; }
+        [JsonPropertyName("note")] public string Note { get; set; }
+        [JsonPropertyName("ticket_type_id")] public Dictionary<string, int> TicketTypeId { get; set; }
+    }
+
 
 
     public class EventEnd
@@ -134,7 +206,7 @@ public class TicketTailorClient : IDisposable
     {
         [JsonPropertyName("id")] public string Id { get; set; }
 
-        [JsonPropertyName("max_per_order")] public object MaxPerOrder { get; set; }
+        [JsonPropertyName("max_per_order")] public int? MaxPerOrder { get; set; }
 
         [JsonPropertyName("name")] public string Name { get; set; }
 
@@ -149,7 +221,7 @@ public class TicketTailorClient : IDisposable
 
         [JsonPropertyName("id")] public string Id { get; set; }
 
-        [JsonPropertyName("access_code")] public object AccessCode { get; set; }
+        [JsonPropertyName("access_code")] public string AccessCode { get; set; }
 
         [JsonPropertyName("booking_fee")] public int BookingFee { get; set; }
 
@@ -157,9 +229,9 @@ public class TicketTailorClient : IDisposable
 
         [JsonPropertyName("group_id")] public string GroupId { get; set; }
 
-        [JsonPropertyName("max_per_order")] public int MaxPerOrder { get; set; }
+        [JsonPropertyName("max_per_order")] public int? MaxPerOrder { get; set; }
 
-        [JsonPropertyName("min_per_order")] public int MinPerOrder { get; set; }
+        [JsonPropertyName("min_per_order")] public int? MinPerOrder { get; set; }
 
         [JsonPropertyName("name")] public string Name { get; set; }
 
@@ -190,13 +262,13 @@ public class TicketTailorClient : IDisposable
     public class IssuedTicket
     {
         [JsonPropertyName("id")] public string Id { get; set; }
-        
+
         [JsonPropertyName("reference")] public string Reference { get; set; }
         [JsonPropertyName("description")] public string Description { get; set; }
         [JsonPropertyName("status")] public string Status { get; set; }
 
         [JsonPropertyName("full_name")] public string FullName { get; set; }
-        
+
 
         [JsonPropertyName("qr_code_url")] public string QrCodeUrl { get; set; }
         [JsonPropertyName("barcode_url")] public string BarcodeUrl { get; set; }

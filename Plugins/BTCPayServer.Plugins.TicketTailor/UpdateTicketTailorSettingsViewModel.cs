@@ -30,4 +30,16 @@ public class TicketTailorViewModel
 {
     public TicketTailorClient.Event Event { get; set; }
     public TicketTailorSettings Settings { get; set; }
+    
+    public string Name { get; set; }
+    public string Email { get; set; }
+            
+    public PurchaseRequestItem[] Items { get; set; }
+    public string AccessCode { get; set; }
+
+    public class PurchaseRequestItem
+    {
+        public string TicketTypeId { get; set; }
+        public int Quantity { get; set; }
+    }
 }
