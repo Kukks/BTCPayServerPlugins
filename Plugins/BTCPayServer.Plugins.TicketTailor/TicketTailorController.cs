@@ -144,6 +144,12 @@ namespace BTCPayServer.Plugins.TicketTailor
                     {
                         request.Name = "Anonymous lizard";
                     }
+
+                    var nameSplit = request.Name.Split(" ", StringSplitOptions.RemoveEmptyEntries);
+                    if (nameSplit.Length < 2)
+                    {
+                        request.Name = nameSplit[0] + " Lizard";
+                    }
                     var inv = await btcpayClient.CreateInvoice(storeId,
                         new CreateInvoiceRequest()
                         {
