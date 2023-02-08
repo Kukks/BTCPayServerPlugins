@@ -1,6 +1,7 @@
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
+using BTCPayServer.Services.Apps;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace BTCPayServer.Plugins.TicketTailor
