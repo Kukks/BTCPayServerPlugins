@@ -13,12 +13,10 @@ namespace BTCPayServer.Plugins.TicketTailor
         };
         public override void Execute(IServiceCollection applicationBuilder)
         {
+            applicationBuilder.AddSingleton<IApp, TicketTailorApp>();
             applicationBuilder.AddSingleton<TicketTailorService>();
+            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("TicketTailor/NavExtension", "apps-nav"));
             applicationBuilder.AddHostedService(s=>s.GetRequiredService<TicketTailorService>());
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("TicketTailor/StoreIntegrationTicketTailorOption",
-                "store-integrations-list"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("TicketTailor/TicketTailorNav",
-                "store-integrations-nav"));
             base.Execute(applicationBuilder);
         }
     }

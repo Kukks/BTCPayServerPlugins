@@ -69,7 +69,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
                 <div class="overflow-hidden col-12 ">@Safe.Raw(Model.Event.Description)</div>
             </div>
         }
-        <form method="post" asp-controller="TicketTailor" asp-action="Purchase" asp-antiforgery="false" asp-route-storeId="@Context.GetRouteValue("storeId")">
+        <form method="post" asp-controller="UITicketTailor" asp-action="Purchase" asp-antiforgery="false" asp-route-storeId="@Context.GetRouteValue("storeId")">
             <input type="hidden" asp-for="AccessCode" value="@accessCode"/>
             <div class="row g-2 justify-content-center mb-4" id="ticket-form-container">
                 <div class="col-sm-6 col-md-4">
@@ -147,7 +147,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
                                         <h5 >@item.Name</h5>
                                         <p>@Safe.Raw(item.Description)</p>
                                     </div>
-                                    <div style="flex:1">
+                                    <div style="flex:1; text-align: end">
                                         @if (purchasable)
                                         {
                                             <div class="input-group">
@@ -167,7 +167,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
                                         }
                                         else
                                         {
-                                            <div >Unavailable</div>
+                                            <div class="btn btn-outline-secondary" disabled="disabled" >Unavailable</div>
                                         }
 
 

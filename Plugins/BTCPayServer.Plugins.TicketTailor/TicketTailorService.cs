@@ -4,16 +4,15 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using BTCPayServer.Abstractions.Contracts;
-using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Events;
 using BTCPayServer.HostedServices;
+using BTCPayServer.Services.Apps;
 using BTCPayServer.Services.Invoices;
-using Microsoft.AspNetCore.Http;
+using BTCPayServer.Services.Mails;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using MimeKit;
 using Newtonsoft.Json.Linq;
 using static System.String;
 
@@ -21,62 +20,32 @@ namespace BTCPayServer.Plugins.TicketTailor;
 
 public class TicketTailorService : EventHostedServiceBase
 {
-    private readonly ISettingsRepository _settingsRepository;
-    private readonly IMemoryCache _memoryCache;
+    private readonly AppService _appService;
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IStoreRepository _storeRepository;
     private readonly ILogger<TicketTailorService> _logger;
-    private readonly IBTCPayServerClientFactory _btcPayServerClientFactory;
-    private readonly LinkGenerator _linkGenerator;
+    private readonly InvoiceRepository _invoiceRepository;
+    private readonly EmailSenderFactory _emailSenderFactory;
 
-    public TicketTailorService(ISettingsRepository settingsRepository, IMemoryCache memoryCache,
-        IHttpClientFactory httpClientFactory,
-        IStoreRepository storeRepository, ILogger<TicketTailorService> logger,
-        IBTCPayServerClientFactory btcPayServerClientFactory, LinkGenerator linkGenerator,
-        EventAggregator eventAggregator) : base(eventAggregator, logger)
+    public TicketTailorService(
+        AppService appService,
+        IHttpClientFactory httpClientFactory,ILogger<TicketTailorService> logger,
+        EventAggregator eventAggregator, InvoiceRepository invoiceRepository, EmailSenderFactory emailSenderFactory) : base(eventAggregator, logger)
     {
-        _settingsRepository = settingsRepository;
-        _memoryCache = memoryCache;
+        _appService = appService;
         _httpClientFactory = httpClientFactory;
-        _storeRepository = storeRepository;
         _logger = logger;
-        _btcPayServerClientFactory = btcPayServerClientFactory;
-        _linkGenerator = linkGenerator;
+        _invoiceRepository = invoiceRepository;
+        _emailSenderFactory = emailSenderFactory;
     }
 
 
-    public async Task<TicketTailorSettings> GetTicketTailorForStore(string storeId)
-    {
-        var k = $"{nameof(TicketTailorSettings)}_{storeId}";
-        return await _memoryCache.GetOrCreateAsync(k, async _ =>
-        {
-            var res = await _storeRepository.GetSettingAsync<TicketTailorSettings>(storeId,
-                nameof(TicketTailorSettings));
-            if (res is not null) return res;
-            res = await _settingsRepository.GetSettingAsync<TicketTailorSettings>(k);
-
-            if (res is not null)
-            {
-                await SetTicketTailorForStore(storeId, res);
-            }
-
-            await _settingsRepository.UpdateSetting<TicketTailorSettings>(null, k);
-            return res;
-        });
-    }
-
-    public async Task SetTicketTailorForStore(string storeId, TicketTailorSettings TicketTailorSettings)
-    {
-        var k = $"{nameof(TicketTailorSettings)}_{storeId}";
-        await _storeRepository.UpdateSetting(storeId, nameof(TicketTailorSettings), TicketTailorSettings);
-        _memoryCache.Set(k, TicketTailorSettings);
-    }
 
 
     internal class IssueTicket
     {
         public string InvoiceId { get; set; }
-        public string StoreId { get; set; }
+        public string AppId { get; set; }
+        public InvoiceEntity InvoiceEntity { get; set; }
     }
 
     protected override void SubscribeToEvents()
@@ -86,105 +55,116 @@ public class TicketTailorService : EventHostedServiceBase
         base.SubscribeToEvents();
     }
 
-    public async Task<BTCPayServerClient> CreateClient(string storeId)
-    {
-        return await _btcPayServerClientFactory.Create(null, new[] {storeId});
-    }
-
     protected override async Task ProcessEvent(object evt, CancellationToken cancellationToken)
     {
         if (evt is InvoiceEvent invoiceEvent)
         {
-            if (invoiceEvent.Invoice.Metadata.OrderId != "tickettailor" || !new []{InvoiceStatus.Settled, InvoiceStatus.Expired, InvoiceStatus.Invalid}.Contains(invoiceEvent.Invoice.GetInvoiceState().Status.ToModernStatus()))
+            if (!new[] {InvoiceStatus.Settled, InvoiceStatus.Expired, InvoiceStatus.Invalid}.Contains(invoiceEvent
+                    .Invoice.GetInvoiceState().Status.ToModernStatus()))
             {
                 return;
             }
+            var apps = AppService.GetAppInternalTags(invoiceEvent.Invoice);
+            var internalTags = invoiceEvent.Invoice.GetInternalTags("");
+            var possibleTicketTailorTags = apps.ToDictionary(s=>s,s => AppService.GetAppOrderId(TicketTailorApp.AppType, s));
 
-            evt = new IssueTicket() {InvoiceId = invoiceEvent.InvoiceId, StoreId = invoiceEvent.Invoice.StoreId};
+            var matchedApps = possibleTicketTailorTags.Where(pair => internalTags.Contains(pair.Value))
+                .Select(pair => pair.Key);
+            foreach (var matchedApp in matchedApps)
+            {
+                PushEvent(new IssueTicket()
+                {
+                    AppId = matchedApp,
+                    InvoiceId = invoiceEvent.InvoiceId,
+                    InvoiceEntity = invoiceEvent.Invoice
+                });
+            }
+
+            return;
         }
 
         if (evt is not IssueTicket issueTicket)
             return;
 
-        async Task HandleIssueTicketError(JToken posData, string e, InvoiceData invoiceData,
-            BTCPayServerClient btcPayClient)
+        async Task HandleIssueTicketError(JToken posData, string e, InvoiceEntity invoiceEntity ,
+            InvoiceRepository invoiceRepository)
         {
+            
             posData["Error"] =
                 $"Ticket could not be created. You should refund customer.{Environment.NewLine}{e}";
-            invoiceData.Metadata["posData"] = posData;
-            await btcPayClient.UpdateInvoice(issueTicket.StoreId, invoiceData.Id,
-                new UpdateInvoiceRequest() {Metadata = invoiceData.Metadata}, cancellationToken);
+            invoiceEntity.Metadata.PosData = posData.ToString();
+            await invoiceRepository.UpdateInvoiceMetadata(invoiceEntity.Id, invoiceEntity.StoreId,
+                invoiceEntity.Metadata.ToJObject());
             try
             {
-                await btcPayClient.MarkInvoiceStatus(issueTicket.StoreId, invoiceData.Id,
-                    new MarkInvoiceStatusRequest() {Status = InvoiceStatus.Invalid}, cancellationToken);
+                await invoiceRepository.MarkInvoiceStatus(invoiceEntity.Id, InvoiceStatus.Invalid);
             }
             catch (Exception exception)
             {
                 _logger.LogError(exception,
-                    $"Failed to update invoice {invoiceData.Id} status from {invoiceData.Status} to Invalid after failing to issue ticket from ticket tailor");
+                    $"Failed to update invoice {invoiceEntity.Id} status from {invoiceEntity.Status} to Invalid after failing to issue ticket from ticket tailor");
             }
         }
 
-        InvoiceData invoice = null;
         try
         {
-            var settings = await GetTicketTailorForStore(issueTicket.StoreId);
+            var app = await _appService.GetApp(issueTicket.AppId, TicketTailorApp.AppType);
+            var settings = app?.GetSettings<TicketTailorSettings>();
             if (settings is null || settings.ApiKey is null)
             {
                 return;
             }
 
-            var btcPayClient = await CreateClient(issueTicket.StoreId);
-            invoice = await btcPayClient.GetInvoice(issueTicket.StoreId, issueTicket.InvoiceId, cancellationToken);
-
-            if (new[] {InvoiceStatus.Invalid, InvoiceStatus.Expired}.Contains(invoice.Status))
+            issueTicket.InvoiceEntity ??= await _invoiceRepository.GetInvoice(issueTicket.InvoiceId);
+            if (issueTicket.InvoiceEntity?.GetInternalTags("")?.Contains(AppService.GetAppOrderId(app)) is not true)
             {
-                if (invoice.Metadata.TryGetValue("holdId", out var jHoldIdx) &&
-                    jHoldIdx.Value<string>() is { } holdIdx)
+                return;
+            }
+            var holdId = issueTicket.InvoiceEntity.Metadata.GetMetadata<string?>("holdId");
+            var status = issueTicket.InvoiceEntity.Status.ToModernStatus();
+            if (new[] {InvoiceStatus.Invalid, InvoiceStatus.Expired}.Contains(status))
+            {
+                if (IsNullOrEmpty(holdId))
                 {
-                    if (await new TicketTailorClient(_httpClientFactory, settings.ApiKey).DeleteHold(holdIdx))
-                    {
-                        invoice.Metadata.Remove("holdId");
-                        invoice.Metadata.Add("holdId_deleted", holdIdx);
-                        await btcPayClient.UpdateInvoice(issueTicket.StoreId, issueTicket.InvoiceId,
-                            new UpdateInvoiceRequest()
-                            {
-                                Metadata = invoice.Metadata
-                            }, cancellationToken);
-                    }
+                    return;
                 }
 
+                if (!await new TicketTailorClient(_httpClientFactory, settings.ApiKey).DeleteHold(holdId)) return;
+                issueTicket.InvoiceEntity.Metadata.SetMetadata<string>("holdId", null);
+                issueTicket.InvoiceEntity.Metadata.SetMetadata("holdId_deleted", holdId);
+                await _invoiceRepository.UpdateInvoiceMetadata(issueTicket.InvoiceId,
+                    issueTicket.InvoiceEntity.StoreId, issueTicket.InvoiceEntity.Metadata.ToJObject());
+
                 return;
             }
 
-            if (invoice.Status != InvoiceStatus.Settled)
+            if (status!= InvoiceStatus.Settled)
             {
                 return;
             }
 
-            if (invoice.Metadata.TryGetValue("ticketIds", out var jTicketId) &&
-                jTicketId.Values<string>() is { } ticketIds)
+            var ticketIds = issueTicket.InvoiceEntity.Metadata.GetMetadata<string[]>("ticketIds");
+            if (ticketIds is not null)
+            {
+                return;
+            }
+            if (IsNullOrEmpty(holdId))
             {
                 return;
             }
 
-            if (!invoice.Metadata.TryGetValue("holdId", out var jHoldId) ||
-                jHoldId.Value<string>() is not { } holdId)
-            {
-                return;
-            }
+            var email = issueTicket.InvoiceEntity.Metadata.BuyerEmail;
+            var name = issueTicket.InvoiceEntity.Metadata.BuyerName;
 
-            if (!invoice.Metadata.TryGetValue("btcpayUrl", out var jbtcpayUrl) ||
-                jbtcpayUrl.Value<string>() is not { } btcpayUrl)
-            {
-                return;
-            }
-
-            var email = invoice.Metadata["buyerEmail"].ToString();
-            var name = invoice.Metadata["buyerName"]?.ToString();
-            invoice.Metadata.TryGetValue("posData", out var posData);
-            posData ??= new JObject();
+            JObject posData = null;
+           try
+           {
+               posData = JObject.Parse( issueTicket.InvoiceEntity.Metadata.PosData);
+           }
+           catch
+           { 
+               posData ??= new JObject();
+           }
             var client = new TicketTailorClient(_httpClientFactory, settings.ApiKey);
             try
             {
@@ -194,7 +174,7 @@ public class TicketTailorService : EventHostedServiceBase
                 var hold = await client.GetHold(holdId);
                 if (hold is null)
                 {
-                    await HandleIssueTicketError(posData, "The hold created for this invoice was not found", invoice, btcPayClient);
+                    await HandleIssueTicketError(posData, "The hold created for this invoice was not found", issueTicket.InvoiceEntity, _invoiceRepository);
 
                     return;
                     
@@ -207,7 +187,7 @@ public class TicketTailorService : EventHostedServiceBase
                     
                         var ticketResult = await client.CreateTicket(new TicketTailorClient.IssueTicketRequest()
                         {
-                            Reference = invoice.Id,
+                            Reference = issueTicket.InvoiceId,
                             Email = email,
                             EventId = settings.EventId,
                             HoldId = holdId,
@@ -231,38 +211,24 @@ public class TicketTailorService : EventHostedServiceBase
 
                 if (tickets.Count != holdOriginalAmount)
                 {
-                    await HandleIssueTicketError(posData, $"Not all the held tickets were issued because: {Join(",", errors)}", invoice, btcPayClient);
+                    await HandleIssueTicketError(posData, $"Not all the held tickets were issued because: {Join(",", errors)}", issueTicket.InvoiceEntity, _invoiceRepository);
 
                     return;
                 }
+                issueTicket.InvoiceEntity.Metadata.SetMetadata("ticketIds", tickets.Select(issuedTicket => issuedTicket.Id).ToArray());
 
-                invoice.Metadata["ticketIds"] =
-                    new JArray(tickets.Select(issuedTicket => issuedTicket.Id));
+                posData["Ticket Id"] =  new JArray(issueTicket.InvoiceEntity.Metadata.GetMetadata<string[]>("ticketIds"));
+                issueTicket.InvoiceEntity.Metadata.PosData = posData.ToString();
+                await _invoiceRepository.UpdateInvoiceMetadata(issueTicket.InvoiceId, issueTicket.InvoiceEntity.StoreId,
+                    issueTicket.InvoiceEntity.Metadata.ToJObject());
 
-                posData["Ticket Id"] = invoice.Metadata["ticketIds"];
-                invoice.Metadata["posData"] = posData;
-                await btcPayClient.UpdateInvoice(issueTicket.StoreId, invoice.Id,
-                    new UpdateInvoiceRequest() {Metadata = invoice.Metadata}, cancellationToken);
-
-                var uri = new Uri(btcpayUrl);
-                var url =
-                    _linkGenerator.GetUriByAction("Receipt",
-                        "TicketTailor",
-                        new {issueTicket.StoreId, invoiceId = invoice.Id},
-                        uri.Scheme,
-                        new HostString(uri.Host),
-                        uri.AbsolutePath);
-
+                
                 try
                 {
-                    await btcPayClient.SendEmail(issueTicket.StoreId,
-                        new SendEmailRequest()
-                        {
-                            Subject = "Your ticket is available now.",
-                            Email = email,
-                            Body =
-                                $"Your payment has been settled and the event ticket has been issued successfully. Please go to <a href='{url}'>{url}</a>"
-                        }, cancellationToken);
+
+                    var emailSender = await _emailSenderFactory.GetEmailSender(issueTicket.InvoiceEntity.StoreId);
+                    emailSender.SendEmail(MailboxAddress.Parse(email), "Your ticket is available now.",
+                        $"Your payment has been settled and the event ticket has been issued successfully. Please go to <a href='{issueTicket.InvoiceEntity.RedirectURL}'>{issueTicket.InvoiceEntity.RedirectURL}</a>");
                 }
                 catch (Exception e)
                 {
@@ -271,7 +237,7 @@ public class TicketTailorService : EventHostedServiceBase
             }
             catch (Exception e)
             {
-                await HandleIssueTicketError(posData, e.Message, invoice, btcPayClient);
+                await HandleIssueTicketError(posData, e.Message, issueTicket.InvoiceEntity, _invoiceRepository);
             }
         }
         catch (Exception ex)

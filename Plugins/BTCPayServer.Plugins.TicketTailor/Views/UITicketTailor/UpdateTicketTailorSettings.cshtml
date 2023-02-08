@@ -1,8 +1,6 @@
 ﻿@using BTCPayServer.Abstractions.Extensions
-@using BTCPayServer.Client
 @using BTCPayServer.Plugins.TicketTailor
 @using Microsoft.AspNetCore.Mvc.TagHelpers
-@using Microsoft.AspNetCore.Routing
 @using BTCPayServer.Abstractions.Contracts
 @model BTCPayServer.Plugins.TicketTailor.UpdateTicketTailorSettingsViewModel
 @inject IScopeProvider ScopeProvider
@@ -121,7 +119,7 @@
                 <input type="submit" value="Save" name="command" class="btn btn-primary"/>
                 @if (this.ViewContext.ModelState.IsValid && Model.EventId is not null)
                 {
-                    <a class="btn btn-secondary" href=" @Url.Action("View", "TicketTailor", new {storeId})">
+                    <a class="btn btn-secondary" href=" @Url.Action("View", "UITicketTailor", new {storeId})">
                         Ticket purchase page
                     </a>
                 }

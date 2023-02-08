@@ -32,7 +32,7 @@ public class TicketTailorClient : IDisposable
         return (await _httpClient.GetFromJsonAsync<DataHolder<Event[]>>("/v1/events"))?.Data;
     }
 
-    public async Task<Event> GetEvent(string id)
+    public async Task<Event?> GetEvent(string id)
     {
         return await _httpClient.GetFromJsonAsync<Event>($"/v1/events/{id}");
     }

@@ -1,0 +1,18 @@
+@using BTCPayServer
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Plugins.TicketTailor
+@using BTCPayServer.Views.Apps
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using BTCPayServer.Client
+@model BTCPayServer.Components.MainNav.StoreApp
+@{ var store = Context.GetStoreData(); }
+
+@if (store != null && Model.AppType == TicketTailorApp.AppType)
+{
+    <li class="nav-item" permission="@Policies.CanModifyStoreSettings">
+        <a asp-area="" asp-controller="UITicketTailor" asp-action="UpdateTicketTailorSettings" asp-route-appId="@Model.Id" class="nav-link @ViewData.IsActivePage(AppsNavPages.Update, Model.Id)" id="@($"StoreNav-App-{Model.Id}")">
+            <img style="width:14px; margin-right: 10px;" class="icon" src="~/Resources/assets/tt.png" />
+            <span>@Model.AppName</span>
+        </a>
+    </li>
+}
