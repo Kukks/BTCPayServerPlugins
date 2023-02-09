@@ -4,14 +4,21 @@ var plugins = Directory.GetDirectories("../../../../Plugins");
 var p = "";
 foreach (var plugin in plugins)
 {
-    var x = Directory.GetDirectories(Path.Combine(plugin,"bin"));
-    if (x.Any(s => s.EndsWith("Altcoins-Debug")))
+    try
     {
-        p += $"{Path.GetFullPath(plugin)}/bin/Altcoins-Debug/net6.0/{Path.GetFileName(plugin)}.dll;";
+        var x = Directory.GetDirectories(Path.Combine(plugin, "bin"));
+        if (x.Any(s => s.EndsWith("Altcoins-Debug")))
+        {
+            p += $"{Path.GetFullPath(plugin)}/bin/Altcoins-Debug/net6.0/{Path.GetFileName(plugin)}.dll;";
+        }
+        else
+        {
+            p += $"{Path.GetFullPath(plugin)}/bin/Debug/net6.0/{Path.GetFileName(plugin)}.dll;";
+        }
     }
-    else
+    catch (Exception e)
     {
-        p += $"{Path.GetFullPath(plugin)}/bin/Debug/net6.0/{Path.GetFileName(plugin)}.dll;";
+        Console.WriteLine(e);
     }
 }
 
