@@ -1,0 +1,145 @@
+﻿@using BTCPayServer.Abstractions.Extensions
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@model Nip5StoreSettings
+@{
+    ViewData.SetActivePage("Nostr NIP05", "Nostr NIP05", "Nostr NIP05");
+}
+
+<partial name="_StatusMessage"/>
+
+<h2 class="mb-4">@ViewData["Title"]</h2>
+
+<div class="row">
+    <div class="col-md-10">
+        <form method="post">
+            <div class="row">
+                <div class="form-group">
+                    <label asp-for="Name" class="form-label"></label>
+                    <input asp-for="Name" class="form-control"/>
+                    <span asp-validation-for="Name" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <label asp-for="PubKey" class="form-label"></label>
+                    <input asp-for="PubKey" class="form-control"/>
+                    <span asp-validation-for="PubKey" class="text-danger"></span>
+                </div>
+            </div>
+            <div class="row">
+                <table class="table table-responsive col-12">
+                    <thead>
+                    <tr>
+                        <th>
+                            Relay
+                        </th>
+                        <th class="text-end">
+                            Actions
+                        </th>
+                    </tr>
+                    </thead>
+                    <tbody id="relay-list">
+                    @if (Model.Relays is not null)
+                    {
+                        @for (var index = 0; index < Model.Relays.Length; index++)
+                        {
+                            <tr data-index="@index">
+                                <td>
+                                    <input class="form-control" type="text" asp-for="Relays[index]">
+                                </td>
+                                <td  class="text-end">
+                                    <button class="btn btn-link" type="button" data-remove>Remove</button>
+                                </td>
+                            </tr>
+                        }
+                    }
+                    </tbody>
+                </table>
+
+            </div>
+            <div class="row">
+                <div class="d-flex">
+                <button type="button" id="add-relay" class="btn btn-outline-secondary mx-2">Add Relay</button>
+                <button name="command" type="submit" value="save" class="btn btn-primary  mx-2">Submit</button>
+                <button name="command" type="button" class="btn btn-primary  mx-2 " style="display: none" id="import">Import wth nostr extension</button>
+                @if (Model.Name is not null)
+                {
+                    <button name="command" type="submit" value="remove" class="btn btn-danger">Clear</button>
+                }
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<template id="row">
+    <tr data-index="-1">
+        <td>
+            <input type="text" class="form-control">
+        </td>
+        <td  class="text-end">
+            <button class="btn btn-link" type="button" data-remove>Remove</button>
+        </td>
+    </tr>
+</template>
+
+<script >
+document.addEventListener("DOMContentLoaded", ()=>{
+
+        const importbtn=  document.getElementById("import");
+        importbtn.style.display = "block";
+        importbtn.addEventListener("click", async ()=>{
+            document.getElementById("PubKey").value = await window.nostr.getPublicKey();
+            const relays = await window.nostr.getRelays();
+         
+            Object.entries(relays).forEach(entry => {
+                const [key, value] = entry;
+           
+                if (!document.querySelector(`[value='${key}']`)){
+               
+                    const template = document.querySelector('#row');
+                    const clone = template.content.cloneNode(true);
+                    clone.querySelector("input").value = key;
+                    clone.querySelector("input").setAttribute("value", key);
+                    document.getElementById("relay-list").appendChild(clone);
+                    setIndex();
+                    setupRemoveBtn();
+                }
+            });
+        });
+    
+    
+    setupRemoveBtn();
+
+    document.getElementById("add-relay").addEventListener("click", ()=>{
+        const template = document.querySelector('#row');
+        const clone = template.content.cloneNode(true);
+        document.getElementById("relay-list").appendChild(clone);
+        setIndex();
+    setupRemoveBtn();
+        
+    });
+    
+    
+    
+    function setupRemoveBtn(){
+        document.querySelectorAll("[data-remove]").forEach(value =>{
+                value.removeEventListener("click",onRemoveRelay )
+                 value.addEventListener("click",onRemoveRelay );
+                
+            });
+    }
+    
+    
+    function onRemoveRelay(evt){
+        evt.target.parentElement.parentElement.remove();    
+        setIndex();
+        
+    }
+    
+    function setIndex(){
+         document.querySelectorAll("[data-index]").forEach((value, key) => {
+                        value.setAttribute("data-index", key);
+                        value.querySelector("input").name = `Relays[${key}]`;
+                    })
+    }
+});
+</script>

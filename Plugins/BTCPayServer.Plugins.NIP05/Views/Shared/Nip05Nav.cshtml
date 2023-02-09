@@ -1,0 +1,19 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Client
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+}
+@if (!string.IsNullOrEmpty(storeId))
+{
+    <li class="nav-item">
+        <a asp-controller="Nip5" asp-action="Edit" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Nostr NIP05")" id="Nav-NIP05"
+           permission="@Policies.CanModifyStoreSettings">
+            <svg role="img" class="icon">
+                        </svg>
+            <span>NIP05</span>
+        </a>
+    </li>
+}
