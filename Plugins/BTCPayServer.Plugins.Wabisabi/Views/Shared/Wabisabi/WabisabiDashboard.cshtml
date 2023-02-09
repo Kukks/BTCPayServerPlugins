@@ -63,9 +63,7 @@
         }
         else
         {
-            <div class="widget store-wallet-balance " style="
-    max-height: 500px;
-    overflow-y: auto;">
+            <div class="widget store-wallet-balance" >
                 <header>
                     <h3>Recent Coinjoins</h3>
                     @if (cjHistory.Any())
@@ -97,9 +95,7 @@
 
             var privacyPercentage = Math.Round(privacy * 100);
             var colorCoins = coins.GroupBy(coin => coin.CoinColor(wallet.AnonymitySetTarget)).ToDictionary(grouping => grouping.Key, grouping => grouping);
-            <div class="widget store-numbers" style="
-                                                  max-height: 500px;
-                                                  overflow-y: auto;">
+            <div class="widget store-numbers" >
 
             @if (wallet is BTCPayWallet btcPayWallet)
             {

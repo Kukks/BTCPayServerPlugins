@@ -1,0 +1,34 @@
+﻿@using Microsoft.AspNetCore.Mvc.TagHelpers
+@model BTCPayServer.Plugins.Wabisabi.AffiliateServer.WabisabiAffiliateSettings
+@{
+    Layout = "../Shared/_NavLayout.cshtml";
+    ViewData["NavPartialName"] = "../UIServer/_Nav";
+}
+
+<h2 class="mb-4">Coinjoin affiliate configuration</h2>
+
+<form method="post">
+    <div class="row">
+        <div class="col-xxl-constrain col-xl-8">
+            <div class="form-group form-check">
+                <label asp-for="Enabled" class="form-check-label">Enable </label>
+                <input asp-for="Enabled" type="checkbox" class="form-check-input"/>
+            </div>
+
+            <div class="form-group pt-3">
+                <label class="form-label" for="config">Coordinator Key</label>
+
+                <input type="text" class="form-control " asp-for="SigningKey">
+                </input>
+            </div>
+        </div>
+    </div>
+
+    <button name="command" type="submit" value="save" class="btn btn-primary mt-2">Save</button>
+
+
+</form>
+
+@section PageFootContent {
+    <partial name="_ValidationScriptsPartial"/>
+}

@@ -46,7 +46,12 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                 })
                 .Where(coin =>
                 {
-                    
+                    if (!_wallet.WabisabiStoreSettings.PlebMode &&
+                        _wallet.WabisabiStoreSettings.CrossMixBetweenCoordinatorsMode ==
+                        WabisabiStoreSettings.CrossMixMode.Always)
+                    {
+                        return true;
+                    }
                     if (!coin.HdPubKey.Label.Contains("coinjoin") || coin.HdPubKey.Label.Contains(utxoSelectionParameters.CoordinatorName))
                     {
                         return true;

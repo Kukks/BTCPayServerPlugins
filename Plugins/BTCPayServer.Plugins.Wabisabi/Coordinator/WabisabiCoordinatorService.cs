@@ -150,7 +150,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
                 cacheKey,
                 action: async (_, cancellationToken) =>
                 {
-                    var result = await _explorerClient.GetFeeRateAsync(confirmationTarget, cancellationToken);
+                    var result = await _explorerClient.GetFeeRateAsync(confirmationTarget, new FeeRate(100m), cancellationToken);
                     return new EstimateSmartFeeResponse() {FeeRate = result.FeeRate, Blocks = result.BlockCount};
                 },
                 options: CacheOptionsWithExpirationToken(size: 1, expireInSeconds: 60),

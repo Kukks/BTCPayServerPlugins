@@ -163,14 +163,10 @@ namespace BTCPayServer.Plugins.Wabisabi
                     return View(vm);
 
                 case "save":
-                    foreach (WabisabiStoreCoordinatorSettings settings in vm.Settings)
-                    {
-                        vm.InputLabelsAllowed = vm.InputLabelsAllowed.Where(s => !string.IsNullOrEmpty(s)).Distinct()
-                            .ToList();
-                        vm.InputLabelsExcluded = vm.InputLabelsExcluded.Where(s => !string.IsNullOrEmpty(s)).Distinct()
-                            .ToList();
-                    }
-
+                    vm.InputLabelsAllowed = vm.InputLabelsAllowed.Where(s => !string.IsNullOrEmpty(s)).Distinct()
+                        .ToList();
+                    vm.InputLabelsExcluded = vm.InputLabelsExcluded.Where(s => !string.IsNullOrEmpty(s)).Distinct()
+                        .ToList();
                     await _WabisabiService.SetWabisabiForStore(storeId, vm);
                     TempData["SuccessMessage"] = "Wabisabi settings modified";
                     return RedirectToAction(nameof(UpdateWabisabiStoreSettings), new {storeId});
