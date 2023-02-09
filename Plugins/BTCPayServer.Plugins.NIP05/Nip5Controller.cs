@@ -105,6 +105,7 @@ public class Nip5Controller : Controller
     [HttpGet("~/.well-known/nostr.json")]
     [EnableCors(CorsPolicies.All)]
     [IgnoreAntiforgeryToken]
+    [AllowAnonymous]
     public async Task<IActionResult> GetUser([FromQuery] string name)
     {
         var result = await Get(name);
