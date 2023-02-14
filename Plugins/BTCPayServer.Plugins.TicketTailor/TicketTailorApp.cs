@@ -163,4 +163,35 @@ public class TicketTailorApp : IApp
         return itemCount;
             
     }
+
+    public async Task<object> GetInfo(AppData app)
+    {
+        var config = app.GetSettings<TicketTailorSettings>();
+        try
+        {
+            if (config?.ApiKey is not null && config?.EventId is not null)
+            {
+                var client = new TicketTailorClient(_httpClientFactory, config.ApiKey);
+                var evt = await client.GetEvent(config.EventId);
+                return evt is null ? null : new TicketTailorViewModel() {Event = evt, Settings = config};
+            }
+        }
+        catch
+        {
+            // ignored
+        }
+
+        return null;
+    }
+
+    public Task SetDefaultSettings(AppData appData, string defaultCurrency)
+    {
+        appData.SetSettings(new TicketTailorSettings());
+        return Task.CompletedTask;
+    }
+
+    public string ViewLink(AppData app)
+    {
+        return _linkGenerator.GetPathByAction("View", "UITicketTailor", new {appId = app.Id}, _options.RootPath);
+    }
 }

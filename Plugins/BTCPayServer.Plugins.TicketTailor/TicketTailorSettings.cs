@@ -1,9 +1,11 @@
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace BTCPayServer.Plugins.TicketTailor
 {
     public class TicketTailorSettings
     {
+        [Newtonsoft.Json.JsonIgnore][JsonIgnore]
         public string ApiKey { get; set; }
         public string EventId { get; set; }
 
