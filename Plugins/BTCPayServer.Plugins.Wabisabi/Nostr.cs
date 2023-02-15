@@ -17,22 +17,50 @@ public class Nostr
 
     public static async Task Publish(
         Uri relayUri,
-        Network currentNetwork,
-        string key,
-        Uri coordinatorUri,
-        string description,
+        NostrEvent[] evts,
         CancellationToken cancellationToken )
     {
 
         var ct = CancellationTokenSource
             .CreateLinkedTokenSource(cancellationToken, new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token)
             .Token;
-        var privateKey = NostrExtensions.ParseKey(key);
         var client = new NostrClient(relayUri);
         await client.ConnectAndWaitUntilConnected(ct);
         _ = client.ListenForMessages();
-        TaskCompletionSource tcs = new TaskCompletionSource();
+        var tcs = new TaskCompletionSource();
        
+        var ids = evts.Select(evt => evt.Id).ToHashSet();
+        
+        
+        client.EventsReceived += (sender, tuple) =>
+        {
+            if (ids.RemoveWhere(s => tuple.events.Any(@event => @event.Id == s)) > 0 && !ids.Any())
+            {
+                tcs.TrySetResult();   
+            }
+        };
+        await client.CreateSubscription("ack", new[]
+        {
+            new NostrSubscriptionFilter()
+            {
+                Ids = ids.ToArray()
+            }
+        }, ct);
+        foreach (var evt in evts)
+        {
+            await client.PublishEvent(evt, ct);
+        }
+        await tcs.Task.WithCancellation(ct);
+        await client.CloseSubscription("ack", ct);
+        client.Dispose();
+    }
+
+    public static async Task<NostrEvent> CreateCoordinatorDiscoveryEvent(Network currentNetwork,
+        string key,
+        Uri coordinatorUri,
+        string description)
+    {
+        var privateKey = NostrExtensions.ParseKey(key);
         var evt = new NostrEvent()
         {
             Kind = Kind,
@@ -42,37 +70,12 @@ public class Nostr
             Tags = new List<NostrEventTag>()
             {
                 new() {TagIdentifier = "uri", Data = new List<string>() {new Uri(coordinatorUri, "plugins/wabisabi-coordinator").ToString()}},
-                new() {TagIdentifier = "network", Data = new List<string>() {currentNetwork.Name}}
+                new() {TagIdentifier = "network", Data = new List<string>() {currentNetwork.Name.ToLower()}}
             }
         };
+        
         await evt.ComputeIdAndSign(privateKey);
-        client.EventsReceived += (sender, tuple) =>
-        {
-            if (tuple.events.Any(@event => @event.Id == evt.Id))
-            {
-                tcs.TrySetResult();
-            }
-        };
-        client.MessageReceived += (sender, tuple) =>
-        {
-            if (tuple.StartsWith($"[\"OK\",\"{evt.Id}\",true"))
-            {
-                
-                tcs.TrySetResult();
-            }
-            Console.WriteLine(tuple);
-        };
-        await client.CreateSubscription("ack", new[]
-        {
-            new NostrSubscriptionFilter()
-            {
-                Ids = new[] {evt.Id}
-            }
-        }, ct);
-        await client.PublishEvent(evt, ct);
-        await tcs.Task.WithCancellation(ct);
-        await client.CloseSubscription("ack", ct);
-        client.Dispose();
+        return evt;
     }
 
     public static async Task<List<DiscoveredCoordinator>> Discover(

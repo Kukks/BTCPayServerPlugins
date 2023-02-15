@@ -198,9 +198,16 @@ public class WabisabiCoordinatorService : PeriodicRunner
     {
         var network = _clientProvider.GetExplorerClient("BTC").Network.NBitcoinNetwork;
         var s = await GetSettings();
-        if (s.Enabled && !string.IsNullOrEmpty(s.NostrIdentity) && s.NostrRelay is not null && s.UriToAdvertise is not null)
+        if (s.Enabled && !string.IsNullOrEmpty(s.NostrIdentity) && s.NostrRelay is not null &&
+            s.UriToAdvertise is not null)
         {
-            await Nostr.Publish(s.NostrRelay, network, s.NostrIdentity, s.UriToAdvertise, s.CoordinatorDescription,cancel);
+
+            await Nostr.Publish(s.NostrRelay,
+                new[]
+                {
+                    await Nostr.CreateCoordinatorDiscoveryEvent(network, s.NostrIdentity, s.UriToAdvertise,
+                        s.CoordinatorDescription)
+                }, cancel);
         }
     }
 }

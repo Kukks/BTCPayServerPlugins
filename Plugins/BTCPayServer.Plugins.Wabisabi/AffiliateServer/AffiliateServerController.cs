@@ -13,6 +13,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NBitcoin.DataEncoders;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using WalletWasabi.Affiliation.Models;
 using WalletWasabi.Affiliation.Models.CoinjoinRequest;
 
@@ -85,6 +87,7 @@ public class AffiliateServerController:Controller
     [HttpPost("get_coinjoin_request")]
     public async Task<IActionResult> GetCoinjoinRequest([FromBody] GetCoinjoinRequestRequest request)
     {
+        
         var settings = await _settingsRepository.GetSettingAsync<WabisabiAffiliateSettings>();
         if (settings?.Enabled is not true)
         {
@@ -98,19 +101,15 @@ public class AffiliateServerController:Controller
         try
         {
 
-        var valid = ecdsa.VerifyData(payload.GetCanonicalSerialization(), request.Signature, HashAlgorithmName.SHA256);
-        if(!valid)
-            return NotFound();
+            var valid = ecdsa.VerifyData(payload.GetCanonicalSerialization(), request.Signature, HashAlgorithmName.SHA256);
+            if(!valid)
+                return NotFound();
         
-        var path = Path.Combine(_dataDirectories.Value.DataDir, "Plugins", "CoinjoinAffiliate", "History.txt");
-        string rawBody;
-        using (StreamReader reader = new StreamReader(Request.Body, Encoding.UTF8))
-        {
-            rawBody = (await reader.ReadToEndAsync());
-        }
-
-        await System.IO.File.AppendAllLinesAsync(path, new[] {rawBody.Replace(Environment.NewLine, "")}, Encoding.UTF8);
-        return Ok(new GetCoinjoinRequestResponse(Array.Empty<byte>()));
+            var path = Path.Combine(_dataDirectories.Value.DataDir, "Plugins", "CoinjoinAffiliate", "History.txt");
+            
+            
+            await System.IO.File.AppendAllLinesAsync(path, new[] {JObject.FromObject(request).ToString(Formatting.None).Replace(Environment.NewLine, "")}, Encoding.UTF8);
+            return Ok(new GetCoinjoinRequestResponse(Array.Empty<byte>()));
         
         }
         catch (Exception e)

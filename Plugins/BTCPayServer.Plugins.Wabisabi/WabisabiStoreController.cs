@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using AngleSharp.Dom.Events;
@@ -11,17 +12,22 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Common;
+using BTCPayServer.Data;
 using BTCPayServer.Filters;
 using BTCPayServer.Models.WalletViewModels;
+using BTCPayServer.Security;
 using BTCPayServer.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using NBitcoin;
 using NBitcoin.Payment;
+using NBitcoin.Secp256k1;
 using NBXplorer;
 using Newtonsoft.Json.Linq;
 using NNostr.Client;
+using Org.BouncyCastle.Security;
 using WalletWasabi.Backend.Controllers;
 using WalletWasabi.Blockchain.TransactionBuilding;
 using WalletWasabi.Blockchain.TransactionOutputs;
@@ -38,19 +44,25 @@ namespace BTCPayServer.Plugins.Wabisabi
         private readonly IBTCPayServerClientFactory _btcPayServerClientFactory;
         private readonly IExplorerClientProvider _explorerClientProvider;
         private readonly WabisabiCoordinatorService _wabisabiCoordinatorService;
+        private readonly IAuthorizationService _authorizationService;
+        private readonly UserManager<ApplicationUser> _userManager;
         private readonly WabisabiCoordinatorClientInstanceManager _instanceManager;
 
         public WabisabiStoreController(WabisabiService WabisabiService, WalletProvider walletProvider,
             IBTCPayServerClientFactory btcPayServerClientFactory,
             IExplorerClientProvider explorerClientProvider,
             WabisabiCoordinatorService wabisabiCoordinatorService,
-            WabisabiCoordinatorClientInstanceManager instanceManager)
+            WabisabiCoordinatorClientInstanceManager instanceManager, 
+            IAuthorizationService authorizationService,
+            UserManager<ApplicationUser> userManager)
         {
             _WabisabiService = WabisabiService;
             _walletProvider = walletProvider;
             _btcPayServerClientFactory = btcPayServerClientFactory;
             _explorerClientProvider = explorerClientProvider;
             _wabisabiCoordinatorService = wabisabiCoordinatorService;
+            _authorizationService = authorizationService;
+            _userManager = userManager;
             _instanceManager = instanceManager;
         }
 
@@ -89,11 +101,27 @@ namespace BTCPayServer.Plugins.Wabisabi
                     coordSettings = await _wabisabiCoordinatorService.GetSettings();
                     var relay = commandIndex ??
                                 coordSettings?.NostrRelay.ToString();
-
+var network = _explorerClientProvider.GetExplorerClient("BTC").Network.NBitcoinNetwork;
+                    
                     if (Uri.TryCreate(relay, UriKind.Absolute, out var relayUri))
                     {
+
+                        if (network.ChainName == ChainName.Regtest)
+                        {
+                            var evts = new List<NostrEvent>();
+                            for (int i = 0; i < SecureRandom.Shared.Next(1, 10); i++)
+                            {
+                                ECPrivKey.TryCreate(new ReadOnlySpan<byte>(RandomNumberGenerator.GetBytes(32)),
+                                    out var key);
+                                evts.Add(await Nostr.CreateCoordinatorDiscoveryEvent(network, key.ToHex(),
+                                    new Uri($"https://{Guid.NewGuid()}.com"), "fake regtest coord test"));
+                            }
+
+                            await Nostr.Publish(relayUri, evts.ToArray(), CancellationToken.None);
+                        }
+
                         ViewBag.DiscoveredCoordinators = await Nostr.Discover(relayUri,
-                            _explorerClientProvider.GetExplorerClient("BTC").Network.NBitcoinNetwork,
+                            network,
                             coordSettings.Key?.CreateXOnlyPubKey().ToHex(), CancellationToken.None);
                     }
                     else
@@ -102,31 +130,12 @@ namespace BTCPayServer.Plugins.Wabisabi
                     }
 
                     return View(vm);
-                case "add-coordinator":
-                    var name = commandIndex;
-                    var uri = coordinator;
-
-                    coordSettings = await _wabisabiCoordinatorService.GetSettings();
-                    if (coordSettings.DiscoveredCoordinators.All(discoveredCoordinator =>
-                            discoveredCoordinator.Name != name))
-                    {
-                        coordSettings.DiscoveredCoordinators.Add(new DiscoveredCoordinator() {Name = name,});
-                        await _wabisabiCoordinatorService.UpdateSettings(coordSettings);
-                        _instanceManager.AddCoordinator($"nostr[{name}]", name, provider => new Uri(uri));
-
-                        TempData["SuccessMessage"] = $"Coordinator {commandIndex} added and started";
-                        return RedirectToAction(nameof(UpdateWabisabiStoreSettings), new {storeId});
-                    }
-
-                    else
-                    {
-                        TempData["ErrorMessage"] =
-                            $"Coordinator {commandIndex} could not be added because the name was not unique";
-                        return View(vm);
-                    }
-
-                    break;
+                
                 case "remove-coordinator":
+                    if (!(await _authorizationService.AuthorizeAsync(User, null,
+                            new PolicyRequirement(Policies.CanModifyServerSettings))).Succeeded)
+                    { return View(vm);
+                    }
                     coordSettings = await _wabisabiCoordinatorService.GetSettings();
                     if (coordSettings.DiscoveredCoordinators.RemoveAll(discoveredCoordinator =>
                             discoveredCoordinator.Name == commandIndex) > 0)
@@ -176,6 +185,30 @@ namespace BTCPayServer.Plugins.Wabisabi
             }
         }
 
+        [HttpPost("add-coordinator")]
+        [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie, Policy = Policies.CanModifyServerSettings)]
+        public async Task<IActionResult> AddCoordinator(string storeId, [FromForm] DiscoveredCoordinator viewModel)
+        {
+            var coordSettings = await _wabisabiCoordinatorService.GetSettings();
+           
+            if (viewModel.Name is not null && viewModel.Uri is not null  && coordSettings.DiscoveredCoordinators.All(discoveredCoordinator =>
+                    discoveredCoordinator.Name != viewModel.Name  && discoveredCoordinator.Uri != viewModel.Uri))
+            {
+                coordSettings.DiscoveredCoordinators.Add(viewModel);
+                await _wabisabiCoordinatorService.UpdateSettings(coordSettings);
+                _instanceManager.AddCoordinator(viewModel.Name, viewModel.Name, provider => viewModel.Uri);
+
+                TempData["SuccessMessage"] = $"Coordinator {viewModel.Name } added and started";
+            }
+
+            else
+            {
+                TempData["ErrorMessage"] =
+                    $"Coordinator {viewModel.Name} could not be added because the name/url was not unique";
+            }
+            return RedirectToAction(nameof(UpdateWabisabiStoreSettings), new {storeId});
+        }
+        
         [Route("coinjoins")]
         public async Task<IActionResult> ListCoinjoins(string storeId, CoinjoinsViewModel viewModel,
             [FromServices] WalletRepository walletRepository)

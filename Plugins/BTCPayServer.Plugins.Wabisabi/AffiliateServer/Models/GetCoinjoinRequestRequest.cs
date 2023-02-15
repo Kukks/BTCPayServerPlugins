@@ -6,11 +6,6 @@ namespace WalletWasabi.Affiliation.Models;
 
 public record GetCoinjoinRequestRequest
 {
-	public GetCoinjoinRequestRequest(Body body, byte[] signature)
-	{
-		Body = body;
-		Signature = signature;
-	}
 
 	[JsonProperty(PropertyName = "signature")]
 	[JsonConverter(typeof(AffiliationByteArrayJsonConverter))]

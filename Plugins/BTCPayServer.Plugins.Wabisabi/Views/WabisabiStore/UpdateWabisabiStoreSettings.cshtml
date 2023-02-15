@@ -74,7 +74,7 @@
         @if (btcPayWallet.OnChainPaymentMethodData?.Enabled is not true)
         {
             <div class="alert alert-danger d-flex align-items-center" role="alert">
-                <vc:icon symbol="warning" />
+                <vc:icon symbol="warning"/>
                 <span class="ms-3">This wallet is not enabled in your store settings and will not be able to participate in coinjoins..</span>
 
                 <button name="command" type="submit" value="check" class="btn btn-text">Refresh</button>
@@ -83,7 +83,7 @@
         else if (!((BTCPayKeyChain) wallet.KeyChain).KeysAvailable)
         {
             <div class="alert alert-danger d-flex align-items-center" role="alert">
-                <vc:icon symbol="warning" />
+                <vc:icon symbol="warning"/>
                 <span class="ms-3">This wallet is not a hot wallet and will not be able to participate in coinjoins.</span>
 
                 <button name="command" type="submit" value="check" class="btn btn-text">Refresh</button>
@@ -121,26 +121,26 @@
             <label asp-for="AnonymitySetTarget" class="form-label">Use Anon score model</label>
             <input type="number" class="form-control" asp-for="AnonymitySetTarget" placeholder="target anon score">
 
-            <p class="text-muted">Scores your coinjoined utxos based on how many other utxos in the coinjoin (and other previous coinjoin rounds) had the same value.<br /> Anonset score computation is not an exact science, and when using coordinators with massive liquidity, is not that important as all rounds (past, present, future) contribute to your privacy.</p>
+            <p class="text-muted">Scores your coinjoined utxos based on how many other utxos in the coinjoin (and other previous coinjoin rounds) had the same value.<br/> Anonset score computation is not an exact science, and when using coordinators with massive liquidity, is not that important as all rounds (past, present, future) contribute to your privacy.</p>
         </div>
         <div class="form-group form-check">
             <label asp-for="ConsolidationMode" class="form-check-label">Coinsolidation mode</label>
-            <input asp-for="ConsolidationMode" type="checkbox" class="form-check-input" />
+            <input asp-for="ConsolidationMode" type="checkbox" class="form-check-input"/>
             <p class="text-muted">Feed as many coins to the coinjoin as possible.</p>
         </div>
         <div class="form-group form-check">
             <label asp-for="RedCoinIsolation" class="form-check-label">Cautious coinjoin entry mode </label>
-            <input asp-for="RedCoinIsolation" type="checkbox" class="form-check-input" />
+            <input asp-for="RedCoinIsolation" type="checkbox" class="form-check-input"/>
             <p class="text-muted">Only allow a single non-private coin into a coinjoin.</p>
         </div>
         <div class="form-group form-check">
             <label asp-for="BatchPayments" class="form-check-label">Batch payments</label>
-            <input asp-for="BatchPayments" type="checkbox" class="form-check-input" />
+            <input asp-for="BatchPayments" type="checkbox" class="form-check-input"/>
             <p class="text-muted">Batch your pending payments (on-chain payouts awaiting payment) inside coinjoins.</p>
         </div>
         <div class="form-group">
             <label asp-for="CrossMixBetweenCoordinatorsMode" class="form-label">Mix funds between different coordinators</label>
-            <select asp-for="CrossMixBetweenCoordinatorsMode"  class="form-select">
+            <select asp-for="CrossMixBetweenCoordinatorsMode" class="form-select">
                 <option value="@WabisabiStoreSettings.CrossMixMode.WhenFree">Cross mix when free</option>
                 <option value="@WabisabiStoreSettings.CrossMixMode.Always">Always cross mix</option>
                 <option value="@WabisabiStoreSettings.CrossMixMode.Never">Never cross mix</option>
@@ -149,7 +149,7 @@
         </div>
         <div class="form-group">
             <label asp-for="ExtraJoinProbability" class="form-label">Continuous Coinjoin</label>
-            <input asp-for="ExtraJoinProbability" type="number" min="0" max="100" step="any" class="form-control" />
+            <input asp-for="ExtraJoinProbability" type="number" min="0" max="100" step="any" class="form-control"/>
             <p class="text-muted">Percentage (100 = 1% reality) probability of joining a round even if you have no payments to batch and all coins are private, prevents timing analysis. (Warning: a high probability will quickly eat up your balance in mining fees) </p>
         </div>
         <div class="form-group ">
@@ -170,7 +170,7 @@
                 {
                     <div class="list-group-item">
                         <div class="input-group input-group-sm">
-                            <input asp-for="InputLabelsAllowed[xIndex]" type="text" class="form-control" />
+                            <input asp-for="InputLabelsAllowed[xIndex]" type="text" class="form-control"/>
                             <button name="command" value="include-label-remove:@Model.InputLabelsAllowed[xIndex]" type="submit" class="btn btn-secondary btn-sm">Remove</button>
                         </div>
                     </div>
@@ -193,7 +193,7 @@
                     <div class="list-group-item">
 
                         <div class="input-group input-group-sm">
-                            <input asp-for="InputLabelsExcluded[xIndex]" type="text" class="form-control" />
+                            <input asp-for="InputLabelsExcluded[xIndex]" type="text" class="form-control"/>
                             <button name="command" value="exclude-label-remove:@Model.InputLabelsExcluded[xIndex]" type="submit" class="btn btn-secondary btn-sm">Remove</button>
                         </div>
                     </div>
@@ -209,7 +209,7 @@
 
 @for (var index = 0; index < Model.Settings.Count; index++)
 {
-    <input asp-for="Settings[index].Coordinator" type="hidden" />
+    <input asp-for="Settings[index].Coordinator" type="hidden"/>
     var s = Model.Settings[index];
 
     if (!WabisabiCoordinatorClientInstanceManager.HostedServices.TryGetValue(s.Coordinator, out var coordinator))
@@ -222,7 +222,10 @@
                 <div class="d-flex">
 
                     <h3>@coordinator.CoordinatorDisplayName</h3>
-
+                    @if (coordinator.CoordinatorName != "local" && coordinator.CoordinatorName != "zksnacks")
+                    {
+                        <button name="command" type="submit" value="remove-coordinator:@(coordinator.CoordinatorName)" class="btn btn-link txt-danger" permission="@Policies.CanModifyServerSettings">Remove</button>
+                    }
                 </div>
 
                 <span class="text-muted">@coordinator.Coordinator</span>
@@ -238,75 +241,76 @@
 
                         </p>
                     }
-                    
-            @if (coordinator.RoundStateUpdater.AnyRound)
-            {
-                var round = coordinator.RoundStateUpdater.RoundStates.Last().Value.CoinjoinState.Parameters;
-                
-                <div class="modal modal-lg fade" id="config-@s.Coordinator">
-                    <div class="modal-dialog">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title" id="exampleModalLabel">@coordinator.CoordinatorDisplayName Last round parameters </h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                            </div>
-                            <div class="modal-body" style="white-space: pre-line">
-                                <table class="table table-responsive my-0">
 
-                                    <tr>
-                                        <th scope="row">Fee charged</th>
-                                        @{
-                                            var fee = $"{round.CoordinationFeeRate.Rate * 100}% + Free remixing {(round.CoordinationFeeRate.PlebsDontPayThreshold <= 0? string.Empty : $"+ Free under {round.CoordinationFeeRate.PlebsDontPayThreshold.ToDecimal(MoneyUnit.BTC)} BTC")}";
-                                        }
-                                        <td>@(fee)
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <th scope="row">Allowed input amounts</th>
-                                        <td>@round.AllowedInputAmounts.Min.ToDecimal(MoneyUnit.BTC) BTC - @round.AllowedInputAmounts.Max.ToDecimal(MoneyUnit.BTC) BTC</td>
-                                    </tr>
-                                    <tr>
-                                        <th scope="row">Allowed input types</th>
-                                        <td>@string.Join(", ", round.AllowedInputTypes)</td>
-                                    </tr>
-                                    <tr>
-                                        <th scope="row">Allowed output amounts</th>
-                                        <td>@round.AllowedOutputAmounts.Min.ToDecimal(MoneyUnit.BTC) BTC - @round.AllowedOutputAmounts.Max.ToDecimal(MoneyUnit.BTC) BTC</td>
-                                                                                                                      
-                                    </tr>
-                                    <tr>
-                                        <th scope="row">Allowed output types</th>
-                                        
-                                        <td>@string.Join(", ", round.AllowedOutputTypes)</td>
-                                    </tr>
-                                    <tr>
-                                        <th scope="row">Minimum inputs</th><td>@round.MinInputCountByRound</td>
-                                    </tr>
-                                    <tr>
-                                        <th scope="row">Maximum inputs</th><td>@round.MaxInputCountByRound</td>
-                                    </tr>
-                                    <tr>
-                                        <th scope="row">Maximum round registration time</th><td>@round.StandardInputRegistrationTimeout.ToString()</td>
-                                    </tr>
+                    @if (coordinator.RoundStateUpdater.AnyRound)
+                    {
+                        var round = coordinator.RoundStateUpdater.RoundStates.Last().Value.CoinjoinState.Parameters;
 
-                                </table>
-                                <div class="alert alert-info">Please note that a coordinator can change its configuration at will. This is only a display of the last round received from them.</div>
-                            </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        <div class="modal modal-lg fade" id="config-@s.Coordinator">
+                            <div class="modal-dialog">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title" id="exampleModalLabel">@coordinator.CoordinatorDisplayName Last round parameters </h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                    </div>
+                                    <div class="modal-body" style="white-space: pre-line">
+                                        <table class="table table-responsive my-0">
+
+                                            <tr>
+                                                <th scope="row">Fee charged</th>
+                                                @{
+                                                    var fee = $"{round.CoordinationFeeRate.Rate * 100}% + Free remixing {(round.CoordinationFeeRate.PlebsDontPayThreshold <= 0 ? string.Empty : $"+ Free under {round.CoordinationFeeRate.PlebsDontPayThreshold.ToDecimal(MoneyUnit.BTC)} BTC")}";
+                                                }
+                                                <td>
+                                                    @(fee)
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <th scope="row">Allowed input amounts</th>
+                                                <td>@round.AllowedInputAmounts.Min.ToDecimal(MoneyUnit.BTC) BTC - @round.AllowedInputAmounts.Max.ToDecimal(MoneyUnit.BTC) BTC</td>
+                                            </tr>
+                                            <tr>
+                                                <th scope="row">Allowed input types</th>
+                                                <td>@string.Join(", ", round.AllowedInputTypes)</td>
+                                            </tr>
+                                            <tr>
+                                                <th scope="row">Allowed output amounts</th>
+                                                <td>@round.AllowedOutputAmounts.Min.ToDecimal(MoneyUnit.BTC) BTC - @round.AllowedOutputAmounts.Max.ToDecimal(MoneyUnit.BTC) BTC</td>
+
+                                            </tr>
+                                            <tr>
+                                                <th scope="row">Allowed output types</th>
+
+                                                <td>@string.Join(", ", round.AllowedOutputTypes)</td>
+                                            </tr>
+                                            <tr>
+                                                <th scope="row">Minimum inputs</th><td>@round.MinInputCountByRound</td>
+                                            </tr>
+                                            <tr>
+                                                <th scope="row">Maximum inputs</th><td>@round.MaxInputCountByRound</td>
+                                            </tr>
+                                            <tr>
+                                                <th scope="row">Maximum round registration time</th><td>@round.StandardInputRegistrationTimeout.ToString()</td>
+                                            </tr>
+
+                                        </table>
+                                        <div class="alert alert-info">Please note that a coordinator can change its configuration at will. This is only a display of the last round received from them.</div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </div>
-                <a class="px-2 cursor-pointer"
-                   data-bs-toggle="modal" data-bs-target="#config-@s.Coordinator">
-                    Coordinator Config
-                </a>
-            }
+                        <a class="px-2 cursor-pointer"
+                           data-bs-toggle="modal" data-bs-target="#config-@s.Coordinator">
+                            Coordinator Config
+                        </a>
+                    }
                 </div>
             </div>
             <div class="form-group form-check form">
-                <input asp-for="Settings[index].Enabled" type="checkbox" class="form-check-input form-control-lg toggle-settings" data-coordinator="@s.Coordinator" disabled="@(!coordinator.WasabiCoordinatorStatusFetcher.Connected)" />
+                <input asp-for="Settings[index].Enabled" type="checkbox" class="form-check-input form-control-lg toggle-settings" data-coordinator="@s.Coordinator" disabled="@(!coordinator.WasabiCoordinatorStatusFetcher.Connected)"/>
                 <a class="px-2 position-absolute bottom-0 cursor-pointer"
                    data-bs-toggle="modal" data-bs-target="#terms-@s.Coordinator"
                    style="
@@ -316,10 +320,7 @@
                     By enabling this coordinator, you agree to their terms and conditions.
                 </a>
             </div>
-            @if (coordinator.CoordinatorName != "local" && coordinator.CoordinatorName != "zksnacks")
-            {
-                <button name="command" type="submit" value="remove-coordinator:@(coordinator.CoordinatorName)" class="btn btn-link btn-danger" permission="@Policies.CanModifyServerSettings">Remove</button>
-            }
+
         </div>
         <div class="modal modal-lg fade" id="terms-@s.Coordinator">
             <div class="modal-dialog">
@@ -340,30 +341,8 @@
 
     </div>
 }
-@if (ViewBag.DiscoveredCoordinators is List<DiscoveredCoordinator> discoveredCoordinators)
-{
-    foreach (var coordinator in discoveredCoordinators)
-    {
-        <div class="card  mt-3" permission="@Policies.CanModifyServerSettings">
-            <div class="card-header d-flex justify-content-between">
-                <div>
-                    <div class="d-flex">
-
-                        <h3>@coordinator.Name</h3>
-
-                    </div>
-
-                    <span class="text-muted">@coordinator.Uri</span>
-                </div>
-                <div class="form-group form-check">
-                    <button name="command" type="submit" value="add-coordinator:@coordinator.Name:@coordinator.Uri" class="btn btn-primary btn-lg">Add</button>
-                </div>
-            </div>
 
 
-        </div>
-    }
-}
 <button name="command" type="submit" value="save" class="btn btn-primary mt-2">Save</button>
 <a asp-controller="WabisabiCoordinatorConfig" asp-action="UpdateWabisabiSettings" class="btn btn-secondary mt-2" permission="@Policies.CanModifyServerSettings">Coordinator runner</a>
 <a asp-controller="WabisabiStore" asp-action="ListCoinjoins" class="btn btn-secondary mt-2" asp-route-storeId="@storeId">Coinjoins</a>
@@ -371,11 +350,19 @@
 <a class="btn btn-secondary mt-2" href="https://gist.github.com/nopara73/bb17e89d7dc9af536ca41f50f705d329" rel="noreferrer noopener" target="_blank">Enable Discrete payments - Coming soon</a>
 
 
-</form>
+</form> 
 
+@if (ViewBag.DiscoveredCoordinators is List<DiscoveredCoordinator> discoveredCoordinators)
+{
+    foreach (var coordinator in discoveredCoordinators)
+    {
+        <partial model="@coordinator" name="Wabisabi/AddCoordinator"/>
+    }
+}
 
+<partial name="Wabisabi/AddManualCoordinator" model="@(new DiscoveredCoordinator())"/>
 @section PageFootContent {
-    <partial name="_ValidationScriptsPartial" />
+    <partial name="_ValidationScriptsPartial"/>
 }
 
 <script type="text/javascript" nonce="@nonce">

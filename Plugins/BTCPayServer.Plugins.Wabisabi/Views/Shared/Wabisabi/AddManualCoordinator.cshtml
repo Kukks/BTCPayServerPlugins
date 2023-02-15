@@ -1,0 +1,36 @@
+﻿@using BTCPayServer.Client
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using BTCPayServer.Abstractions.Contracts
+@model WalletWasabi.Backend.Controllers.DiscoveredCoordinator
+@inject IScopeProvider ScopeProvider
+
+<div class="mt-4" permission="@Policies.CanModifyServerSettings">
+    <button class="btn btn-link mt-4" type="button" data-bs-toggle="collapse" data-bs-target="#manual-coordinator">
+        Add coordinator manually
+    </button>
+    <div class="row collapse" id="manual-coordinator">
+        <div class="col col-xl-6 mb-4">
+            <form asp-action="AddCoordinator" asp-controller="WabisabiStore" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()" method="post" class="card ">
+
+                <div class="card-body">
+                    <h4 class="card-title">Add coordinator manually</h4>
+
+                    <div class="form-group">
+                        <label asp-for="Name" class="form-label">Coordinator Name</label>
+                        <input asp-for="Name" type="text" required class="form-control"/>
+                    </div>
+                    <div class="form-group">
+                        <label asp-for="Uri" class="form-label">Coordinator URL</label>
+                        <input asp-for="Uri" type="url" required class="form-control"/>
+                    </div>
+
+                </div>
+                <div class="card-footer">
+
+                    <button class="btn btn-secondary" type="submit">Add</button>
+                </div>
+
+            </form>
+        </div>
+    </div>
+</div>
