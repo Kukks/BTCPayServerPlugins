@@ -42,7 +42,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                         utxoSelectionParameters.CoordinationFeeRate);
                     var percentageLeft = (effV.ToDecimal(MoneyUnit.BTC) / coin.Amount.ToDecimal(MoneyUnit.BTC));
                     // filter out low value coins where 50% of the value would be eaten up by fees
-                    return effV > 0 && percentageLeft >= 0.5m;
+                    return effV > Money.Zero && percentageLeft >= 0.5m;
                 })
                 .Where(coin =>
                 {
@@ -119,15 +119,15 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
         // Sort the coins by their anon score and then by descending order their value, and then slightly randomize in 2 ways:
         //attempt to shift coins that comes from the same tx AND also attempt to shift coins based on percentage probability
         var remainingCoins = SlightlyShiftOrder(RandomizeCoins(
-            coins.OrderBy(coin => coin.CoinColor(_wallet.AnonymitySetTarget)).ThenByDescending(x =>
+            coins.OrderBy(coin => coin.CoinColor(_wallet.AnonScoreTarget)).ThenByDescending(x =>
                     x.EffectiveValue(utxoSelectionParameters.MiningFeeRate,
                         utxoSelectionParameters.CoordinationFeeRate))
                 .ToList(), liquidityClue), 10);
         var remainingPendingPayments = new List<PendingPayment>(pendingPayments);
-        var solution = new SubsetSolution(remainingPendingPayments.Count, _wallet.AnonymitySetTarget,
+        var solution = new SubsetSolution(remainingPendingPayments.Count, _wallet.AnonScoreTarget,
             utxoSelectionParameters);
 
-        if (remainingCoins.All(coin => coin.CoinColor(_wallet.AnonymitySetTarget) == AnonsetType.Green) &&
+        if (remainingCoins.All(coin => coin.CoinColor(_wallet.AnonScoreTarget) == AnonsetType.Green) &&
             !remainingPendingPayments.Any())
         {
             // var decidedAmt = Random.Shared.Next(10, maxCoins);
@@ -179,20 +179,20 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                     coinColorCount.TryGetValue(coinColor.Key, out var currentCoinColorCount);
                     if (currentCoinColorCount < coinColor.Value)
                     {
-                        predicate = coin1 => coin1.CoinColor(_wallet.AnonymitySetTarget) == coinColor.Key;
+                        predicate = coin1 => coin1.CoinColor(_wallet.AnonScoreTarget) == coinColor.Key;
                         break;
                     }
                 }
                 else
                 {
                     //if the ideal amount = 0, then we should de-prioritize.
-                    predicate = coin1 => coin1.CoinColor(_wallet.AnonymitySetTarget) != coinColor.Key;
+                    predicate = coin1 => coin1.CoinColor(_wallet.AnonScoreTarget) != coinColor.Key;
                     break;
                 }
             }
 
             var coin = remainingCoins.FirstOrDefault(predicate) ?? remainingCoins.First();
-            var color = coin.CoinColor(_wallet.AnonymitySetTarget);
+            var color = coin.CoinColor(_wallet.AnonScoreTarget);
             // If the selected coins list is at its maximum size, break out of the loop
             if (solution.Coins.Count == maxCoins)
             {
@@ -201,7 +201,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
 
             remainingCoins.Remove(coin);
             if (maxPerType.TryGetValue(color, out var maxColor) &&
-                solution.Coins.Count(coin1 => coin1.CoinColor(_wallet.AnonymitySetTarget) == color) == maxColor)
+                solution.Coins.Count(coin1 => coin1.CoinColor(_wallet.AnonScoreTarget) == color) == maxColor)
             {
                 continue;
             }
@@ -280,7 +280,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             var currentCoin = remainingCoins.First();
             remainingCoins.RemoveAt(0);
             var lastCoin = workingList.LastOrDefault();
-            if (lastCoin is null || currentCoin.CoinColor(_wallet.AnonymitySetTarget) == AnonsetType.Green ||
+            if (lastCoin is null || currentCoin.CoinColor(_wallet.AnonScoreTarget) == AnonsetType.Green ||
                 !remainingCoins.Any() ||
                 (remainingCoins.Count == 1 && remainingCoins.First().TransactionId == currentCoin.TransactionId) ||
                 lastCoin.TransactionId != currentCoin.TransactionId ||

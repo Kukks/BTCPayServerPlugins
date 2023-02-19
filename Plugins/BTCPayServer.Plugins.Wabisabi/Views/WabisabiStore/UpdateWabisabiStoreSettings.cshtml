@@ -63,9 +63,12 @@
             .Select(pair => new SelectListItem(pair.Value.Result, pair.Key, Model.MixToOtherWallet == pair.Key)).Prepend(new SelectListItem("None", ""));
 }
 
-
-<h2 class="mb-4">Coinjoin configuration</h2>
-
+<div class="row">
+    <h2 class="">Coinjoin configuration</h2>
+    <a href="https://github.com/Kukks/BTCPayServerPlugins/blob/master/Plugins/BTCPayServer.Plugins.Wabisabi/readme.md" class="ms-1" target="_blank" rel="noreferrer noopener">
+                    <span class="fa fa-question-circle-o text-secondary" title="More information..."></span>
+                </a>
+<span class="fa fa-question-circle-o text-secondary" title="More information..."></span></div>
 <form method="post">
 @{
     var wallet = await WalletProvider.GetWalletAsync(storeId);

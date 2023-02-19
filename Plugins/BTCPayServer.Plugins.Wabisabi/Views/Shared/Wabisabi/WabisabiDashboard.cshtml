@@ -91,10 +91,10 @@
             var wallet = (BTCPayWallet) await WalletProvider.GetWalletAsync(storeId);
 
             var coins = await wallet.GetAllCoins();
-            var privacy = wallet.GetPrivacyPercentage(coins, wallet.AnonymitySetTarget);
+            var privacy = wallet.GetPrivacyPercentage(coins, wallet.AnonScoreTarget);
 
             var privacyPercentage = Math.Round(privacy * 100);
-            var colorCoins = coins.GroupBy(coin => coin.CoinColor(wallet.AnonymitySetTarget)).ToDictionary(grouping => grouping.Key, grouping => grouping);
+            var colorCoins = coins.GroupBy(coin => coin.CoinColor(wallet.AnonScoreTarget)).ToDictionary(grouping => grouping.Key, grouping => grouping);
             <div class="widget store-numbers" >
 
             @if (wallet is BTCPayWallet btcPayWallet)

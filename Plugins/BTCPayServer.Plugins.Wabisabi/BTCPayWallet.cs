@@ -108,7 +108,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     public IKeyChain KeyChain { get; }
     public IDestinationProvider DestinationProvider => this;
 
-    public int AnonymitySetTarget => WabisabiStoreSettings.PlebMode? 2:  WabisabiStoreSettings.AnonymitySetTarget;
+    public int AnonScoreTarget => WabisabiStoreSettings.PlebMode? 2:  WabisabiStoreSettings.AnonymitySetTarget;
     public bool ConsolidationMode => !WabisabiStoreSettings.PlebMode && WabisabiStoreSettings.ConsolidationMode;
     public TimeSpan FeeRateMedianTimeFrame { get; } = TimeSpan.FromHours(KeyManager.DefaultFeeRateMedianTimeFrameHours);
     public bool RedCoinIsolation => !WabisabiStoreSettings.PlebMode &&WabisabiStoreSettings.RedCoinIsolation;
@@ -121,7 +121,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
 
     public async Task<double> GetPrivacyPercentageAsync()
     {
-        return GetPrivacyPercentage(await GetAllCoins(), AnonymitySetTarget);
+        return GetPrivacyPercentage(await GetAllCoins(), AnonScoreTarget);
     }
 
     public async Task<CoinsView> GetAllCoins()
