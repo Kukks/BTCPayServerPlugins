@@ -110,8 +110,8 @@ public class AffiliateServerController:Controller
                 return NotFound();
         
             var path = Path.Combine(_dataDirectories.Value.DataDir, "Plugins", "CoinjoinAffiliate", "History.txt");
-            
-            
+
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
             await System.IO.File.AppendAllLinesAsync(path, new[] {JObject.FromObject(request).ToString(Formatting.None).Replace(Environment.NewLine, "")}, Encoding.UTF8);
             var response = new CoinJoinNotificationResponse(Array.Empty<byte>());
             return Json(response, AffiliationJsonSerializationOptions.Settings);
