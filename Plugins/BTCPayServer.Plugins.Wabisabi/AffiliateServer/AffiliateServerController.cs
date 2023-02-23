@@ -67,7 +67,7 @@ public class AffiliateServerController:Controller
         if (!System.IO.File.Exists(path))
             return NotFound();
 
-        return File(path,  MediaTypeNames.Text.Plain);
+        return PhysicalFile(path,  MediaTypeNames.Text.Plain);
     }
     
 
