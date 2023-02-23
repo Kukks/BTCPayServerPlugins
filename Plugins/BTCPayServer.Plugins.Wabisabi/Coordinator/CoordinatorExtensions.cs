@@ -3,6 +3,7 @@ using BTCPayServer.Abstractions.Services;
 using BTCPayServer.Configuration;
 using BTCPayServer.Services;
 using Microsoft.Extensions.DependencyInjection;
+using WalletWasabi.Affiliation;
 using WalletWasabi.WabiSabi.Models.Serialization;
 
 namespace WalletWasabi.Backend.Controllers;
@@ -16,8 +17,12 @@ public static class CoordinatorExtensions
         services.AddTransient(provider =>
         {
             var s = provider.GetRequiredService<WabisabiCoordinatorService>();
+            if (!s.Started)
+            {
+                return null;
+            }
             return new WabiSabiController(s.IdempotencyRequestCache, s.WabiSabiCoordinator.Arena,
-                s.WabiSabiCoordinator.CoinJoinFeeRateStatStore);
+                s.WabiSabiCoordinator.CoinJoinFeeRateStatStore, s.WabiSabiCoordinator.AffiliationManager);
         });
         services.AddHostedService((sp) => sp.GetRequiredService<WabisabiCoordinatorService>());
 

@@ -643,12 +643,11 @@ public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count,
                    PaymentFailed = PaymentFailed(data.Id),
                    PaymentSucceeded = PaymentSucceeded(data.Id),
                };
-           }).Where(payment => payment is not null).ToArray();
-           return await Task.WhenAll(payouts);
+           }).ToArray();
+           return (await Task.WhenAll(payouts)).Where(payment => payment is not null).ToArray();
         }
         catch (Exception e)
         {
-            Console.WriteLine(e);
             return Array.Empty<PendingPayment>();
         }
     }

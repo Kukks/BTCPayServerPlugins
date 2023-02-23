@@ -1,15 +1,11 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
-using BTCPayServer.Client;
-using BTCPayServer.Data.Data;
+using BTCPayServer.Data;
 using BTCPayServer.PayoutProcessors;
 using BTCPayServer.Services;
-using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json.Linq;
-using WalletWasabi.WabiSabi.Client;
 
 namespace BTCPayServer.Plugins.Wabisabi
 {

@@ -64,11 +64,13 @@
 }
 
 <div class="row">
-    <h2 class="">Coinjoin configuration</h2>
-    <a href="https://github.com/Kukks/BTCPayServerPlugins/blob/master/Plugins/BTCPayServer.Plugins.Wabisabi/readme.md" class="ms-1" target="_blank" rel="noreferrer noopener">
-                    <span class="fa fa-question-circle-o text-secondary" title="More information..."></span>
-                </a>
-<span class="fa fa-question-circle-o text-secondary" title="More information..."></span></div>
+    <div class="d-flex">
+        <h2 class="">Coinjoin configuration</h2>
+        <a href="https://github.com/Kukks/BTCPayServerPlugins/blob/master/Plugins/BTCPayServer.Plugins.Wabisabi/readme.md" class="ms-1" target="_blank" rel="noreferrer noopener">
+            <span class="fa fa-question-circle-o text-secondary" title="More information..."></span>
+        </a>
+    </div>
+</div>
 <form method="post">
 @{
     var wallet = await WalletProvider.GetWalletAsync(storeId);
@@ -121,8 +123,8 @@
     <div id="advanced" class="@(Model.PlebMode ? "d-none" : "")">
         <div class="form-group">
 
-            <label asp-for="AnonymitySetTarget" class="form-label">Use Anon score model</label>
-            <input type="number" class="form-control" asp-for="AnonymitySetTarget" placeholder="target anon score">
+            <label asp-for="AnonymitySetTarget" class="form-label">Anon score target</label>
+            <input type="number" class="form-control" asp-for="AnonymitySetTarget" placeholder="target anon score" min="0">
 
             <p class="text-muted">Scores your coinjoined utxos based on how many other utxos in the coinjoin (and other previous coinjoin rounds) had the same value.<br/> Anonset score computation is not an exact science, and when using coordinators with massive liquidity, is not that important as all rounds (past, present, future) contribute to your privacy.</p>
         </div>
@@ -350,10 +352,10 @@
 <a asp-controller="WabisabiCoordinatorConfig" asp-action="UpdateWabisabiSettings" class="btn btn-secondary mt-2" permission="@Policies.CanModifyServerSettings">Coordinator runner</a>
 <a asp-controller="WabisabiStore" asp-action="ListCoinjoins" class="btn btn-secondary mt-2" asp-route-storeId="@storeId">Coinjoins</a>
 <button name="command" type="submit" value="discover" class="btn btn-secondary mt-2" permission="@Policies.CanModifyServerSettings">Discover coordinators over Nostr</button>
-<a class="btn btn-secondary mt-2" href="https://gist.github.com/nopara73/bb17e89d7dc9af536ca41f50f705d329" rel="noreferrer noopener" target="_blank">Enable Discrete payments - Coming soon</a>
+<a class="btn btn-secondary mt-2" href="https://gist.github.com/nopara73/bb17e89d7dc9af536ca41f50f705d329" rel="noreferrer noopener" target="_blank">Enable Discreet payments - Coming soon</a>
 
 
-</form> 
+</form>
 
 @if (ViewBag.DiscoveredCoordinators is List<DiscoveredCoordinator> discoveredCoordinators)
 {
@@ -364,6 +366,7 @@
 }
 
 <partial name="Wabisabi/AddManualCoordinator" model="@(new DiscoveredCoordinator())"/>
+
 @section PageFootContent {
     <partial name="_ValidationScriptsPartial"/>
 }

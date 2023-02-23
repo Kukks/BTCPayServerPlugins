@@ -26,6 +26,7 @@ using NBXplorer;
 using NBXplorer.Models;
 using Newtonsoft.Json.Linq;
 using NNostr.Client;
+using WalletWasabi.Affiliation;
 using WalletWasabi.Bases;
 using WalletWasabi.BitcoinCore.Rpc;
 using WalletWasabi.Cache;
@@ -47,6 +48,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
 
     public readonly IdempotencyRequestCache IdempotencyRequestCache;
 
+    public bool Started => HostedServices.IsStartAllAsyncStarted;
     private HostedServices HostedServices { get; } = new();
     public WabiSabiCoordinator WabiSabiCoordinator { get; private set; }
 
@@ -63,6 +65,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
         _httpClientFactory = httpClientFactory;
         IdempotencyRequestCache = new(memoryCache);
     }
+    
 
     private WabisabiCoordinatorSettings cachedSettings;
 

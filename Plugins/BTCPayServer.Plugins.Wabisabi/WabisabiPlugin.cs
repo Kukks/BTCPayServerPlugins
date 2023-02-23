@@ -1,41 +1,25 @@
 ﻿using System;
-using System.Buffers;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
-using System.Net.Http;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
+using BTCPayServer.Client.Models;
 using BTCPayServer.Common;
-using BTCPayServer.Data.Data;
 using BTCPayServer.Payments;
-using BTCPayServer.Payments.PayJoin;
 using BTCPayServer.PayoutProcessors;
 using BTCPayServer.Services.Stores;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Controllers;
-using Microsoft.AspNetCore.Mvc.Formatters;
-using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.ObjectPool;
-using Microsoft.Extensions.Options;
 using NBitcoin;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Serialization;
 using WalletWasabi.Backend.Controllers;
 using WalletWasabi.Logging;
 using WalletWasabi.WabiSabi.Client;
-using WalletWasabi.WabiSabi.Models.Serialization;
 using LogLevel = WalletWasabi.Logging.LogLevel;
 
 namespace BTCPayServer.Plugins.Wabisabi;
@@ -131,7 +115,7 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
             return new[] {new PaymentMethodId("BTC", PaymentTypes.BTCLike)};
         }
 
-        public Task<IHostedService> ConstructProcessor(PayoutProcessorData settings)
+        public Task<IHostedService> ConstructProcessor(Data.PayoutProcessorData settings)
         {
             return Task.FromResult<IHostedService>(new ShellSerice());
         }

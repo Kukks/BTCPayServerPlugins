@@ -91,6 +91,7 @@ namespace BTCPayServer.Plugins.Wabisabi
             var actualCommand = pieces[0];
             var commandIndex = pieces.Length > 1 ? pieces[1] : null;
             var coordinator = pieces.Length > 2 ? pieces[2] : null;
+            vm.AnonymitySetTarget = Math.Max(2, vm.AnonymitySetTarget);
             var coord = vm.Settings.SingleOrDefault(settings => settings.Coordinator == coordinator);
             ModelState.Clear();
 

@@ -1,11 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using BTCPayServer.Client.Models;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
 using WalletWasabi.Blockchain.TransactionOutputs;
@@ -83,29 +81,6 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             new Dictionary<AnonsetType, int>() {{AnonsetType.Red, 1}, {AnonsetType.Orange, 1}, {AnonsetType.Green, 1}},
             _wallet.ConsolidationMode, liquidityClue);
         _logger.LogInformation(solution.ToString());
-        // SubsetSolution bestSolution = null;
-        // for (int i = 0; i < 100; i++)
-        // {
-        //     var minCoins = new Dictionary<AnonsetType, int>();
-        //     if (_wallet.RedCoinIsolation)
-        //     {
-        //         minCoins.Add(AnonsetType.Red, 1);
-        //     }
-        //     var solution = SelectCoinsInternal(utxoSelectionParameters, coinCandidates, payments,  Random.Shared.Next(10,31), 
-        //         minCoins,  new Dictionary<AnonsetType, int>()
-        //     {
-        //             
-        //         {AnonsetType.Red, 1},
-        //         {AnonsetType.Orange, 1},
-        //         {AnonsetType.Green, 1}
-        //     },_wallet.ConsolidationMode, liquidityClue);
-        //     if (bestSolution is null || solution.Score() > bestSolution.Score())
-        //     {
-        //         bestSolution = solution;
-        //     }
-        // }
-        // _logger.LogInformation(bestSolution.ToString());
-        // return bestSolution.Coins.ToImmutableList();
         return solution.Coins.ToImmutableList();
     }
 
@@ -115,7 +90,6 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
         Dictionary<AnonsetType, int> maxPerType, Dictionary<AnonsetType, int> idealMinimumPerType,
         bool consolidationMode, Money liquidityClue)
     {
-        var stopwatch = Stopwatch.StartNew();
         // Sort the coins by their anon score and then by descending order their value, and then slightly randomize in 2 ways:
         //attempt to shift coins that comes from the same tx AND also attempt to shift coins based on percentage probability
         var remainingCoins = SlightlyShiftOrder(RandomizeCoins(
@@ -130,25 +104,6 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
         if (remainingCoins.All(coin => coin.CoinColor(_wallet.AnonScoreTarget) == AnonsetType.Green) &&
             !remainingPendingPayments.Any())
         {
-            // var decidedAmt = Random.Shared.Next(10, maxCoins);
-            // // all the coins are mixed and we have no payments to do..
-            // //if we are trying to reduce our utxoset, and we
-            // if (consolidationMode && remainingCoins.Count >= decidedAmt)
-            // {
-            //     
-            //     for (int i = 0; i < decidedAmt; i++)
-            //     {
-            //         
-            //         var anonsetOrderedCoin =
-            //             remainingCoins.OrderBy(coin => coin.AnonymitySet).BiasedRandomElement(70);
-            //         solution.Coins.Add(anonsetOrderedCoin);
-            //         remainingCoins.Remove(anonsetOrderedCoin);
-            //     }
-            // }
-            // else
-            // {
-            //still good to have a chance to proceed with a join to reduce timing analysis
-
             var rand = Random.Shared.Next(1, 1001);
             if (rand > _wallet.WabisabiStoreSettings.ExtraJoinProbability)
             {
@@ -158,7 +113,6 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
 
             _logger.LogInformation(
                 "All coins are private and we have no pending payments but will join just to reduce timing analysis");
-            //}
         }
 
         while (remainingCoins.Any())
@@ -246,9 +200,6 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                 }
             }
         }
-
-        stopwatch.Stop();
-        solution.TimeElapsed = stopwatch.Elapsed;
         return solution;
     }
 
@@ -316,7 +267,7 @@ public enum AnonsetType
     Green
 }
 
-public class SubsetSolution : IEquatable<SubsetSolution>
+public class SubsetSolution
 {
     private readonly UtxoSelectionParameters _utxoSelectionParameters;
 
@@ -326,8 +277,6 @@ public class SubsetSolution : IEquatable<SubsetSolution>
         TotalPaymentsGross = totalPaymentsGross;
         AnonsetTarget = anonsetTarget;
     }
-
-    public TimeSpan TimeElapsed { get; set; }
     public List<SmartCoin> Coins { get; set; } = new();
     public List<PendingPayment> HandledPayments { get; set; } = new();
 
@@ -346,49 +295,6 @@ public class SubsetSolution : IEquatable<SubsetSolution>
 
     public decimal LeftoverValue => TotalValue - TotalPaymentCost;
 
-    public decimal Score()
-    {
-        var score = 0m;
-
-        decimal ComputeCoinScore(List<SmartCoin> coins)
-        {
-            var w = 0m;
-            foreach (var smartCoin in coins)
-            {
-                var val = smartCoin.EffectiveValue(_utxoSelectionParameters.MiningFeeRate,
-                    _utxoSelectionParameters.CoordinationFeeRate).ToDecimal(MoneyUnit.BTC);
-                if (smartCoin.AnonymitySet <= 0)
-                {
-                    w += val;
-                }
-                else
-                {
-                    w += val / (decimal)smartCoin.AnonymitySet;
-                }
-            }
-
-            return w; // / (coins.Count == 0 ? 1 : coins.Count);
-        }
-
-        decimal ComputePaymentScore(List<PendingPayment> pendingPayments)
-        {
-            return TotalPaymentsGross == 0 ? 100 : (pendingPayments.Count / (decimal)TotalPaymentsGross) * 100;
-        }
-
-        score += ComputeCoinScore(Coins);
-        score += ComputePaymentScore(HandledPayments);
-
-        return score;
-    }
-
-
-    public string GetId()
-    {
-        return string.Join("-",
-            Coins.OrderBy(coin => coin.Outpoint).Select(coin => coin.Outpoint.ToString())
-                .Concat(HandledPayments.OrderBy(arg => arg.Value).Select(p => p.Value.ToString())));
-    }
-
     public override string ToString()
     {
         var sb = new StringBuilder();
@@ -402,7 +308,7 @@ public class SubsetSolution : IEquatable<SubsetSolution>
         sc.TryGetValue(AnonsetType.Orange, out var ocoins);
         sc.TryGetValue(AnonsetType.Red, out var rcoins);
         sb.AppendLine(
-            $"Solution total coins:{Coins.Count} R:{rcoins?.Length ?? 0} O:{ocoins?.Length ?? 0} G:{gcoins?.Length ?? 0} AL:{GetAnonLoss(Coins)} total value: {TotalValue} total payments:{TotalPaymentCost}/{TotalPaymentsGross} leftover: {LeftoverValue} score: {Score()} Compute time: {TimeElapsed} ");
+            $"Solution total coins:{Coins.Count} R:{rcoins?.Length ?? 0} O:{ocoins?.Length ?? 0} G:{gcoins?.Length ?? 0} AL:{GetAnonLoss(Coins)} total value: {TotalValue} total payments:{TotalPaymentCost}/{TotalPaymentsGross} leftover: {LeftoverValue}");
         sb.AppendLine(
             $"Used coins: {string.Join(", ", Coins.Select(coin => coin.Outpoint + " " + coin.Amount.ToString() + " A" + coin.AnonymitySet))}");
         if (HandledPayments.Any())
@@ -410,18 +316,6 @@ public class SubsetSolution : IEquatable<SubsetSolution>
         return sb.ToString();
     }
 
-    public bool Equals(SubsetSolution? other)
-    {
-        return GetId() == other?.GetId();
-    }
-
-    public override bool Equals(object? obj)
-    {
-        if (ReferenceEquals(null, obj)) return false;
-        if (ReferenceEquals(this, obj)) return true;
-        if (obj.GetType() != this.GetType()) return false;
-        return Equals((SubsetSolution)obj);
-    }
 
     private static decimal GetAnonLoss<TCoin>(IEnumerable<TCoin> coins)
         where TCoin : SmartCoin

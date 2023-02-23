@@ -15,8 +15,10 @@ using Microsoft.Extensions.Options;
 using NBitcoin.DataEncoders;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using WalletWasabi.Affiliation;
 using WalletWasabi.Affiliation.Models;
-using WalletWasabi.Affiliation.Models.CoinjoinRequest;
+using WalletWasabi.Affiliation.Models.CoinJoinNotification;
+using WalletWasabi.Affiliation.Serialization;
 
 namespace BTCPayServer.Plugins.Wabisabi.AffiliateServer;
 
@@ -84,8 +86,8 @@ public class AffiliateServerController:Controller
     
     
     [AllowAnonymous]
-    [HttpPost("get_coinjoin_request")]
-    public async Task<IActionResult> GetCoinjoinRequest([FromBody] GetCoinjoinRequestRequest request)
+    [HttpPost("notify_coinjoin")]
+    public async Task<IActionResult> GetCoinjoinRequest()
     {
         
         var settings = await _settingsRepository.GetSettingAsync<WabisabiAffiliateSettings>();
@@ -93,11 +95,13 @@ public class AffiliateServerController:Controller
         {
             return NotFound();
         }
-
         var keyB = Encoders.Hex.DecodeData(settings.SigningKey);
         ecdsa.ImportSubjectPublicKeyInfo(keyB.AsSpan(), out _);
-        
-        Payload payload = new(new Header(), request.Body);
+
+        using var reader = new StreamReader(Request.Body);
+        var request =
+            AffiliateServerHttpApiClient.Deserialize<CoinJoinNotificationRequest>(await reader.ReadToEndAsync());
+        Payload payload = new(Header.Instance,  request.Body);
         try
         {
 
@@ -109,8 +113,9 @@ public class AffiliateServerController:Controller
             
             
             await System.IO.File.AppendAllLinesAsync(path, new[] {JObject.FromObject(request).ToString(Formatting.None).Replace(Environment.NewLine, "")}, Encoding.UTF8);
-            return Ok(new GetCoinjoinRequestResponse(Array.Empty<byte>()));
-        
+            var response = new CoinJoinNotificationResponse(Array.Empty<byte>());
+            return Json(response, AffiliationJsonSerializationOptions.Settings);
+
         }
         catch (Exception e)
         {
