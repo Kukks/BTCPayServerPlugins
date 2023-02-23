@@ -43,9 +43,6 @@
         </ProjectReference>
     </ItemGroup>
     <ItemGroup>
-        <Folder Include="Resources" />
-    </ItemGroup>
-    <ItemGroup>
         <PackageReference Include="NNostr.Client" Version="0.0.18" />
     </ItemGroup>
     <Target Name="DeleteExampleFile" AfterTargets="Publish">

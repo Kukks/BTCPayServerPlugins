@@ -15,10 +15,12 @@ using Microsoft.Extensions.Options;
 using NBitcoin.DataEncoders;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Serilog.Core;
 using WalletWasabi.Affiliation;
 using WalletWasabi.Affiliation.Models;
 using WalletWasabi.Affiliation.Models.CoinJoinNotification;
 using WalletWasabi.Affiliation.Serialization;
+using Constants = WalletWasabi.Helpers.Constants;
 
 namespace BTCPayServer.Plugins.Wabisabi.AffiliateServer;
 
@@ -73,7 +75,6 @@ public class AffiliateServerController:Controller
     [HttpPost("get_status")]
     public async Task<IActionResult> GetStatus()
     {
-        
         var settings = 
             await _settingsRepository.GetSettingAsync<WabisabiAffiliateSettings>();
         if(settings?.Enabled is true&& !string.IsNullOrEmpty(settings.SigningKey))
@@ -89,7 +90,6 @@ public class AffiliateServerController:Controller
     [HttpPost("notify_coinjoin")]
     public async Task<IActionResult> GetCoinjoinRequest()
     {
-        
         var settings = await _settingsRepository.GetSettingAsync<WabisabiAffiliateSettings>();
         if (settings?.Enabled is not true)
         {

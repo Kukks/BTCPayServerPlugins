@@ -74,23 +74,23 @@ namespace BTCPayServer.Plugins.Wabisabi
             }
             
             await _walletProvider.SettingsUpdated(storeId, wabisabiSettings);
-           var existingProcessor = (await  _payoutProcessorService.GetProcessors(new PayoutProcessorService.PayoutProcessorQuery()
-           {
-               Stores = new[] {storeId},
-               Processors = new[] {"Wabisabi"},
-
-           })).FirstOrDefault();
-            _eventAggregator.Publish(new PayoutProcessorUpdated()
-            {
-                Id = existingProcessor?.Id,
-                Data = paybatching? new PayoutProcessorData()
-                {
-                    Id = existingProcessor?.Id,
-                    Processor = "Wabisabi",
-                    StoreId = storeId,
-                    PaymentMethod = "BTC",
-                }: null
-            });
+           // var existingProcessor = (await  _payoutProcessorService.GetProcessors(new PayoutProcessorService.PayoutProcessorQuery()
+           // {
+           //     Stores = new[] {storeId},
+           //     Processors = new[] {"Wabisabi"},
+           //
+           // })).FirstOrDefault();
+           //  _eventAggregator.Publish(new PayoutProcessorUpdated()
+           //  {
+           //      Id = existingProcessor?.Id,
+           //      Data = paybatching? new PayoutProcessorData()
+           //      {
+           //          Id = existingProcessor?.Id,
+           //          Processor = "Wabisabi",
+           //          StoreId = storeId,
+           //          PaymentMethod = "BTC",
+           //      }: null
+           //  });
         }
         
 
