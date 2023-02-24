@@ -1,5 +1,8 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
+using BTCPayServer.Client.JsonConverters;
+using NBitcoin;
+using Newtonsoft.Json;
 
 namespace BTCPayServer.Plugins.Wabisabi;
 
@@ -32,8 +35,17 @@ public class WabisabiStoreSettings
 
 public class WabisabiStoreCoordinatorSettings
 {
+    
     public string Coordinator { get; set; }
     public bool Enabled { get; set; } = false;
+    public LastCoordinatorRoundConfig RoundWhenEnabled { get; set; }
+}
 
+public class LastCoordinatorRoundConfig
+{
     
+    public decimal CoordinationFeeRate { get; set; }
+    [JsonConverter(typeof(MoneyJsonConverter))]
+    public Money PlebsDontPayThreshold { get; set; }
+    public int MinInputCountByRound { get; set; }
 }

@@ -43,8 +43,6 @@
 </div>
 <form method="post">
 @{
-
-
     var wallet = await WalletProvider.GetWalletAsync(storeId);
     if (wallet is BTCPayWallet btcPayWallet)
     {
@@ -283,19 +281,39 @@
                            data-bs-toggle="modal" data-bs-target="#config-@s.Coordinator">
                             Coordinator Config
                         </a>
+                        @if (Model.Settings[index].RoundWhenEnabled is not null && !BTCPayWallet.IsRoundOk(round, Model.Settings[index]))
+                        {
+                            <div class="alert alert-danger w-100 mb-0 p-1">Round fees/parameters changed. Coinjoins will not occur unless you accept the new parameters.<button class="btn btn-link alert-link p-0" name="command" type="submit" value="accept-terms:@s.Coordinator"> Accept new terms</button></div>
+                        }
                     }
+
+                    <a class="px-2 w-100 cursor-pointer"
+                       data-bs-toggle="modal" data-bs-target="#terms-@s.Coordinator"
+                       style="
+                                            right: 0;
+                                            text-align: right;
+                                        ">
+                        By enabling this coordinator, you agree to their terms and conditions.
+                    </a>
                 </div>
             </div>
-            <div class="form-group form-check form">
-                <input asp-for="Settings[index].Enabled" type="checkbox" class="form-check-input form-control-lg toggle-settings" data-coordinator="@s.Coordinator" disabled="@(!coordinator.WasabiCoordinatorStatusFetcher.Connected)"/>
-                <a class="px-2 position-absolute bottom-0 cursor-pointer"
-                   data-bs-toggle="modal" data-bs-target="#terms-@s.Coordinator"
-                   style="
-                        right: 0;
-                        text-align: right;
-                    ">
-                    By enabling this coordinator, you agree to their terms and conditions.
-                </a>
+            @{
+                var canEnable = coordinator.WasabiCoordinatorStatusFetcher.Connected && coordinator.RoundStateUpdater.AnyRound;
+            }
+            <div class="form-group form-check form" data-bs-toggle="tooltip"  title="@(!canEnable ? "You cannot enable this coordinator until it is connected and a round has been seen" : string.Empty)">
+                @if (Model.Settings[index].RoundWhenEnabled is not null)
+                {
+                    <input type="hidden" asp-for="Settings[index].RoundWhenEnabled.CoordinationFeeRate"/>
+                    <input type="hidden" asp-for="Settings[index].RoundWhenEnabled.PlebsDontPayThreshold"/>
+                    <input type="hidden" asp-for="Settings[index].RoundWhenEnabled.MinInputCountByRound"/>
+                }
+
+                <input asp-for="Settings[index].Enabled"
+
+                       type="checkbox" class="form-check-input form-control-lg toggle-settings"
+                       data-coordinator="@s.Coordinator"
+                       disabled="@(!Model.Settings[index].Enabled && !canEnable)"/>
+
             </div>
 
         </div>
@@ -343,7 +361,7 @@
     <partial name="_ValidationScriptsPartial"/>
 }
 
-<script type="text/javascript" >
+<script type="text/javascript">
 
  function handlePlebModeChange(evt){
      const isPlebMode = evt.target.value === "true";

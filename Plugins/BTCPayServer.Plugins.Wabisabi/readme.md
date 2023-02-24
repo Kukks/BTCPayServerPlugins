@@ -59,7 +59,7 @@ Scientist mode allows you to configure the following:
 We realize that the weakest link in these coinjoin protocols is the centralized coordinator aspect, and so have opted to support multiple coordinators, in parallel, from the get-go. You can discover additional coordinators over Nostr, or you can add a coordinator manually by using the link at the bottom.
 ![docs/img_5.png](docs/img_5.png)
 
-Please be cautious as some coordinators may be malicious in nature. Once a coordinator has been added and a coinjoin round has been discovered, you can click on "Coordinator Config" to see what their fees and round requirements are set to, but be aware that a coordinator can change these at will. Additional safeguards will be implemented soon.
+Please be cautious as some coordinators may be malicious in nature. Once a coordinator has been added and a coinjoin round has been discovered, you can click on "Coordinator Config" to see what their fees and round requirements are set to, but be aware that a coordinator can change these at will. The plugin tracks if the minimum inputs per round, the coordination fee or the free threshold has changed and will not join rounds that are worse off than the one visible when you enabled the coordinator. You can accept the new terms by clicking on "Accept new terms" and the plugin will join rounds using the new parameters.
 
 ![docs/img_6.png](docs/img_6.png)
 

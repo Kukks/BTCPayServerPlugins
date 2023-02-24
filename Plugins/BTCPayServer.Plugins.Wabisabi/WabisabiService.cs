@@ -52,10 +52,8 @@ namespace BTCPayServer.Plugins.Wabisabi
             return res;
         }
 
-        public async Task SetWabisabiForStore(string storeId, WabisabiStoreSettings wabisabiSettings)
+        public async Task SetWabisabiForStore(string storeId, WabisabiStoreSettings wabisabiSettings, string termsCoord = null)
         {
-            var paybatching = wabisabiSettings.PlebMode || wabisabiSettings.BatchPayments &&
-                wabisabiSettings.Settings.Any(settings => settings.Enabled);
             foreach (var setting in wabisabiSettings.Settings)
             {
                 if (setting.Enabled) continue;
@@ -70,7 +68,31 @@ namespace BTCPayServer.Plugins.Wabisabi
             }
             else
             {
-                await _storeRepository.UpdateSetting<WabisabiStoreSettings>(storeId, nameof(WabisabiStoreSettings), wabisabiSettings!);
+                var res = await  _storeRepository.GetSettingAsync<WabisabiStoreSettings>(storeId, nameof(WabisabiStoreSettings));
+                foreach (var wabisabiStoreCoordinatorSettings in wabisabiSettings.Settings)
+                {
+                    if (!wabisabiStoreCoordinatorSettings.Enabled)
+                    {
+                        wabisabiStoreCoordinatorSettings.RoundWhenEnabled = null;
+                    }else if (
+                        (termsCoord == wabisabiStoreCoordinatorSettings.Coordinator ||
+                        res?.Settings?.Find(settings =>
+                                  settings.Coordinator == wabisabiStoreCoordinatorSettings.Coordinator)?.RoundWhenEnabled is null) && 
+                              _coordinatorClientInstanceManager.HostedServices.TryGetValue(wabisabiStoreCoordinatorSettings.Coordinator, out var coordinator))
+                    {
+                        var round = coordinator.RoundStateUpdater.RoundStates.LastOrDefault();
+                        wabisabiStoreCoordinatorSettings.RoundWhenEnabled = new LastCoordinatorRoundConfig()
+                        {
+                            CoordinationFeeRate = round.Value.CoinjoinState.Parameters.CoordinationFeeRate.Rate,
+                            PlebsDontPayThreshold = round.Value.CoinjoinState.Parameters.CoordinationFeeRate
+                                .PlebsDontPayThreshold,
+                            MinInputCountByRound = round.Value.CoinjoinState.Parameters.MinInputCountByRound,
+                        };
+                    }
+                    
+                    
+                }
+                await _storeRepository.UpdateSetting(storeId, nameof(WabisabiStoreSettings), wabisabiSettings!);
             }
             
             await _walletProvider.SettingsUpdated(storeId, wabisabiSettings);
