@@ -29,7 +29,7 @@
             <td>
                 @if (string.IsNullOrEmpty(coin.PayoutId))
                 {
-                    @coin.AnonymitySet
+                    @coin.AnonymitySet.ToString("0.##")
                 }
                 else
                 {
@@ -73,10 +73,10 @@
                     </a>
                 </td>
                 <td>
-                    <span class="">@cjData.CoinsIn.Length (@cjData.CoinsIn.Sum(coin => coin.Amount) BTC) (@cjInWeightedAverage anonset wavg)</span>
+                    <span class="">@cjData.CoinsIn.Length (@cjData.CoinsIn.Sum(coin => coin.Amount) BTC) (@cjInWeightedAverage.ToString("0.##") anonset wavg)</span>
                 </td>
                 <td>
-                    <span class="">@cjData.CoinsOut.Length (@cjData.CoinsOut.Sum(coin => coin.Amount) BTC) (@cjOutWeightedAverage anonset wavg)</span>
+                    <span class="">@cjData.CoinsOut.Length (@cjData.CoinsOut.Sum(coin => coin.Amount) BTC) (@cjOutWeightedAverage.ToString("0.##") anonset wavg)</span>
                 </td>
 
             </tr>

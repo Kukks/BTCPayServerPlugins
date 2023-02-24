@@ -575,7 +575,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
             }
         }
 
-        Logger.LogInformation($"unlocked utxos: {string.Join(',', unlocked)}");
+        Logger.LogTrace($"unlocked utxos: {string.Join(',', unlocked)}");
     }
 
 public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count, bool preferTaproot, bool mixedOutputs)

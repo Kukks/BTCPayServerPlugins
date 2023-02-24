@@ -1,32 +1,20 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Net;
 using System.Net.Http;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Common;
 using BTCPayServer.Configuration;
 using BTCPayServer.Plugins.Wabisabi;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Hosting.Server;
-using Microsoft.AspNetCore.Hosting.Server.Features;
-using Microsoft.AspNetCore.Routing;
+using BTCPayServer.Services;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using NBitcoin;
 using NBitcoin.RPC;
 using NBXplorer;
-using NBXplorer.Models;
 using Newtonsoft.Json.Linq;
-using NNostr.Client;
-using WalletWasabi.Affiliation;
 using WalletWasabi.Bases;
 using WalletWasabi.BitcoinCore.Rpc;
 using WalletWasabi.Cache;
@@ -55,7 +43,8 @@ public class WabisabiCoordinatorService : PeriodicRunner
     public WabisabiCoordinatorService(ISettingsRepository settingsRepository,
         IOptions<DataDirectories> dataDirectories, IExplorerClientProvider clientProvider, IMemoryCache memoryCache,
         WabisabiCoordinatorClientInstanceManager instanceManager,
-        IHttpClientFactory httpClientFactory) : base(TimeSpan.FromMinutes(15))
+        IHttpClientFactory httpClientFactory,
+        IServiceProvider serviceProvider) : base(TimeSpan.FromMinutes(15))
     {
         _settingsRepository = settingsRepository;
         _dataDirectories = dataDirectories;
@@ -63,11 +52,13 @@ public class WabisabiCoordinatorService : PeriodicRunner
         _memoryCache = memoryCache;
         _instanceManager = instanceManager;
         _httpClientFactory = httpClientFactory;
+        _socks5HttpClientHandler = serviceProvider.GetRequiredService<Socks5HttpClientHandler>();
         IdempotencyRequestCache = new(memoryCache);
     }
     
 
     private WabisabiCoordinatorSettings cachedSettings;
+    private readonly Socks5HttpClientHandler _socks5HttpClientHandler;
 
     public async Task<WabisabiCoordinatorSettings> GetSettings()
     {
@@ -210,7 +201,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
                 {
                     await Nostr.CreateCoordinatorDiscoveryEvent(network, s.NostrIdentity, s.UriToAdvertise,
                         s.CoordinatorDescription)
-                }, cancel);
+                }, _socks5HttpClientHandler, cancel);
         }
     }
 }

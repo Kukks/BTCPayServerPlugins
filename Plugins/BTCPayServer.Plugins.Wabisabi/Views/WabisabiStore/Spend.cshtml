@@ -7,7 +7,6 @@
 @using BTCPayServer
 @using BTCPayServer.Common
 @model WabisabiStoreController.SpendViewModel 
-@inject ContentSecurityPolicies contentSecurityPolicies
 @inject IScopeProvider _scopeProvider
 @inject WalletProvider WalletProvider
 @{
@@ -15,9 +14,6 @@
     Layout = "../Shared/_NavLayout.cshtml";
     ViewData["NavPartialName"] = "../UIStores/_Nav";
     ViewData.SetActivePage("Plugins", "BTCPayServer.Views.Stores.StoreNavPages", "Spend", storeId);
-    var nonce = RandomUtils.GetUInt256().ToString().Substring(0, 32);
-    contentSecurityPolicies.Add("script-src", $"'nonce-{nonce}'");
-    contentSecurityPolicies.AllowUnsafeHashes();
     var wallet = (BTCPayWallet) await WalletProvider.GetWalletAsync(storeId);
     var coins = await wallet.GetAllCoins();
 }
@@ -56,7 +52,7 @@
     <partial name="_ValidationScriptsPartial" />
 }
 
-<script type="text/javascript" nonce="@nonce">
+<script type="text/javascript" >
 
  document.addEventListener("DOMContentLoaded", function () {
         });

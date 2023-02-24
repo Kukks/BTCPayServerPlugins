@@ -3,13 +3,10 @@ using System.Collections.Immutable;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using NBitcoin;
-using WalletWasabi.Backend.Models.Responses;
 using WalletWasabi.Bases;
 using WalletWasabi.WabiSabi.Backend.PostRequests;
 using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.WabiSabi.Models;
-using WalletWasabi.WebClients.Wasabi;
 
 namespace BTCPayServer.Plugins.Wabisabi;
 
@@ -40,7 +37,7 @@ public class WasabiCoordinatorStatusFetcher : PeriodicRunner, IWasabiBackendStat
         catch (Exception e)
         {
             Connected = false;
-            _logger.LogError(e, "Could not connect to the coordinator ");
+            _logger.LogError(e, "Could not connect to the coordinator");
             throw;
         }
     }

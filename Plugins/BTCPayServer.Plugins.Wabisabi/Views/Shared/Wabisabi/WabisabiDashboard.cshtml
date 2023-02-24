@@ -267,7 +267,8 @@
                                 {
                                     <tr>
                                         <td>
-                                            @coin.AnonymitySet
+                                            //print to 2 decimal places with no rounding
+                                            @coin.AnonymitySet.ToString("0.##")
                                         </td>
                                         <td>
                                             @coin.Amount.ToDecimal(MoneyUnit.BTC) BTC

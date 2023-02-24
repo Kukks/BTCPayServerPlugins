@@ -80,7 +80,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             minCoins,
             new Dictionary<AnonsetType, int>() {{AnonsetType.Red, 1}, {AnonsetType.Orange, 1}, {AnonsetType.Green, 1}},
             _wallet.ConsolidationMode, liquidityClue);
-        _logger.LogInformation(solution.ToString());
+        _logger.LogTrace(solution.ToString());
         return solution.Coins.ToImmutableList();
     }
 

@@ -21,6 +21,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
+using Microsoft.Extensions.DependencyInjection;
 using NBitcoin;
 using NBitcoin.Payment;
 using NBitcoin.Secp256k1;
@@ -45,8 +46,8 @@ namespace BTCPayServer.Plugins.Wabisabi
         private readonly IExplorerClientProvider _explorerClientProvider;
         private readonly WabisabiCoordinatorService _wabisabiCoordinatorService;
         private readonly IAuthorizationService _authorizationService;
-        private readonly UserManager<ApplicationUser> _userManager;
         private readonly WabisabiCoordinatorClientInstanceManager _instanceManager;
+        private readonly Socks5HttpClientHandler _socks5HttpClientHandler;
 
         public WabisabiStoreController(WabisabiService WabisabiService, WalletProvider walletProvider,
             IBTCPayServerClientFactory btcPayServerClientFactory,
@@ -54,7 +55,7 @@ namespace BTCPayServer.Plugins.Wabisabi
             WabisabiCoordinatorService wabisabiCoordinatorService,
             WabisabiCoordinatorClientInstanceManager instanceManager, 
             IAuthorizationService authorizationService,
-            UserManager<ApplicationUser> userManager)
+            IServiceProvider serviceProvider)
         {
             _WabisabiService = WabisabiService;
             _walletProvider = walletProvider;
@@ -62,8 +63,8 @@ namespace BTCPayServer.Plugins.Wabisabi
             _explorerClientProvider = explorerClientProvider;
             _wabisabiCoordinatorService = wabisabiCoordinatorService;
             _authorizationService = authorizationService;
-            _userManager = userManager;
             _instanceManager = instanceManager;
+            _socks5HttpClientHandler = serviceProvider.GetRequiredService<Socks5HttpClientHandler>();
         }
 
         [HttpGet("")]
@@ -118,7 +119,7 @@ var network = _explorerClientProvider.GetExplorerClient("BTC").Network.NBitcoinN
                                     new Uri($"https://{Guid.NewGuid()}.com"), "fake regtest coord test"));
                             }
 
-                            await Nostr.Publish(relayUri, evts.ToArray(), CancellationToken.None);
+                            await Nostr.Publish(relayUri, evts.ToArray(),_socks5HttpClientHandler ,CancellationToken.None);
                         }
 
                         ViewBag.DiscoveredCoordinators = await Nostr.Discover(relayUri,

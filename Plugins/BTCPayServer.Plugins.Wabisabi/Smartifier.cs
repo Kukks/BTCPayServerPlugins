@@ -172,21 +172,13 @@ public class Smartifier
 
     private void CoinPropertyChanged(object sender, PropertyChangedEventArgs e)
     {
-        if (sender is SmartCoin smartCoin)
+        if (sender is SmartCoin smartCoin && e.PropertyName == nameof(SmartCoin.CoinJoinInProgress))
         {
-            if (e.PropertyName == nameof(SmartCoin.CoinJoinInProgress))
+            if (_utxoLocker is not null)
             {
-                // _logger.LogInformation($"{smartCoin.Outpoint}.CoinJoinInProgress = {smartCoin.CoinJoinInProgress}");
-                if (_utxoLocker is not null)
-                {
-                    _ = (smartCoin.CoinJoinInProgress
-                        ? _utxoLocker.TryLock(smartCoin.Outpoint)
-                        : _utxoLocker.TryUnlock(smartCoin.Outpoint)).ContinueWith(task =>
-                    {
-                        // _logger.LogInformation(
-                        //     $"{(task.Result ? "Success" : "Fail")}: {(smartCoin.CoinJoinInProgress ? "" : "un")}locking coin for coinjoin: {smartCoin.Outpoint} ");
-                    });
-                }
+                _ = (smartCoin.CoinJoinInProgress
+                    ? _utxoLocker.TryLock(smartCoin.Outpoint)
+                    : _utxoLocker.TryUnlock(smartCoin.Outpoint));
             }
         }
     }

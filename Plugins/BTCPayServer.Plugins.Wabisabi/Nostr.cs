@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using BTCPayServer.Services;
 using NBitcoin;
 using Newtonsoft.Json.Linq;
 using NNostr.Client;
@@ -14,10 +15,15 @@ namespace BTCPayServer.Plugins.Wabisabi;
 public class Nostr
 {
     public static int Kind = 15750;
+    public static string TypeTagIdentifier = "type";
+    public static string TypeTagValue = "wabisabi";
+    public static string NetworkTagIdentifier = "network";
+    public static string EndpointTagIdentifier = "endpoint";
 
     public static async Task Publish(
         Uri relayUri,
         NostrEvent[] evts,
+        Socks5HttpClientHandler httpClientHandler,
         CancellationToken cancellationToken )
     {
 
@@ -69,12 +75,13 @@ public class Nostr
             CreatedAt = DateTimeOffset.UtcNow,
             Tags = new List<NostrEventTag>()
             {
-                new() {TagIdentifier = "uri", Data = new List<string>() {new Uri(coordinatorUri, "plugins/wabisabi-coordinator").ToString()}},
-                new() {TagIdentifier = "network", Data = new List<string>() {currentNetwork.Name.ToLower()}}
+                new() {TagIdentifier = EndpointTagIdentifier, Data = new List<string>() {new Uri(coordinatorUri, "plugins/wabisabi-coordinator").ToString()}},
+                new() {TagIdentifier = TypeTagIdentifier, Data = new List<string>() { TypeTagValue}},
+                new() {TagIdentifier = NetworkTagIdentifier, Data = new List<string>() {currentNetwork.Name.ToLower()}}
             }
         };
         
-        await evt.ComputeIdAndSign(privateKey);
+        await evt.ComputeIdAndSignAsync(privateKey);
         return evt;
     }
 
@@ -127,15 +134,18 @@ public class Nostr
             @event.CreatedAt < DateTimeOffset.UtcNow.AddMinutes(15) &&
             @event.Verify() &&
             @event.Tags.Any(tag =>
-                tag.TagIdentifier == "uri" &&
+                tag.TagIdentifier == EndpointTagIdentifier &&
                 tag.Data.Any(s => Uri.IsWellFormedUriString(s, UriKind.Absolute))) &&
             @event.Tags.Any(tag =>
-                tag.TagIdentifier == "network" && tag.Data.FirstOrDefault() == network)
+                tag.TagIdentifier == TypeTagIdentifier &&
+                tag.Data.FirstOrDefault() == TypeTagValue) &&
+            @event.Tags.Any(tag =>
+                tag.TagIdentifier == NetworkTagIdentifier && tag.Data.FirstOrDefault() == network)
         ).Select(@event => new DiscoveredCoordinator()
         {
             Description = @event.Content,
             Name = @event.PublicKey,
-            Uri = new Uri(@event.GetTaggedData("uri")
+            Uri = new Uri(@event.GetTaggedData("endpoint")
                 .First(s => Uri.IsWellFormedUriString(s, UriKind.Absolute)))
         }).ToList();
     }

@@ -195,7 +195,7 @@ public class WabisabiCoordinatorClientInstance
         switch (e)
         {
             case CoinJoinStatusEventArgs coinJoinStatusEventArgs:
-                _logger.LogInformation(coinJoinStatusEventArgs.CoinJoinProgressEventArgs.GetType().ToString() + "   :" +
+                _logger.LogTrace(coinJoinStatusEventArgs.CoinJoinProgressEventArgs.GetType() + "   :" +
                                        e.Wallet.WalletName);
                 break;
             case CompletedEventArgs completedEventArgs:
@@ -222,13 +222,11 @@ public class WabisabiCoordinatorClientInstance
                     });
                     break;
                 }
-                _logger.LogInformation("Coinjoin complete!   :" +
-                                       e.Wallet.WalletName);
+                _logger.LogTrace("Coinjoin complete!   :" + e.Wallet.WalletName);
                 break;
             case LoadedEventArgs loadedEventArgs:
                 var stopWhenAllMixed = !((BTCPayWallet)loadedEventArgs.Wallet).BatchPayments;
                _ = CoinJoinManager.StartAsync(loadedEventArgs.Wallet, stopWhenAllMixed, false, CancellationToken.None);
-                _logger.LogInformation( "Loaded wallet  :" + e.Wallet.WalletName + $"stopWhenAllMixed: {stopWhenAllMixed}");
                 break;
             case StartErrorEventArgs errorArgs:
                 _logger.LogInformation("Could not start wallet for coinjoin:" + errorArgs.Error.ToString() + "   :" + e.Wallet.WalletName);
@@ -237,7 +235,7 @@ public class WabisabiCoordinatorClientInstance
                 _logger.LogInformation("Stopped wallet for coinjoin: " + stoppedEventArgs.Reason + "   :" + e.Wallet.WalletName);
                 break;
             default:
-                _logger.LogInformation(e.GetType() + "   :" + e.Wallet.WalletName);
+                _logger.LogTrace(e.GetType() + "   :" + e.Wallet.WalletName);
                 break;
         }
     }

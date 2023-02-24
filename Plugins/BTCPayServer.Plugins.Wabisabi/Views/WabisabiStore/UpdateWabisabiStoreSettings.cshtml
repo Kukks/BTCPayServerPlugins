@@ -1,66 +1,36 @@
 ﻿@using BTCPayServer.Plugins.Wabisabi
-@using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Abstractions.Contracts
 @using BTCPayServer.Security
 @using NBitcoin
 @using System.Security.Claims
 @using BTCPayServer
 @using BTCPayServer.Client
-@using BTCPayServer.Common
+@using BTCPayServer.Services.Stores
 @using Microsoft.AspNetCore.Mvc.TagHelpers
 @using WalletWasabi.Backend.Controllers
 @model BTCPayServer.Plugins.Wabisabi.WabisabiStoreSettings
-@inject ContentSecurityPolicies contentSecurityPolicies
 @inject WabisabiCoordinatorClientInstanceManager WabisabiCoordinatorClientInstanceManager
 @inject IScopeProvider _scopeProvider
-@inject IExplorerClientProvider ExplorerClientProvider;
-@inject IBTCPayServerClientFactory ClientFactory
+@inject StoreRepository StoreRepository
 @inject WalletProvider WalletProvider
+@inject BTCPayNetworkProvider BtcPayNetworkProvider
 @{
     var storeId = _scopeProvider.GetCurrentStoreId();
     Layout = "../Shared/_NavLayout.cshtml";
     ViewData["NavPartialName"] = "../UIStores/_Nav";
     ViewData.SetActivePage("Plugins", "BTCPayServer.Views.Stores.StoreNavPages", "Wabisabi coinjoin support", storeId);
-    var nonce = RandomUtils.GetUInt256().ToString().Substring(0, 32);
-    contentSecurityPolicies.Add("script-src", $"'nonce-{nonce}'");
-    contentSecurityPolicies.AllowUnsafeHashes();
-    var explorerClient = ExplorerClientProvider.GetExplorerClient("BTC");
     var userid = Context.User.Claims.Single(claim => claim.Type == ClaimTypes.NameIdentifier).Value;
     var anyEnabled = Model.Settings.Any(settings => settings.Enabled);
-    var Client = await ClientFactory.Create(userid, storeId);
-    ScriptPubKeyType? scriptType = null;
-    try
-    {
-        var pm = await Client.GetStoreOnChainPaymentMethod(storeId, "BTC");
-        scriptType = explorerClient.Network.DerivationStrategyFactory.Parse(pm.DerivationScheme).ScriptPubKeyType();
-    }
-    catch (Exception e)
-    {
-    }
-    Client = await ClientFactory.Create(userid);
-    var stores = (await Client.GetStores())
-        .Where(data => data.Id != storeId)
-        .ToDictionary(s => s.Id, async s =>
-        {
-            try
-            {
-                var sclient = await ClientFactory.Create(userid, s.Id, storeId);
-                var pm = await sclient.GetStoreOnChainPaymentMethod(s.Id, "BTC");
-                if (explorerClient.Network.DerivationStrategyFactory.Parse(pm.DerivationScheme).ScriptPubKeyType() != scriptType)
-                {
-                    return null;
-                }
-                return s.Name;
-            }
-            catch (Exception e)
-            {
-                return null;
-            }
-        });
-    await Task.WhenAll(stores.Values);
+    ScriptPubKeyType? scriptType;
+
+    var stores = (await StoreRepository.GetStoresByUserId(userid))
+        .ToDictionary(s => s.Id, s => (s, s.GetDerivationSchemeSettings(BtcPayNetworkProvider, "BTC")));
+
+    stores.TryGetValue(storeId, out var thisStore);
+    scriptType = thisStore.Item2?.AccountDerivation.ScriptPubKeyType();
     var selectStores =
-        stores.Where(pair => pair.Value.Result is not null)
-            .Select(pair => new SelectListItem(pair.Value.Result, pair.Key, Model.MixToOtherWallet == pair.Key)).Prepend(new SelectListItem("None", ""));
+        stores.Where(pair => pair.Key != storeId && pair.Value.Item2 is not null && pair.Value.Item2?.AccountDerivation.ScriptPubKeyType() == scriptType)
+            .Select(pair => new SelectListItem(pair.Value.s.StoreName, pair.Key, Model.MixToOtherWallet == pair.Key)).Prepend(new SelectListItem("None", ""));
 }
 
 <div class="row">
@@ -73,6 +43,8 @@
 </div>
 <form method="post">
 @{
+
+
     var wallet = await WalletProvider.GetWalletAsync(storeId);
     if (wallet is BTCPayWallet btcPayWallet)
     {
@@ -371,7 +343,7 @@
     <partial name="_ValidationScriptsPartial"/>
 }
 
-<script type="text/javascript" nonce="@nonce">
+<script type="text/javascript" >
 
  function handlePlebModeChange(evt){
      const isPlebMode = evt.target.value === "true";

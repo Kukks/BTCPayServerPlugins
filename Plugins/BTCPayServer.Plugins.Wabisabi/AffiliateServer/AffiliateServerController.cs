@@ -63,7 +63,8 @@ public class AffiliateServerController:Controller
     [HttpGet("history")]
     public async Task<IActionResult> ViewRequests()
     {
-        var path = Path.Combine(_dataDirectories.Value.DataDir, "Plugins", "CoinjoinAffiliate", "History.txt");
+        
+        var path = Path.Combine(_dataDirectories.Value.DataDir, "Plugins", "CoinjoinAffiliate",  $"History{DateTime.Today:dd_MM_yyyy}.txt");
         if (!System.IO.File.Exists(path))
             return NotFound();
 
@@ -73,8 +74,10 @@ public class AffiliateServerController:Controller
 
     [AllowAnonymous]
     [HttpPost("get_status")]
+    [HttpGet("get_status")]
     public async Task<IActionResult> GetStatus()
     {
+        _logger.LogTrace("GetStatus Called");
         var settings = 
             await _settingsRepository.GetSettingAsync<WabisabiAffiliateSettings>();
         if(settings?.Enabled is true&& !string.IsNullOrEmpty(settings.SigningKey))
@@ -88,8 +91,11 @@ public class AffiliateServerController:Controller
     
     [AllowAnonymous]
     [HttpPost("notify_coinjoin")]
+    [HttpGet("notify_coinjoin")]
     public async Task<IActionResult> GetCoinjoinRequest()
     {
+        
+        _logger.LogTrace("notify_coinjoin Called");
         var settings = await _settingsRepository.GetSettingAsync<WabisabiAffiliateSettings>();
         if (settings?.Enabled is not true)
         {
@@ -106,12 +112,15 @@ public class AffiliateServerController:Controller
         {
 
             var valid = ecdsa.VerifyData(payload.GetCanonicalSerialization(), request.Signature, HashAlgorithmName.SHA256);
-            if(!valid)
+            if (!valid)
+            {
+                
+                _logger.LogError($"Invalid coinjoin request sent\n{payload.GetCanonicalSerialization()}\n{request.Signature}" );
                 return NotFound();
-        
-            var path = Path.Combine(_dataDirectories.Value.DataDir, "Plugins", "CoinjoinAffiliate", "History.txt");
+            }
+            var path = Path.Combine(_dataDirectories.Value.DataDir, "Plugins", "CoinjoinAffiliate", $"History{DateTime.Today:dd_MM_yyyy}.txt");
 
-            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             await System.IO.File.AppendAllLinesAsync(path, new[] {JObject.FromObject(request).ToString(Formatting.None).Replace(Environment.NewLine, "")}, Encoding.UTF8);
             var response = new CoinJoinNotificationResponse(Array.Empty<byte>());
             return Json(response, AffiliationJsonSerializationOptions.Settings);
