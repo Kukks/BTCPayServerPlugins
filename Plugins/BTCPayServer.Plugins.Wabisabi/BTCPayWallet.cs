@@ -169,13 +169,18 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     }
     public static bool IsRoundOk(RoundParameters roundParameters, WabisabiStoreCoordinatorSettings coordSettings)
     {
-        if (coordSettings.RoundWhenEnabled is null)
+        try
+        {
+            return coordSettings.RoundWhenEnabled is not null &&
+                   roundParameters.CoordinationFeeRate.Rate <= coordSettings.RoundWhenEnabled.CoordinationFeeRate &&
+                   roundParameters.CoordinationFeeRate.PlebsDontPayThreshold <=
+                   coordSettings.RoundWhenEnabled.PlebsDontPayThreshold &&
+                   roundParameters.MinInputCountByRound <= coordSettings.RoundWhenEnabled.MinInputCountByRound;
+        }
+        catch (Exception e)
         {
             return false;
         }
-        return roundParameters.CoordinationFeeRate.Rate <= coordSettings.RoundWhenEnabled.CoordinationFeeRate &&
-               roundParameters.CoordinationFeeRate.PlebsDontPayThreshold <= coordSettings.RoundWhenEnabled.PlebsDontPayThreshold &&
-               roundParameters.MinInputCountByRound <= coordSettings.RoundWhenEnabled.MinInputCountByRound;
     }
     public async Task<IEnumerable<SmartCoin>> GetCoinjoinCoinCandidatesAsync(string coordinatorName)
     {
