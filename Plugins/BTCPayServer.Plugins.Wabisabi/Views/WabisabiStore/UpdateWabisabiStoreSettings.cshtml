@@ -233,7 +233,6 @@
                         </p>
                     }
 
-                    // make sure there is a round that is not a blame round
                     @if (coordinator.RoundStateUpdater.AnyRound && coordinator.RoundStateUpdater.RoundStates.Any(pair => pair.Value.BlameOf == uint256.Zero))
                     {
                         var round = coordinator.RoundStateUpdater.RoundStates.Last(pair => pair.Value.BlameOf == uint256.Zero).Value;
