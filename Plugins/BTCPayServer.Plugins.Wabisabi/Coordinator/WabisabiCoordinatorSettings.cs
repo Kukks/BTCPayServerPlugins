@@ -11,7 +11,7 @@ public class WabisabiCoordinatorSettings
     public bool Enabled { get; set; } = false;
     
     public string NostrIdentity { get; set; }
-    public Uri NostrRelay { get; set; } = new Uri("wss://relay.nostr.info");
+    public Uri NostrRelay { get; set; } = new Uri("wss://nostr.mutinywallet.com");
     
     public List<DiscoveredCoordinator> DiscoveredCoordinators { get; set; } = new();
     
@@ -45,5 +45,6 @@ public class DiscoveredCoordinator
 {
     public Uri Uri { get; set; }
     public string Name { get; set; }
+    public string Relay { get; set; }
     public string Description { get; set; }
 }

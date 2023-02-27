@@ -12,6 +12,7 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Common;
+using BTCPayServer.Configuration;
 using BTCPayServer.Data;
 using BTCPayServer.Filters;
 using BTCPayServer.Models.WalletViewModels;
@@ -26,6 +27,7 @@ using NBitcoin;
 using NBitcoin.Payment;
 using NBitcoin.Secp256k1;
 using NBXplorer;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using NNostr.Client;
 using Org.BouncyCastle.Security;
@@ -46,6 +48,7 @@ namespace BTCPayServer.Plugins.Wabisabi
         private readonly IExplorerClientProvider _explorerClientProvider;
         private readonly WabisabiCoordinatorService _wabisabiCoordinatorService;
         private readonly IAuthorizationService _authorizationService;
+        private readonly BTCPayServerOptions _options;
         private readonly WabisabiCoordinatorClientInstanceManager _instanceManager;
         private readonly Socks5HttpClientHandler _socks5HttpClientHandler;
 
@@ -55,7 +58,8 @@ namespace BTCPayServer.Plugins.Wabisabi
             WabisabiCoordinatorService wabisabiCoordinatorService,
             WabisabiCoordinatorClientInstanceManager instanceManager, 
             IAuthorizationService authorizationService,
-            IServiceProvider serviceProvider)
+            IServiceProvider serviceProvider,
+            BTCPayServerOptions options)
         {
             _WabisabiService = WabisabiService;
             _walletProvider = walletProvider;
@@ -63,6 +67,7 @@ namespace BTCPayServer.Plugins.Wabisabi
             _explorerClientProvider = explorerClientProvider;
             _wabisabiCoordinatorService = wabisabiCoordinatorService;
             _authorizationService = authorizationService;
+            _options = options;
             _instanceManager = instanceManager;
             _socks5HttpClientHandler = serviceProvider.GetRequiredService<Socks5HttpClientHandler>();
         }
@@ -91,8 +96,8 @@ namespace BTCPayServer.Plugins.Wabisabi
             var pieces = command.Split(":");
             var actualCommand = pieces[0];
             var commandIndex = pieces.Length > 1 ? pieces[1] : null;
-            var coordinator = pieces.Length > 2 ? pieces[2] : null;
-            vm.AnonymitySetTarget = Math.Max(2, vm.AnonymitySetTarget);
+            vm.AnonymitySetTarget = Math.Max(0, vm.AnonymitySetTarget);
+            vm.FeeRateMedianTimeFrameHours = Math.Max(0, vm.FeeRateMedianTimeFrameHours);
             ModelState.Clear();
 
             WabisabiCoordinatorSettings coordSettings;
@@ -106,41 +111,6 @@ namespace BTCPayServer.Plugins.Wabisabi
                     await _WabisabiService.SetWabisabiForStore(storeId, vm, commandIndex);
                     TempData["SuccessMessage"] = $"{commandIndex} terms accepted";
                     return RedirectToAction(nameof(UpdateWabisabiStoreSettings), new {storeId});
-                    
-                case "discover":
-                    coordSettings = await _wabisabiCoordinatorService.GetSettings();
-                    var relay = commandIndex ??
-                                coordSettings?.NostrRelay.ToString();
-var network = _explorerClientProvider.GetExplorerClient("BTC").Network.NBitcoinNetwork;
-                    
-                    if (Uri.TryCreate(relay, UriKind.Absolute, out var relayUri))
-                    {
-
-                        if (network.ChainName == ChainName.Regtest)
-                        {
-                            var evts = new List<NostrEvent>();
-                            for (int i = 0; i < SecureRandom.Shared.Next(1, 10); i++)
-                            {
-                                ECPrivKey.TryCreate(new ReadOnlySpan<byte>(RandomNumberGenerator.GetBytes(32)),
-                                    out var key);
-                                evts.Add(await Nostr.CreateCoordinatorDiscoveryEvent(network, key.ToHex(),
-                                    new Uri($"https://{Guid.NewGuid()}.com"), "fake regtest coord test"));
-                            }
-
-                            await Nostr.Publish(relayUri, evts.ToArray(),_socks5HttpClientHandler ,CancellationToken.None);
-                        }
-
-                        ViewBag.DiscoveredCoordinators = await Nostr.Discover(relayUri,
-                            network,
-                            coordSettings.Key?.CreateXOnlyPubKey().ToHex(), CancellationToken.None);
-                    }
-                    else
-                    {
-                        TempData["ErrorMessage"] = $"No relay uri was provided";
-                    }
-
-                    return View(vm);
-                
                 case "remove-coordinator":
                     if (!(await _authorizationService.AuthorizeAsync(User, null,
                             new PolicyRequirement(Policies.CanModifyServerSettings))).Succeeded)
@@ -197,11 +167,64 @@ var network = _explorerClientProvider.GetExplorerClient("BTC").Network.NBitcoinN
 
         [HttpPost("add-coordinator")]
         [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie, Policy = Policies.CanModifyServerSettings)]
-        public async Task<IActionResult> AddCoordinator(string storeId, [FromForm] DiscoveredCoordinator viewModel)
+        public async Task<IActionResult> AddCoordinator(string storeId, [FromForm] DiscoveredCoordinator viewModel, string command )
         {
+            
             var coordSettings = await _wabisabiCoordinatorService.GetSettings();
+            if (command == "discover")
+            {
+                
+                var network = _explorerClientProvider.GetExplorerClient("BTC").Network.NBitcoinNetwork;
+                    
+                if (Uri.TryCreate(viewModel.Relay, UriKind.Absolute, out var relayUri))
+                {
+
+                    if (network.ChainName == ChainName.Regtest)
+                    {
+                        var eventsTomake = Random.Shared.Next(1, 5);
+                        var evts = new List<NostrEvent>();
+                        for (var i = 0; i < eventsTomake; i++)
+                        {
+                            ECPrivKey.TryCreate(new ReadOnlySpan<byte>(RandomNumberGenerator.GetBytes(32)),
+                                out var key);
+                            evts.Add(await Nostr.CreateCoordinatorDiscoveryEvent(network, key.ToHex(),
+                                new Uri($"https://{Guid.NewGuid()}.com"), "fake regtest coord test"));
+                        }
+
+                        await Nostr.Publish(relayUri, evts.ToArray(),null,CancellationToken.None);
+                    }
+
+                    try
+                    {
+                        var result = await Nostr.Discover(
+                            _socks5HttpClientHandler, relayUri,
+                            network,
+                            coordSettings.Key?.CreateXOnlyPubKey().ToHex(), CancellationToken.None);
+                        if(result.Any())
+                            TempData["DiscoveredCoordinators"] = JsonConvert.SerializeObject(result);
+                        else
+                            TempData["ErrorMessage"] = $"No coordinators found.";
+                    }
+                    catch (Exception e)
+                    {
+                        
+                        TempData["ErrorMessage"] = $"Could not discover coordinators: {e.Message}";
+                    }
+                   
+                }
+                else
+                {
+                    TempData["ErrorMessage"] = $"No relay uri was provided";
+                }
+                
+                return RedirectToAction(nameof(UpdateWabisabiStoreSettings), new {storeId});
+            }
+            
            
-            if (viewModel.Name is not null && viewModel.Uri is not null  && coordSettings.DiscoveredCoordinators.All(discoveredCoordinator =>
+            if (viewModel.Name is not null && 
+                viewModel.Uri is not null  && 
+                !new []{"local", "zksnacks"}.Contains(viewModel.Name.ToLowerInvariant()) &&
+                coordSettings.DiscoveredCoordinators.All(discoveredCoordinator =>
                     discoveredCoordinator.Name != viewModel.Name  && discoveredCoordinator.Uri != viewModel.Uri))
             {
                 coordSettings.DiscoveredCoordinators.Add(viewModel);

@@ -24,6 +24,7 @@ public class WabisabiStoreSettings
     public bool BatchPayments { get; set; } = true;
     public int ExtraJoinProbability { get; set; } = 0;
     public CrossMixMode CrossMixBetweenCoordinatorsMode { get; set; } = CrossMixMode.WhenFree;
+    public int FeeRateMedianTimeFrameHours { get; set; }
 
     public enum CrossMixMode
     {

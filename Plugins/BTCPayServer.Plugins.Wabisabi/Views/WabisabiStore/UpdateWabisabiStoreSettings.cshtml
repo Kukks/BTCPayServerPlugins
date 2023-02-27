@@ -1,10 +1,10 @@
 ﻿@using BTCPayServer.Plugins.Wabisabi
 @using BTCPayServer.Abstractions.Contracts
-@using BTCPayServer.Security
 @using NBitcoin
 @using System.Security.Claims
 @using BTCPayServer
 @using BTCPayServer.Client
+@using BTCPayServer.Configuration
 @using BTCPayServer.Services.Stores
 @using Microsoft.AspNetCore.Mvc.TagHelpers
 @using WalletWasabi.Backend.Controllers
@@ -14,6 +14,7 @@
 @inject StoreRepository StoreRepository
 @inject WalletProvider WalletProvider
 @inject BTCPayNetworkProvider BtcPayNetworkProvider
+@inject BTCPayServerOptions BtcPayServerOptions
 @{
     var storeId = _scopeProvider.GetCurrentStoreId();
     Layout = "../Shared/_NavLayout.cshtml";
@@ -43,6 +44,14 @@
 </div>
 <form method="post">
 @{
+    if (BtcPayServerOptions.SocksEndpoint is null)
+    {
+         <div class="alert alert-danger d-flex align-items-center" role="alert">
+                <vc:icon symbol="warning"/>
+                <span class="ms-3">TOR is not configured on this BTCPay Server instance. All communication will be over clearnet and therefore not private!</span>
+         </div>
+    }
+    
     var wallet = await WalletProvider.GetWalletAsync(storeId);
     if (wallet is BTCPayWallet btcPayWallet)
     {
@@ -97,6 +106,13 @@
             <input type="number" class="form-control" asp-for="AnonymitySetTarget" placeholder="target anon score" min="0">
 
             <p class="text-muted">Scores your coinjoined utxos based on how many other utxos in the coinjoin (and other previous coinjoin rounds) had the same value.<br/> Anonset score computation is not an exact science, and when using coordinators with massive liquidity, is not that important as all rounds (past, present, future) contribute to your privacy.</p>
+        </div>
+        <div class="form-group">
+
+            <label asp-for="FeeRateMedianTimeFrameHours" class="form-label">Mining fee limits in hours</label>
+            <input type="number" class="form-control" asp-for="FeeRateMedianTimeFrameHours" placeholder="hours" min="0">
+
+            <p class="text-muted">Only coinjoin if the mining fee is below the median of the specified number of hours</p>
         </div>
         <div class="form-group form-check">
             <label asp-for="ConsolidationMode" class="form-check-label">Coinsolidation mode</label>
@@ -217,9 +233,11 @@
                         </p>
                     }
 
-                    @if (coordinator.RoundStateUpdater.AnyRound)
+                    // make sure there is a round that is not a blame round
+                    @if (coordinator.RoundStateUpdater.AnyRound && coordinator.RoundStateUpdater.RoundStates.Any(pair => pair.Value.BlameOf == uint256.Zero))
                     {
-                        var round = coordinator.RoundStateUpdater.RoundStates.Last().Value.CoinjoinState.Parameters;
+                        var round = coordinator.RoundStateUpdater.RoundStates.Last(pair => pair.Value.BlameOf == uint256.Zero).Value;
+                        var roundParameters = round.CoinjoinState.Parameters;
 
                         <div class="modal modal-lg fade" id="config-@s.Coordinator">
                             <div class="modal-dialog">
@@ -234,7 +252,7 @@
                                             <tr>
                                                 <th scope="row">Fee charged</th>
                                                 @{
-                                                    var fee = $"{round.CoordinationFeeRate.Rate * 100}% + Free remixing {(round.CoordinationFeeRate.PlebsDontPayThreshold <= 0 ? string.Empty : $"+ Free under {round.CoordinationFeeRate.PlebsDontPayThreshold.ToDecimal(MoneyUnit.BTC)} BTC")}";
+                                                    var fee = $"{roundParameters.CoordinationFeeRate.Rate * 100}% + Free remixing {(roundParameters.CoordinationFeeRate.PlebsDontPayThreshold <= 0 ? string.Empty : $"+ Free under {roundParameters.CoordinationFeeRate.PlebsDontPayThreshold.ToDecimal(MoneyUnit.BTC)} BTC")}";
                                                 }
                                                 <td>
                                                     @(fee)
@@ -242,30 +260,30 @@
                                             </tr>
                                             <tr>
                                                 <th scope="row">Allowed input amounts</th>
-                                                <td>@round.AllowedInputAmounts.Min.ToDecimal(MoneyUnit.BTC) BTC - @round.AllowedInputAmounts.Max.ToDecimal(MoneyUnit.BTC) BTC</td>
+                                                <td>@roundParameters.AllowedInputAmounts.Min.ToDecimal(MoneyUnit.BTC) BTC - @roundParameters.AllowedInputAmounts.Max.ToDecimal(MoneyUnit.BTC) BTC</td>
                                             </tr>
                                             <tr>
                                                 <th scope="row">Allowed input types</th>
-                                                <td>@string.Join(", ", round.AllowedInputTypes)</td>
+                                                <td>@string.Join(", ", roundParameters.AllowedInputTypes)</td>
                                             </tr>
                                             <tr>
                                                 <th scope="row">Allowed output amounts</th>
-                                                <td>@round.AllowedOutputAmounts.Min.ToDecimal(MoneyUnit.BTC) BTC - @round.AllowedOutputAmounts.Max.ToDecimal(MoneyUnit.BTC) BTC</td>
+                                                <td>@roundParameters.AllowedOutputAmounts.Min.ToDecimal(MoneyUnit.BTC) BTC - @roundParameters.AllowedOutputAmounts.Max.ToDecimal(MoneyUnit.BTC) BTC</td>
 
                                             </tr>
                                             <tr>
                                                 <th scope="row">Allowed output types</th>
 
-                                                <td>@string.Join(", ", round.AllowedOutputTypes)</td>
+                                                <td>@string.Join(", ", roundParameters.AllowedOutputTypes)</td>
                                             </tr>
                                             <tr>
-                                                <th scope="row">Minimum inputs</th><td>@round.MinInputCountByRound</td>
+                                                <th scope="row">Minimum inputs</th><td>@roundParameters.MinInputCountByRound</td>
                                             </tr>
                                             <tr>
-                                                <th scope="row">Maximum inputs</th><td>@round.MaxInputCountByRound</td>
+                                                <th scope="row">Maximum inputs</th><td>@roundParameters.MaxInputCountByRound</td>
                                             </tr>
                                             <tr>
-                                                <th scope="row">Maximum round registration time</th><td>@round.StandardInputRegistrationTimeout.ToString()</td>
+                                                <th scope="row">Maximum round registration time</th><td>@roundParameters.StandardInputRegistrationTimeout.ToString()</td>
                                             </tr>
 
                                         </table>
@@ -281,7 +299,7 @@
                            data-bs-toggle="modal" data-bs-target="#config-@s.Coordinator">
                             Coordinator Config
                         </a>
-                        @if (Model.Settings[index].RoundWhenEnabled is not null && !BTCPayWallet.IsRoundOk(round, Model.Settings[index]))
+                        @if (Model.Settings[index].RoundWhenEnabled is not null && !BTCPayWallet.IsRoundOk(roundParameters, Model.Settings[index]))
                         {
                             <div class="alert alert-danger w-100 mb-0 p-1">Round fees/parameters changed. Coinjoins will not occur unless you accept the new parameters.<button class="btn btn-link alert-link p-0" name="command" type="submit" value="accept-terms:@s.Coordinator"> Accept new terms</button></div>
                         }
@@ -300,7 +318,7 @@
             @{
                 var canEnable = coordinator.WasabiCoordinatorStatusFetcher.Connected && coordinator.RoundStateUpdater.AnyRound;
             }
-            <div class="form-group form-check form" data-bs-toggle="tooltip"  title="@(!canEnable ? "You cannot enable this coordinator until it is connected and a round has been seen" : string.Empty)">
+            <div class="form-group form-check form" data-bs-toggle="tooltip" title="@(!canEnable ? "You cannot enable this coordinator until it is connected and a round has been seen" : string.Empty)">
                 @if (Model.Settings[index].RoundWhenEnabled is not null)
                 {
                     <input type="hidden" asp-for="Settings[index].RoundWhenEnabled.CoordinationFeeRate"/>
@@ -339,23 +357,15 @@
 
 
 <button name="command" type="submit" value="save" class="btn btn-primary mt-2">Save</button>
-<a asp-controller="WabisabiCoordinatorConfig" asp-action="UpdateWabisabiSettings" class="btn btn-secondary mt-2" permission="@Policies.CanModifyServerSettings">Coordinator runner</a>
 <a asp-controller="WabisabiStore" asp-action="ListCoinjoins" class="btn btn-secondary mt-2" asp-route-storeId="@storeId">Coinjoins</a>
-<button name="command" type="submit" value="discover" class="btn btn-secondary mt-2" permission="@Policies.CanModifyServerSettings">Discover coordinators over Nostr</button>
-<a class="btn btn-secondary mt-2" href="https://gist.github.com/nopara73/bb17e89d7dc9af536ca41f50f705d329" rel="noreferrer noopener" target="_blank">Enable Discreet payments - Coming soon</a>
-
-
 </form>
 
-@if (ViewBag.DiscoveredCoordinators is List<DiscoveredCoordinator> discoveredCoordinators)
-{
-    foreach (var coordinator in discoveredCoordinators)
-    {
-        <partial model="@coordinator" name="Wabisabi/AddCoordinator"/>
-    }
-}
 
-<partial name="Wabisabi/AddManualCoordinator" model="@(new DiscoveredCoordinator())"/>
+<a asp-controller="WabisabiCoordinatorConfig" asp-action="UpdateWabisabiSettings" class="btn btn-secondary mt-2" permission="@Policies.CanModifyServerSettings">Coordinator runner</a>
+
+<partial name="Wabisabi/AddCoordinatorPrompt" model="@(new DiscoveredCoordinator())"/>
+<a class="btn btn-secondary mt-2" href="https://gist.github.com/nopara73/bb17e89d7dc9af536ca41f50f705d329" rel="noreferrer noopener" target="_blank">Enable Discreet payments - Coming soon</a>
+
 
 @section PageFootContent {
     <partial name="_ValidationScriptsPartial"/>

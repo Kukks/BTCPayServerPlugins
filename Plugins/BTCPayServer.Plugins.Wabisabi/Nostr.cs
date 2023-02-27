@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Services;
@@ -23,26 +25,37 @@ public class Nostr
     public static async Task Publish(
         Uri relayUri,
         NostrEvent[] evts,
-        Socks5HttpClientHandler httpClientHandler,
+        Socks5HttpClientHandler? httpClientHandler,
         CancellationToken cancellationToken )
     {
-
+        if (!evts.Any())
+            return;
         var ct = CancellationTokenSource
-            .CreateLinkedTokenSource(cancellationToken, new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token)
+            .CreateLinkedTokenSource(cancellationToken, new CancellationTokenSource(TimeSpan.FromMinutes(1)).Token)
             .Token;
-        var client = new NostrClient(relayUri);
+        var client = new NostrClient(relayUri, socket => socket.Options.Proxy = httpClientHandler?.Proxy);
         await client.ConnectAndWaitUntilConnected(ct);
         _ = client.ListenForMessages();
         var tcs = new TaskCompletionSource();
        
         var ids = evts.Select(evt => evt.Id).ToHashSet();
-        
-        
+        client.InvalidMessageReceived += (sender, tuple) =>
+        {
+            Console.WriteLine(tuple);
+            
+        };
+        client.OkReceived += (sender, tuple) =>
+        {
+            if (ids.RemoveWhere(s => s == tuple.eventId)> 0 && !ids.Any())
+            {
+                tcs.TrySetResult();   
+            }
+        };
         client.EventsReceived += (sender, tuple) =>
         {
             if (ids.RemoveWhere(s => tuple.events.Any(@event => @event.Id == s)) > 0 && !ids.Any())
             {
-                tcs.TrySetResult();   
+                tcs.TrySetResult();
             }
         };
         await client.CreateSubscription("ack", new[]
@@ -86,18 +99,25 @@ public class Nostr
     }
 
     public static async Task<List<DiscoveredCoordinator>> Discover(
+        Socks5HttpClientHandler? httpClientHandler,
         Uri relayUri,
         Network currentNetwork,
         string ourPubKey,
         CancellationToken cancellationToken)
     {
-        using var nostrClient = new NostrClient(relayUri);
+        
+        var nostrClient = new NostrClient(relayUri, socket => socket.Options.Proxy = httpClientHandler?.Proxy);
         await nostrClient.CreateSubscription("nostr-wabisabi-coordinators",
             new[]
             {
                 new NostrSubscriptionFilter()
                 {
                     Kinds = new[] {Kind}, Since = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromHours(1)),
+                    ExtensionData = new Dictionary<string, JsonElement>()
+                    {
+                        ["type"] = JsonSerializer.SerializeToElement(TypeTagValue),
+                        ["network"] = JsonSerializer.SerializeToElement(currentNetwork.Name.ToLower())
+                    }
                 }
             }, cancellationToken);
         var cts = new CancellationTokenSource(TimeSpan.FromMinutes(1));
@@ -107,12 +127,9 @@ public class Nostr
         var tcs = new TaskCompletionSource();
         Stopwatch stopwatch = new();
         stopwatch.Start();
-        nostrClient.MessageReceived += (sender, s) =>
+        nostrClient.EoseReceived += (sender, s) =>
         {
-            if (JArray.Parse(s).FirstOrDefault()?.Value<string>() == "EOSE")
-            {
-                tcs.SetResult();
-            }
+            tcs.SetResult();
         };
         nostrClient.EventsReceived += (sender, tuple) =>
         {

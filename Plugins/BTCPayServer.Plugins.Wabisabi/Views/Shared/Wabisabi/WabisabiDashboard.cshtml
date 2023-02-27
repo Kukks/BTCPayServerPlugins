@@ -13,7 +13,7 @@
 @inject WabisabiService WabisabiService;
 @inject WalletProvider WalletProvider;
 @inject WabisabiCoordinatorClientInstanceManager WabisabiCoordinatorClientInstanceManager
-@inject ContentSecurityPolicies contentSecurityPolicies
+
 @inject IExplorerClientProvider ExplorerClientProvider
 
 @{
@@ -31,10 +31,9 @@
     var storeId = ScopeProvider.GetCurrentStoreId();
     // var methods = await Client.GetStoreOnChainPaymentMethods(storeId, true);
     // var method = methods.FirstOrDefault(data => data.CryptoCode == "BTC");
-    var nonce = RandomUtils.GetUInt256().ToString().Substring(0, 32);
-    contentSecurityPolicies.Add("script-src", $"'nonce-{nonce}'");
-    contentSecurityPolicies.AllowUnsafeHashes();
-    var mainnet = ExplorerClientProvider.GetExplorerClient("BTC").Network.NBitcoinNetwork.ChainName == ChainName.Mainnet;
+    // var nonce = RandomUtils.GetUInt256().ToString().Substring(0, 32);
+    // contentSecurityPolicies.Add("script-src", $"'nonce-{nonce}'");
+    // contentSecurityPolicies.AllowUnsafeHashes();
 
 }
 @if (available)

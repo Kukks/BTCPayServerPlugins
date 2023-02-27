@@ -3,11 +3,13 @@ using System.IO;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using BTCPayServer;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Common;
 using BTCPayServer.Configuration;
 using BTCPayServer.Plugins.Wabisabi;
 using BTCPayServer.Services;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -33,6 +35,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
     private readonly IMemoryCache _memoryCache;
     private readonly WabisabiCoordinatorClientInstanceManager _instanceManager;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly LinkGenerator _linkGenerator;
 
     public readonly IdempotencyRequestCache IdempotencyRequestCache;
 
@@ -44,7 +47,8 @@ public class WabisabiCoordinatorService : PeriodicRunner
         IOptions<DataDirectories> dataDirectories, IExplorerClientProvider clientProvider, IMemoryCache memoryCache,
         WabisabiCoordinatorClientInstanceManager instanceManager,
         IHttpClientFactory httpClientFactory,
-        IServiceProvider serviceProvider) : base(TimeSpan.FromMinutes(15))
+        IServiceProvider serviceProvider,
+        LinkGenerator linkGenerator) : base(TimeSpan.FromMinutes(15))
     {
         _settingsRepository = settingsRepository;
         _dataDirectories = dataDirectories;
@@ -52,6 +56,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
         _memoryCache = memoryCache;
         _instanceManager = instanceManager;
         _httpClientFactory = httpClientFactory;
+        _linkGenerator = linkGenerator;
         _socks5HttpClientHandler = serviceProvider.GetRequiredService<Socks5HttpClientHandler>();
         IdempotencyRequestCache = new(memoryCache);
     }
@@ -196,12 +201,13 @@ public class WabisabiCoordinatorService : PeriodicRunner
             s.UriToAdvertise is not null)
         {
 
+            var uri = new Uri(s.UriToAdvertise, "plugins/wabisabi-coordinator/wabisabi");
             await Nostr.Publish(s.NostrRelay,
                 new[]
                 {
-                    await Nostr.CreateCoordinatorDiscoveryEvent(network, s.NostrIdentity, s.UriToAdvertise,
+                    await Nostr.CreateCoordinatorDiscoveryEvent(network, s.NostrIdentity, uri,
                         s.CoordinatorDescription)
-                }, _socks5HttpClientHandler, cancel);
+                },s.UriToAdvertise.IsOnion()?  _socks5HttpClientHandler: null, cancel);
         }
     }
 }
