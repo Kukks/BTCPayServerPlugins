@@ -5,6 +5,7 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Data;
 using BTCPayServer.PayoutProcessors;
 using BTCPayServer.Services;
+using NBitcoin;
 using Newtonsoft.Json.Linq;
 
 namespace BTCPayServer.Plugins.Wabisabi
@@ -38,6 +39,13 @@ namespace BTCPayServer.Plugins.Wabisabi
             var res = await  _storeRepository.GetSettingAsync<WabisabiStoreSettings>(storeId, nameof(WabisabiStoreSettings));
             res ??= new WabisabiStoreSettings();
             res.Settings = res.Settings.Where(settings => _ids.Contains(settings.Coordinator)).ToList();
+            res.Settings.ForEach(settings =>
+            {
+                if(settings.RoundWhenEnabled != null && string.IsNullOrEmpty(settings.RoundWhenEnabled.PlebsDontPayThreshold))
+                {
+                    settings.RoundWhenEnabled.PlebsDontPayThreshold = "1000000";
+                }
+            });
             foreach (var wabisabiCoordinatorManager in _coordinatorClientInstanceManager.HostedServices)
             {
                 if (res.Settings.All(settings => settings.Coordinator != wabisabiCoordinatorManager.Key))
@@ -85,7 +93,7 @@ namespace BTCPayServer.Plugins.Wabisabi
                         {
                             CoordinationFeeRate = round.Value.CoinjoinState.Parameters.CoordinationFeeRate.Rate,
                             PlebsDontPayThreshold = round.Value.CoinjoinState.Parameters.CoordinationFeeRate
-                                .PlebsDontPayThreshold,
+                                .PlebsDontPayThreshold.Satoshi.ToString(),
                             MinInputCountByRound = round.Value.CoinjoinState.Parameters.MinInputCountByRound,
                         };
                     }

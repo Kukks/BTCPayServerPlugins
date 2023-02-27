@@ -46,7 +46,9 @@ public class LastCoordinatorRoundConfig
 {
     
     public decimal CoordinationFeeRate { get; set; }
-    [JsonConverter(typeof(MoneyJsonConverter))]
-    public Money PlebsDontPayThreshold { get; set; }
+    public string PlebsDontPayThreshold { get; set; }
+    [JsonIgnore]
+    public Money PlebsDontPayThresholdM => Money.Parse(PlebsDontPayThreshold);
+    
     public int MinInputCountByRound { get; set; }
 }
