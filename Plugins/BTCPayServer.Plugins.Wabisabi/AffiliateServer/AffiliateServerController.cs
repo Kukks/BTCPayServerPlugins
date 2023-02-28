@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 using System.Net.Mime;
 using System.Security.Cryptography;
 using System.Text;
@@ -107,6 +108,12 @@ public class AffiliateServerController:Controller
         using var reader = new StreamReader(Request.Body);
         var request =
             AffiliateServerHttpApiClient.Deserialize<CoinJoinNotificationRequest>(await reader.ReadToEndAsync());
+        if (request.Body.Inputs.All(input => !input.IsAffiliated))
+        {
+            var response = new CoinJoinNotificationResponse(Array.Empty<byte>());
+            return Json(response, AffiliationJsonSerializationOptions.Settings);
+        }
+
         Payload payload = new(Header.Instance,  request.Body);
         try
         {
@@ -121,7 +128,7 @@ public class AffiliateServerController:Controller
             var path = Path.Combine(_dataDirectories.Value.DataDir, "Plugins", "CoinjoinAffiliate", $"History{DateTime.Today:dd_MM_yyyy}.txt");
 
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            await System.IO.File.AppendAllLinesAsync(path, new[] {JObject.FromObject(request).ToString(Formatting.None).Replace(Environment.NewLine, "")}, Encoding.UTF8);
+            await System.IO.File.AppendAllLinesAsync(path, new[] {JObject.FromObject(request, JsonSerializer.Create(AffiliationJsonSerializationOptions.Settings) ).ToString(Formatting.None).Replace(Environment.NewLine, "")}, Encoding.UTF8);
             var response = new CoinJoinNotificationResponse(Array.Empty<byte>());
             return Json(response, AffiliationJsonSerializationOptions.Settings);
 
