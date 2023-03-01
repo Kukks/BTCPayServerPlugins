@@ -256,7 +256,6 @@ namespace BTCPayServer.Plugins.Wabisabi
             return View(viewModel);
         }
 
-        [XFrameOptions(XFrameOptionsAttribute.XFrameOptions.SameOrigin)]
         [HttpGet("spend")]
         public async Task<IActionResult> Spend(string storeId)
         {
@@ -268,7 +267,6 @@ namespace BTCPayServer.Plugins.Wabisabi
             return View(new SpendViewModel() { });
         }
 
-        [XFrameOptions(XFrameOptionsAttribute.XFrameOptions.SameOrigin)]
         [HttpPost("spend")]
         public async Task<IActionResult> Spend(string storeId, SpendViewModel spendViewModel, string command)
         {
