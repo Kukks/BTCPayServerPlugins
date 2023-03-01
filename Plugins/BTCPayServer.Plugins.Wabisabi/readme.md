@@ -2,6 +2,13 @@
 
 This plugin allows every BTCPay Server instance to integrate with the Wabisabi coinjoin protocol developed by [zkSNACKS](docs/https://zksnacks.com/) ([Wasabi Wallet](docs/https://wasabiwallet.io/)).
 
+
+<p align="center">
+<a href="http://www.youtube.com/watch?feature=player_embedded&v=zGVCrwMKKn0
+" target="_blank"><img src="http://img.youtube.com/vi/zGVCrwMKKn0/0.jpg" 
+ border="10" /></a>
+</p>
+
 ## Installation
 
 First ensure that your BTCPay Server instance is at least version 1.8.0 and that NBXplorer is at least 2.3.58. If you are using the recommended Docker deployment method, it is as simple as [one-click](docs/https://docs.btcpayserver.org/FAQ/ServerSettings/#how-to-update-btcpay-server).
