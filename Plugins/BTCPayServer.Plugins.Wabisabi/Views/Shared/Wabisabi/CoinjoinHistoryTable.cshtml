@@ -56,7 +56,7 @@
         @foreach (var cjData in Model)
         {
             var cjInWeightedAverage = @CoinjoinAnalyzer.WeightedAverage.Invoke(@cjData.CoinsIn.Select(coin => new CoinjoinAnalyzer.AmountWithAnonymity(coin.AnonymitySet, new Money(coin.Amount, MoneyUnit.BTC))));
-            var cjOutWeightedAverage = @CoinjoinAnalyzer.WeightedAverage.Invoke(@cjData.CoinsOut.Select(coin => new CoinjoinAnalyzer.AmountWithAnonymity(coin.AnonymitySet, new Money(coin.Amount, MoneyUnit.BTC))));
+            var cjOutWeightedAverage = @CoinjoinAnalyzer.WeightedAverage.Invoke(@cjData.CoinsOut.Where(coin => coin.PayoutId is null).Select(coin => new CoinjoinAnalyzer.AmountWithAnonymity(coin.AnonymitySet, new Money(coin.Amount, MoneyUnit.BTC))));
             <tr>
                 <td>
                     <a class="text-break" data-bs-toggle="collapse" data-bs-target="#txcoins-@cjData.Round">@cjData.Round</a>

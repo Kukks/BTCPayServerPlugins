@@ -599,7 +599,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         Logger.LogTrace($"unlocked utxos: {string.Join(',', unlocked)}");
     }
 
-public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count, bool preferTaproot, bool mixedOutputs)
+public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count, bool mixedOutputs)
     {
         if (!WabisabiStoreSettings.PlebMode && !string.IsNullOrEmpty(WabisabiStoreSettings.MixToOtherWallet) && mixedOutputs)
         {
@@ -671,6 +671,11 @@ public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count,
         {
             return Array.Empty<PendingPayment>();
         }
+    }
+
+    public Task<ScriptType> GetScriptTypeAsync()
+    {
+        return Task.FromResult(DerivationScheme.GetDerivation(0).ScriptPubKey.GetScriptType());
     }
 
     private Action<(uint256 roundId, uint256 transactionId, int outputIndex)> PaymentSucceeded(string payoutId)

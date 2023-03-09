@@ -66,7 +66,8 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
             provider.GetRequiredService<IExplorerClientProvider>(),
             provider.GetRequiredService<ILoggerFactory>(),
             utxoLocker,
-            provider.GetRequiredService<EventAggregator>()
+            provider.GetRequiredService<EventAggregator>(),
+            provider.GetRequiredService<ILogger<WalletProvider>>()
         ));
         applicationBuilder.AddWabisabiCoordinator();
         applicationBuilder.AddSingleton<IWalletProvider>(provider => provider.GetRequiredService<WalletProvider>());
@@ -141,7 +142,7 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
         {
             var walletProvider =
                 (WalletProvider)applicationBuilderApplicationServices.GetRequiredService<IWalletProvider>();
-            await walletProvider.ResetWabisabiStuckPayouts();
+            await walletProvider.ResetWabisabiStuckPayouts(null);
         });
 
         Logger.DotnetLogger = applicationBuilderApplicationServices.GetService<ILogger<WabisabiPlugin>>();

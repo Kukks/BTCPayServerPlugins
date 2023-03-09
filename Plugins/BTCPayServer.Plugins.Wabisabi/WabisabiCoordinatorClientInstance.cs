@@ -19,6 +19,7 @@ using WalletWasabi.WabiSabi.Backend.PostRequests;
 using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.WabiSabi.Client.RoundStateAwaiters;
 using WalletWasabi.WabiSabi.Client.StatusChangedEvents;
+using WalletWasabi.Wallets;
 using WalletWasabi.WebClients.Wasabi;
 using HttpClientFactory = WalletWasabi.WebClients.Wasabi.HttpClientFactory;
 
@@ -63,11 +64,18 @@ public class WabisabiCoordinatorClientInstanceManager:IHostedService
         }
     }
 
-    public async Task StopWallet(string name)
+    public async Task StopWallet(IWallet wallet, string coordinator = null)
     {
-        foreach (var servicesValue in HostedServices.Values)
+        if (coordinator is not null && HostedServices.TryGetValue(coordinator, out var instance))
         {
-            await servicesValue.StopWallet(name);
+            await instance.StopWallet(wallet);
+        }
+        else if (coordinator is null)
+        {
+            foreach (var servicesValue in HostedServices.Values)
+            {
+                await servicesValue.StopWallet(wallet);
+            }
         }
     }
 
@@ -184,9 +192,9 @@ public class WabisabiCoordinatorClientInstance
 
     }
 
-    public async Task StopWallet(string walletName)
+    public async Task StopWallet(IWallet wallet)
     {
-        await CoinJoinManager.StopAsyncByName(walletName, CancellationToken.None);
+        await CoinJoinManager.StopAsync(wallet, CancellationToken.None);
     }
 
     private void OnStatusChanged(object sender, StatusChangedEventArgs e)

@@ -39,6 +39,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     public IUTXOLocker UtxoLocker { get; set; }
     private readonly ILoggerFactory _loggerFactory;
     private readonly EventAggregator _eventAggregator;
+    private readonly ILogger<WalletProvider> _logger;
 
     public WalletProvider(
         IServiceProvider serviceProvider,
@@ -47,7 +48,8 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
         IExplorerClientProvider explorerClientProvider, 
         ILoggerFactory loggerFactory, 
         IUTXOLocker utxoLocker, 
-        EventAggregator eventAggregator ) : base(TimeSpan.FromMinutes(5))
+        EventAggregator eventAggregator,
+        ILogger<WalletProvider> logger) : base(TimeSpan.FromMinutes(5))
     {
         UtxoLocker = utxoLocker;
         _serviceProvider = serviceProvider;
@@ -56,7 +58,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
         _explorerClientProvider = explorerClientProvider;
         _loggerFactory = loggerFactory;
         _eventAggregator = eventAggregator;
-        
+        _logger = logger;
     }
 
     public readonly  ConcurrentDictionary<string, Task<IWallet?>> LoadedWallets = new();
@@ -65,9 +67,9 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
    
     public class WalletUnloadEventArgs : EventArgs
     {
-        public string Wallet { get; }
+        public IWallet Wallet { get; }
 
-        public WalletUnloadEventArgs(string wallet)
+        public WalletUnloadEventArgs(IWallet wallet)
         {
             Wallet = wallet;
         }
@@ -76,7 +78,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     public event EventHandler<WalletUnloadEventArgs>? WalletUnloaded;
     public async Task<IWallet> GetWalletAsync(string name)
     {
-        await initialLoad;
+        await initialLoad.Task;
         return await LoadedWallets.GetOrAddAsync(name, async s =>
         {
 
@@ -118,7 +120,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
         
     }
 
-    private Task initialLoad = null;
+    private TaskCompletionSource initialLoad = new();
     private IEventAggregatorSubscription _subscription;
     private IEventAggregatorSubscription _subscription2;
 
@@ -131,7 +133,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
             return Array.Empty<IWallet>();
         }
 
-        await initialLoad; 
+        await initialLoad.Task; 
         return (await Task.WhenAll(_cachedSettings
                 .Select(pair => GetWalletAsync(pair.Key))))
             .Where(wallet => wallet is not null);
@@ -139,22 +141,32 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
 
     
 
-    public async Task ResetWabisabiStuckPayouts()
+    public async Task ResetWabisabiStuckPayouts(string[] storeIds)
     {
-        var wallets = await GetWalletsAsync();
+
+        await initialLoad.Task;
         
+        
+        storeIds??= _cachedSettings?.Keys.ToArray() ?? Array.Empty<string>();
+        if (!storeIds.Any())
+        {
+            return;
+        }
         var pullPaymentHostedService =  _serviceProvider.GetRequiredService<PullPaymentHostedService>();
         var payouts = await pullPaymentHostedService.GetPayouts(new PullPaymentHostedService.PayoutQuery()
         {
-            States = new PayoutState[]
+            States = new[]
             {
                 PayoutState.InProgress
             },
             PaymentMethods = new[] {"BTC"},
-            Stores = wallets.Select(wallet => ((BTCPayWallet) wallet).StoreId).ToArray()
+            Stores = storeIds
         });
         var inProgressPayouts = payouts
             .Where(data => data.GetProofBlobJson()?.Value<string>("proofType") == "Wabisabi").ToArray();
+        if(!inProgressPayouts.Any())
+            return;
+        _logger.LogInformation("Moving {count} stuck coinjoin payouts to AwaitingPayment", inProgressPayouts.Length);
         foreach (PayoutData payout in inProgressPayouts)
         {
             try
@@ -217,8 +229,12 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     private async Task UnloadWallet(string name)
     {
         
-        LoadedWallets.TryRemove(name, out _);
-        WalletUnloaded?.Invoke(this, new WalletUnloadEventArgs(name));
+        LoadedWallets.TryRemove(name, out var walletTask);
+        if (walletTask != null)
+        {
+            var wallet = await walletTask;
+            WalletUnloaded?.Invoke(this, new WalletUnloadEventArgs(wallet));
+        }
     }
 
     public async Task SettingsUpdated(string storeId, WabisabiStoreSettings wabisabiSettings)
@@ -269,10 +285,11 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     
     public override Task StartAsync(CancellationToken cancellationToken)
     {
-        initialLoad = Task.Run(async () =>
+        Task.Run(async () =>
         {
             _cachedSettings =
                 await _storeRepository.GetSettingsAsync<WabisabiStoreSettings>(nameof(WabisabiStoreSettings));
+            initialLoad.SetResult();
         }, cancellationToken);
         _subscription = _eventAggregator.SubscribeAsync<WalletChangedEvent>(@event =>
             Check(@event.WalletId.StoreId, cancellationToken));

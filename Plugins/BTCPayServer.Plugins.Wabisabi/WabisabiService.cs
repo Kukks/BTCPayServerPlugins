@@ -62,11 +62,14 @@ namespace BTCPayServer.Plugins.Wabisabi
 
         public async Task SetWabisabiForStore(string storeId, WabisabiStoreSettings wabisabiSettings, string termsCoord = null)
         {
-            foreach (var setting in wabisabiSettings.Settings)
+            foreach (var setting in wabisabiSettings.Settings.Where(setting => !setting.Enabled))
             {
-                if (setting.Enabled) continue;
-                if(_coordinatorClientInstanceManager.HostedServices.TryGetValue(setting.Coordinator, out var coordinator))
-                    _ = coordinator.StopWallet(storeId);
+                _walletProvider.LoadedWallets.TryGetValue(storeId, out var walletTask);
+                if (walletTask != null)
+                {
+                    var wallet = await walletTask;
+                    await _coordinatorClientInstanceManager.StopWallet(wallet, setting.Coordinator);
+                }
             }
    
             if (wabisabiSettings.Settings.All(settings => !settings.Enabled))
