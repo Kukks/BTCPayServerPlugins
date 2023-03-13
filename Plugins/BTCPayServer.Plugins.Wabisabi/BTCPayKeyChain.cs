@@ -13,6 +13,7 @@ namespace BTCPayServer.Plugins.Wabisabi;
 
 public class BTCPayKeyChain : IKeyChain
 {
+    public Smartifier Smartifier { get; }
     private readonly ExplorerClient _explorerClient;
     private readonly DerivationStrategyBase _derivationStrategy;
     private readonly ExtKey _masterKey;
@@ -21,8 +22,9 @@ public class BTCPayKeyChain : IKeyChain
     public bool KeysAvailable => _masterKey is not null && _accountKey is not null;
 
     public BTCPayKeyChain(ExplorerClient explorerClient, DerivationStrategyBase derivationStrategy, ExtKey masterKey,
-        ExtKey accountKey)
+        ExtKey accountKey, Smartifier smartifier)
     {
+        Smartifier = smartifier;
         _explorerClient = explorerClient;
         _derivationStrategy = derivationStrategy;
         _masterKey = masterKey;

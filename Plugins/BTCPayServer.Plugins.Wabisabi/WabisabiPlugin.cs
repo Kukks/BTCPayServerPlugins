@@ -62,12 +62,12 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
         applicationBuilder.AddSingleton<WalletProvider>(provider => new(
             provider,
             provider.GetRequiredService<StoreRepository>(),
-            provider.GetRequiredService<IBTCPayServerClientFactory>(),
             provider.GetRequiredService<IExplorerClientProvider>(),
             provider.GetRequiredService<ILoggerFactory>(),
             utxoLocker,
             provider.GetRequiredService<EventAggregator>(),
-            provider.GetRequiredService<ILogger<WalletProvider>>()
+            provider.GetRequiredService<ILogger<WalletProvider>>(),
+            provider.GetRequiredService<BTCPayNetworkProvider>()
         ));
         applicationBuilder.AddWabisabiCoordinator();
         applicationBuilder.AddSingleton<IWalletProvider>(provider => provider.GetRequiredService<WalletProvider>());

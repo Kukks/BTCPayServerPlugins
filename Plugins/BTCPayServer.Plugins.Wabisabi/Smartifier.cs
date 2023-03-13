@@ -31,21 +31,20 @@ public class Smartifier
     public Smartifier(
         WalletRepository walletRepository,
         ExplorerClient explorerClient, DerivationStrategyBase derivationStrategyBase, string storeId,
-        IUTXOLocker utxoLocker)
+        IUTXOLocker utxoLocker, RootedKeyPath accountKeyPath)
     {
         _walletRepository = walletRepository;
         _explorerClient = explorerClient;
         DerivationScheme = derivationStrategyBase;
         _storeId = storeId;
         _utxoLocker = utxoLocker;
-        _accountKeyPath = _explorerClient.GetMetadataAsync<RootedKeyPath>(DerivationScheme,
-            WellknownMetadataKeys.AccountKeyPath);
+        _accountKeyPath = accountKeyPath;
     }
 
     public readonly  ConcurrentDictionary<uint256, Task<TransactionInformation>> CachedTransactions = new();
     public readonly ConcurrentDictionary<uint256, Task<SmartTransaction>> Transactions = new();
     public readonly  ConcurrentDictionary<OutPoint, Task<SmartCoin>> Coins = new();
-    private readonly Task<RootedKeyPath> _accountKeyPath;
+    private readonly RootedKeyPath _accountKeyPath;
 
     public async Task LoadCoins(List<ReceivedCoin> coins, int current ,
         Dictionary<OutPoint, (HashSet<string> labels, double anonset, BTCPayWallet.CoinjoinData coinjoinData)> utxoLabels)
@@ -150,7 +149,7 @@ public class Smartifier
                 utxoLabels.TryGetValue(coin.OutPoint, out var labels);
                 var unsmartTx = await CachedTransactions[coin.OutPoint.Hash];
                 var pubKey = DerivationScheme.GetChild(coin.KeyPath).GetExtPubKeys().First().PubKey;
-                var kp = (await _accountKeyPath).Derive(coin.KeyPath).KeyPath;
+                var kp = _accountKeyPath.Derive(coin.KeyPath).KeyPath;
 
                 var hdPubKey = new HdPubKey(pubKey, kp, new SmartLabel(labels.labels ?? new HashSet<string>()),
                     current == 1 ? KeyState.Clean : KeyState.Used);

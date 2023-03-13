@@ -18,13 +18,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
 using NBXplorer;
-using NBXplorer.Models;
 using WalletWasabi.Bases;
-using WalletWasabi.Blockchain.Analysis;
-using WalletWasabi.Blockchain.TransactionOutputs;
 using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.Wallets;
-using MarkPayoutRequest = BTCPayServer.Client.Models.MarkPayoutRequest;
 using PayoutData = BTCPayServer.Data.PayoutData;
 
 namespace BTCPayServer.Plugins.Wabisabi;
@@ -34,31 +30,31 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     private Dictionary<string, WabisabiStoreSettings>? _cachedSettings;
     private readonly IServiceProvider _serviceProvider;
     private readonly StoreRepository _storeRepository;
-    private readonly IBTCPayServerClientFactory _btcPayServerClientFactory;
     private readonly IExplorerClientProvider _explorerClientProvider;
     public IUTXOLocker UtxoLocker { get; set; }
     private readonly ILoggerFactory _loggerFactory;
     private readonly EventAggregator _eventAggregator;
     private readonly ILogger<WalletProvider> _logger;
+    private readonly BTCPayNetworkProvider _networkProvider;
 
     public WalletProvider(
         IServiceProvider serviceProvider,
         StoreRepository storeRepository, 
-        IBTCPayServerClientFactory btcPayServerClientFactory,
         IExplorerClientProvider explorerClientProvider, 
         ILoggerFactory loggerFactory, 
         IUTXOLocker utxoLocker, 
         EventAggregator eventAggregator,
-        ILogger<WalletProvider> logger) : base(TimeSpan.FromMinutes(5))
+        ILogger<WalletProvider> logger,
+        BTCPayNetworkProvider networkProvider) : base(TimeSpan.FromMinutes(5))
     {
         UtxoLocker = utxoLocker;
         _serviceProvider = serviceProvider;
         _storeRepository = storeRepository;
-        _btcPayServerClientFactory = btcPayServerClientFactory;
         _explorerClientProvider = explorerClientProvider;
         _loggerFactory = loggerFactory;
         _eventAggregator = eventAggregator;
         _logger = logger;
+        _networkProvider = networkProvider;
     }
 
     public readonly  ConcurrentDictionary<string, Task<IWallet?>> LoadedWallets = new();
@@ -76,32 +72,49 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     }
 
     public event EventHandler<WalletUnloadEventArgs>? WalletUnloaded;
-    public async Task<IWallet> GetWalletAsync(string name)
+    public async Task<IWallet?> GetWalletAsync(string name)
     {
         await initialLoad.Task;
         return await LoadedWallets.GetOrAddAsync(name, async s =>
         {
-
             if (!_cachedSettings.TryGetValue(name, out var wabisabiStoreSettings))
             {
                 return null;
             }
-            
-            var client = await _btcPayServerClientFactory.Create(null, name);
-            var pm = await client.GetStoreOnChainPaymentMethod(name, "BTC");
+            var store = await _storeRepository.FindStore(name);
+            var paymentMethod = store?.GetDerivationSchemeSettings(_networkProvider, "BTC");
+            if (paymentMethod is null)
+            {
+                return null;
+            }
+
             var explorerClient = _explorerClientProvider.GetExplorerClient("BTC");
-            var derivationStrategy =
-                explorerClient.Network.DerivationStrategyFactory.Parse(pm.DerivationScheme);
+            var isHotWallet = paymentMethod.IsHotWallet;
+            var enabled = store.GetEnabledPaymentIds(_networkProvider).Contains(paymentMethod.PaymentId);
+            var derivationStrategy = paymentMethod.AccountDerivation;
+            BTCPayKeyChain keychain;
+            if (isHotWallet && enabled)
+            {
+                var masterKey = await explorerClient.GetMetadataAsync<BitcoinExtKey>(derivationStrategy,
+                    WellknownMetadataKeys.MasterHDKey);
+                var accountKey = await explorerClient.GetMetadataAsync<BitcoinExtKey>(derivationStrategy,
+                    WellknownMetadataKeys.AccountHDKey);
+                var accountKeyPath = await explorerClient.GetMetadataAsync<RootedKeyPath>(derivationStrategy,
+                    WellknownMetadataKeys.AccountKeyPath);
 
-            var masterKey = await explorerClient.GetMetadataAsync<BitcoinExtKey>(derivationStrategy,
-                WellknownMetadataKeys.MasterHDKey);
-            var accountKey = await explorerClient.GetMetadataAsync<BitcoinExtKey>(derivationStrategy,
-                WellknownMetadataKeys.AccountHDKey);
+                if (masterKey is null || accountKey is null || accountKeyPath is null)
+                {
+                    
+                    keychain = new BTCPayKeyChain(explorerClient, derivationStrategy, null, null, null);
+                }else
+                    keychain = new BTCPayKeyChain(explorerClient, derivationStrategy, masterKey, accountKey, new Smartifier(_serviceProvider.GetRequiredService<WalletRepository>(),explorerClient, derivationStrategy, name, UtxoLocker, accountKeyPath));
 
-            var keychain = new BTCPayKeyChain(explorerClient, derivationStrategy, masterKey, accountKey);
+            }
+            else
+            {
+                keychain = new BTCPayKeyChain(explorerClient, derivationStrategy, null, null, null);
+            }
 
-
-            var smartifier = new Smartifier(_serviceProvider.GetRequiredService<WalletRepository>(),explorerClient, derivationStrategy, name, UtxoLocker);
 
             return (IWallet)new BTCPayWallet(
                 _serviceProvider.GetRequiredService<WalletRepository>(),
@@ -109,10 +122,9 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
                 _serviceProvider.GetRequiredService<BitcoinLikePayoutHandler>(),
                 _serviceProvider.GetRequiredService<BTCPayNetworkJsonSerializerSettings>(),
                 _serviceProvider.GetRequiredService<Services.Wallets.BTCPayWalletProvider>().GetWallet("BTC"),
-                _serviceProvider.GetRequiredService<PullPaymentHostedService>(),
-                pm, derivationStrategy, explorerClient, keychain,
-                _btcPayServerClientFactory, name, wabisabiStoreSettings, UtxoLocker,
-                _loggerFactory, smartifier, 
+                _serviceProvider.GetRequiredService<PullPaymentHostedService>(),derivationStrategy, explorerClient, keychain,
+                name, wabisabiStoreSettings, UtxoLocker,
+                _loggerFactory, 
                 _serviceProvider.GetRequiredService<StoreRepository>(), BannedCoins,
                 _eventAggregator);
             
@@ -121,8 +133,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     }
 
     private TaskCompletionSource initialLoad = new();
-    private IEventAggregatorSubscription _subscription;
-    private IEventAggregatorSubscription _subscription2;
+    private CompositeDisposable _disposables = new();
 
     public async Task<IEnumerable<IWallet>> GetWalletsAsync()
     {
@@ -186,38 +197,25 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     protected override async Task ActionAsync(CancellationToken cancel)
     {
 
-        var toCheck = LoadedWallets.Keys.ToList();
-        while (toCheck.Any())
-        {
-            var storeid = toCheck.First();
-            await Check(storeid, cancel);
-            toCheck.Remove(storeid);
-        }
+        // var toCheck = LoadedWallets.Keys.ToList();
+        // while (toCheck.Any())
+        // {
+        //     var storeid = toCheck.First();
+        //     await Check(storeid, cancel);
+        //     toCheck.Remove(storeid);
+        // }
     }
 
     public async Task Check(string storeId, CancellationToken cancellationToken)
     {
-        var client = await _btcPayServerClientFactory.Create(null, storeId);
         try
         {
             if (LoadedWallets.TryGetValue(storeId, out var currentWallet))
             {
-                var wallet = (BTCPayWallet)await currentWallet;
-                var kc = (BTCPayKeyChain)wallet.KeyChain;
-                var pm = await client.GetStoreOnChainPaymentMethod(storeId, "BTC", cancellationToken);
-                if (pm.DerivationScheme != wallet.OnChainPaymentMethodData.DerivationScheme)
-                {
-                    await UnloadWallet(storeId);
-                }
-                else
-                {
-                    wallet.OnChainPaymentMethodData = pm;
-                }
-
-                if (!kc.KeysAvailable)
-                {
-                    await UnloadWallet(storeId);
-                }
+                await UnloadWallet(storeId);
+                if(_cachedSettings.TryGetValue(storeId , out var settings) && settings.Settings.Any(coordinatorSettings => coordinatorSettings.Enabled))
+                    await GetWalletAsync(storeId);
+                await GetWalletAsync(storeId);
             }
         }
         catch (Exception e)
@@ -291,15 +289,28 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
                 await _storeRepository.GetSettingsAsync<WabisabiStoreSettings>(nameof(WabisabiStoreSettings));
             initialLoad.SetResult();
         }, cancellationToken);
-        _subscription = _eventAggregator.SubscribeAsync<WalletChangedEvent>(@event =>
-            Check(@event.WalletId.StoreId, cancellationToken));
+        _disposables.Add(_eventAggregator.SubscribeAsync<StoreRemovedEvent>(async @event =>
+        {
+            await initialLoad.Task;
+            await UnloadWallet(@event.StoreId);
+
+        }));
+        _disposables.Add(_eventAggregator.SubscribeAsync<WalletChangedEvent>(async @event =>
+        {
+            if (@event.WalletId.CryptoCode == "BTC")
+            {
+                await initialLoad.Task;
+                await Check(@event.WalletId.StoreId, cancellationToken);
+            }
+
+        }));
+                
         return base.StartAsync(cancellationToken);
     }
 
     public override Task StopAsync(CancellationToken cancellationToken)
     {
-        _subscription?.Dispose();
-        _subscription2?.Dispose();
+        _disposables?.Dispose();
         return base.StopAsync(cancellationToken);
     }
 }

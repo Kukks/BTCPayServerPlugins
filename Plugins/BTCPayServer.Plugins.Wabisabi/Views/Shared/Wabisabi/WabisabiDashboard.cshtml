@@ -29,11 +29,6 @@
         return;
     }
     var storeId = ScopeProvider.GetCurrentStoreId();
-    // var methods = await Client.GetStoreOnChainPaymentMethods(storeId, true);
-    // var method = methods.FirstOrDefault(data => data.CryptoCode == "BTC");
-    // var nonce = RandomUtils.GetUInt256().ToString().Substring(0, 32);
-    // contentSecurityPolicies.Add("script-src", $"'nonce-{nonce}'");
-    // contentSecurityPolicies.AllowUnsafeHashes();
 
 }
 @if (available)
@@ -87,7 +82,7 @@
                 }
             </div>
 
-            var wallet = (BTCPayWallet) await WalletProvider.GetWalletAsync(storeId);
+            var wallet = (BTCPayWallet?) await WalletProvider.GetWalletAsync(storeId);
 
             var coins = await wallet.GetAllCoins();
             var privacy = wallet.GetPrivacyPercentage(coins, wallet.AnonScoreTarget);
@@ -96,20 +91,13 @@
             var colorCoins = coins.GroupBy(coin => coin.CoinColor(wallet.AnonScoreTarget)).ToDictionary(grouping => grouping.Key, grouping => grouping);
             <div class="widget store-numbers" >
 
-            @if (wallet is BTCPayWallet btcPayWallet)
+            @if (wallet is { })
             {
-                @if (btcPayWallet.OnChainPaymentMethodData?.Enabled is not true)
+                @if (!((BTCPayKeyChain) wallet.KeyChain).KeysAvailable)
                 {
                     <div class="alert alert-danger d-flex align-items-center" role="alert">
                         <vc:icon symbol="warning"/>
-                        <span class="ms-3">This wallet is not enabled in your store settings and will not be able to participate in coinjoins..</span>
-                    </div>
-                }
-                else if (!((BTCPayKeyChain) wallet.KeyChain).KeysAvailable)
-                {
-                    <div class="alert alert-danger d-flex align-items-center" role="alert">
-                        <vc:icon symbol="warning"/>
-                        <span class="ms-3">This wallet is not a hot wallet and will not be able to participate in coinjoins.</span>
+                        <span class="ms-3">This wallet is either not a hot wallet, or enabled in yout store settings and will not be able to participate in coinjoins.</span>
                     </div>
                 }
             }

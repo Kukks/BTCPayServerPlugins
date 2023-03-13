@@ -44,10 +44,10 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     private readonly BTCPayNetworkJsonSerializerSettings _btcPayNetworkJsonSerializerSettings;
     private readonly Services.Wallets.BTCPayWallet _btcPayWallet;
     private readonly PullPaymentHostedService _pullPaymentHostedService;
-    public OnChainPaymentMethodData OnChainPaymentMethodData;
+    // public OnChainPaymentMethodData OnChainPaymentMethodData;
     public readonly DerivationStrategyBase DerivationScheme;
     public readonly ExplorerClient ExplorerClient;
-    public readonly IBTCPayServerClientFactory BtcPayServerClientFactory;
+    // public readonly IBTCPayServerClientFactory BtcPayServerClientFactory;
     public WabisabiStoreSettings WabisabiStoreSettings;
     public readonly IUTXOLocker UtxoLocker;
     public readonly ILogger Logger;
@@ -59,16 +59,13 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         BTCPayNetworkJsonSerializerSettings btcPayNetworkJsonSerializerSettings,
         Services.Wallets.BTCPayWallet btcPayWallet,
         PullPaymentHostedService pullPaymentHostedService,
-        OnChainPaymentMethodData onChainPaymentMethodData,
         DerivationStrategyBase derivationScheme,
         ExplorerClient explorerClient,
         BTCPayKeyChain keyChain,
-        IBTCPayServerClientFactory btcPayServerClientFactory,
         string storeId,
         WabisabiStoreSettings wabisabiStoreSettings,
         IUTXOLocker utxoLocker,
         ILoggerFactory loggerFactory,
-        Smartifier smartifier,
         StoreRepository storeRepository,
         ConcurrentDictionary<string, Dictionary<OutPoint, DateTimeOffset>> bannedCoins, EventAggregator eventAggregator)
     {
@@ -79,14 +76,11 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         _btcPayNetworkJsonSerializerSettings = btcPayNetworkJsonSerializerSettings;
         _btcPayWallet = btcPayWallet;
         _pullPaymentHostedService = pullPaymentHostedService;
-        OnChainPaymentMethodData = onChainPaymentMethodData;
         DerivationScheme = derivationScheme;
         ExplorerClient = explorerClient;
-        BtcPayServerClientFactory = btcPayServerClientFactory;
         StoreId = storeId;
         WabisabiStoreSettings = wabisabiStoreSettings;
         UtxoLocker = utxoLocker;
-        _smartifier = smartifier;
         _storeRepository = storeRepository;
         _bannedCoins = bannedCoins;
         _eventAggregator = eventAggregator;
@@ -101,8 +95,9 @@ public class BTCPayWallet : IWallet, IDestinationProvider
 
     bool IWallet.IsMixable(string coordinator)
     {
-        return OnChainPaymentMethodData?.Enabled is  true && WabisabiStoreSettings.Settings.SingleOrDefault(settings =>
-            settings.Coordinator.Equals(coordinator))?.Enabled is  true && ((BTCPayKeyChain)KeyChain).KeysAvailable;
+        return KeyChain is BTCPayKeyChain {KeysAvailable: true} && WabisabiStoreSettings.Settings.SingleOrDefault(
+            settings =>
+                settings.Coordinator.Equals(coordinator))?.Enabled is true;
     }
 
     public IKeyChain KeyChain { get; }
@@ -152,7 +147,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     }
     
     private IRoundCoinSelector _coinSelector;
-    public readonly Smartifier _smartifier;
+    public Smartifier _smartifier => (KeyChain as BTCPayKeyChain)?.Smartifier;
     private readonly StoreRepository _storeRepository;
     private readonly ConcurrentDictionary<string, Dictionary<OutPoint, DateTimeOffset>> _bannedCoins;
     private readonly EventAggregator _eventAggregator;
@@ -352,7 +347,13 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     public async Task RegisterCoinjoinTransaction(SuccessfulCoinJoinResult result, string coordinatorName)
     {
         await _savingProgress;
+
+     
+
+        
         _savingProgress = RegisterCoinjoinTransactionInternal(result, coordinatorName);
+        
+        
         await _savingProgress;
     }
     private async Task RegisterCoinjoinTransactionInternal(SuccessfulCoinJoinResult result, string coordinatorName)
@@ -378,10 +379,10 @@ public class BTCPayWallet : IWallet, IDestinationProvider
             
 
             Dictionary<IndexedTxOut, PendingPayment> indexToPayment = new();
-            foreach (var script in result.OutputScripts)
+            foreach (var script in result.Outputs)
             {
                 var txout = result.UnsignedCoinJoin.Outputs.AsIndexedOutputs()
-                    .Single(@out => @out.TxOut.ScriptPubKey == script);
+                    .Single(@out => @out.TxOut.ScriptPubKey == script.ScriptPubKey && @out.TxOut.Value == script.Value);
 
                 
                 //this was not a mix to self, but rather a payment
@@ -393,7 +394,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
                    continue;
                 }
 
-                scriptInfos.Add((txout, ExplorerClient.GetKeyInformationAsync(BlockchainAnalyzer.StdDenoms.Contains(txout.TxOut.Value)?utxoDerivationScheme:DerivationScheme, script)));
+                scriptInfos.Add((txout, ExplorerClient.GetKeyInformationAsync(BlockchainAnalyzer.StdDenoms.Contains(txout.TxOut.Value)?utxoDerivationScheme:DerivationScheme, script.ScriptPubKey)));
             }
 
             await Task.WhenAll(scriptInfos.Select(t => t.Item2));
@@ -405,9 +406,9 @@ public class BTCPayWallet : IWallet, IDestinationProvider
                 coin.SpenderTransaction = smartTx;
                 smartTx.TryAddWalletInput(coin);
             });
-            result.OutputScripts.ForEach(s =>
+            result.Outputs.ForEach(s =>
             {
-                if (scriptInfos2.TryGetValue(s, out var si))
+                if (scriptInfos2.TryGetValue(s.ScriptPubKey, out var si))
                 {
                     var derivation = DerivationScheme.GetChild(si.Item2.Result.KeyPath).GetExtPubKeys().First()
                         .PubKey;
@@ -582,22 +583,22 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     }
 
 
-    public async Task UnlockUTXOs()
-    {
-        var client = await BtcPayServerClientFactory.Create(null, StoreId);
-        var utxos = await client.GetOnChainWalletUTXOs(StoreId, "BTC");
-        var unlocked = new List<string>();
-        foreach (OnChainWalletUTXOData utxo in utxos)
-        {
-
-            if (await UtxoLocker.TryUnlock(utxo.Outpoint))
-            {
-                unlocked.Add(utxo.Outpoint.ToString());
-            }
-        }
-
-        Logger.LogTrace($"unlocked utxos: {string.Join(',', unlocked)}");
-    }
+    // public async Task UnlockUTXOs()
+    // {
+    //     var client = await BtcPayServerClientFactory.Create(null, StoreId);
+    //     var utxos = await client.GetOnChainWalletUTXOs(StoreId, "BTC");
+    //     var unlocked = new List<string>();
+    //     foreach (OnChainWalletUTXOData utxo in utxos)
+    //     {
+    //
+    //         if (await UtxoLocker.TryUnlock(utxo.Outpoint))
+    //         {
+    //             unlocked.Add(utxo.Outpoint.ToString());
+    //         }
+    //     }
+    //
+    //     Logger.LogTrace($"unlocked utxos: {string.Join(',', unlocked)}");
+    // }
 
 public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count, bool mixedOutputs)
     {
@@ -605,15 +606,14 @@ public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count,
         {
             try
             {
-                var mixClient = await BtcPayServerClientFactory.Create(null, WabisabiStoreSettings.MixToOtherWallet);
-                var pm = await mixClient.GetStoreOnChainPaymentMethod(WabisabiStoreSettings.MixToOtherWallet,
-                    "BTC");
+                var mixStore = await  _storeRepository.FindStore(WabisabiStoreSettings.MixToOtherWallet);
+                var pm =  mixStore.GetDerivationSchemeSettings(_btcPayNetworkProvider, "BTC");
                 
-               var deriv =   ExplorerClient.Network.DerivationStrategyFactory.Parse(pm.DerivationScheme);
-               if (deriv.ScriptPubKeyType() == DerivationScheme.ScriptPubKeyType())
+                
+               if (pm?.AccountDerivation?.ScriptPubKeyType() == DerivationScheme.ScriptPubKeyType())
                {
                    return  await  Task.WhenAll(Enumerable.Repeat(0, count).Select(_ =>
-                       _btcPayWallet.ReserveAddressAsync(WabisabiStoreSettings.MixToOtherWallet, deriv, "coinjoin"))).ContinueWith(task => task.Result.Select(information => information.Address));
+                       _btcPayWallet.ReserveAddressAsync(WabisabiStoreSettings.MixToOtherWallet, pm.AccountDerivation, "coinjoin"))).ContinueWith(task => task.Result.Select(information => information.Address));
                }
             }
             

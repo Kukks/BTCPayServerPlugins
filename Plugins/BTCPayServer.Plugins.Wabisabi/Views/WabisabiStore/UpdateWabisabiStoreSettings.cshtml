@@ -53,24 +53,14 @@
     }
     
     var wallet = await WalletProvider.GetWalletAsync(storeId);
-    if (wallet is BTCPayWallet btcPayWallet)
+    if (wallet is BTCPayWallet)
     {
-        @if (btcPayWallet.OnChainPaymentMethodData?.Enabled is not true)
+     
+        @if (!((BTCPayKeyChain) wallet.KeyChain).KeysAvailable)
         {
             <div class="alert alert-danger d-flex align-items-center" role="alert">
                 <vc:icon symbol="warning"/>
-                <span class="ms-3">This wallet is not enabled in your store settings and will not be able to participate in coinjoins..</span>
-
-                <button name="command" type="submit" value="check" class="btn btn-text">Refresh</button>
-            </div>
-        }
-        else if (!((BTCPayKeyChain) wallet.KeyChain).KeysAvailable)
-        {
-            <div class="alert alert-danger d-flex align-items-center" role="alert">
-                <vc:icon symbol="warning"/>
-                <span class="ms-3">This wallet is not a hot wallet and will not be able to participate in coinjoins.</span>
-
-                <button name="command" type="submit" value="check" class="btn btn-text">Refresh</button>
+                <span class="ms-3">This wallet is either not a hot wallet, or enabled in yout store settings and will not be able to participate in coinjoins.</span>
             </div>
         }
     }
