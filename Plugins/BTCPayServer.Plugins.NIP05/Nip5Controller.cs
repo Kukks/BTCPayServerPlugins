@@ -10,6 +10,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
+using NNostr.Client;
+using NNostr.Client.Protocols;
 
 namespace BTCPayServer.Plugins.NIP05;
 
@@ -54,13 +56,42 @@ public class Nip5Controller : Controller
             return RedirectToAction("Edit", new {storeId});
         }
 
+        try
+        {
+            settings.PubKey = settings.PubKey.Trim();
+            settings.PubKey = settings.PubKey.FromNIP19Npub().ToHex();
+        }
+        catch (Exception)
+        {
+            try
+            {
+                
+                var note = (NIP19.NosteProfileNote)settings.PubKey.FromNIP19Note() ;
+                settings.PubKey = note.PubKey;
+                settings.Relays = (settings.Relays ?? new string[0])?.Concat(note.Relays).ToArray();
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        try
+        {
+            NostrExtensions.ParsePubKey(settings.PubKey);
+        }
+        catch (Exception e)
+        {
+            
+            ModelState.AddModelError(nameof(settings.PubKey), "invalid public key");
+        }
+
         if (!ModelState.IsValid)
         {
             return View(settings);
         }
 
         settings.Relays = settings.Relays
-            ?.Where(s => !string.IsNullOrEmpty(s) && Uri.TryCreate(s, UriKind.Absolute, out _)).ToArray();
+            ?.Where(s => !string.IsNullOrEmpty(s) && Uri.TryCreate(s, UriKind.Absolute, out _)).Distinct().ToArray();
         var found = await Get(settings.Name.ToLowerInvariant());
         if (found.storeId is not null && storeId != found.storeId)
         {

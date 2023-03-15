@@ -11,7 +11,7 @@
     <PropertyGroup>
         <Product>Nostr NIP5</Product>
         <Description>Allows you to verify your nostr account</Description>
-        <Version>1.0.2</Version>
+        <Version>1.0.3</Version>
     </PropertyGroup>
     <!-- Plugin development properties -->
     <PropertyGroup>
@@ -36,5 +36,8 @@
     </ItemGroup>
     <ItemGroup>
         <Folder Include="Resources" />
+    </ItemGroup>
+    <ItemGroup>
+      <PackageReference Include="NNostr.Client" Version="0.0.24" />
     </ItemGroup>
 </Project>
