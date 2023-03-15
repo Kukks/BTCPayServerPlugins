@@ -93,26 +93,30 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
             var enabled = store.GetEnabledPaymentIds(_networkProvider).Contains(paymentMethod.PaymentId);
             var derivationStrategy = paymentMethod.AccountDerivation;
             BTCPayKeyChain keychain;
+            var accountKeyPath = paymentMethod.AccountKeySettings.FirstOrDefault()?.GetRootedKeyPath();
             if (isHotWallet && enabled)
             {
                 var masterKey = await explorerClient.GetMetadataAsync<BitcoinExtKey>(derivationStrategy,
                     WellknownMetadataKeys.MasterHDKey);
                 var accountKey = await explorerClient.GetMetadataAsync<BitcoinExtKey>(derivationStrategy,
                     WellknownMetadataKeys.AccountHDKey);
-                var accountKeyPath = await explorerClient.GetMetadataAsync<RootedKeyPath>(derivationStrategy,
+                    var accountKeyPath2 = await explorerClient.GetMetadataAsync<RootedKeyPath>(derivationStrategy,
                     WellknownMetadataKeys.AccountKeyPath);
-
+                    accountKeyPath = accountKeyPath2 ?? accountKeyPath;
+                    var smartifier = new Smartifier(_serviceProvider.GetRequiredService<WalletRepository>(),
+                        explorerClient, derivationStrategy, name, UtxoLocker, accountKeyPath);
                 if (masterKey is null || accountKey is null || accountKeyPath is null)
                 {
-                    
-                    keychain = new BTCPayKeyChain(explorerClient, derivationStrategy, null, null, null);
+                    keychain = new BTCPayKeyChain(explorerClient, derivationStrategy, null, null, smartifier);
                 }else
-                    keychain = new BTCPayKeyChain(explorerClient, derivationStrategy, masterKey, accountKey, new Smartifier(_serviceProvider.GetRequiredService<WalletRepository>(),explorerClient, derivationStrategy, name, UtxoLocker, accountKeyPath));
+                    keychain = new BTCPayKeyChain(explorerClient, derivationStrategy, masterKey, accountKey, smartifier);
 
             }
             else
             {
-                keychain = new BTCPayKeyChain(explorerClient, derivationStrategy, null, null, null);
+                var smartifier = new Smartifier(_serviceProvider.GetRequiredService<WalletRepository>(), explorerClient,
+                    derivationStrategy, name, UtxoLocker, accountKeyPath);
+                keychain = new BTCPayKeyChain(explorerClient, derivationStrategy, null, null, smartifier);
             }
 
 
