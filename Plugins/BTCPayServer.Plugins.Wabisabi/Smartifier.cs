@@ -150,7 +150,7 @@ public class Smartifier
                 var unsmartTx = await CachedTransactions[coin.OutPoint.Hash];
                 var pubKey = DerivationScheme.GetChild(coin.KeyPath).GetExtPubKeys().First().PubKey;
                 //if there is no account key path, it most likely means this is a watch only wallet. Fake the key path
-                var kp = _accountKeyPath?.Derive(coin.KeyPath).KeyPath ?? new KeyPath(0);
+                var kp = _accountKeyPath?.Derive(coin.KeyPath).KeyPath ?? new KeyPath(0,0,0,0,0);
 
                 var hdPubKey = new HdPubKey(pubKey, kp, new SmartLabel(labels.labels ?? new HashSet<string>()),
                     current == 1 ? KeyState.Clean : KeyState.Used);
