@@ -255,7 +255,7 @@ public class TicketTailorService : EventHostedServiceBase
                     return;
                 }
                 await _invoiceRepository.UpdateInvoiceMetadata(invoice.Id, invoice.StoreId, invoice.Metadata.ToJObject());
-
+                await _invoiceRepository.AddInvoiceLogs(invoice.Id, invLogs);
                 var uri = new Uri(btcpayUrl);
                 var url =
                     _linkGenerator.GetUriByAction("Receipt",
