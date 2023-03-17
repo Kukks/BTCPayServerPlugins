@@ -9,7 +9,7 @@
     <PropertyGroup>
         <Product>TicketTailor</Product>
         <Description>Allows you to integrate with TicketTailor.com to sell tickets for Bitcoin</Description>
-        <Version>1.0.6</Version>
+        <Version>1.0.7</Version>
     </PropertyGroup>
     <!-- Plugin development properties -->
     <PropertyGroup>
@@ -29,10 +29,10 @@
 
 
     <ItemGroup>
-        <EmbeddedResource Include="Resources\**"/>
-        <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj"/>
+        <EmbeddedResource Include="Resources\**" />
+        <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
     </ItemGroup>
     <ItemGroup>
-        <Folder Include="Resources"/>
+        <Folder Include="Resources" />
     </ItemGroup>
 </Project>

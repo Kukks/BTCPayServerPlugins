@@ -32,25 +32,28 @@ footer {
 <script nonce="@nonce">
 document.addEventListener("DOMContentLoaded", ()=>{
     const btn = document.querySelector("button[type='submit']");
-    document.querySelectorAll("input").forEach(value => value.addEventListener("change", (evt)=>{
-        
-        if (!!evt.target.value && parseInt(evt.target.value) > 0){    
-            btn.style.display = "block";
-        }
+    document.querySelectorAll("input").forEach(value => value.addEventListener("input", (evt)=>{
         
         let total = 0;
+        let totalQty = 0;
         document.querySelectorAll("[data-price]").forEach(value1 => {
             if (!!value1.value){
                 const qty = parseInt(value1.value);
                 if (qty > 0){
                     
-                const price = parseInt(value1.dataset.price);
+                const price = parseFloat(value1.dataset.price).toPrecision(12);
                 total += price * qty;
+                totalQty += qty;
                 }
             }
         });
-        
-        btn.textContent = `Purchase for ${total}${@Safe.Json(@Model.Event.Currency)}`
+        if (totalQty > 0){
+            btn.style.display = "block";
+        }
+        else{
+            btn.style.display = "none";
+        }
+        btn.textContent = `Purchase for ${total.toFixed(2)} @Model.Event.Currency.ToUpperInvariant()`
     }))
     document.querySelector("form").addEventListener("submit", ()=>{
         btn.setAttribute("disabled", "disabled");

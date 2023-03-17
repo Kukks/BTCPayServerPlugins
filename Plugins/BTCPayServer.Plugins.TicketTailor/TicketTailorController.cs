@@ -1,13 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net;
 using System.Net.Http;
-using System.Net.Http.Json;
-using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
-using AngleSharp;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Extensions;
 using BTCPayServer.Abstractions.Models;
@@ -17,13 +12,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
-using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.Configuration;
-using NBitcoin;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using AuthenticationSchemes = BTCPayServer.Abstractions.Constants.AuthenticationSchemes;
-using IConfiguration = Microsoft.Extensions.Configuration.IConfiguration;
 
 namespace BTCPayServer.Plugins.TicketTailor
 {
@@ -213,6 +203,9 @@ namespace BTCPayServer.Plugins.TicketTailor
                 {
                         await SetTicketTailorTicketResult(storeId, result, ticketIds.Values<string>());
                     
+                }else if (invoice.Status == InvoiceStatus.Settled)
+                {
+                    await _ticketTailorService.CheckAndIssueTicket(invoice.Id);
                 }
 
                 return View(result);
