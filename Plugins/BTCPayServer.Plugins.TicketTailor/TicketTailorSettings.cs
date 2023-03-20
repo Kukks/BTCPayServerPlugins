@@ -11,5 +11,6 @@ namespace BTCPayServer.Plugins.TicketTailor
         public string CustomCSS { get; set; }
         public List<SpecificTicket> SpecificTickets { get; set; }
         public bool BypassAvailabilityCheck { get; set; }
+        public bool RequireFullName { get; set; }
     }
 }

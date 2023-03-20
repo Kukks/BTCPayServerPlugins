@@ -15,6 +15,7 @@ public class UpdateTicketTailorSettingsViewModel
 
     public List<SpecificTicket> SpecificTickets { get; set; }
     public bool BypassAvailabilityCheck { get; set; }
+    public bool RequireFullName { get; set; }
 }
 
 public class SpecificTicket

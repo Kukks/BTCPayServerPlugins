@@ -53,6 +53,7 @@ namespace BTCPayServer.Plugins.TicketTailor
         public async Task<IActionResult> Purchase(string storeId, TicketTailorViewModel request)
         {
             var config = await _ticketTailorService.GetTicketTailorForStore(storeId);
+            (TicketTailorClient.Hold, string error)? hold = null;
             try
             {
                 if (config?.ApiKey is not null && config?.EventId is not null)
@@ -109,18 +110,18 @@ namespace BTCPayServer.Plugins.TicketTailor
                         price += ticketCost * purchaseRequestItem.Quantity;
                     }
 
-                    var hold = await client.CreateHold(new TicketTailorClient.CreateHoldRequest()
+                    hold = await client.CreateHold(new TicketTailorClient.CreateHoldRequest()
                     {
                         EventId = evt.Id,
                         Note = "Created by BTCPay Server",
                         TicketTypeId = request.Items.ToDictionary(item => item.TicketTypeId, item => item.Quantity)
                     });
-                    if (!string.IsNullOrEmpty(hold.error))
+                    if (!string.IsNullOrEmpty(hold.Value.error))
                     {
                         TempData.SetStatusMessageModel(new StatusMessageModel
                         {
                             Severity = StatusMessageModel.StatusSeverity.Error,
-                            Html = $"Could not reserve tickets because {hold.error}"
+                            Html = $"Could not reserve tickets because {hold.Value.error}"
                         });
                         return RedirectToAction("View", new {storeId});
                     }
@@ -130,23 +131,31 @@ namespace BTCPayServer.Plugins.TicketTailor
                     var redirectUrl = Request.GetAbsoluteUri(Url.Action("Receipt",
                         "TicketTailor", new {storeId, invoiceId = "kukkskukkskukks"}));
                     redirectUrl = redirectUrl.Replace("kukkskukkskukks", "{InvoiceId}");
-                    if(string.IsNullOrEmpty(request.Name))
+                    request.Name??=string.Empty;
+                    var nameSplit = request.Name.Split(" ", StringSplitOptions.RemoveEmptyEntries);
+                    if (config.RequireFullName && nameSplit.Length < 2)
                     {
-                        request.Name = "Anonymous lizard";
+                        TempData.SetStatusMessageModel(new StatusMessageModel
+                        {
+                            Severity = StatusMessageModel.StatusSeverity.Error,
+                            Html = "Please enter your full name."
+                        });
+                        return RedirectToAction("View", new {storeId});
                     }
 
-                    var nameSplit = request.Name.Split(" ", StringSplitOptions.RemoveEmptyEntries);
-                    if (nameSplit.Length < 2)
+                    request.Name = nameSplit.Length switch
                     {
-                        request.Name = nameSplit[0] + " Lizard";
-                    }
+                        0 => "Satoshi Nakamoto",
+                        < 2 => $"{nameSplit} Nakamoto",
+                        _ => request.Name
+                    };
                     var inv = await btcpayClient.CreateInvoice(storeId,
                         new CreateInvoiceRequest()
                         {
                             Amount = price,
                             Currency = evt.Currency,
                             Type = InvoiceType.Standard,
-                            AdditionalSearchTerms = new[] {"tickettailor", hold.Item1.Id, evt.Id},
+                            AdditionalSearchTerms = new[] {"tickettailor", hold.Value.Item1.Id, evt.Id},
                             Checkout =
                             {
                                 RequiresRefundEmail = true,
@@ -162,7 +171,7 @@ namespace BTCPayServer.Plugins.TicketTailor
                                 btcpayUrl = Request.GetAbsoluteRoot(),
                                 buyerName = request.Name, 
                                 buyerEmail = request.Email, 
-                                holdId = hold.Item1.Id,
+                                holdId = hold.Value.Item1.Id,
                                 orderId="tickettailor"
                             })
                         });
@@ -173,14 +182,24 @@ namespace BTCPayServer.Plugins.TicketTailor
                             inv = await btcpayClient.GetInvoice(inv.StoreId, inv.Id);
                     }
 
-                    if (inv.Status == InvoiceStatus.Settled)
-                        return RedirectToAction("Receipt", new {storeId, invoiceId = inv.Id});
-                    
-                    return RedirectToAction("Checkout","UIInvoice", new {invoiceId = inv.Id});
+                    return inv.Status == InvoiceStatus.Settled
+                        ? RedirectToAction("Receipt", new {storeId, invoiceId = inv.Id})
+                        : RedirectToAction("Checkout", "UIInvoice", new {invoiceId = inv.Id});
                 }
             }
             catch (Exception e)
             {
+                TempData.SetStatusMessageModel(new StatusMessageModel
+                {
+                    Severity = StatusMessageModel.StatusSeverity.Error,
+                    Html = $"Could not continue with ticket purchase.</br>{e.Message}"
+                });
+                if (hold?.Item1 is not null)
+                {
+                    
+                    var client = new TicketTailorClient(_httpClientFactory, config.ApiKey);
+                    await client.DeleteHold(hold?.Item1.Id);
+                }
             }
 
             return RedirectToAction("View", new {storeId});
@@ -280,6 +299,7 @@ namespace BTCPayServer.Plugins.TicketTailor
                     vm.ShowDescription = TicketTailor.ShowDescription;
                     vm.BypassAvailabilityCheck = TicketTailor.BypassAvailabilityCheck;
                     vm.CustomCSS = TicketTailor.CustomCSS;
+                    vm.RequireFullName = TicketTailor.RequireFullName;
                     vm.SpecificTickets = TicketTailor.SpecificTickets;
                 }
             }
@@ -374,7 +394,8 @@ namespace BTCPayServer.Plugins.TicketTailor
                 ShowDescription = vm.ShowDescription,
                 CustomCSS = vm.CustomCSS,
                 SpecificTickets = vm.SpecificTickets,
-                BypassAvailabilityCheck = vm.BypassAvailabilityCheck
+                BypassAvailabilityCheck = vm.BypassAvailabilityCheck,
+                RequireFullName = vm.RequireFullName
             };
             
 

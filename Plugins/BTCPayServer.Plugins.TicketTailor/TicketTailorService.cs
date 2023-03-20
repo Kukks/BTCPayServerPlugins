@@ -111,14 +111,23 @@ public class TicketTailorService : EventHostedServiceBase
 
     protected override async Task ProcessEvent(object evt, CancellationToken cancellationToken)
     {
-        if (evt is InvoiceEvent invoiceEvent)
+        switch (evt)
         {
-            if (invoiceEvent.Invoice.Metadata.OrderId != "tickettailor" || !new []{InvoiceStatus.Settled, InvoiceStatus.Expired, InvoiceStatus.Invalid}.Contains(invoiceEvent.Invoice.GetInvoiceState().Status.ToModernStatus()))
-            {
+            case InvoiceEvent invoiceEvent when invoiceEvent.Invoice.Metadata.OrderId != "tickettailor" || !new []{InvoiceStatus.Settled, InvoiceStatus.Expired, InvoiceStatus.Invalid}.Contains(invoiceEvent.Invoice.GetInvoiceState().Status.ToModernStatus()):
                 return;
-            }
+            case InvoiceEvent invoiceEvent:
+                
+                if(_memoryCache.TryGetValue($"{nameof(TicketTailorService)}_{invoiceEvent.Invoice.Id}_issue_check_from_ui", out _))return;
+                
+                await _memoryCache.GetOrCreateAsync(
+                    $"{nameof(TicketTailorService)}_{invoiceEvent.Invoice.Id}_issue_check_from_ui", async entry =>
+                    {
+                        entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(2);
+                        return true;
+                    });
 
-            evt = new IssueTicket() {Invoice = invoiceEvent.Invoice};
+                evt = new IssueTicket() {Invoice = invoiceEvent.Invoice};
+                break;
         }
 
         if (evt is not IssueTicket issueTicket)

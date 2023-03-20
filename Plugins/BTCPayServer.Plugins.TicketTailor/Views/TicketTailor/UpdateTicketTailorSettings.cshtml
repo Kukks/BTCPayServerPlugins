@@ -54,6 +54,11 @@
                     <label asp-for="BypassAvailabilityCheck" class="form-check-label">Bypass availability checks of TicketTailor (such as when in draft mode)</label>
                     <span asp-validation-for="BypassAvailabilityCheck" class="text-danger"></span>
                 </div>
+                <div class="form-group form-check">
+                    <input asp-for="RequireFullName" type="checkbox" class="form-check-input"/>
+                    <label asp-for="RequireFullName" class="form-check-label">Require full name to be provided (if unchecked and not provided, the gap will be filled in with a placeholder)</label>
+                    <span asp-validation-for="RequireFullName" class="text-danger"></span>
+                </div>
 
                 <div class="form-group">
                     <label asp-for="CustomCSS" class="form-label">Additional Custom CSS</label>

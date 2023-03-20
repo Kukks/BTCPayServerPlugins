@@ -1,15 +1,9 @@
 ﻿@using Microsoft.AspNetCore.Routing
 @using BTCPayServer.Plugins.TicketTailor
 @using Microsoft.AspNetCore.Mvc.TagHelpers
-@using NBitcoin
 @model BTCPayServer.Plugins.TicketTailor.TicketTailorViewModel
-
-@inject BTCPayServer.Security.ContentSecurityPolicies csp;
 @{
     
-    var nonce = RandomUtils.GetUInt256().ToString().Substring(0, 32);
-    csp.Add("script-src", $"'nonce-{nonce}'");
-    csp.AllowUnsafeHashes();
     Layout = "_LayoutSimple";
     var available = Model.Settings.BypassAvailabilityCheck || (Model.Event.Unavailable != "true" && Model.Event.TicketsAvailable == "true");
     Model.Settings.SpecificTickets ??= new List<SpecificTicket>();
@@ -29,7 +23,7 @@ footer {
                }
 
 </style>
-<script nonce="@nonce">
+<script>
 document.addEventListener("DOMContentLoaded", ()=>{
     const btn = document.querySelector("button[type='submit']");
     document.querySelectorAll("input").forEach(value => value.addEventListener("input", (evt)=>{
@@ -77,7 +71,8 @@ document.addEventListener("DOMContentLoaded", ()=>{
             <div class="row g-2 justify-content-center mb-4" id="ticket-form-container">
                 <div class="col-sm-6 col-md-4">
                     <div class="form-floating">
-                        <input type="text" minlength="3" asp-for="Name" class="form-control">
+                        <input type="text" asp-for="Name" class="form-control" required="@Model.Settings.RequireFullName"
+                        pattern="^(\w\w+)\s(\w+)$" title="Please enter your first and last name, separated with a space.">
                         <label >Name</label>
                     </div>
                 </div>

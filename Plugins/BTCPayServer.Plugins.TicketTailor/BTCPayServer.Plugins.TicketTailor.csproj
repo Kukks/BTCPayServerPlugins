@@ -9,7 +9,7 @@
     <PropertyGroup>
         <Product>TicketTailor</Product>
         <Description>Allows you to integrate with TicketTailor.com to sell tickets for Bitcoin</Description>
-        <Version>1.0.8</Version>
+        <Version>1.0.9</Version>
     </PropertyGroup>
     <!-- Plugin development properties -->
     <PropertyGroup>
