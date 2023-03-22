@@ -1,0 +1,47 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+}
+@if (!string.IsNullOrEmpty(storeId))
+{
+    <li class="nav-item">
+        <a asp-area="" asp-controller="DataErasure" asp-action="Update" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("DataErasure")" id="Nav-DataErasure">
+            <svg
+                style="margin: 5px"
+               xmlns="http://www.w3.org/2000/svg"
+               width="16"
+               height="16"
+               viewBox="0 0 511.99999 511.99999"
+               id="svg2"
+               version="1.1">
+              <g
+                 id="layer1"
+                 transform="translate(0,-540.36219)">
+                <path
+                        stroke="currentColor"
+                   style="opacity:1;fill:none;fill-opacity:1;stroke-width:24;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+                   d="m 338.76367,578.92612 148.25878,123.01999 c 12.78743,10.61057 14.53806,29.44624 3.92517,42.23243 L 312.10496,959.64465 c -17.3194,15.8938 -96.44756,23.22811 -117.54045,2.99071 L 91.97017,876.25805 C 79.259029,865.55614 77.432098,846.81181 88.044982,834.02562 L 296.52482,582.85324 c 10.61288,-12.78619 29.45142,-14.53769 42.23885,-3.92712 z"
+                   id="rect4136" />
+                <rect
+                        fill="currentColor"
+                   style="opacity:1;fill-opacity:1;stroke:none;stroke-width:16;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+                   id="rect4138"
+                   width="367.39352"
+                   height="25.711227"
+                   x="0.13772964"
+                   y="1027.0753" />
+                <path
+                        fill="currentColor"
+                   style="opacity:1;fill-opacity:1;stroke:none;stroke-width:16;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+                   d="m 344.97498,582.49293 135.37673,115.03875 c 12.6466,10.74667 14.39592,29.76299 3.92221,42.6375 L 381.24318,866.81692 187.35744,725.83714 303.2416,586.33378 c 10.60501,-12.76652 29.08678,-14.58751 41.73338,-3.84085 z"
+                   id="rect4156"/>
+              </g>
+            </svg>
+
+            <span>Data Erasure</span>
+        </a>
+    </li>
+}
