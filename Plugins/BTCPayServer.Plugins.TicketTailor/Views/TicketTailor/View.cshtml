@@ -3,7 +3,6 @@
 @using Microsoft.AspNetCore.Mvc.TagHelpers
 @model BTCPayServer.Plugins.TicketTailor.TicketTailorViewModel
 @{
-    
     Layout = "_LayoutSimple";
     var available = Model.Settings.BypassAvailabilityCheck || (Model.Event.Unavailable != "true" && Model.Event.TicketsAvailable == "true");
     Model.Settings.SpecificTickets ??= new List<SpecificTicket>();
@@ -26,7 +25,8 @@ footer {
 <script>
 document.addEventListener("DOMContentLoaded", ()=>{
     const btn = document.querySelector("button[type='submit']");
-    document.querySelectorAll("input").forEach(value => value.addEventListener("input", (evt)=>{
+    const inputs = document.querySelectorAll("input");
+    inputs.forEach(value => value.addEventListener("input", (evt)=>{
         
         let total = 0;
         let totalQty = 0;
@@ -42,15 +42,16 @@ document.addEventListener("DOMContentLoaded", ()=>{
             }
         });
         if (totalQty > 0){
-            btn.style.display = "block";
+            btn.removeAttribute("disabled");
         }
         else{
-            btn.style.display = "none";
+            btn.setAttribute("disabled", "disabled");
         }
         btn.textContent = `Purchase for ${total.toFixed(2)} @Model.Event.Currency.ToUpperInvariant()`
     }))
     document.querySelector("form").addEventListener("submit", ()=>{
         btn.setAttribute("disabled", "disabled");
+        inputs.forEach(value => value.setAttribute("disabled", "disabled"));
     })
 })
 </script>
@@ -72,8 +73,8 @@ document.addEventListener("DOMContentLoaded", ()=>{
                 <div class="col-sm-6 col-md-4">
                     <div class="form-floating">
                         <input type="text" asp-for="Name" class="form-control" required="@Model.Settings.RequireFullName"
-                        pattern="^(\w\w+)\s(\w+)$" title="Please enter your first and last name, separated with a space.">
-                        <label >Name</label>
+                               pattern="^(\w\w+)\s(\w+)$" title="Please enter your first and last name, separated with a space.">
+                        <label >Full Name</label>
                     </div>
                 </div>
                 <div class="col-sm-6 col-md-4">
@@ -88,103 +89,108 @@ document.addEventListener("DOMContentLoaded", ()=>{
 
                     @{
                         var index = -1;
-
+                        var firstPurchaseable = true;
+                        
                         foreach (var groupedTickets in Model.Event.TicketTypes.GroupBy(type => type.GroupId).OrderBy(groupedTickets => Model.Event.TicketGroups.FirstOrDefault(ticketGroup => ticketGroup.Id == groupedTickets.Key)?.SortOrder))
                         {
                             <div class="bg-tile w-100 p-4 mb-2">
 
 
 
-                            @if (!string.IsNullOrEmpty(groupedTickets.Key))
-                            {
-                                var group = Model.Event.TicketGroups.First(ticketGroup => ticketGroup.Id == groupedTickets.Key);
-                                <h4 class="mb-2 text-center ">@group.Name</h4>
-                            }
-                            @foreach (var item in groupedTickets)
-                            {
-                                var availableToShow = new[] {"on_sale", "sold_out", "unavailable"}.Contains(item.Status);
-                                if (!string.IsNullOrEmpty(item.AccessCode) && item.AccessCode.Equals(accessCode, StringComparison.InvariantCultureIgnoreCase))
+                                @if (!string.IsNullOrEmpty(groupedTickets.Key))
                                 {
-                                    availableToShow = true;
+                                    var group = Model.Event.TicketGroups.First(ticketGroup => ticketGroup.Id == groupedTickets.Key);
+                                    <h4 class="mb-2 text-center ">@group.Name</h4>
                                 }
-                                var specific = false;
-
-                                if (Model.Settings.SpecificTickets?.Any() is true)
+                                @foreach (var item in groupedTickets)
                                 {
-                                    var matched = Model.Settings.SpecificTickets.FirstOrDefault(ticket => ticket.TicketTypeId == item.Id);
-                                    if (matched is null || matched.Hidden)
+                                    var availableToShow = new[] {"on_sale", "sold_out", "unavailable"}.Contains(item.Status);
+                                    if (!string.IsNullOrEmpty(item.AccessCode) && item.AccessCode.Equals(accessCode, StringComparison.InvariantCultureIgnoreCase))
+                                    {
+                                        availableToShow = true;
+                                    }
+                                    var specific = false;
+
+                                    if (Model.Settings.SpecificTickets?.Any() is true)
+                                    {
+                                        var matched = Model.Settings.SpecificTickets.FirstOrDefault(ticket => ticket.TicketTypeId == item.Id);
+                                        if (matched is null || matched.Hidden)
+                                        {
+                                            continue;
+                                        }
+                                        if (matched.Price is not null)
+                                        {
+                                            item.Price = matched.Price.Value;
+                                        }
+                                        if (!string.IsNullOrEmpty(matched.Name))
+                                        {
+                                            item.Name = matched.Name;
+                                        }
+                                        if (!string.IsNullOrEmpty(matched.Description))
+                                        {
+                                            item.Description = matched.Description;
+                                        }
+                                        availableToShow = true;
+                                        specific = true;
+                                    }
+                                    if (!availableToShow)
                                     {
                                         continue;
                                     }
-                                    if (matched.Price is not null)
-                                    {
-                                        item.Price = matched.Price.Value;
-                                    }
-                                    if (!string.IsNullOrEmpty(matched.Name))
-                                    {
-                                        item.Name = matched.Name;
-                                    }
-                                    if (!string.IsNullOrEmpty(matched.Description))
-                                    {
-                                        item.Description = matched.Description;
-                                    }
-                                    availableToShow = true;
-                                    specific = true;
-                                }
-                                if (!availableToShow)
-                                {
-                                    continue;
-                                }
-                                index++;
+                                    index++;
 
-                                <input type="hidden" asp-for="Items[index].TicketTypeId" value="@item.Id"/>
-                                var purchasable = available && (specific || new[] {"on_sale", "locked"}.Contains(item.Status)) && item.Quantity > 0;
+                                    <input type="hidden" asp-for="Items[index].TicketTypeId" value="@item.Id"/>
+                                    var purchasable = available && (specific || new[] {"on_sale", "locked"}.Contains(item.Status)) && item.Quantity > 0;
 
-                                <div class="d-flex justify-content-between">
-                                    <div style="flex:2">
-                                        <h5 >@item.Name</h5>
-                                        <p>@Safe.Raw(item.Description)</p>
-                                    </div>
-                                    <div style="flex:1">
-                                        @if (purchasable)
-                                        {
-                                            <div class="input-group">
-                                                <div class="form-floating">
-                                                    <input type="number"
-                                                           class="form-control" asp-for="Items[index].Quantity" max="@item.MaxPerOrder"
-                                                           min="0" data-price="@item.Price">
+                                    <div class="d-flex justify-content-between">
+                                        <div style="flex:2">
+                                            <h5 >@item.Name</h5>
+                                            <p>@Safe.Raw(item.Description)</p>
+                                        </div>
+                                        <div style="flex:1">
+                                            @if (purchasable)
+                                            {
+                                                
+                                                // var value = firstPurchaseable && Model.Items?.Any(requestItem => requestItem.Quantity > 0) is not true? 1: Model.Items?.ElementAtOrDefault(index)?.Quantity??0;
+                                                <div class="input-group">
+                                                    <div class="form-floating">
+                                                        <input type="number"
+                                                               class="form-control" asp-for="Items[index].Quantity" max="@item.MaxPerOrder"
+                                                               min="0" data-price="@item.Price" step="1">
 
-                                                    <label >Quantity</label>
+                                                        <label >Quantity</label>
+                                                    </div>
+
+                                                    <span class="input-group-text">
+                                                        @(item.Price == 0 ? "FREE" : $"{item.Price} {Model.Event.Currency.ToUpperInvariant()}")
+
+                                                    </span>
                                                 </div>
-
-                                                <span class="input-group-text">
-                                                    @(item.Price == 0 ? "FREE" : $"{item.Price} {Model.Event.Currency.ToUpperInvariant()}")
-
-                                                </span>
-                                            </div>
-                                        }
-                                        else
-                                        {
-                                            <div >Unavailable</div>
-                                        }
+                                                
+                                                firstPurchaseable = false;
+                                            }
+                                            else
+                                            {
+                                                <div class="text-muted" >Unavailable</div>
+                                            }
 
 
+                                        </div>
                                     </div>
-                                </div>
-                                <hr/>
-                            }
-                       
+                                    <hr/>
+                                }
+
                             </div>
-                            }
+                        }
 
                     }
 
 
                 </div>
-                <div class="col-sm-12 col-md-8">
-                    <button class="btn btn-primary btn-lg m-auto" type="submit" style="display: none">Purchase</button>
-                
-                                </div>
+                <div class="col-sm-12 col-md-8 text-center">
+                    <button class="btn btn-primary btn-lg m-auto" type="submit" disabled="disabled">Purchase</button>
+
+                </div>
             </div>
         </form>
 
