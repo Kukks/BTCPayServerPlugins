@@ -104,8 +104,8 @@ namespace BTCPayServer.Plugins.DataErasure
 
                         skip += 100;
                     }
-
-                    _logger.LogInformation($"Erased {count} invoice data for store {setting.Key}");
+                    if(count > 0)
+                        _logger.LogInformation($"Erased {count} invoice data for store {setting.Key}");
                     setting.Value.LastRunCutoff = cutoffDate;
                     await SetCore(setting.Key, setting.Value);
                 }
@@ -114,7 +114,7 @@ namespace BTCPayServer.Plugins.DataErasure
 
 
                 _runningLock.Release();
-                await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken);
+                await Task.Delay(TimeSpan.FromDays(1), cancellationToken);
             }
         }
 
