@@ -51,7 +51,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
     }))
     document.querySelector("form").addEventListener("submit", ()=>{
         btn.setAttribute("disabled", "disabled");
-        inputs.forEach(value => value.setAttribute("disabled", "disabled"));
+        inputs.forEach(value => value.setAttribute("readonly", "readonly"));
     })
 })
 </script>
@@ -74,13 +74,13 @@ document.addEventListener("DOMContentLoaded", ()=>{
                     <div class="form-floating">
                         <input type="text" asp-for="Name" class="form-control" required="@Model.Settings.RequireFullName"
                                pattern="^(\w\w+)\s(\w+)$" title="Please enter your first and last name, separated with a space.">
-                        <label >Full Name</label>
+                        <label  asp-for="Name">Full Name</label>
                     </div>
                 </div>
                 <div class="col-sm-6 col-md-4">
                     <div class="form-floating">
                         <input required type="email" name="email" asp-for="Email" class="form-control"/>
-                        <label >Email</label>
+                        <label asp-for="Email">Email</label>
                     </div>
                 </div>
             </div>
@@ -89,8 +89,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
 
                     @{
                         var index = -1;
-                        var firstPurchaseable = true;
-                        
+
                         foreach (var groupedTickets in Model.Event.TicketTypes.GroupBy(type => type.GroupId).OrderBy(groupedTickets => Model.Event.TicketGroups.FirstOrDefault(ticketGroup => ticketGroup.Id == groupedTickets.Key)?.SortOrder))
                         {
                             <div class="bg-tile w-100 p-4 mb-2">
@@ -104,11 +103,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
                                 }
                                 @foreach (var item in groupedTickets)
                                 {
-                                    var availableToShow = new[] {"on_sale", "sold_out", "unavailable"}.Contains(item.Status);
-                                    if (!string.IsNullOrEmpty(item.AccessCode) && item.AccessCode.Equals(accessCode, StringComparison.InvariantCultureIgnoreCase))
-                                    {
-                                        availableToShow = true;
-                                    }
+                                    var availableToShow = new[] {"on_sale", "sold_out", "unavailable"}.Contains(item.Status) || !string.IsNullOrEmpty(item.AccessCode) && item.AccessCode.Equals(accessCode, StringComparison.InvariantCultureIgnoreCase);
                                     var specific = false;
 
                                     if (Model.Settings.SpecificTickets?.Any() is true)
@@ -142,23 +137,21 @@ document.addEventListener("DOMContentLoaded", ()=>{
                                     <input type="hidden" asp-for="Items[index].TicketTypeId" value="@item.Id"/>
                                     var purchasable = available && (specific || new[] {"on_sale", "locked"}.Contains(item.Status)) && item.Quantity > 0;
 
-                                    <div class="d-flex justify-content-between">
-                                        <div style="flex:2">
+                                    <div class="row  justify-content-between">
+                                        <div  class="col-lg-8 col-sm-12">
                                             <h5 >@item.Name</h5>
                                             <p>@Safe.Raw(item.Description)</p>
                                         </div>
-                                        <div style="flex:1">
+                                        <div class="col-lg-4 col-sm-12">
                                             @if (purchasable)
                                             {
-                                                
-                                                // var value = firstPurchaseable && Model.Items?.Any(requestItem => requestItem.Quantity > 0) is not true? 1: Model.Items?.ElementAtOrDefault(index)?.Quantity??0;
                                                 <div class="input-group">
                                                     <div class="form-floating">
                                                         <input type="number"
                                                                class="form-control" asp-for="Items[index].Quantity" max="@item.MaxPerOrder"
-                                                               min="0" data-price="@item.Price" step="1">
+                                                               min="0" data-price="@item.Price" />
 
-                                                        <label >Quantity</label>
+                                                        <label  asp-for="Items[index].Quantity">Quantity</label>
                                                     </div>
 
                                                     <span class="input-group-text">
@@ -166,12 +159,10 @@ document.addEventListener("DOMContentLoaded", ()=>{
 
                                                     </span>
                                                 </div>
-                                                
-                                                firstPurchaseable = false;
                                             }
                                             else
                                             {
-                                                <div class="text-muted" >Unavailable</div>
+                                                <div class="text-muted">Unavailable</div>
                                             }
 
 

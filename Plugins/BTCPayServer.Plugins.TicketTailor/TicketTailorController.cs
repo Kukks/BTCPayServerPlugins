@@ -70,7 +70,7 @@ namespace BTCPayServer.Plugins.TicketTailor
                     {
                         if (purchaseRequestItem.Quantity <= 0)
                         {
-                            continue;;
+                            continue;
                         }
                         var ticketType = evt.TicketTypes.FirstOrDefault(type => type.Id == purchaseRequestItem.TicketTypeId);
                         
