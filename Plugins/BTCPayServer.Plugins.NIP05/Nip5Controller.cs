@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
+using NBitcoin.Secp256k1;
 using NNostr.Client;
 using NNostr.Client.Protocols;
 
@@ -85,6 +86,38 @@ public class Nip5Controller : Controller
             ModelState.AddModelError(nameof(settings.PubKey), "invalid public key");
         }
 
+        if (!string.IsNullOrEmpty(settings.PrivateKey))
+        {
+            try
+            {
+                ECPrivKey k;
+                try
+                {
+k =  settings.PrivateKey.FromNIP19Nsec();
+                }
+                catch (Exception e)
+                {
+                   
+                    k =  NostrExtensions.ParseKey(settings.PrivateKey);
+                }
+               
+               if (string.IsNullOrEmpty(settings.PubKey))
+               {
+                   
+                   settings.PubKey = k.CreateXOnlyPubKey().ToHex();
+                   ModelState.Remove(nameof(settings.PubKey));
+               }
+               else if(settings.PubKey != k.CreateXOnlyPubKey().ToHex())
+                   ModelState.AddModelError(nameof(settings.PrivateKey), "private key does not match public key provided. Clear the public key to generate it from the private key.");
+            }
+            catch (Exception e)
+            {
+                
+                ModelState.AddModelError(nameof(settings.PubKey), "invalid private key");
+            }
+        }
+        
+
         if (!ModelState.IsValid)
         {
             return View(settings);
@@ -109,8 +142,8 @@ public class Nip5Controller : Controller
         await _storeRepository.UpdateSetting(storeId, "NIP05", settings);
         return RedirectToAction("Edit", new {storeId});
     }
-
-    private async Task<(string? storeId, Nip5StoreSettings? settings)> Get(string name)
+[NonAction]
+    public async Task<(string? storeId, Nip5StoreSettings? settings)> Get(string name)
     {
         var rex = await _memoryCache.GetOrCreateAsync<(string? storeId, Nip5StoreSettings? settings)>(
             $"NIP05_{name.ToLowerInvariant()}",

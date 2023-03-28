@@ -9,9 +9,9 @@
 
     <!-- Plugin specific properties -->
     <PropertyGroup>
-        <Product>Nostr NIP5</Product>
-        <Description>Allows you to verify your nostr account</Description>
-        <Version>1.0.3</Version>
+        <Product>Nostr </Product>
+        <Description>Allows you to verify your nostr account with NIP5 and zap like the rest of the crazies</Description>
+        <Version>1.0.4</Version>
     </PropertyGroup>
     <!-- Plugin development properties -->
     <PropertyGroup>
