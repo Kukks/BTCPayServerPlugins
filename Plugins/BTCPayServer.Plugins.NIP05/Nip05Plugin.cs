@@ -197,7 +197,7 @@ namespace BTCPayServer.Plugins.NIP05
     {
         private readonly Nip5Controller _nip5Controller;
         private readonly LightningAddressService _lightningAddressService;
-        public override string Hook => "lnurlp";
+        public override string Hook => "modify-lnurlp-request";
 
         public LnurlFilter(Nip5Controller nip5Controller, LightningAddressService lightningAddressService)
         {
@@ -249,7 +249,7 @@ namespace BTCPayServer.Plugins.NIP05
             _memoryCache = memoryCache;
         }
 
-        public override string Hook => "lnurlp-description";
+        public override string Hook => "modify-lnurlp-description";
 
         public override async Task<string> Execute(string arg)
         {
