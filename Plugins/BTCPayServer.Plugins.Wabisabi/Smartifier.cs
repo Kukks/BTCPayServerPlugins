@@ -66,7 +66,7 @@ public class Smartifier
             var tx = await Transactions.GetOrAdd(coin.OutPoint.Hash, async uint256 =>
             {
                 var unsmartTx = await CachedTransactions[coin.OutPoint.Hash];
-                if (unsmartTx is null)
+                if (unsmartTx?.Transaction is null)
                 {
                     return null;
                 }
