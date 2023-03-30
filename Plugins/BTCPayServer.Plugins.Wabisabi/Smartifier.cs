@@ -144,6 +144,9 @@ public class Smartifier
                 return smartTx;
             });
 
+            if(tx is null){
+                continue;
+            }
             var smartCoin = await Coins.GetOrAdd(coin.OutPoint, async point =>
             {
                 utxoLabels.TryGetValue(coin.OutPoint, out var labels);
