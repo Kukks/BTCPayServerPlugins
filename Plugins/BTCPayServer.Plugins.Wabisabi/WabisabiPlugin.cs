@@ -28,7 +28,7 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
 {
     public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
     {
-        new() { Identifier = nameof(BTCPayServer), Condition = ">=1.7.12" }
+        new() { Identifier = nameof(BTCPayServer), Condition = ">=1.8.0" }
     };
     public override void Execute(IServiceCollection applicationBuilder)
     {
