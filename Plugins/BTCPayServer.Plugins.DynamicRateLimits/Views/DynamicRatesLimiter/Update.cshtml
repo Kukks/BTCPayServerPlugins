@@ -1,0 +1,117 @@
+﻿@using BTCPayServer.Plugins.DynamicRateLimits
+@model DynamicRateLimitSettings 
+
+@{
+    Layout = "../Shared/_NavLayout.cshtml";
+    ViewData["NavPartialName"] = "../UIServer/_Nav";
+}
+
+<h2 class="mb-4">Rate limit configuration</h2>
+
+<form method="post">
+
+    <div class="row">
+        <table class="table table-responsive col-12">
+            <thead>
+            <tr>
+                <th>
+                    Rate Limit
+                </th>
+                <th class="text-end">
+                    Actions
+                </th>
+            </tr>
+            </thead>
+            <tbody id="limit-list">
+            @if (Model.RateLimits is not null)
+            {
+                @for (var index = 0; index < Model.RateLimits.Length; index++)
+                {
+                    <tr data-index="@index">
+                        <td>
+                            <input class="form-control" type="text" asp-for="RateLimits[index]">
+                        </td>
+                        <td class="text-end">
+                            <button class="btn btn-link" type="button" data-remove>Remove</button>
+                        </td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+
+    </div>
+
+
+    <button type="button" id="add-limit" class="btn btn-outline-secondary mx-2">Add rate limit</button>
+    <button name="command" type="submit" value="save" class="btn btn-primary mt-2">Save</button>
+    <button name="command" type="submit" value="use-defaults" class="btn btn-primary mt-2">Use defaults</button>
+
+    <button class="btn btn-link" type="button"data-bs-toggle="collapse" data-bs-target="#defaults">View defaults</button>
+    <div class="collapse" id="defaults">
+        @inject DynamicRateLimitsService DynamicRateLimitsService
+        <div class="card card-body">
+            <ul>
+                @foreach (var rateLimit in DynamicRateLimitsService.OriginalLimits)
+                {
+                    <li>@rateLimit</li>
+                }
+            </ul>
+        </div>
+    </div>
+
+</form>
+
+@section PageFootContent {
+    <partial name="_ValidationScriptsPartial"/>
+}
+<template id="row">
+    <tr data-index="-1">
+        <td>
+            <input type="text" class="form-control">
+        </td>
+        <td  class="text-end">
+            <button class="btn btn-link" type="button" data-remove>Remove</button>
+        </td>
+    </tr>
+</template>
+
+<script >
+document.addEventListener("DOMContentLoaded", ()=>{
+
+    setupRemoveBtn();
+
+    document.getElementById("add-limit").addEventListener("click", ()=>{
+        const template = document.querySelector('#row');
+        const clone = template.content.cloneNode(true);
+        document.getElementById("limit-list").appendChild(clone);
+        setIndex();
+    setupRemoveBtn();
+        
+    });
+    
+    
+    
+    function setupRemoveBtn(){
+        document.querySelectorAll("[data-remove]").forEach(value =>{
+                value.removeEventListener("click",onRemove )
+                 value.addEventListener("click",onRemove );
+                
+            });
+    }
+    
+    
+    function onRemove(evt){
+        evt.target.parentElement.parentElement.remove();    
+        setIndex();
+        
+    }
+    
+    function setIndex(){
+         document.querySelectorAll("[data-index]").forEach((value, key) => {
+                        value.setAttribute("data-index", key);
+                        value.querySelector("input").name = `RateLimits[${key}]`;
+                    })
+    }
+});
+</script>
