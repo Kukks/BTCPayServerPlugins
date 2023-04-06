@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
@@ -47,7 +48,14 @@ public class Zapper : IHostedService
             if (_pendingZapEvents.Any())
             {
                 _logger.LogInformation($"Attempting to send {_pendingZapEvents.Count} zap receipts");
-                var pendingZaps = _pendingZapEvents.Take(Range.All).ToArray();
+                List<PendingZapEvent> pendingZaps = new();
+                while (!_pendingZapEvents.IsEmpty)
+                {
+                    if (_pendingZapEvents.TryTake(out var pendingZap))
+                    {
+                        pendingZaps.Add(pendingZap);
+                    }
+                }
                 var relaysToConnectTo = pendingZaps.SelectMany(@event => @event.relays).Distinct();
                 var relaysToZap =relaysToConnectTo.ToDictionary(s => s, s => pendingZaps.Where(@event => @event.relays.Contains(s)).Select(@event => @event.nostrEvent).ToArray());
 
@@ -138,7 +146,7 @@ public class Zapper : IHostedService
         var key = NostrExtensions.ParseKey(settings.settings.PrivateKey);
             
         var zapRequestEvent = JsonSerializer.Deserialize<NostrEvent>(zapRequest);
-        var relays = zapRequestEvent.GetTaggedData("relays");
+        var relays = zapRequestEvent.Tags.Where(tag => tag.TagIdentifier == "relay").SelectMany(tag => tag.Data).ToArray();
             
         var tags = zapRequestEvent.Tags.Where(a => a.TagIdentifier.Length == 1).ToList();
         tags.Add(new()
