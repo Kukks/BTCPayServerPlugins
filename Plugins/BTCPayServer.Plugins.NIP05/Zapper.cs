@@ -9,6 +9,7 @@ using BTCPayServer.Payments;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 using NNostr.Client;
 
 namespace BTCPayServer.Plugins.NIP05;
@@ -109,14 +110,14 @@ public class Zapper : IHostedService
 
     private async Task Subscription(InvoiceEvent arg)
     {
-        if (arg.EventCode != InvoiceEventCode.Completed)
+        if (arg.EventCode != InvoiceEventCode.Completed && arg.EventCode != InvoiceEventCode.MarkedCompleted)
             return;
         var pm = arg.Invoice.GetPaymentMethod(new PaymentMethodId("BTC", PaymentTypes.LNURLPay));
         if (pm is null)
         {
             return;
         }
-        if(!_memoryCache.TryGetValue(Nip05Plugin.GetZapRequestCacheKey(arg.Invoice.Id), out var zapRequestEntry) || zapRequestEntry is not string zapRequest)
+        if(!_memoryCache.TryGetValue(Nip05Plugin.GetZapRequestCacheKey(arg.Invoice.Id), out var zapRequestEntry) || zapRequestEntry is not StringValues zapRequest)
         {
             return;
         }

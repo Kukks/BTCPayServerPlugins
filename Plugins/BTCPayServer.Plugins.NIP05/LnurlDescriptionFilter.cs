@@ -43,7 +43,7 @@ public class LnurlDescriptionFilter : PluginHookFilter<string>
                     var metadata = JsonConvert.DeserializeObject<string[][]>(arg);
                     var username = metadata
                         .FirstOrDefault(strings => strings.FirstOrDefault()?.Equals("text/identifier") is true)
-                        ?.FirstOrDefault()?.ToLowerInvariant().Split("@")[0];
+                        ?.ElementAtOrDefault(1)?.ToLowerInvariant().Split("@")[0];
                     if (string.IsNullOrEmpty(username))
                     {
                         return arg;
