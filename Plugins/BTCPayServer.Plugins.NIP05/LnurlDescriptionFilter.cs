@@ -74,7 +74,7 @@ public class LnurlDescriptionFilter : PluginHookFilter<string>
                             return arg;
                         }
 
-                        var entry = _memoryCache.CreateEntry(Nip05Plugin.GetZapRequestCacheKey(invoiceId.ToString()));
+                        using var entry = _memoryCache.CreateEntry(Nip05Plugin.GetZapRequestCacheKey(invoiceId.ToString()));
                         entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
                         entry.SetAbsoluteExpiration(TimeSpan.FromMinutes(5));
                         entry.SetValue(nostr);

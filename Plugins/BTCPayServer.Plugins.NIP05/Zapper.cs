@@ -43,7 +43,6 @@ public class Zapper : IHostedService
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-
             if (_pendingZapEvents.Any())
             {
                 _logger.LogInformation($"Attempting to send {_pendingZapEvents.Count} zap receipts");
@@ -94,7 +93,15 @@ public class Zapper : IHostedService
                 }
                 else
                 {
-                    await Task.Delay(100, waitingToken.Token);
+                    try
+                    {
+
+                        await Task.Delay(100, waitingToken.Token);
+                    }
+                    catch (TaskCanceledException e)
+                    {
+                        break;
+                    }
                 }
             }
         }
