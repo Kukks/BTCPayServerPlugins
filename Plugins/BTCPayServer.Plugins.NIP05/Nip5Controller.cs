@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
+using NBitcoin.DataEncoders;
 using NBitcoin.Secp256k1;
 using NNostr.Client;
 using NNostr.Client.Protocols;
@@ -66,10 +67,14 @@ public class Nip5Controller : Controller
         {
             try
             {
-                
-                var note = (NIP19.NosteProfileNote)settings.PubKey.FromNIP19Note() ;
-                settings.PubKey = note.PubKey;
-                settings.Relays = (settings.Relays ?? new string[0])?.Concat(note.Relays).ToArray();
+                if (!HexEncoder.IsWellFormed(settings.PubKey))
+                {
+
+                    var note = (NIP19.NosteProfileNote) settings.PubKey.FromNIP19Note();
+                    settings.PubKey = note.PubKey;
+                    settings.Relays = (settings.Relays ?? Array.Empty<string>())?.Concat(note.Relays).ToArray();
+
+                }
             }
             catch (Exception)
             {
@@ -100,7 +105,8 @@ k =  settings.PrivateKey.FromNIP19Nsec();
                    
                     k =  NostrExtensions.ParseKey(settings.PrivateKey);
                 }
-               
+
+                settings.PrivateKey = k.ToHex();
                if (string.IsNullOrEmpty(settings.PubKey))
                {
                    
@@ -113,7 +119,7 @@ k =  settings.PrivateKey.FromNIP19Nsec();
             catch (Exception e)
             {
                 
-                ModelState.AddModelError(nameof(settings.PubKey), "invalid private key");
+                ModelState.AddModelError(nameof(settings.PrivateKey), "invalid private key");
             }
         }
         

@@ -1,6 +1,9 @@
 ﻿@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.TagHelpers
 @using Microsoft.AspNetCore.Mvc.TagHelpers
-@model Nip5StoreSettings
+@using BTCPayServer.Abstractions.Contracts
+@model BTCPayServer.Plugins.NIP05.Nip5StoreSettings
+@inject IScopeProvider ScopeProvider
 @{
     ViewData.SetActivePage("Nostr", "Nostr", "Nostr");
 }
@@ -26,8 +29,9 @@
                 <div class="form-group">
                     <label asp-for="PrivateKey" class="form-label">Private key for zaps</label>
                     <input asp-for="PrivateKey" class="form-control"/>
-                    <span asp-validation-for="PubKey" class="text-danger"></span>
-                    <p class="text-muted">You'll also need to enable a lightning address with the same name.</p>
+                    <span asp-validation-for="PrivateKey" class="text-danger"></span>
+                    <p class="text-muted">You'll also need to <a asp-action="EditLightningAddress" asp-controller="UILNURL" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()">enable a lightning address</a> with the same name.</p>
+                    
                 </div>
             </div>
             <div class="row">
