@@ -146,7 +146,7 @@ public class Zapper : IHostedService
         var key = NostrExtensions.ParseKey(settings.settings.PrivateKey);
             
         var zapRequestEvent = JsonSerializer.Deserialize<NostrEvent>(zapRequest);
-        var relays = zapRequestEvent.Tags.Where(tag => tag.TagIdentifier == "relay").SelectMany(tag => tag.Data).ToArray();
+        var relays = zapRequestEvent.Tags.Where(tag => tag.TagIdentifier == "relays").SelectMany(tag => tag.Data).ToArray();
             
         var tags = zapRequestEvent.Tags.Where(a => a.TagIdentifier.Length == 1).ToList();
         tags.Add(new()

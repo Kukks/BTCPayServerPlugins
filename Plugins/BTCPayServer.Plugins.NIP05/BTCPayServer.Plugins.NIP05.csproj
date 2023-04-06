@@ -11,7 +11,7 @@
     <PropertyGroup>
         <Product>Nostr </Product>
         <Description>Allows you to verify your nostr account with NIP5 and zap like the rest of the crazies</Description>
-        <Version>1.0.9</Version>
+        <Version>1.0.10</Version>
     </PropertyGroup>
     <!-- Plugin development properties -->
     <PropertyGroup>
