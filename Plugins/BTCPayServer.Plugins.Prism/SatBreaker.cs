@@ -262,6 +262,10 @@ namespace BTCPayServer.Plugins.Prism
                             }
 
                             await UpdatePrismSettingsForStore(creditDestination.StoreId, prismSettings, true);
+                            if (await CreatePayouts(creditDestination.StoreId, prismSettings))
+                            {
+                                await UpdatePrismSettingsForStore(creditDestination.StoreId, prismSettings, true);
+                            }
                         }
                     }
 
@@ -314,8 +318,10 @@ namespace BTCPayServer.Plugins.Prism
                     }
 
                     await UpdatePrismSettingsForStore(address.StoreDataId, prismSettings, true);
-                    await CreatePayouts(address.StoreDataId, prismSettings);
-                    await UpdatePrismSettingsForStore(address.StoreDataId, prismSettings, true);
+                    if (await CreatePayouts(address.StoreDataId, prismSettings))
+                    {
+                        await UpdatePrismSettingsForStore(address.StoreDataId, prismSettings, true);
+                    }
                 }
             }
             catch (Exception e)
@@ -328,8 +334,9 @@ namespace BTCPayServer.Plugins.Prism
             }
         }
 
-        private async Task CreatePayouts(string storeId, PrismSettings prismSettings)
+        private async Task<bool> CreatePayouts(string storeId, PrismSettings prismSettings)
         {
+            var result = false;
             foreach (var (destination, amtMsats) in prismSettings.DestinationBalance)
             {
                 var amt = amtMsats / 1000;
@@ -357,9 +364,12 @@ namespace BTCPayServer.Plugins.Prism
                             new PendingPayout(payoutAmount, reserveFee));
                         prismSettings.DestinationBalance.AddOrReplace(destination,
                             amtMsats - (payoutAmount + reserveFee) * 1000);
+                        result = true;
                     }
                 }
             }
+
+            return result;
         }
     }
 }
