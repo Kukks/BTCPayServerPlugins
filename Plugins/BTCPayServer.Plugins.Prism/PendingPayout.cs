@@ -1,3 +1,3 @@
 ﻿namespace BTCPayServer.Plugins.Prism;
 
-public record PendingPayout(long BalanceAmount, long FeeCharged);
+public record PendingPayout(long PayoutAmount, long FeeCharged);
