@@ -1,0 +1,72 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Client
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+}
+@if (!string.IsNullOrEmpty(storeId))
+{
+    <li class="nav-item">
+        <a asp-controller="Prism" asp-action="Edit" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Prism")" id="Nav-Prism"
+           permission="@Policies.CanModifyStoreSettings">
+           <svg
+              style="    width: 24px;
+                         margin-right: 3px; height: 22px"
+             xmlns="http://www.w3.org/2000/svg"
+             viewBox="0 0 37 30"
+             version="1.1"
+             id="svg3449">
+            <defs
+               id="defs3443" />
+            <g
+               id="layer1"
+               transform="translate(0,-267)">
+              <g
+                 transform="translate(-301.50996,158.13669)"
+                 id="g3423">
+                <g
+                   style="stroke-width:0.60000002;stroke-miterlimit:4;stroke-dasharray:none"
+                   transform="translate(0,2.1166667)"
+                   id="g3391">
+                  <path
+                          
+                     style="fill:#89afd7;stroke:currentColor;stroke-width:0.60000002;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+                     d="M 319.99999,116.00001 304,116 v -2 h 15.99999 z"
+                     id="path10794"/>
+                  <path
+                     style="fill:#3465a4;stroke:currentColor;stroke-width:0.60000002;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+                     d="m 336,118 v 3 L 319.99999,116.00001 320,115.5 c 4.83688,0.38641 11.17142,1.98265 16,2.5 z"
+                     id="path10796"/>
+                  <path
+                     style="fill:#73d216;stroke:currentColor;stroke-width:0.60000002;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+                     d="m 320,115.5 16,2.5 v -3 h -16 z"
+                     id="path10798" />
+                  <path
+                     style="fill:#fc9d12;stroke:currentColor;stroke-width:0.60000002;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+                     d="M 319.99999,115 320,114.5 336,112 v 3 z"
+                     id="path10800" />
+                  <path
+                     style="fill:#a40000;stroke:currentColor;stroke-width:0.60000002;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+                     d="m 336,112 -16,2.5 -10e-6,-0.5 L 336,109 Z"
+                     id="path10802"/>
+                </g>
+                <g
+                   id="g3395">
+                  <path
+                     style="fill:#d3d7cf;stroke:currentColor;stroke-width:1.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+                     d="M 319.99999,117.00001 309.99998,132 320,137 v 0 l 10,-5 z"
+                     id="path10790" />
+                  <path
+                     style="fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+                     d="m 319.99999,117.00001 v 20 0"
+                     id="path10792"/>
+                </g>
+              </g>
+            </g>
+          </svg>
+            <span>Prism</span>
+        </a>
+    </li>
+}

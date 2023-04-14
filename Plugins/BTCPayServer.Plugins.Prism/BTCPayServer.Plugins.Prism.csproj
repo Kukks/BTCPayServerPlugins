@@ -1,0 +1,40 @@
+
+
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+    <PropertyGroup>
+        <TargetFramework>net6.0</TargetFramework>
+        <LangVersion>10</LangVersion>
+    </PropertyGroup>
+
+    <!-- Plugin specific properties -->
+    <PropertyGroup>
+        <Product>LN Prism</Product>
+        <Description>Automated value splits for lightning.</Description>
+        <Version>1.0.1</Version>
+    </PropertyGroup>
+    <!-- Plugin development properties -->
+    <PropertyGroup>
+        <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+        <PreserveCompilationContext>false</PreserveCompilationContext>
+        <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    </PropertyGroup>
+
+    <!-- This will make sure that referencing BTCPayServer doesn't put any artifact in the published directory -->
+    <ItemDefinitionGroup>
+        <ProjectReference>
+            <Properties>StaticWebAssetsEnabled=false</Properties>
+            <Private>false</Private>
+            <ExcludeAssets>runtime;native;build;buildTransitive;contentFiles</ExcludeAssets>
+        </ProjectReference>
+    </ItemDefinitionGroup>
+
+
+    <ItemGroup>
+        <EmbeddedResource Include="Resources\**" />
+        <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
+    </ItemGroup>
+    <ItemGroup>
+      <AdditionalFiles Include="Views\Prism\Edit.cshtml" />
+    </ItemGroup>
+</Project>
