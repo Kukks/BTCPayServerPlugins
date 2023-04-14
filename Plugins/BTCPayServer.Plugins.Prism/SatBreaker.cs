@@ -244,7 +244,7 @@ namespace BTCPayServer.Plugins.Prism
                                 prismSettings.PendingPayouts.Remove(payout);
                             }
 
-                            await UpdatePrismSettingsForStore(creditDestination.StoreId, prismSettings);
+                            await UpdatePrismSettingsForStore(creditDestination.StoreId, prismSettings, true);
                         }
                     }
 
@@ -296,9 +296,9 @@ namespace BTCPayServer.Plugins.Prism
                         }
                     }
 
-                    await UpdatePrismSettingsForStore(address.StoreDataId, prismSettings);
+                    await UpdatePrismSettingsForStore(address.StoreDataId, prismSettings, true);
                     await CreatePayouts(address.StoreDataId, prismSettings);
-                    await UpdatePrismSettingsForStore(address.StoreDataId, prismSettings);
+                    await UpdatePrismSettingsForStore(address.StoreDataId, prismSettings, true);
                 }
             }
             catch (Exception e)
