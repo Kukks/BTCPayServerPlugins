@@ -333,9 +333,9 @@ namespace BTCPayServer.Plugins.Prism
                     if (payout.Result == ClaimRequest.ClaimResult.Ok)
                     {
                         prismSettings.PendingPayouts??=new();
-                        prismSettings.PendingPayouts.Add(payout.PayoutData.Id, new PendingPayout(amt, reserveFee));
+                        prismSettings.PendingPayouts.Add(payout.PayoutData.Id, new PendingPayout(payoutAmount, reserveFee));
                         prismSettings.DestinationBalance.AddOrReplace(destination,
-                            amtMsats - (amt - reserveFee) * 1000);
+                            amtMsats - (payoutAmount + reserveFee) * 1000);
                     }
                 }
             }
