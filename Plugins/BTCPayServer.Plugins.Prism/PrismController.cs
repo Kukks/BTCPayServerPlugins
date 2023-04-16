@@ -40,7 +40,7 @@ public class PrismController : Controller
     [HttpPost]
     public async Task<IActionResult> Edit(string storeId, PrismSettings settings, string command)
     {
-        for (int i = 0; i < settings.Splits.Length; i++)
+        for (int i = 0; i < settings.Splits?.Length; i++)
         {
             var prism = settings.Splits[i];
             if (string.IsNullOrEmpty(prism.Source))
@@ -65,7 +65,7 @@ public class PrismController : Controller
                 ModelState.AddModelError($"Splits[{i}].Destinations", "Destinations must sum up to a 100 maximum");
             }
 
-            for (int j = 0; j < prism.Destinations.Length; j++)
+            for (int j = 0; j < prism.Destinations?.Length; j++)
             {
                 var dest = prism.Destinations[j].Destination;
                 //check that the source is a valid internet identifier, which is username@domain(and optional port)
