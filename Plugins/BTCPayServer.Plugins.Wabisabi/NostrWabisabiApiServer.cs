@@ -10,6 +10,7 @@ using NBitcoin.Secp256k1;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using NNostr.Client;
+using WabiSabi.Crypto;
 using WalletWasabi.Logging;
 using WalletWasabi.WabiSabi;
 using WalletWasabi.WabiSabi.Backend.Models;

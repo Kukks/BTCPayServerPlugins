@@ -25,6 +25,7 @@ public class WabisabiStoreSettings
     public int ExtraJoinProbability { get; set; } = 0;
     public CrossMixMode CrossMixBetweenCoordinatorsMode { get; set; } = CrossMixMode.WhenFree;
     public int FeeRateMedianTimeFrameHours { get; set; }
+    public long MinimumDenominationAmount { get; set; } = 10000;
 
     public enum CrossMixMode
     {

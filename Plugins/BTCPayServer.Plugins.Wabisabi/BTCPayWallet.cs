@@ -83,7 +83,6 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         UtxoLocker = utxoLocker;
         _storeRepository = storeRepository;
         _bannedCoins = bannedCoins;
-        _eventAggregator = eventAggregator;
         Logger = loggerFactory.CreateLogger($"BTCPayWallet_{storeId}");
 
     }
@@ -103,12 +102,13 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     public IKeyChain KeyChain { get; }
     public IDestinationProvider DestinationProvider => this;
 
-    public int AnonScoreTarget => WabisabiStoreSettings.PlebMode? 2:  WabisabiStoreSettings.AnonymitySetTarget;
+    public int AnonScoreTarget => WabisabiStoreSettings.PlebMode? 5:  WabisabiStoreSettings.AnonymitySetTarget;
     public bool ConsolidationMode => !WabisabiStoreSettings.PlebMode && WabisabiStoreSettings.ConsolidationMode;
     public TimeSpan FeeRateMedianTimeFrame => TimeSpan.FromHours(WabisabiStoreSettings.PlebMode?
         KeyManager.DefaultFeeRateMedianTimeFrameHours: WabisabiStoreSettings.FeeRateMedianTimeFrameHours);
     public bool RedCoinIsolation => !WabisabiStoreSettings.PlebMode &&WabisabiStoreSettings.RedCoinIsolation;
     public bool BatchPayments => WabisabiStoreSettings.PlebMode || WabisabiStoreSettings.BatchPayments;
+    public long? MinimumDenominationAmount => WabisabiStoreSettings.PlebMode? 20000 : WabisabiStoreSettings.MinimumDenominationAmount;
 
     public async Task<bool> IsWalletPrivateAsync()
     {
@@ -150,7 +150,6 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     public Smartifier _smartifier => (KeyChain as BTCPayKeyChain)?.Smartifier;
     private readonly StoreRepository _storeRepository;
     private readonly ConcurrentDictionary<string, Dictionary<OutPoint, DateTimeOffset>> _bannedCoins;
-    private readonly EventAggregator _eventAggregator;
 
     public IRoundCoinSelector GetCoinSelector()
     {
@@ -346,15 +345,21 @@ public class BTCPayWallet : IWallet, IDestinationProvider
 
     public async Task RegisterCoinjoinTransaction(SuccessfulCoinJoinResult result, string coordinatorName)
     {
+        Console.WriteLine($"{WalletName}_RegisterCoinjoinTransaction");
+        Console.WriteLine($"{WalletName}_savingProgress");
         await _savingProgress;
 
+        Console.WriteLine($"{WalletName}_savingProgress_done");
      
 
         
         _savingProgress = RegisterCoinjoinTransactionInternal(result, coordinatorName);
         
         
+        Console.WriteLine($"{WalletName}_savingProgress");
         await _savingProgress;
+        
+        Console.WriteLine($"{WalletName}_savingProgress_done");
     }
     private async Task RegisterCoinjoinTransactionInternal(SuccessfulCoinJoinResult result, string coordinatorName)
     {

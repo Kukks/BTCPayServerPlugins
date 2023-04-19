@@ -103,6 +103,12 @@
             <input type="number" class="form-control" asp-for="FeeRateMedianTimeFrameHours" placeholder="hours" min="0">
 
             <p class="text-muted">Only coinjoin if the mining fee is below the median of the specified number of hours</p>
+        </div>>
+        <div class="form-group">
+
+            <label asp-for="MinimumDenominationAmount" class="form-label">Minimum denomination (in sats)</label>
+            <input type="number" class="form-control" asp-for="MinimumDenominationAmount" placeholder="sats" min="0">
+            <p class="text-muted">Do no use any of the standard denominations below this amount (creates change (which will get remixed) but prevent tiny utxos)</p>
         </div>
         <div class="form-group form-check">
             <label asp-for="ConsolidationMode" class="form-check-label">Coinsolidation mode</label>

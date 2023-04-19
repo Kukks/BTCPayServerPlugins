@@ -114,7 +114,7 @@ public class AffiliateServerController:Controller
             return Json(response, AffiliationJsonSerializationOptions.Settings);
         }
 
-        Payload payload = new(Header.Instance,  request.Body);
+        Payload payload = new(Header.Create(AffiliationConstants.NonDefaultAffiliationId),  request.Body);
         try
         {
 

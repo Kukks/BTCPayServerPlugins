@@ -10,9 +10,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using NBitcoin;
 using WalletWasabi.Backend.Controllers;
-using WalletWasabi.Services;
 using WalletWasabi.Tor.Socks5.Pool.Circuits;
 using WalletWasabi.Userfacing;
 using WalletWasabi.WabiSabi.Backend.PostRequests;
@@ -20,7 +18,6 @@ using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.WabiSabi.Client.RoundStateAwaiters;
 using WalletWasabi.WabiSabi.Client.StatusChangedEvents;
 using WalletWasabi.Wallets;
-using WalletWasabi.WebClients.Wasabi;
 using HttpClientFactory = WalletWasabi.WebClients.Wasabi.HttpClientFactory;
 
 namespace BTCPayServer.Plugins.Wabisabi;
@@ -199,7 +196,7 @@ public class WabisabiCoordinatorClientInstance
 
     private void OnStatusChanged(object sender, StatusChangedEventArgs e)
     {
-        
+        bool stopWhenAllMixed;
         switch (e)
         {
             case CoinJoinStatusEventArgs coinJoinStatusEventArgs:
@@ -233,11 +230,14 @@ public class WabisabiCoordinatorClientInstance
                 _logger.LogTrace("Coinjoin complete!   :" + e.Wallet.WalletName);
                 break;
             case LoadedEventArgs loadedEventArgs:
-                var stopWhenAllMixed = !((BTCPayWallet)loadedEventArgs.Wallet).BatchPayments;
+                stopWhenAllMixed = !((BTCPayWallet)loadedEventArgs.Wallet).BatchPayments;
                _ = CoinJoinManager.StartAsync(loadedEventArgs.Wallet, stopWhenAllMixed, false, CancellationToken.None);
                 break;
             case StartErrorEventArgs errorArgs:
-                _logger.LogInformation("Could not start wallet for coinjoin:" + errorArgs.Error.ToString() + "   :" + e.Wallet.WalletName);
+                stopWhenAllMixed = !((BTCPayWallet)errorArgs.Wallet).BatchPayments;
+                _ = CoinJoinManager.StartAsync(errorArgs.Wallet, stopWhenAllMixed, false, CancellationToken.None);
+
+                // _logger.LogInformation("Could not start wallet for coinjoin:" + errorArgs.Error.ToString() + "   :" + e.Wallet.WalletName);
                 break;
             case StoppedEventArgs stoppedEventArgs:
                 _logger.LogInformation("Stopped wallet for coinjoin: " + stoppedEventArgs.Reason + "   :" + e.Wallet.WalletName);

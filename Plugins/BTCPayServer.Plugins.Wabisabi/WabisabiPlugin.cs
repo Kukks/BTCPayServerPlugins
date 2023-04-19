@@ -1,20 +1,12 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
-using BTCPayServer.Client.Models;
 using BTCPayServer.Common;
-using BTCPayServer.Payments;
-using BTCPayServer.PayoutProcessors;
 using BTCPayServer.Services.Stores;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
 using WalletWasabi.Backend.Controllers;
@@ -38,22 +30,22 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
             {
                 var res = ActivatorUtilities.CreateInstance<WabisabiCoordinatorClientInstanceManager>(provider);
                 res.UTXOLocker = utxoLocker;
-                res.AddCoordinator("zkSNACKS Coordinator", "zksnacks", provider =>
-                {
-                    var chain = provider.GetService<IExplorerClientProvider>().GetExplorerClient("BTC").Network
-                        .NBitcoinNetwork.ChainName;
-                    if (chain == ChainName.Mainnet)
-                    {
-                        return new Uri("https://wasabiwallet.io/");
-                    }
-
-                    if (chain == ChainName.Testnet)
-                    {
-                        return new Uri("https://wasabiwallet.co/");
-                    }
-
-                    return new Uri("http://localhost:37127");
-                });
+                // res.AddCoordinator("zkSNACKS Coordinator", "zksnacks", provider =>
+                // {
+                //     var chain = provider.GetService<IExplorerClientProvider>().GetExplorerClient("BTC").Network
+                //         .NBitcoinNetwork.ChainName;
+                //     if (chain == ChainName.Mainnet)
+                //     {
+                //         return new Uri("https://wasabiwallet.io/");
+                //     }
+                //
+                //     if (chain == ChainName.Testnet)
+                //     {
+                //         return new Uri("https://wasabiwallet.co/");
+                //     }
+                //
+                //     return new Uri("http://localhost:37127");
+                // });
                 return res;
             });
         applicationBuilder.AddHostedService(provider =>
@@ -83,7 +75,7 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
             "onchain-wallet-send"));
 
         // applicationBuilder.AddSingleton<IPayoutProcessorFactory, WabisabiPayoutProcessor>();
-        Logger.SetMinimumLevel(LogLevel.Warning);
+        Logger.SetMinimumLevel(LogLevel.Debug);
         Logger.SetModes(LogMode.DotNetLoggers);
 
 
