@@ -108,7 +108,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         KeyManager.DefaultFeeRateMedianTimeFrameHours: WabisabiStoreSettings.FeeRateMedianTimeFrameHours);
     public bool RedCoinIsolation => !WabisabiStoreSettings.PlebMode &&WabisabiStoreSettings.RedCoinIsolation;
     public bool BatchPayments => WabisabiStoreSettings.PlebMode || WabisabiStoreSettings.BatchPayments;
-    public long? MinimumDenominationAmount => WabisabiStoreSettings.PlebMode? 20000 : WabisabiStoreSettings.MinimumDenominationAmount;
+    public long? MinimumDenominationAmount => WabisabiStoreSettings.PlebMode? 10000 : WabisabiStoreSettings.MinimumDenominationAmount;
 
     public async Task<bool> IsWalletPrivateAsync()
     {
