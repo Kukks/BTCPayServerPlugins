@@ -30,22 +30,22 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
             {
                 var res = ActivatorUtilities.CreateInstance<WabisabiCoordinatorClientInstanceManager>(provider);
                 res.UTXOLocker = utxoLocker;
-                // res.AddCoordinator("zkSNACKS Coordinator", "zksnacks", provider =>
-                // {
-                //     var chain = provider.GetService<IExplorerClientProvider>().GetExplorerClient("BTC").Network
-                //         .NBitcoinNetwork.ChainName;
-                //     if (chain == ChainName.Mainnet)
-                //     {
-                //         return new Uri("https://wasabiwallet.io/");
-                //     }
-                //
-                //     if (chain == ChainName.Testnet)
-                //     {
-                //         return new Uri("https://wasabiwallet.co/");
-                //     }
-                //
-                //     return new Uri("http://localhost:37127");
-                // });
+                res.AddCoordinator("zkSNACKS Coordinator", "zksnacks", provider =>
+                {
+                    var chain = provider.GetService<IExplorerClientProvider>().GetExplorerClient("BTC").Network
+                        .NBitcoinNetwork.ChainName;
+                    if (chain == ChainName.Mainnet)
+                    {
+                        return new Uri("https://wasabiwallet.io/");
+                    }
+                
+                    if (chain == ChainName.Testnet)
+                    {
+                        return new Uri("https://wasabiwallet.co/");
+                    }
+                
+                    return new Uri("http://localhost:37127");
+                });
                 return res;
             });
         applicationBuilder.AddHostedService(provider =>
