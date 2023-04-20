@@ -15,6 +15,7 @@ public class WasabiCoordinatorStatusFetcher : PeriodicRunner, IWasabiBackendStat
     private readonly IWabiSabiApiRequestHandler _wasabiClient;
     private readonly ILogger _logger;
     public bool Connected { get; set; } = false;
+    public bool? OverrideConnected { get; set; }
     public WasabiCoordinatorStatusFetcher(IWabiSabiApiRequestHandler wasabiClient, ILogger logger) :
         base(TimeSpan.FromSeconds(30))
     {
@@ -26,13 +27,21 @@ public class WasabiCoordinatorStatusFetcher : PeriodicRunner, IWasabiBackendStat
     {
         try
         {
-             await _wasabiClient.GetStatusAsync(new RoundStateRequest(ImmutableList<RoundStateCheckpoint>.Empty), cancel);
-            if (!Connected)
+            if (OverrideConnected is { })
             {
-                _logger.LogInformation("Connected to coordinator"  );
+                Connected = OverrideConnected.Value;
             }
+            else
+            {
+                await _wasabiClient.GetStatusAsync(new RoundStateRequest(ImmutableList<RoundStateCheckpoint>.Empty), cancel);
+                if (!Connected)
+                {
+                    _logger.LogInformation("Connected to coordinator"  );
+                }
+                Connected = true;
+            }
+            
 
-            Connected = true;
         }
         catch (Exception e)
         {

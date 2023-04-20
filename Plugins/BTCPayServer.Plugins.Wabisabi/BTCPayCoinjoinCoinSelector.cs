@@ -100,9 +100,9 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
         var remainingPendingPayments = new List<PendingPayment>(pendingPayments);
         var solution = new SubsetSolution(remainingPendingPayments.Count, _wallet.AnonScoreTarget,
             utxoSelectionParameters);
-
-        if (remainingCoins.All(coin => coin.CoinColor(_wallet.AnonScoreTarget) == AnonsetType.Green) &&
-            !remainingPendingPayments.Any())
+        var fullyPrivate = remainingCoins.All(coin => coin.CoinColor(_wallet.AnonScoreTarget) == AnonsetType.Green);
+        var coinjoiningOnlyForPayments = fullyPrivate && remainingPendingPayments.Any();
+        if (fullyPrivate && !coinjoiningOnlyForPayments)
         {
             var rand = Random.Shared.Next(1, 1001);
             if (rand > _wallet.WabisabiStoreSettings.ExtraJoinProbability)
@@ -199,6 +199,14 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                     break;
                 }
             }
+        }
+
+        if (coinjoiningOnlyForPayments && solution.HandledPayments?.Any() is not true)
+        {
+            _logger.LogInformation(
+                "Attempted to coinjoin only to fulfill payments but the coin selection results yieleded no handled payment.");
+            return  new SubsetSolution(remainingPendingPayments.Count, _wallet.AnonScoreTarget,
+                utxoSelectionParameters);
         }
         return solution;
     }

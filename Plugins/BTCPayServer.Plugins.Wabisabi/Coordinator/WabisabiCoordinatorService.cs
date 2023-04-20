@@ -185,12 +185,21 @@ public class WabisabiCoordinatorService : PeriodicRunner
     public async Task StartCoordinator(CancellationToken cancellationToken)
     {
         await HostedServices.StartAllAsync(cancellationToken);
+        if (_instanceManager.HostedServices.TryGetValue("local", out var instance))
+        {
+            instance.WasabiCoordinatorStatusFetcher.OverrideConnected = null;
+        }
         _instanceManager.AddCoordinator("Local Coordinator", "local", _ => null, cachedSettings.TermsConditions);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
+        if (_instanceManager.HostedServices.TryGetValue("local", out var instance))
+        {
+            instance.WasabiCoordinatorStatusFetcher.OverrideConnected = false;
+        }
         await HostedServices.StopAllAsync(cancellationToken);
+
     }
 
     protected override async Task ActionAsync(CancellationToken cancel)

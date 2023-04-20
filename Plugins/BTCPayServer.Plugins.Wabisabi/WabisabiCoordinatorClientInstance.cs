@@ -200,7 +200,7 @@ public class WabisabiCoordinatorClientInstance
         switch (e)
         {
             case CoinJoinStatusEventArgs coinJoinStatusEventArgs:
-                _logger.LogTrace(coinJoinStatusEventArgs.CoinJoinProgressEventArgs.GetType() + "   :" +
+                _logger.LogInformation(coinJoinStatusEventArgs.CoinJoinProgressEventArgs.GetType() + "   :" +
                                        e.Wallet.WalletName);
                 break;
             case CompletedEventArgs completedEventArgs:
@@ -234,10 +234,7 @@ public class WabisabiCoordinatorClientInstance
                _ = CoinJoinManager.StartAsync(loadedEventArgs.Wallet, stopWhenAllMixed, false, CancellationToken.None);
                 break;
             case StartErrorEventArgs errorArgs:
-                stopWhenAllMixed = !((BTCPayWallet)errorArgs.Wallet).BatchPayments;
-                _ = CoinJoinManager.StartAsync(errorArgs.Wallet, stopWhenAllMixed, false, CancellationToken.None);
-
-                // _logger.LogInformation("Could not start wallet for coinjoin:" + errorArgs.Error.ToString() + "   :" + e.Wallet.WalletName);
+                _logger.LogInformation("Could not start wallet for coinjoin:" + errorArgs.Error.ToString() + "   :" + e.Wallet.WalletName);
                 break;
             case StoppedEventArgs stoppedEventArgs:
                 _logger.LogInformation("Stopped wallet for coinjoin: " + stoppedEventArgs.Reason + "   :" + e.Wallet.WalletName);
@@ -250,7 +247,6 @@ public class WabisabiCoordinatorClientInstance
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        
         RoundStateUpdater.StartAsync(cancellationToken);
         WasabiCoordinatorStatusFetcher.StartAsync(cancellationToken);
         CoinJoinManager.StartAsync(cancellationToken);

@@ -16,23 +16,19 @@ namespace BTCPayServer.Plugins.Wabisabi
         private readonly WabisabiCoordinatorClientInstanceManager _coordinatorClientInstanceManager;
         private readonly WalletProvider _walletProvider;
         private readonly WalletRepository _walletRepository;
-        private readonly PayoutProcessorService _payoutProcessorService;
-        private readonly EventAggregator _eventAggregator;
         private string[] _ids => _coordinatorClientInstanceManager.HostedServices.Keys.ToArray();
 
-        public WabisabiService( IStoreRepository storeRepository, 
+        public WabisabiService(IStoreRepository storeRepository,
             WabisabiCoordinatorClientInstanceManager coordinatorClientInstanceManager,
             WalletProvider walletProvider,
-            WalletRepository walletRepository,PayoutProcessorService payoutProcessorService, EventAggregator eventAggregator)
+            WalletRepository walletRepository)
         {
             _storeRepository = storeRepository;
             _coordinatorClientInstanceManager = coordinatorClientInstanceManager;
             _walletProvider = walletProvider;
             _walletRepository = walletRepository;
-            _payoutProcessorService = payoutProcessorService;
-            _eventAggregator = eventAggregator;
         }
-        
+
         public async Task<WabisabiStoreSettings> GetWabisabiForStore(string storeId)
         {
             
