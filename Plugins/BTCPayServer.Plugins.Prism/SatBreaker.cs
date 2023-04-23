@@ -137,7 +137,7 @@ namespace BTCPayServer.Plugins.Prism
                                             lnClients.Add(payout.StoreDataId, lnClient);
                                         }
 
-                                        if (lnClient is not null)
+                                        if (lnClient is not null && proof?.PaymentHash is not null)
                                         {
                                             var p = await lnClient.GetPayment(proof.PaymentHash, CancellationToken);
                                             feePaid = (long) p.Fee.ToUnit(LightMoneyUnit.Satoshi);

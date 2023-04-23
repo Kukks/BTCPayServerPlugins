@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
+using WalletWasabi.Blockchain.Keys;
 using WalletWasabi.Blockchain.TransactionOutputs;
 using WalletWasabi.Crypto.Randomness;
 using WalletWasabi.Extensions;
@@ -161,6 +162,14 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             }
 
             solution.Coins.Add(coin);
+            // we make sure to spend all coins of the same script as it reduces the chance of the user stupidly consolidating later on
+            var scriptPubKey = coin.ScriptPubKey;
+            var reusedAddressCoins = remainingCoins.Where(smartCoin => smartCoin.ScriptPubKey == scriptPubKey).ToArray();
+            foreach (var reusedAddressCoin in reusedAddressCoins)
+            {
+                remainingCoins.Remove(reusedAddressCoin);
+                solution.Coins.Add(reusedAddressCoin);
+            }
 
             // Loop through the pending payments and handle each payment by subtracting the payment amount from the total value of the selected coins
             var potentialPayments = remainingPendingPayments
@@ -317,8 +326,6 @@ public class SubsetSolution
         sc.TryGetValue(AnonsetType.Red, out var rcoins);
         sb.AppendLine(
             $"Solution total coins:{Coins.Count} R:{rcoins?.Length ?? 0} O:{ocoins?.Length ?? 0} G:{gcoins?.Length ?? 0} AL:{GetAnonLoss(Coins)} total value: {TotalValue} total payments:{TotalPaymentCost}/{TotalPaymentsGross} leftover: {LeftoverValue}");
-        sb.AppendLine(
-            $"Used coins: {string.Join(", ", Coins.Select(coin => coin.Outpoint + " " + coin.Amount.ToString() + " A" + coin.AnonymitySet))}");
         if (HandledPayments.Any())
             sb.AppendLine($"handled payments: {string.Join(", ", HandledPayments.Select(p => p.Value))} ");
         return sb.ToString();

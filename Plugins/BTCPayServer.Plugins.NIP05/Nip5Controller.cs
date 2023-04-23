@@ -11,7 +11,6 @@ using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 using NBitcoin.DataEncoders;
-using NBitcoin.Secp256k1;
 using NNostr.Client;
 using NNostr.Client.Protocols;
 
@@ -38,21 +37,35 @@ public class Nip5Controller : Controller
     [HttpGet]
     public async Task<IActionResult> Edit(string storeId)
     {
-        var settings = await _storeRepository.GetSettingAsync<Nip5StoreSettings>(storeId, "NIP05");
+        var settings = await GetForStore(storeId);
         return View(settings ?? new());
+    }
+[NonAction]
+    public async Task<Nip5StoreSettings?> GetForStore(string storeId)
+    {
+        return await _memoryCache.GetOrCreateAsync("NIP05_" + storeId, async entry => await _storeRepository.GetSettingAsync<Nip5StoreSettings>(storeId, "NIP05"));
+        
+    }
+
+    [NonAction]
+    public async Task UpdateStore(string storeId, Nip5StoreSettings? settings)
+    {
+        _memoryCache.Remove("NIP05_" + storeId);
+       await _storeRepository.UpdateSetting(storeId, "NIP05", settings);
+       _memoryCache.CreateEntry("NIP05_" + storeId).SetValue(settings);
     }
 
     [HttpPost]
     public async Task<IActionResult> Edit(string storeId, Nip5StoreSettings settings, string command)
     {
+        
+        var existingSettings = await GetForStore(storeId);
         if (command == "remove")
         {
-            var settingss = await _storeRepository.GetSettingAsync<Nip5StoreSettings>(storeId, "NIP05");
-            if (settingss is not null)
+            if (existingSettings is not null)
             {
-                await _storeRepository.UpdateSetting<Nip5StoreSettings>(storeId, "NIP05", null);
-
-                _memoryCache.Remove($"NIP05_{settingss.Name.ToLowerInvariant()}");
+                await UpdateStore(storeId, null);
+                _memoryCache.Remove($"NIP05_{existingSettings.Name.ToLowerInvariant()}");
             }
 
             return RedirectToAction("Edit", new {storeId});
@@ -139,13 +152,12 @@ k =  settings.PrivateKey.FromNIP19Nsec();
             return View(settings);
         }
 
-        var settingssx = await _storeRepository.GetSettingAsync<Nip5StoreSettings>(storeId, "NIP05");
-        if (settingssx is not null)
+        if (existingSettings?.Name is not null)
         {
-            _memoryCache.Remove($"NIP05_{settingssx.Name.ToLowerInvariant()}");
+            _memoryCache.Remove($"NIP05_{existingSettings.Name.ToLowerInvariant()}");
         }
 
-        await _storeRepository.UpdateSetting(storeId, "NIP05", settings);
+        await UpdateStore(storeId, settings);
         return RedirectToAction("Edit", new {storeId});
     }
 [NonAction]

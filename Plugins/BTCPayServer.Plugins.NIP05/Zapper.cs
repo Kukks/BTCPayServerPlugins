@@ -7,14 +7,25 @@ using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Events;
 using BTCPayServer.Payments;
+using BTCPayServer.Services;
+using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
+using NBitcoin;
+using NBitcoin.Secp256k1;
 using NNostr.Client;
 
 namespace BTCPayServer.Plugins.NIP05;
 
+public record ZapperSettings(string ZapperPrivateKey)
+{
+    public ECPrivKey ZappingKey => NostrExtensions.ParseKey(ZapperPrivateKey);
+    public ECXOnlyPubKey ZappingPublicKey => ZappingKey.CreateXOnlyPubKey();
+    public string ZappingPublicKeyHex => ZappingPublicKey.ToHex();
+    
+}
 public class Zapper : IHostedService
 {
     record PendingZapEvent(string[] relays, NostrEvent nostrEvent);
@@ -23,15 +34,28 @@ public class Zapper : IHostedService
     private readonly Nip5Controller _nip5Controller;
     private readonly IMemoryCache _memoryCache;
     private readonly ILogger<Zapper> _logger;
+    private readonly SettingsRepository _settingsRepository;
     private IEventAggregatorSubscription _subscription;
     private ConcurrentBag<PendingZapEvent> _pendingZapEvents = new();
 
-    public Zapper(EventAggregator eventAggregator, Nip5Controller nip5Controller, IMemoryCache memoryCache, ILogger<Zapper> logger)
+    private async Task<ZapperSettings> GetSettings()
+    { var result = await _settingsRepository.GetSettingAsync<ZapperSettings>( "Zapper");
+        if (result is not null) return result;
+        result = new ZapperSettings(Convert.ToHexString(RandomUtils.GetBytes(32)));
+        await _settingsRepository.UpdateSetting(result, "Zapper");
+
+        return result;
+    }
+
+
+    public Zapper(EventAggregator eventAggregator, 
+        Nip5Controller nip5Controller, IMemoryCache memoryCache, ILogger<Zapper> logger, SettingsRepository settingsRepository, StoreRepository storeRepository)
     {
         _eventAggregator = eventAggregator;
         _nip5Controller = nip5Controller;
         _memoryCache = memoryCache;
         _logger = logger;
+        _settingsRepository = settingsRepository;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -70,7 +94,27 @@ public class Zapper : IHostedService
                         var tcs = new TaskCompletionSource();
                         using var c = new NostrClient(new Uri(relay.Key));
                         await c.ConnectAndWaitUntilConnected(cts.Token);
+                        
                         var pendingOksOnIds = relay.Value.Select(a => a.Id).ToHashSet();
+                        var subscription = new NostrSubscriptionFilter()
+                        {
+                            Ids = pendingOksOnIds.ToArray()
+                        };
+                        c.EventsReceived+= (sender, args) =>
+                        {
+                            foreach (var nostrEvent in args.events)
+                            {
+                                if (nostrEvent.Id == "zap-confirmation")
+                                {
+                                    pendingOksOnIds.Remove(nostrEvent.Id);
+                                    if (!pendingOksOnIds.Any())
+                                    {
+                                        tcs.SetResult();
+                                    }
+                                }
+                            }
+                        };
+                        await c.CreateSubscription("zap-confirmations",new []{subscription}, cts.Token);
                         c.OkReceived += (sender, okargs) =>
                         {
                             pendingOksOnIds.Remove(okargs.eventId);
@@ -87,7 +131,6 @@ public class Zapper : IHostedService
                     }
                     catch (Exception e)
                     {
-                        _logger.LogError(e, $"Error zapping to {relay.Key}");
                     }
                 }));
                     
@@ -131,23 +174,11 @@ public class Zapper : IHostedService
         }
 
         var pmd = (LNURLPayPaymentMethodDetails) pm.GetPaymentMethodDetails();
-        var name = pmd.ConsumedLightningAddress.Split("@")[0];
-        var settings = await _nip5Controller.Get(name);
-        if (settings.storeId != arg.Invoice.StoreId)
-        {
-            return;
-        }
-
-        if (string.IsNullOrEmpty(settings.settings.PrivateKey))
-        {
-            return;
-        }
-
-        var key = NostrExtensions.ParseKey(settings.settings.PrivateKey);
-            
+        var settings = await GetSettings();
+        
         var zapRequestEvent = JsonSerializer.Deserialize<NostrEvent>(zapRequest);
         var relays = zapRequestEvent.Tags.Where(tag => tag.TagIdentifier == "relays").SelectMany(tag => tag.Data).ToArray();
-            
+        
         var tags = zapRequestEvent.Tags.Where(a => a.TagIdentifier.Length == 1).ToList();
         tags.Add(new()
         {
@@ -165,15 +196,15 @@ public class Zapper : IHostedService
         {
             Kind = 9735,
             CreatedAt = DateTimeOffset.UtcNow,
-            PublicKey = settings.settings.PubKey,
+            PublicKey = settings.ZappingPublicKeyHex,
             Content = zapRequestEvent.Content,
             Tags = tags
         };
 
 
-        await zapReceipt.ComputeIdAndSignAsync(key);
-            
-        _pendingZapEvents.Add(new PendingZapEvent(relays.Concat(settings.settings.Relays?? Array.Empty<string>()).Distinct().ToArray(), zapReceipt));
+        await zapReceipt.ComputeIdAndSignAsync(settings.ZappingKey);
+        var userNostrSettings = await _nip5Controller.GetForStore(arg.Invoice.StoreId);
+        _pendingZapEvents.Add(new PendingZapEvent(relays.Concat(userNostrSettings?.Relays?? Array.Empty<string>()).Distinct().ToArray(), zapReceipt));
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
