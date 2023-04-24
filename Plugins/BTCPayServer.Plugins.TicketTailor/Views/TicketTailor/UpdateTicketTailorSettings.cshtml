@@ -59,6 +59,11 @@
                     <label asp-for="RequireFullName" class="form-check-label">Require full name to be provided (if unchecked and not provided, the gap will be filled in with a placeholder)</label>
                     <span asp-validation-for="RequireFullName" class="text-danger"></span>
                 </div>
+                <div class="form-group form-check">
+                    <input asp-for="AllowDiscountCodes" type="checkbox" class="form-check-input"/>
+                    <label asp-for="AllowDiscountCodes" class="form-check-label">Allow discount codes (due to the nature of Ticket Tailor's API, redemption limit is not applied.</label>
+                    <span asp-validation-for="AllowDiscountCodes" class="text-danger"></span>
+                </div>
 
                 <div class="form-group">
                     <label asp-for="CustomCSS" class="form-label">Additional Custom CSS</label>

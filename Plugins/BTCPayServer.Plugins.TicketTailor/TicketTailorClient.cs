@@ -335,4 +335,44 @@ public class TicketTailorClient : IDisposable
 
         [JsonPropertyName("venue")] public Venue Venue { get; set; }
     }
+
+    public async Task<DiscountCode?> GetDiscountCode(string code)
+    {
+        var response = await _httpClient.GetAsync($"/v1/discounts?code={code}");
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+        var result = await response.Content.ReadFromJsonAsync<DataHolder<DiscountCode[]>>();
+        return result?.Data?.FirstOrDefault();
+    }
+    public class DiscountCode
+{
+    public string id { get; set; }
+    public string code { get; set; }
+    public Expires? expires { get; set; }
+    public int? max_redemptions { get; set; }
+    public string name { get; set; }
+    public int? face_value_amount { get; set; }
+    public int? face_value_percentage { get; set; }
+    public string[] ticket_types { get; set; }
+    public int? times_redeemed { get; set; }
+    public string type { get; set; }
+    public class Expires
+    {
+        public string date { get; set; }
+        public string formatted { get; set; }
+        public string iso { get; set; }
+        public string time { get; set; }
+        public string timezone { get; set; }
+        public long unix { get; set; }
+    }
 }
+
+
+
+
+    
+    
+}
+

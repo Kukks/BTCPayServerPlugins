@@ -50,7 +50,7 @@ namespace BTCPayServer.Plugins.TicketTailor
         
         [AllowAnonymous]
         [HttpPost("")]
-        public async Task<IActionResult> Purchase(string storeId, TicketTailorViewModel request)
+        public async Task<IActionResult> Purchase(string storeId, TicketTailorViewModel request, bool preview = false)
         {
             var config = await _ticketTailorService.GetTicketTailorForStore(storeId);
             (TicketTailorClient.Hold, string error)? hold = null;
@@ -66,6 +66,17 @@ namespace BTCPayServer.Plugins.TicketTailor
                     }
 
                     var price = 0m;
+                    TicketTailorClient.DiscountCode discountCode = null;
+                    if (!string.IsNullOrEmpty(request.DiscountCode) && config.AllowDiscountCodes)
+                    {
+                        discountCode = await client.GetDiscountCode(request.DiscountCode);
+                        if (discountCode?.expires?.unix is not null && DateTimeOffset.FromUnixTimeSeconds(discountCode.expires.unix) < DateTimeOffset.Now)
+                        {
+                            discountCode = null;
+                        }
+                    }
+
+                    var discountedAmount = 0m;
                     foreach (var purchaseRequestItem in request.Items)
                     {
                         if (purchaseRequestItem.Quantity <= 0)
@@ -73,7 +84,7 @@ namespace BTCPayServer.Plugins.TicketTailor
                             continue;
                         }
                         var ticketType = evt.TicketTypes.FirstOrDefault(type => type.Id == purchaseRequestItem.TicketTypeId);
-                        
+                       
                         var specificTicket =
                             config.SpecificTickets?.SingleOrDefault(ticket => ticketType?.Id == ticket.TicketTypeId);
                         if ((config.SpecificTickets?.Any() is true && specificTicket is null) || ticketType is null ||
@@ -107,7 +118,36 @@ namespace BTCPayServer.Plugins.TicketTailor
                             ticketCost =specificTicket.Price.GetValueOrDefault(ticketType.Price);
                         }
 
-                        price += ticketCost * purchaseRequestItem.Quantity;
+                        var originalTicketCost = ticketCost;
+                        if (discountCode?.ticket_types.Contains(ticketType?.Id) is true)
+                        {
+                            switch (discountCode.type)
+                            {
+                                case "fixed_amount" when discountCode.face_value_amount is not null:
+                                    ticketCost -= (discountCode.face_value_amount.Value / 100m);
+                                    break;
+                                case "percentage" when discountCode.face_value_percentage is not null:
+
+                                    var percentageOff = (discountCode.face_value_percentage.Value / 100m);
+                                    
+                                    ticketCost -= (ticketCost * percentageOff);
+                                    break;
+                            }
+                        }
+        
+                        var thisTicketBatchCost = ticketCost * purchaseRequestItem.Quantity;
+                        discountedAmount += (originalTicketCost * purchaseRequestItem.Quantity) - thisTicketBatchCost;
+                        
+                        price += thisTicketBatchCost;
+                    }
+
+                    if (preview)
+                    {
+                        return Json(new
+                        {
+                            discountedAmount,
+                            total = price
+                        });
                     }
 
                     hold = await client.CreateHold(new TicketTailorClient.CreateHoldRequest()
@@ -172,7 +212,9 @@ namespace BTCPayServer.Plugins.TicketTailor
                                 buyerName = request.Name, 
                                 buyerEmail = request.Email, 
                                 holdId = hold.Value.Item1.Id,
-                                orderId="tickettailor"
+                                orderId="tickettailor",
+                                discountCode,
+                                discountedAmount
                             })
                         });
 
@@ -300,6 +342,7 @@ namespace BTCPayServer.Plugins.TicketTailor
                     vm.BypassAvailabilityCheck = TicketTailor.BypassAvailabilityCheck;
                     vm.CustomCSS = TicketTailor.CustomCSS;
                     vm.RequireFullName = TicketTailor.RequireFullName;
+                    vm.AllowDiscountCodes = TicketTailor.AllowDiscountCodes;
                     vm.SpecificTickets = TicketTailor.SpecificTickets;
                 }
             }
@@ -395,7 +438,8 @@ namespace BTCPayServer.Plugins.TicketTailor
                 CustomCSS = vm.CustomCSS,
                 SpecificTickets = vm.SpecificTickets,
                 BypassAvailabilityCheck = vm.BypassAvailabilityCheck,
-                RequireFullName = vm.RequireFullName
+                RequireFullName = vm.RequireFullName,
+                AllowDiscountCodes = vm.AllowDiscountCodes
             };
             
 

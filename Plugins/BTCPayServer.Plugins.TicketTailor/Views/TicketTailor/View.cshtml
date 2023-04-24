@@ -3,10 +3,15 @@
 @using Microsoft.AspNetCore.Mvc.TagHelpers
 @model BTCPayServer.Plugins.TicketTailor.TicketTailorViewModel
 @{
+    var storeId = Context.GetRouteValue("storeId");
     Layout = "_LayoutSimple";
     var available = Model.Settings.BypassAvailabilityCheck || (Model.Event.Unavailable != "true" && Model.Event.TicketsAvailable == "true");
     Model.Settings.SpecificTickets ??= new List<SpecificTicket>();
     Context.Request.Query.TryGetValue("accessCode", out var accessCode);
+    if (Context.Request.Query.TryGetValue("discount", out var discount))
+    {
+        Model.DiscountCode = discount;
+    }
 }
 <style>
         hr:last-child{
@@ -24,10 +29,13 @@ footer {
 </style>
 <script>
 document.addEventListener("DOMContentLoaded", ()=>{
+    const form = document.querySelector("form");
     const btn = document.querySelector("button[type='submit']");
     const inputs = document.querySelectorAll("input");
+    const discountCode = document.querySelector("#DiscountCode");
     inputs.forEach(value => value.addEventListener("input", (evt)=>{
         
+
         let total = 0;
         let totalQty = 0;
         document.querySelectorAll("[data-price]").forEach(value1 => {
@@ -48,8 +56,25 @@ document.addEventListener("DOMContentLoaded", ()=>{
             btn.setAttribute("disabled", "disabled");
         }
         btn.textContent = `Purchase for ${total.toFixed(2)} @Model.Event.Currency.ToUpperInvariant()`
+        
+        if (discountCode && discountCode.value && totalQty > 0){
+            const data = new FormData(form);
+            const xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function() {
+            if (this.readyState == 4 && this.status == 200) {
+                const response = JSON.parse(this.responseText);  
+                if (response.discountedAmount){  
+                    btn.innerHTML = `Purchase for ${response.total.toFixed(2)} @Model.Event.Currency.ToUpperInvariant()<br/><span class="">${response.discountedAmount.toFixed(2)} @Model.Event.Currency.ToUpperInvariant() discount</span>`
+                } else{  
+                    btn.textContent = `Purchase for ${response.total.toFixed(2)} @Model.Event.Currency.ToUpperInvariant()`
+                }
+            }
+        }
+             xhttp.open("POST", "@Url.Action("Purchase", new {storeId, preview = true})", true);
+             xhttp.send(data);
+           }
     }))
-    document.querySelector("form").addEventListener("submit", ()=>{
+    form.addEventListener("submit", ()=>{
         btn.setAttribute("disabled", "disabled");
         inputs.forEach(value => value.setAttribute("readonly", "readonly"));
     })
@@ -67,14 +92,14 @@ document.addEventListener("DOMContentLoaded", ()=>{
                 <div class="overflow-hidden col-12 ">@Safe.Raw(Model.Event.Description)</div>
             </div>
         }
-        <form method="post" asp-controller="TicketTailor" asp-action="Purchase" asp-antiforgery="false" asp-route-storeId="@Context.GetRouteValue("storeId")">
+        <form method="post" asp-controller="TicketTailor" asp-action="Purchase" asp-antiforgery="false" asp-route-storeId="@storeId">
             <input type="hidden" asp-for="AccessCode" value="@accessCode"/>
             <div class="row g-2 justify-content-center mb-4" id="ticket-form-container">
                 <div class="col-sm-6 col-md-4">
                     <div class="form-floating">
                         <input type="text" asp-for="Name" class="form-control" required="@Model.Settings.RequireFullName"
                                pattern="^(\w\w+)\s(\w+)$" title="Please enter your first and last name, separated with a space.">
-                        <label  asp-for="Name">Full Name</label>
+                        <label asp-for="Name">Full Name</label>
                     </div>
                 </div>
                 <div class="col-sm-6 col-md-4">
@@ -83,6 +108,8 @@ document.addEventListener("DOMContentLoaded", ()=>{
                         <label asp-for="Email">Email</label>
                     </div>
                 </div>
+               
+
             </div>
             <div class="row g-2 justify-content-center mb-4">
                 <div class="col-sm-12 col-md-8">
@@ -138,7 +165,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
                                     var purchasable = available && (specific || new[] {"on_sale", "locked"}.Contains(item.Status)) && item.Quantity > 0;
 
                                     <div class="row  justify-content-between">
-                                        <div  class="col-lg-8 col-sm-12">
+                                        <div class="col-lg-8 col-sm-12">
                                             <h5 >@item.Name</h5>
                                             <p>@Safe.Raw(item.Description)</p>
                                         </div>
@@ -149,9 +176,9 @@ document.addEventListener("DOMContentLoaded", ()=>{
                                                     <div class="form-floating">
                                                         <input type="number"
                                                                class="form-control" asp-for="Items[index].Quantity" max="@item.MaxPerOrder"
-                                                               min="0" data-price="@item.Price" />
+                                                               min="0" data-price="@item.Price"/>
 
-                                                        <label  asp-for="Items[index].Quantity">Quantity</label>
+                                                        <label asp-for="Items[index].Quantity">Quantity</label>
                                                     </div>
 
                                                     <span class="input-group-text">
@@ -178,6 +205,15 @@ document.addEventListener("DOMContentLoaded", ()=>{
 
 
                 </div>
+                 @if (Model.Settings.AllowDiscountCodes)
+                                {
+                                    <div class="col-sm-12 col-md-8 text-center">
+                                        <div class="form-floating">
+                                            <input required type="text" asp-for="DiscountCode" class="form-control"/>
+                                            <label asp-for="DiscountCode">Promo code</label>
+                                        </div>
+                                    </div>
+                                }
                 <div class="col-sm-12 col-md-8 text-center">
                     <button class="btn btn-primary btn-lg m-auto" type="submit" disabled="disabled">Purchase</button>
 

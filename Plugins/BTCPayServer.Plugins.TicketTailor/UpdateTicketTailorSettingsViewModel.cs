@@ -16,6 +16,7 @@ public class UpdateTicketTailorSettingsViewModel
     public List<SpecificTicket> SpecificTickets { get; set; }
     public bool BypassAvailabilityCheck { get; set; }
     public bool RequireFullName { get; set; }
+    public bool AllowDiscountCodes { get; set; }
 }
 
 public class SpecificTicket
@@ -37,6 +38,7 @@ public class TicketTailorViewModel
             
     public PurchaseRequestItem[] Items { get; set; }
     public string AccessCode { get; set; }
+    public string DiscountCode { get; set; }
 
     public class PurchaseRequestItem
     {
