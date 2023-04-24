@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 using NBitcoin.DataEncoders;
+using NBitcoin.Secp256k1;
 using NNostr.Client;
 using NNostr.Client.Protocols;
 
@@ -40,25 +41,25 @@ public class Nip5Controller : Controller
         var settings = await GetForStore(storeId);
         return View(settings ?? new());
     }
-[NonAction]
+
+    [NonAction]
     public async Task<Nip5StoreSettings?> GetForStore(string storeId)
     {
-        return await _memoryCache.GetOrCreateAsync("NIP05_" + storeId, async entry => await _storeRepository.GetSettingAsync<Nip5StoreSettings>(storeId, "NIP05"));
-        
+        return await _memoryCache.GetOrCreateAsync("NIP05_" + storeId,
+            async entry => await _storeRepository.GetSettingAsync<Nip5StoreSettings>(storeId, "NIP05"));
     }
 
     [NonAction]
     public async Task UpdateStore(string storeId, Nip5StoreSettings? settings)
     {
         _memoryCache.Remove("NIP05_" + storeId);
-       await _storeRepository.UpdateSetting(storeId, "NIP05", settings);
-       _memoryCache.CreateEntry("NIP05_" + storeId).SetValue(settings);
+        await _storeRepository.UpdateSetting(storeId, "NIP05", settings);
+        _memoryCache.CreateEntry("NIP05_" + storeId).SetValue(settings);
     }
 
     [HttpPost]
     public async Task<IActionResult> Edit(string storeId, Nip5StoreSettings settings, string command)
     {
-        
         var existingSettings = await GetForStore(storeId);
         if (command == "remove")
         {
@@ -82,11 +83,9 @@ public class Nip5Controller : Controller
             {
                 if (!HexEncoder.IsWellFormed(settings.PubKey))
                 {
-
                     var note = (NIP19.NosteProfileNote) settings.PubKey.FromNIP19Note();
                     settings.PubKey = note.PubKey;
                     settings.Relays = (settings.Relays ?? Array.Empty<string>())?.Concat(note.Relays).ToArray();
-
                 }
             }
             catch (Exception)
@@ -100,7 +99,6 @@ public class Nip5Controller : Controller
         }
         catch (Exception e)
         {
-            
             ModelState.AddModelError(nameof(settings.PubKey), "invalid public key");
         }
 
@@ -111,31 +109,29 @@ public class Nip5Controller : Controller
                 ECPrivKey k;
                 try
                 {
-k =  settings.PrivateKey.FromNIP19Nsec();
+                    k = settings.PrivateKey.FromNIP19Nsec();
                 }
                 catch (Exception e)
                 {
-                   
-                    k =  NostrExtensions.ParseKey(settings.PrivateKey);
+                    k = NostrExtensions.ParseKey(settings.PrivateKey);
                 }
 
                 settings.PrivateKey = k.ToHex();
-               if (string.IsNullOrEmpty(settings.PubKey))
-               {
-                   
-                   settings.PubKey = k.CreateXOnlyPubKey().ToHex();
-                   ModelState.Remove(nameof(settings.PubKey));
-               }
-               else if(settings.PubKey != k.CreateXOnlyPubKey().ToHex())
-                   ModelState.AddModelError(nameof(settings.PrivateKey), "private key does not match public key provided. Clear the public key to generate it from the private key.");
+                if (string.IsNullOrEmpty(settings.PubKey))
+                {
+                    settings.PubKey = k.CreateXOnlyPubKey().ToHex();
+                    ModelState.Remove(nameof(settings.PubKey));
+                }
+                else if (settings.PubKey != k.CreateXOnlyPubKey().ToHex())
+                    ModelState.AddModelError(nameof(settings.PrivateKey),
+                        "private key does not match public key provided. Clear the public key to generate it from the private key.");
             }
             catch (Exception e)
             {
-                
                 ModelState.AddModelError(nameof(settings.PrivateKey), "invalid private key");
             }
         }
-        
+
 
         if (!ModelState.IsValid)
         {
@@ -160,7 +156,8 @@ k =  settings.PrivateKey.FromNIP19Nsec();
         await UpdateStore(storeId, settings);
         return RedirectToAction("Edit", new {storeId});
     }
-[NonAction]
+
+    [NonAction]
     public async Task<(string? storeId, Nip5StoreSettings? settings)> Get(string name)
     {
         var rex = await _memoryCache.GetOrCreateAsync<(string? storeId, Nip5StoreSettings? settings)>(

@@ -34,60 +34,57 @@ public class LnurlDescriptionFilter : PluginHookFilter<string>
 
     public override async Task<string> Execute(string arg)
     {
-        
-            if (_httpContextAccessor.HttpContext.Request.Query.TryGetValue("nostr", out var nostr) &&
-                _httpContextAccessor.HttpContext.Request.RouteValues.TryGetValue("invoiceId", out var invoiceId))
+        if (_httpContextAccessor.HttpContext.Request.Query.TryGetValue("nostr", out var nostr) &&
+            _httpContextAccessor.HttpContext.Request.RouteValues.TryGetValue("invoiceId", out var invoiceId))
+        {
+            try
             {
-                try
+                var metadata = JsonConvert.DeserializeObject<string[][]>(arg);
+                var username = metadata
+                    .FirstOrDefault(strings => strings.FirstOrDefault()?.Equals("text/identifier") is true)
+                    ?.ElementAtOrDefault(1)?.ToLowerInvariant().Split("@")[0];
+                if (string.IsNullOrEmpty(username))
                 {
-                    var metadata = JsonConvert.DeserializeObject<string[][]>(arg);
-                    var username = metadata
-                        .FirstOrDefault(strings => strings.FirstOrDefault()?.Equals("text/identifier") is true)
-                        ?.ElementAtOrDefault(1)?.ToLowerInvariant().Split("@")[0];
-                    if (string.IsNullOrEmpty(username))
-                    {
-                        return arg;
-                    }
-
-                    var lnAddress = await _lightningAddressService.ResolveByAddress(username);
-                    if (lnAddress is null)
-                    {
-                        return arg;
-                    }
-
-                    var user = await _nip5Controller.Get(username);
-                    if (user.storeId is not null)
-                    {
-                        if (user.storeId != lnAddress.StoreDataId)
-                        {
-                            return arg;
-                        }
-
-                        var parsedNote = System.Text.Json.JsonSerializer.Deserialize<NostrEvent>(nostr);
-                        if (parsedNote?.Kind != 9734)
-                        {
-                            return arg;
-                        }
-
-                        if (!parsedNote.Verify())
-                        {
-                            return arg;
-                        }
-
-                        using var entry = _memoryCache.CreateEntry(Nip05Plugin.GetZapRequestCacheKey(invoiceId.ToString()));
-                        entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
-                        entry.SetAbsoluteExpiration(TimeSpan.FromMinutes(5));
-                        entry.SetValue(nostr);
-                        return nostr;
-                    }
+                    return arg;
                 }
-                catch (Exception e)
+
+                var lnAddress = await _lightningAddressService.ResolveByAddress(username);
+                if (lnAddress is null)
                 {
-                    _logger.LogError(e, $"Error while processing nostr zap request for invoice  {invoiceId}\n{nostr}");
+                    return arg;
+                }
+
+                var user = await _nip5Controller.Get(username);
+                if (user.storeId is not null)
+                {
+                    if (user.storeId != lnAddress.StoreDataId)
+                    {
+                        return arg;
+                    }
+
+                    var parsedNote = System.Text.Json.JsonSerializer.Deserialize<NostrEvent>(nostr);
+                    if (parsedNote?.Kind != 9734)
+                    {
+                        return arg;
+                    }
+
+                    if (!parsedNote.Verify())
+                    {
+                        return arg;
+                    }
+
+                    using var entry = _memoryCache.CreateEntry(Nip05Plugin.GetZapRequestCacheKey(invoiceId.ToString()));
+                    entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
+                    entry.SetAbsoluteExpiration(TimeSpan.FromMinutes(5));
+                    entry.SetValue(nostr);
+                    return nostr;
                 }
             }
-            
-       
+            catch (Exception e)
+            {
+                _logger.LogError(e, $"Error while processing nostr zap request for invoice  {invoiceId}\n{nostr}");
+            }
+        }
 
         return arg;
     }

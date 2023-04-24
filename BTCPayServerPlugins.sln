@@ -16,8 +16,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Rating", "subm
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Common", "submodules\btcpayserver\BTCPayServer.Common\BTCPayServer.Common.csproj", "{3F2E0BA0-9EA7-490F-894D-F9703F35B174}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.Custodians.FakeCustodian", "submodules\btcpayserver\Plugins\BTCPayServer.Plugins.Custodians.FakeCustodian\BTCPayServer.Plugins.Custodians.FakeCustodian.csproj", "{CCDE6E23-60B7-4B12-95AA-91CB40DBC3BD}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "BTCPay", "BTCPay", "{9E04ECE9-E304-4FF2-9CBC-83256E6C6962}"
 	ProjectSection(SolutionItems) = preProject
 		submodules\btcpayserver\Build\Common.csproj = submodules\btcpayserver\Build\Common.csproj
@@ -127,14 +125,6 @@ Global
 		{3F2E0BA0-9EA7-490F-894D-F9703F35B174}.Altcoins-Release|Any CPU.Build.0 = Altcoins-Release|Any CPU
 		{3F2E0BA0-9EA7-490F-894D-F9703F35B174}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{3F2E0BA0-9EA7-490F-894D-F9703F35B174}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{CCDE6E23-60B7-4B12-95AA-91CB40DBC3BD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{CCDE6E23-60B7-4B12-95AA-91CB40DBC3BD}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{CCDE6E23-60B7-4B12-95AA-91CB40DBC3BD}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{CCDE6E23-60B7-4B12-95AA-91CB40DBC3BD}.Release|Any CPU.Build.0 = Release|Any CPU
-		{CCDE6E23-60B7-4B12-95AA-91CB40DBC3BD}.Altcoins-Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{CCDE6E23-60B7-4B12-95AA-91CB40DBC3BD}.Altcoins-Debug|Any CPU.Build.0 = Debug|Any CPU
-		{CCDE6E23-60B7-4B12-95AA-91CB40DBC3BD}.Altcoins-Release|Any CPU.ActiveCfg = Release|Any CPU
-		{CCDE6E23-60B7-4B12-95AA-91CB40DBC3BD}.Altcoins-Release|Any CPU.Build.0 = Release|Any CPU
 		{6295533A-F941-40CA-B889-FE6C0432ED53}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{6295533A-F941-40CA-B889-FE6C0432ED53}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6295533A-F941-40CA-B889-FE6C0432ED53}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -270,7 +260,6 @@ Global
 		{8F158B88-0FEE-44FF-8552-7C0F17D5C508} = {9E04ECE9-E304-4FF2-9CBC-83256E6C6962}
 		{D7E7309D-C4F4-496A-B2C8-BC5D3991B9C0} = {9E04ECE9-E304-4FF2-9CBC-83256E6C6962}
 		{3F2E0BA0-9EA7-490F-894D-F9703F35B174} = {9E04ECE9-E304-4FF2-9CBC-83256E6C6962}
-		{CCDE6E23-60B7-4B12-95AA-91CB40DBC3BD} = {9E04ECE9-E304-4FF2-9CBC-83256E6C6962}
 		{2C5C4DF9-BA1F-4671-9F24-B22D7C9C3D21} = {9E04ECE9-E304-4FF2-9CBC-83256E6C6962}
 	EndGlobalSection
 EndGlobal

@@ -19,7 +19,8 @@ namespace BTCPayServer.Plugins.NIP05
                 "store-integrations-nav"));
             applicationBuilder.AddSingleton<IPluginHookFilter, LnurlDescriptionFilter>();
             applicationBuilder.AddSingleton<IPluginHookFilter, LnurlFilter>();
-            applicationBuilder.AddHostedService<Zapper>();
+            applicationBuilder.AddSingleton<Zapper>();
+            applicationBuilder.AddHostedService(sp => sp.GetRequiredService<Zapper>());
             base.Execute(applicationBuilder);
         }
 

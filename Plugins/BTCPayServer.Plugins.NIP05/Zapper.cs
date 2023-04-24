@@ -2,7 +2,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Events;
@@ -15,16 +14,36 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using NBitcoin;
 using NBitcoin.Secp256k1;
+using Newtonsoft.Json;
 using NNostr.Client;
+using JsonSerializer = System.Text.Json.JsonSerializer;
 
 namespace BTCPayServer.Plugins.NIP05;
 
-public record ZapperSettings(string ZapperPrivateKey)
+public class ZapperSettings
 {
+    public ZapperSettings(string ZapperPrivateKey)
+    {
+        this.ZapperPrivateKey = ZapperPrivateKey;
+    }
+
+    public ZapperSettings()
+    {
+        
+    }
+
+    [JsonIgnore]
     public ECPrivKey ZappingKey => NostrExtensions.ParseKey(ZapperPrivateKey);
+    [JsonIgnore]
     public ECXOnlyPubKey ZappingPublicKey => ZappingKey.CreateXOnlyPubKey();
+    [JsonIgnore]
     public string ZappingPublicKeyHex => ZappingPublicKey.ToHex();
-    
+    public string ZapperPrivateKey { get; init; }
+
+    public void Deconstruct(out string ZapperPrivateKey)
+    {
+        ZapperPrivateKey = this.ZapperPrivateKey;
+    }
 }
 public class Zapper : IHostedService
 {
@@ -38,7 +57,7 @@ public class Zapper : IHostedService
     private IEventAggregatorSubscription _subscription;
     private ConcurrentBag<PendingZapEvent> _pendingZapEvents = new();
 
-    private async Task<ZapperSettings> GetSettings()
+    public async Task<ZapperSettings> GetSettings()
     { var result = await _settingsRepository.GetSettingAsync<ZapperSettings>( "Zapper");
         if (result is not null) return result;
         result = new ZapperSettings(Convert.ToHexString(RandomUtils.GetBytes(32)));
@@ -192,18 +211,25 @@ public class Zapper : IHostedService
             Data = new() {zapRequest}
         });
 
+        var userNostrSettings = await _nip5Controller.GetForStore(arg.Invoice.StoreId);
+        var key = userNostrSettings?.PrivateKey is not null
+            ? NostrExtensions.ParseKey(userNostrSettings?.PrivateKey)
+            : settings.ZappingKey; 
+        
+        var pubkey = userNostrSettings?.PubKey is not null
+            ? userNostrSettings?.PubKey
+            : settings.ZappingPublicKeyHex; 
         var zapReceipt = new NostrEvent()
         {
             Kind = 9735,
             CreatedAt = DateTimeOffset.UtcNow,
-            PublicKey = settings.ZappingPublicKeyHex,
+            PublicKey = pubkey,
             Content = zapRequestEvent.Content,
             Tags = tags
         };
 
 
-        await zapReceipt.ComputeIdAndSignAsync(settings.ZappingKey);
-        var userNostrSettings = await _nip5Controller.GetForStore(arg.Invoice.StoreId);
+        await zapReceipt.ComputeIdAndSignAsync(key);
         _pendingZapEvents.Add(new PendingZapEvent(relays.Concat(userNostrSettings?.Relays?? Array.Empty<string>()).Distinct().ToArray(), zapReceipt));
     }
 

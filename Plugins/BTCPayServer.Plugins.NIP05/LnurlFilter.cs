@@ -9,12 +9,14 @@ public class LnurlFilter : PluginHookFilter<LNURLPayRequest>
 {
     private readonly Nip5Controller _nip5Controller;
     private readonly LightningAddressService _lightningAddressService;
+    private readonly Zapper _zapper;
     public override string Hook => "modify-lnurlp-request";
 
-    public LnurlFilter(Nip5Controller nip5Controller, LightningAddressService lightningAddressService)
+    public LnurlFilter(Nip5Controller nip5Controller, LightningAddressService lightningAddressService, Zapper zapper)
     {
         _nip5Controller = nip5Controller;
         _lightningAddressService = lightningAddressService;
+        _zapper = zapper;
     }
 
     public override async Task<LNURLPayRequest> Execute(LNURLPayRequest arg)
@@ -32,13 +34,9 @@ public class LnurlFilter : PluginHookFilter<LNURLPayRequest>
             return arg;
         }
 
-        var nip5 = await _nip5Controller.Get(name);
-        if (nip5.storeId != lnAddress.StoreDataId)
-        {
-            return arg;
-        }
+        var nip5 = await _nip5Controller.GetForStore(lnAddress.StoreDataId);
 
-        arg.NostrPubkey = nip5.settings.PubKey;
+        arg.NostrPubkey = nip5?.PubKey ?? (await _zapper.GetSettings()).ZappingPublicKeyHex;
         arg.AllowsNostr = true;
         return arg;
     }
