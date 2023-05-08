@@ -100,25 +100,31 @@ public class Zapper : IHostedService
                     }
                 }
                 var relaysToConnectTo = pendingZaps.SelectMany(@event => @event.relays).Distinct();
-                var relaysToZap =relaysToConnectTo.ToDictionary(s => s, s => pendingZaps.Where(@event => @event.relays.Contains(s)).Select(@event => @event.nostrEvent).ToArray());
+                var relaysToZap =relaysToConnectTo.
+                    ToDictionary(s => s, s => pendingZaps.Where(@event => @event.relays.Contains(s)).Select(@event => @event.nostrEvent).ToArray())
+                    .Chunk(5);
 
-                await Task.WhenAll(relaysToZap.Select(async relay =>
+                foreach (var chunk in relaysToZap)
                 {
-                    try
+                    await Task.WhenAll(chunk.Select(async relay =>
                     {
-                        _logger.LogInformation($"Zapping {relay.Value.Length} to {relay.Key}");
-                        var cts = new CancellationTokenSource();
-                        cts.CancelAfter(TimeSpan.FromSeconds(30));
-                        using var c = new NostrClient(new Uri(relay.Key));
-                        _ =  c.Connect(cts.Token);
-                        await c.WaitUntilConnected(cts.Token);
-                        await c.SendEventsAndWaitUntilReceived(relay.Value, cts.Token);
-                        await c.Disconnect();
-                    }
-                    catch (Exception e)
-                    {
-                    }
-                }));
+                        try
+                        {
+                            _logger.LogInformation($"Zapping {relay.Value.Length} to {relay.Key}");
+                            var cts = new CancellationTokenSource();
+                            cts.CancelAfter(TimeSpan.FromSeconds(30));
+                            using var c = new NostrClient(new Uri(relay.Key));
+                            _ =  c.Connect(cts.Token);
+                            await c.WaitUntilConnected(cts.Token);
+                            await c.SendEventsAndWaitUntilReceived(relay.Value, cts.Token);
+                            await c.Disconnect();
+                        }
+                        catch (Exception e)
+                        {
+                        }
+                    }));
+                }
+                
                     
             }
             var waitingToken = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
