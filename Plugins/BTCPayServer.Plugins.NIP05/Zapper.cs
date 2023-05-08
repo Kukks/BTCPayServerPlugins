@@ -106,46 +106,13 @@ public class Zapper : IHostedService
                 {
                     try
                     {
-                    
                         _logger.LogInformation($"Zapping {relay.Value.Length} to {relay.Key}");
                         var cts = new CancellationTokenSource();
                         cts.CancelAfter(TimeSpan.FromSeconds(30));
-                        var tcs = new TaskCompletionSource();
                         using var c = new NostrClient(new Uri(relay.Key));
-                        await c.ConnectAndWaitUntilConnected(cts.Token);
-                        
-                        var pendingOksOnIds = relay.Value.Select(a => a.Id).ToHashSet();
-                        var subscription = new NostrSubscriptionFilter()
-                        {
-                            Ids = pendingOksOnIds.ToArray()
-                        };
-                        c.EventsReceived+= (sender, args) =>
-                        {
-                            foreach (var nostrEvent in args.events)
-                            {
-                                if (nostrEvent.Id == "zap-confirmation")
-                                {
-                                    pendingOksOnIds.Remove(nostrEvent.Id);
-                                    if (!pendingOksOnIds.Any())
-                                    {
-                                        tcs.SetResult();
-                                    }
-                                }
-                            }
-                        };
-                        await c.CreateSubscription("zap-confirmations",new []{subscription}, cts.Token);
-                        c.OkReceived += (sender, okargs) =>
-                        {
-                            pendingOksOnIds.Remove(okargs.eventId);
-                            if(!pendingOksOnIds.Any())
-                                tcs.SetResult();
-                        };
-                        foreach (var nostrEvent in relay.Value)
-                        {
-                            await c.PublishEvent(nostrEvent, cts.Token);
-                                
-                        }
-                        await tcs.Task.WaitAsync(cts.Token);
+                        _ =  c.Connect(cts.Token);
+                        await c.WaitUntilConnected(cts.Token);
+                        await c.SendEventsAndWaitUntilReceived(relay.Value, cts.Token);
                         await c.Disconnect();
                     }
                     catch (Exception e)
