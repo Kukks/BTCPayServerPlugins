@@ -345,21 +345,9 @@ public class BTCPayWallet : IWallet, IDestinationProvider
 
     public async Task RegisterCoinjoinTransaction(SuccessfulCoinJoinResult result, string coordinatorName)
     {
-        Console.WriteLine($"{WalletName}_RegisterCoinjoinTransaction");
-        Console.WriteLine($"{WalletName}_savingProgress");
         await _savingProgress;
-
-        Console.WriteLine($"{WalletName}_savingProgress_done");
-     
-
-        
         _savingProgress = RegisterCoinjoinTransactionInternal(result, coordinatorName);
-        
-        
-        Console.WriteLine($"{WalletName}_savingProgress");
         await _savingProgress;
-        
-        Console.WriteLine($"{WalletName}_savingProgress_done");
     }
     private async Task RegisterCoinjoinTransactionInternal(SuccessfulCoinJoinResult result, string coordinatorName)
     {

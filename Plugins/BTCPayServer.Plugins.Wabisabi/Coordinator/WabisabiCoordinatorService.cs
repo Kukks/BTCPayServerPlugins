@@ -138,6 +138,12 @@ public class WabisabiCoordinatorService : PeriodicRunner
             return transaction.GetHash();
         }
 
+        public override async Task<int> GetBlockCountAsync(CancellationToken cancellationToken = default)
+        {   
+            var result = await _explorerClient.GetStatusAsync(cancellationToken);
+            return result.BitcoinStatus.Blocks;
+        }
+
         public override async Task<EstimateSmartFeeResponse> EstimateSmartFeeAsync(int confirmationTarget,
             EstimateSmartFeeMode estimateMode = EstimateSmartFeeMode.Conservative,
             CancellationToken cancellationToken = default)
