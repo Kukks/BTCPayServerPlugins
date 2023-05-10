@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Services;
+using LNURL;
 using NBitcoin;
 using Newtonsoft.Json.Linq;
 using NNostr.Client;
@@ -34,43 +35,10 @@ public class Nostr
             .CreateLinkedTokenSource(cancellationToken, new CancellationTokenSource(TimeSpan.FromMinutes(1)).Token)
             .Token;
         var client = new NostrClient(relayUri, socket => socket.Options.Proxy = httpClientHandler?.Proxy);
-        await client.ConnectAndWaitUntilConnected(ct);
-        _ = client.ListenForMessages();
-        var tcs = new TaskCompletionSource();
+        _ = client.Connect(ct);
+        await client.WaitUntilConnected(ct);
        
-        var ids = evts.Select(evt => evt.Id).ToHashSet();
-        client.InvalidMessageReceived += (sender, tuple) =>
-        {
-            Console.WriteLine(tuple);
-            
-        };
-        client.OkReceived += (sender, tuple) =>
-        {
-            if (ids.RemoveWhere(s => s == tuple.eventId)> 0 && !ids.Any())
-            {
-                tcs.TrySetResult();   
-            }
-        };
-        client.EventsReceived += (sender, tuple) =>
-        {
-            if (ids.RemoveWhere(s => tuple.events.Any(@event => @event.Id == s)) > 0 && !ids.Any())
-            {
-                tcs.TrySetResult();
-            }
-        };
-        await client.CreateSubscription("ack", new[]
-        {
-            new NostrSubscriptionFilter()
-            {
-                Ids = ids.ToArray()
-            }
-        }, ct);
-        foreach (var evt in evts)
-        {
-            await client.PublishEvent(evt, ct);
-        }
-        await tcs.Task.WithCancellation(ct);
-        await client.CloseSubscription("ack", ct);
+        await client.SendEventsAndWaitUntilReceived(evts, ct);
         client.Dispose();
     }
 
@@ -84,8 +52,6 @@ public class Nostr
         {
             Kind = Kind,
             Content =  description,
-            PublicKey = privateKey.CreatePubKey().ToXOnlyPubKey().ToHex(),
-            CreatedAt = DateTimeOffset.UtcNow,
             Tags = new List<NostrEventTag>()
             {
                 new() {TagIdentifier = EndpointTagIdentifier, Data = new List<string>() {new Uri(coordinatorUri, "plugins/wabisabi-coordinator").ToString()}},
@@ -106,27 +72,10 @@ public class Nostr
         CancellationToken cancellationToken)
     {
         
-        var nostrClient = new NostrClient(relayUri, socket => socket.Options.Proxy = httpClientHandler?.Proxy);
-        await nostrClient.CreateSubscription("nostr-wabisabi-coordinators",
-            new[]
-            {
-                new NostrSubscriptionFilter()
-                {
-                    Kinds = new[] {Kind}, Since = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromHours(1)),
-                    ExtensionData = new Dictionary<string, JsonElement>()
-                    {
-                        ["type"] = JsonSerializer.SerializeToElement(TypeTagValue),
-                        ["network"] = JsonSerializer.SerializeToElement(currentNetwork.Name.ToLower())
-                    }
-                }
-            }, cancellationToken);
-        var cts = new CancellationTokenSource(TimeSpan.FromMinutes(1));
-        await nostrClient.ConnectAndWaitUntilConnected(cts.Token);
-        _ = nostrClient.ListenForMessages();
+        var nostrClient = new NostrClient(relayUri, socket => socket.Options.Proxy = relayUri.IsLocalNetwork()? null: httpClientHandler?.Proxy);
+        Stopwatch stopwatch = new();
         var result = new List<NostrEvent>();
         var tcs = new TaskCompletionSource();
-        Stopwatch stopwatch = new();
-        stopwatch.Start();
         nostrClient.EoseReceived += (sender, s) =>
         {
             tcs.SetResult();
@@ -136,6 +85,28 @@ public class Nostr
             stopwatch.Restart();
             result.AddRange(tuple.events);
         };
+        
+        var network = currentNetwork.Name.ToLower();
+        var cts = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+        _ = nostrClient.Connect(cts.Token);
+        await nostrClient.WaitUntilConnected(cts.Token);
+        await nostrClient.CreateSubscription("nostr-wabisabi-coordinators",
+            new[]
+            {
+                new NostrSubscriptionFilter()
+                {
+                    Kinds = new[] {Kind}, 
+                    Since = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromHours(1)),
+                    ExtensionData = new Dictionary<string, JsonElement>()
+                    {
+                        ["#type"] = JsonSerializer.SerializeToElement(new []{TypeTagValue}),
+                        ["#network"] = JsonSerializer.SerializeToElement(new []{network})
+                    }
+                }
+            }, cancellationToken);
+        stopwatch.Start();
+        
+        
         while (!tcs.Task.IsCompleted && !cts.IsCancellationRequested &&
                stopwatch.ElapsedMilliseconds < 10000)
         {
@@ -144,11 +115,9 @@ public class Nostr
 
         nostrClient.Dispose();
 
-        var network = currentNetwork.Name
-            .ToLower();
         return result.Where(@event =>
             @event.PublicKey != ourPubKey &&
-            @event.CreatedAt < DateTimeOffset.UtcNow.AddMinutes(15) &&
+            @event.CreatedAt >= DateTimeOffset.UtcNow.Subtract(TimeSpan.FromHours(1)) && 
             @event.Verify() &&
             @event.Tags.Any(tag =>
                 tag.TagIdentifier == EndpointTagIdentifier &&
@@ -157,8 +126,10 @@ public class Nostr
                 tag.TagIdentifier == TypeTagIdentifier &&
                 tag.Data.FirstOrDefault() == TypeTagValue) &&
             @event.Tags.Any(tag =>
-                tag.TagIdentifier == NetworkTagIdentifier && tag.Data.FirstOrDefault() == network)
-        ).Select(@event => new DiscoveredCoordinator()
+                tag.TagIdentifier == NetworkTagIdentifier && tag.Data.FirstOrDefault()?.Equals(network, StringComparison.InvariantCultureIgnoreCase) is true)
+        ).OrderByDescending(@event => @event.CreatedAt)
+            .DistinctBy(@event => @event.PublicKey)
+            .Select(@event => new DiscoveredCoordinator()
         {
             Description = @event.Content,
             Name = @event.PublicKey,

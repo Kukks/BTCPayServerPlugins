@@ -94,14 +94,8 @@ public class WabisabiCoordinatorService : PeriodicRunner
             instance.TermsConditions = wabisabiCoordinatorSettings.TermsConditions;
         }
 
-        try
-        {
-
-            await this.ActionAsync(CancellationToken.None);
-        }
-        catch (Exception e)
-        {
-        }
+        _ =  ActionAsync(CancellationToken.None);
+        
         await _settingsRepository.UpdateSetting(wabisabiCoordinatorSettings, nameof(WabisabiCoordinatorSettings));
     }
 
