@@ -73,45 +73,28 @@ public class Nostr
     {
         
         var nostrClient = new NostrClient(relayUri, socket => socket.Options.Proxy = relayUri.IsLocalNetwork()? null: httpClientHandler?.Proxy);
-        Stopwatch stopwatch = new();
         var result = new List<NostrEvent>();
-        var tcs = new TaskCompletionSource();
-        nostrClient.EoseReceived += (sender, s) =>
-        {
-            tcs.SetResult();
-        };
-        nostrClient.EventsReceived += (sender, tuple) =>
-        {
-            stopwatch.Restart();
-            result.AddRange(tuple.events);
-        };
-        
         var network = currentNetwork.Name.ToLower();
-        var cts = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+        
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(new CancellationTokenSource(TimeSpan.FromMinutes(1)).Token,
+            cancellationToken);
         _ = nostrClient.Connect(cts.Token);
         await nostrClient.WaitUntilConnected(cts.Token);
-        await nostrClient.CreateSubscription("nostr-wabisabi-coordinators",
+
+        result = await nostrClient.SubscribeForEvents(
             new[]
             {
                 new NostrSubscriptionFilter()
                 {
-                    Kinds = new[] {Kind}, 
+                    Kinds = new[] {Kind},
                     Since = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromHours(1)),
                     ExtensionData = new Dictionary<string, JsonElement>()
                     {
-                        ["#type"] = JsonSerializer.SerializeToElement(new []{TypeTagValue}),
-                        ["#network"] = JsonSerializer.SerializeToElement(new []{network})
+                        ["#type"] = JsonSerializer.SerializeToElement(new[] {TypeTagValue}),
+                        ["#network"] = JsonSerializer.SerializeToElement(new[] {network})
                     }
                 }
-            }, cancellationToken);
-        stopwatch.Start();
-        
-        
-        while (!tcs.Task.IsCompleted && !cts.IsCancellationRequested &&
-               stopwatch.ElapsedMilliseconds < 10000)
-        {
-            await Task.Delay(1000, cts.Token);
-        }
+            }, true, cts.Token).ToListAsync();
 
         nostrClient.Dispose();
 

@@ -209,12 +209,10 @@ public class WabisabiCoordinatorService : PeriodicRunner
         if (s.Enabled && !string.IsNullOrEmpty(s.NostrIdentity) && s.NostrRelay is not null &&
             s.UriToAdvertise is not null)
         {
-
-            var uri = new Uri(s.UriToAdvertise, "plugins/wabisabi-coordinator/wabisabi");
             await Nostr.Publish(s.NostrRelay,
                 new[]
                 {
-                    await Nostr.CreateCoordinatorDiscoveryEvent(network, s.NostrIdentity, uri,
+                    await Nostr.CreateCoordinatorDiscoveryEvent(network, s.NostrIdentity, s.UriToAdvertise,
                         s.CoordinatorDescription)
                 },s.UriToAdvertise.IsOnion()?  _socks5HttpClientHandler: null, cancel);
         }

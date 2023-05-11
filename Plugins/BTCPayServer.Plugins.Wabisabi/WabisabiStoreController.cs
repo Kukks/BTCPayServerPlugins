@@ -73,6 +73,7 @@ namespace BTCPayServer.Plugins.Wabisabi
         }
 
         [HttpGet("")]
+        [HttpGet("add-coordinator")]
         public async Task<IActionResult> UpdateWabisabiStoreSettings(string storeId)
         {
             WabisabiStoreSettings Wabisabi = null;
@@ -132,7 +133,6 @@ namespace BTCPayServer.Plugins.Wabisabi
                     }
 
                     return View(vm);
-                    break;
                 case "check":
                     await _walletProvider.Check(storeId, CancellationToken.None);
                     TempData["SuccessMessage"] = "Store wallet re-checked";
