@@ -54,7 +54,7 @@ public class Nostr
             Content =  description,
             Tags = new List<NostrEventTag>()
             {
-                new() {TagIdentifier = EndpointTagIdentifier, Data = new List<string>() {new Uri(coordinatorUri, "plugins/wabisabi-coordinator").ToString()}},
+                new() {TagIdentifier = EndpointTagIdentifier, Data = new List<string>() {new Uri(coordinatorUri, "plugins/wabisabi-coordinator/").ToString()}},
                 new() {TagIdentifier = TypeTagIdentifier, Data = new List<string>() { TypeTagValue}},
                 new() {TagIdentifier = NetworkTagIdentifier, Data = new List<string>() {currentNetwork.Name.ToLower()}}
             }

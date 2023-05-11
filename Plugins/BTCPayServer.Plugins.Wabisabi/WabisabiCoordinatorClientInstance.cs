@@ -90,9 +90,14 @@ public class WabisabiCoordinatorClientInstanceManager:IHostedService
         {
             return;
         }
+        
+        var url = fetcher.Invoke(_provider).AbsoluteUri;
+            url = url.EndsWith("/")
+            ? url
+            : url + "/";
         var instance = new WabisabiCoordinatorClientInstance(
             displayName,
-            name, fetcher.Invoke(_provider), _provider.GetService<ILoggerFactory>(), _provider, UTXOLocker,
+            name, new Uri(url), _provider.GetService<ILoggerFactory>(), _provider, UTXOLocker,
             _provider.GetService<WalletProvider>(), termsConditions);
         if (HostedServices.TryAdd(instance.CoordinatorName, instance))
         {
