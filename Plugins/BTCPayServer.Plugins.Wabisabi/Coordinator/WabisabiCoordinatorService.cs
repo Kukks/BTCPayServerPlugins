@@ -175,16 +175,17 @@ public class WabisabiCoordinatorService : PeriodicRunner
             _httpClientFactory);
         HostedServices.Register<WabiSabiCoordinator>(() => WabiSabiCoordinator, "WabiSabi Coordinator");
         var settings = await GetSettings();
+        
+        if (settings.Enabled)
+        {
+            _ = StartCoordinator(cancellationToken);
+        }
         if (settings.DiscoveredCoordinators?.Any() is true)
         {
             foreach (var discoveredCoordinator in settings.DiscoveredCoordinators)
             {
                 _instanceManager.AddCoordinator(discoveredCoordinator.Name, discoveredCoordinator.Name, _ => discoveredCoordinator.Uri, null, discoveredCoordinator.Description );
             }
-        }
-        if (settings.Enabled)
-        {
-            _ = StartCoordinator(cancellationToken);
         }
 
         await base.StartAsync(cancellationToken);
