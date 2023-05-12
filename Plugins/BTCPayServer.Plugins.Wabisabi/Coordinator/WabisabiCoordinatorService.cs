@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -174,7 +175,14 @@ public class WabisabiCoordinatorService : PeriodicRunner
             _httpClientFactory);
         HostedServices.Register<WabiSabiCoordinator>(() => WabiSabiCoordinator, "WabiSabi Coordinator");
         var settings = await GetSettings();
-        if (settings.Enabled is true)
+        if (settings.DiscoveredCoordinators?.Any() is true)
+        {
+            foreach (var discoveredCoordinator in settings.DiscoveredCoordinators)
+            {
+                _instanceManager.AddCoordinator(discoveredCoordinator.Name, discoveredCoordinator.Name, _ => discoveredCoordinator.Uri );
+            }
+        }
+        if (settings.Enabled)
         {
             _ = StartCoordinator(cancellationToken);
         }
