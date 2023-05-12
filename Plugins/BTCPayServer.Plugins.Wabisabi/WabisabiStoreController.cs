@@ -229,7 +229,7 @@ namespace BTCPayServer.Plugins.Wabisabi
             {
                 coordSettings.DiscoveredCoordinators.Add(viewModel);
                 await _wabisabiCoordinatorService.UpdateSettings(coordSettings);
-                _instanceManager.AddCoordinator(viewModel.Name, viewModel.Name, provider => viewModel.Uri);
+                _instanceManager.AddCoordinator(viewModel.Name, viewModel.Name, provider => viewModel.Uri, viewModel.Description);
 
                 TempData["SuccessMessage"] = $"Coordinator {viewModel.Name } added and started";
             }

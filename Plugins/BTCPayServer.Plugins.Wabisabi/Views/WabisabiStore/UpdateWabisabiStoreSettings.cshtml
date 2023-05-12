@@ -217,18 +217,12 @@
 
                 <span class="text-muted">@coordinator.Coordinator</span>
                 <div>
-                    @if (!coordinator.WasabiCoordinatorStatusFetcher.Connected)
-                    {
-                        <p>Coordinator Status: Not connected</p>
-                    }
-                    else
-                    {
-                        <p>
-                            Coordinator Status: Connected
+                    <div>@(coordinator.WasabiCoordinatorStatusFetcher.Connected? "Coordinator Status: Not connected": "Coordinator Status: Connected")</div>
 
-                        </p>
+                    @if (!string.IsNullOrEmpty(coordinator.Description))
+                    {
+                        <p class="text-muted">@coordinator.Description</p>
                     }
-
                     @if (coordinator.RoundStateUpdater.AnyRound && coordinator.RoundStateUpdater.RoundStates.Any(pair => pair.Value.BlameOf == uint256.Zero))
                     {
                         var round = coordinator.RoundStateUpdater.RoundStates.Last(pair => pair.Value.BlameOf == uint256.Zero).Value;
@@ -309,6 +303,7 @@
                         By enabling this coordinator, you agree to their terms and conditions.
                     </a>
                 </div>
+                
             </div>
             @{
                 var canEnable = coordinator.WasabiCoordinatorStatusFetcher.Connected && coordinator.RoundStateUpdater.AnyRound;

@@ -179,7 +179,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
         {
             foreach (var discoveredCoordinator in settings.DiscoveredCoordinators)
             {
-                _instanceManager.AddCoordinator(discoveredCoordinator.Name, discoveredCoordinator.Name, _ => discoveredCoordinator.Uri );
+                _instanceManager.AddCoordinator(discoveredCoordinator.Name, discoveredCoordinator.Name, _ => discoveredCoordinator.Uri, null, discoveredCoordinator.Description );
             }
         }
         if (settings.Enabled)
@@ -197,7 +197,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
         {
             instance.WasabiCoordinatorStatusFetcher.OverrideConnected = null;
         }
-        _instanceManager.AddCoordinator("Local Coordinator", "local", _ => null, cachedSettings.TermsConditions);
+        _instanceManager.AddCoordinator("Local Coordinator", "local", _ => null, cachedSettings.TermsConditions, cachedSettings.CoordinatorDescription);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)

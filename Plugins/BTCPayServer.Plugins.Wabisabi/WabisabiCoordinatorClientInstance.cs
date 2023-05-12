@@ -18,6 +18,7 @@ using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.WabiSabi.Client.RoundStateAwaiters;
 using WalletWasabi.WabiSabi.Client.StatusChangedEvents;
 using WalletWasabi.Wallets;
+using WalletWasabi.WebClients.Wasabi;
 using HttpClientFactory = WalletWasabi.WebClients.Wasabi.HttpClientFactory;
 
 namespace BTCPayServer.Plugins.Wabisabi;
@@ -78,7 +79,7 @@ public class WabisabiCoordinatorClientInstanceManager:IHostedService
 
     
     public  void AddCoordinator(string displayName, string name,
-        Func<IServiceProvider, Uri> fetcher, string termsConditions = null)
+        Func<IServiceProvider, Uri> fetcher, string termsConditions = null, string description = null)
     {
         if (termsConditions is null && name == "zksnacks")
         {
@@ -98,7 +99,7 @@ public class WabisabiCoordinatorClientInstanceManager:IHostedService
         var instance = new WabisabiCoordinatorClientInstance(
             displayName,
             name, new Uri(url), _provider.GetService<ILoggerFactory>(), _provider, UTXOLocker,
-            _provider.GetService<WalletProvider>(), termsConditions);
+            _provider.GetService<WalletProvider>(), termsConditions, description);
         if (HostedServices.TryAdd(instance.CoordinatorName, instance))
         {
             if(started)
@@ -131,6 +132,7 @@ public class WabisabiCoordinatorClientInstance
     public RoundStateUpdater RoundStateUpdater { get; set; }
     public WasabiCoordinatorStatusFetcher WasabiCoordinatorStatusFetcher { get; set; }
     public CoinJoinManager CoinJoinManager { get; set; }
+    public string Description { get; set; }
 
     public WabisabiCoordinatorClientInstance(string coordinatorDisplayName,
         string coordinatorName,
@@ -138,7 +140,7 @@ public class WabisabiCoordinatorClientInstance
         ILoggerFactory loggerFactory,
         IServiceProvider serviceProvider,
         IUTXOLocker utxoLocker,
-        WalletProvider walletProvider, string termsConditions, string coordinatorIdentifier = "CoinJoinCoordinatorIdentifier")
+        WalletProvider walletProvider, string termsConditions, string description,string coordinatorIdentifier = "CoinJoinCoordinatorIdentifier")
     {
         
         _utxoLocker = utxoLocker;
@@ -154,6 +156,7 @@ public class WabisabiCoordinatorClientInstance
         Coordinator = coordinator;
         WalletProvider = walletProvider;
         TermsConditions = termsConditions;
+        Description = description;
         _logger = loggerFactory.CreateLogger(coordinatorName);
         IWabiSabiApiRequestHandler sharedWabisabiClient;
         if (coordinatorName == "local")
@@ -167,6 +170,18 @@ public class WabisabiCoordinatorClientInstance
             var roundStateUpdaterCircuit = new PersonCircuit();
             var roundStateUpdaterHttpClient =
                 WasabiHttpClientFactory.NewHttpClient(Mode.SingleCircuitPerLifetime, roundStateUpdaterCircuit);
+            if (termsConditions is null)
+            {
+                _ = new WasabiClient(roundStateUpdaterHttpClient)
+                    .GetLegalDocumentsAsync(CancellationToken.None)
+                    .ContinueWith(task =>
+                    {
+                        if (task.Status == TaskStatus.RanToCompletion)
+                        {
+                            TermsConditions = task.Result;
+                        }
+                    });
+            }
             sharedWabisabiClient = new WabiSabiHttpApiClient(roundStateUpdaterHttpClient);
            
         }
