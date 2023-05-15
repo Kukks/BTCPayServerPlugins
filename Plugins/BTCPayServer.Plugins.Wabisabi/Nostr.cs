@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.WebSockets;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -31,9 +32,14 @@ public class Nostr
         var ct = CancellationTokenSource
             .CreateLinkedTokenSource(cancellationToken, new CancellationTokenSource(TimeSpan.FromMinutes(1)).Token)
             .Token;
-        var client = new NostrClient(relayUri, socket => socket.Options.Proxy = httpClientHandler?.Proxy);
-        _ = client.Connect(ct);
-        await client.WaitUntilConnected(ct);
+        var client = new NostrClient(relayUri, socket =>
+        {
+            if (socket is ClientWebSocket clientWebSocket && httpClientHandler != null)
+            {
+                clientWebSocket.Options.Proxy = httpClientHandler.Proxy;
+            }
+        });
+        await  client.Connect(ct);
        
         await client.SendEventsAndWaitUntilReceived(evts, ct);
         client.Dispose();
@@ -69,14 +75,19 @@ public class Nostr
         CancellationToken cancellationToken)
     {
         
-        var nostrClient = new NostrClient(relayUri, socket => socket.Options.Proxy = relayUri.IsLocalNetwork()? null: httpClientHandler?.Proxy);
+        var nostrClient = new NostrClient(relayUri, socket =>
+        {
+            if (socket is ClientWebSocket clientWebSocket && httpClientHandler != null)
+            {
+                clientWebSocket.Options.Proxy = httpClientHandler.Proxy;
+            }
+        });
         var result = new List<NostrEvent>();
         var network = currentNetwork.Name.ToLower();
         
         var cts = CancellationTokenSource.CreateLinkedTokenSource(new CancellationTokenSource(TimeSpan.FromMinutes(1)).Token,
             cancellationToken);
-        _ = nostrClient.Connect(cts.Token);
-        await nostrClient.WaitUntilConnected(cts.Token);
+        await nostrClient.Connect(cts.Token);
 
         result = await nostrClient.SubscribeForEvents(
             new[]

@@ -114,8 +114,7 @@ public class Zapper : IHostedService
                             var cts = new CancellationTokenSource();
                             cts.CancelAfter(TimeSpan.FromSeconds(30));
                             using var c = new NostrClient(new Uri(relay.Key));
-                            _ =  c.Connect(cts.Token);
-                            await c.WaitUntilConnected(cts.Token);
+                            await c.Connect(cts.Token);
                             await c.SendEventsAndWaitUntilReceived(relay.Value, cts.Token);
                             await c.Disconnect();
                         }

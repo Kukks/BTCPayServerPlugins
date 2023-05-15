@@ -47,7 +47,7 @@ public class NostrWabisabiApiServer: IHostedService
         _ = _client.ListenForMessages();
         var filter = new NostrSubscriptionFilter()
         {
-            PublicKey = new[] {_coordinatorKey.ToHex()},
+            ReferencedPublicKeys = new[] {_coordinatorKey.ToHex()},
             Kinds = new[] { CommunicationKind},
             Since = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromHours(1))
         };
