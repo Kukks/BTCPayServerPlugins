@@ -217,7 +217,7 @@
 
                 <span class="text-muted">@coordinator.Coordinator</span>
                 <div>
-                    <div>@(coordinator.WasabiCoordinatorStatusFetcher.Connected? "Coordinator Status: Not connected": "Coordinator Status: Connected")</div>
+                    <div>@(!coordinator.WasabiCoordinatorStatusFetcher.Connected? "Coordinator Status: Not connected": "Coordinator Status: Connected")</div>
 
                     @if (!string.IsNullOrEmpty(coordinator.Description))
                     {

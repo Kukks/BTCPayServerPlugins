@@ -187,7 +187,6 @@ public class WabisabiCoordinatorService : PeriodicRunner
                 _instanceManager.AddCoordinator(discoveredCoordinator.Name, discoveredCoordinator.Name, _ => discoveredCoordinator.Uri, null, discoveredCoordinator.Description );
             }
         }
-
         await base.StartAsync(cancellationToken);
     }
 

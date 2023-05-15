@@ -1,15 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Services;
 using LNURL;
 using NBitcoin;
-using Newtonsoft.Json.Linq;
 using NNostr.Client;
 using WalletWasabi.Backend.Controllers;
 
@@ -51,7 +48,7 @@ public class Nostr
         var evt = new NostrEvent()
         {
             Kind = Kind,
-            Content =  description,
+            Content =  description??string.Empty,
             Tags = new List<NostrEventTag>()
             {
                 new() {TagIdentifier = EndpointTagIdentifier, Data = new List<string>() {new Uri(coordinatorUri, "plugins/wabisabi-coordinator/").ToString()}},
@@ -94,7 +91,7 @@ public class Nostr
                         ["#network"] = JsonSerializer.SerializeToElement(new[] {network})
                     }
                 }
-            }, true, cts.Token).ToListAsync();
+            }, true, cts.Token).ToListAsync(cancellationToken);
 
         nostrClient.Dispose();
 

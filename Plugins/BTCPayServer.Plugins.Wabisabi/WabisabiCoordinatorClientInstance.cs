@@ -109,6 +109,8 @@ public class WabisabiCoordinatorClientInstanceManager:IHostedService
         {
             if(started)
                 _ = instance.StartAsync(CancellationToken.None);
+            if(name == "local")
+                instance.WasabiCoordinatorStatusFetcher.OverrideConnected = null;
         }
     }
 

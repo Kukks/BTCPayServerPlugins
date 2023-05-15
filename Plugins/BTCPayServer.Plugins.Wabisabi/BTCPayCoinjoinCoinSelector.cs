@@ -108,11 +108,11 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             var rand = Random.Shared.Next(1, 1001);
             if (rand > _wallet.WabisabiStoreSettings.ExtraJoinProbability)
             {
-                _logger.LogInformation($"All coins are private and we have no pending payments. Skipping join.");
+                _logger.LogTrace($"All coins are private and we have no pending payments. Skipping join.");
                 return solution;
             }
 
-            _logger.LogInformation(
+            _logger.LogTrace(
                 "All coins are private and we have no pending payments but will join just to reduce timing analysis");
         }
 

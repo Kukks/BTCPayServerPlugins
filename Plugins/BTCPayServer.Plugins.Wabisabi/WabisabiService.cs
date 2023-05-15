@@ -5,6 +5,7 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Data;
 using BTCPayServer.PayoutProcessors;
 using BTCPayServer.Services;
+using Microsoft.Extensions.Caching.Memory;
 using NBitcoin;
 using Newtonsoft.Json.Linq;
 
@@ -16,32 +17,44 @@ namespace BTCPayServer.Plugins.Wabisabi
         private readonly WabisabiCoordinatorClientInstanceManager _coordinatorClientInstanceManager;
         private readonly WalletProvider _walletProvider;
         private readonly WalletRepository _walletRepository;
+        private readonly IMemoryCache _memoryCache;
         private string[] _ids => _coordinatorClientInstanceManager.HostedServices.Keys.ToArray();
 
         public WabisabiService(IStoreRepository storeRepository,
             WabisabiCoordinatorClientInstanceManager coordinatorClientInstanceManager,
             WalletProvider walletProvider,
-            WalletRepository walletRepository)
+            WalletRepository walletRepository,
+            IMemoryCache memoryCache)
         {
             _storeRepository = storeRepository;
             _coordinatorClientInstanceManager = coordinatorClientInstanceManager;
             _walletProvider = walletProvider;
             _walletRepository = walletRepository;
+            _memoryCache = memoryCache;
         }
 
+        private string GetCacheKey(string storeId)
+        {
+            return $"{nameof(WabisabiStoreSettings)}-{storeId}";
+        }
         public async Task<WabisabiStoreSettings> GetWabisabiForStore(string storeId)
         {
             
-            var res = await  _storeRepository.GetSettingAsync<WabisabiStoreSettings>(storeId, nameof(WabisabiStoreSettings));
-            res ??= new WabisabiStoreSettings();
-            res.Settings = res.Settings.Where(settings => _ids.Contains(settings.Coordinator)).ToList();
-            res.Settings.ForEach(settings =>
+            var res = await _memoryCache.GetOrCreate(GetCacheKey(storeId), async entry =>
             {
-                if(settings.RoundWhenEnabled != null && string.IsNullOrEmpty(settings.RoundWhenEnabled.PlebsDontPayThreshold))
+                var res = await  _storeRepository.GetSettingAsync<WabisabiStoreSettings>(storeId, nameof(WabisabiStoreSettings));
+                res ??= new WabisabiStoreSettings();
+                res.Settings = res.Settings.Where(settings => _ids.Contains(settings.Coordinator)).ToList();
+                res.Settings.ForEach(settings =>
                 {
-                    settings.RoundWhenEnabled.PlebsDontPayThreshold = "1000000";
-                }
+                    if(settings.RoundWhenEnabled != null && string.IsNullOrEmpty(settings.RoundWhenEnabled.PlebsDontPayThreshold))
+                    {
+                        settings.RoundWhenEnabled.PlebsDontPayThreshold = "1000000";
+                    }
+                });
+                return res;
             });
+            
             foreach (var wabisabiCoordinatorManager in _coordinatorClientInstanceManager.HostedServices)
             {
                 if (res.Settings.All(settings => settings.Coordinator != wabisabiCoordinatorManager.Key))
@@ -75,7 +88,7 @@ namespace BTCPayServer.Plugins.Wabisabi
             }
             else
             {
-                var res = await  _storeRepository.GetSettingAsync<WabisabiStoreSettings>(storeId, nameof(WabisabiStoreSettings));
+                var res = await GetWabisabiForStore(storeId);
                 foreach (var wabisabiStoreCoordinatorSettings in wabisabiSettings.Settings)
                 {
                     if (!wabisabiStoreCoordinatorSettings.Enabled)
@@ -101,7 +114,7 @@ namespace BTCPayServer.Plugins.Wabisabi
                 }
                 await _storeRepository.UpdateSetting(storeId, nameof(WabisabiStoreSettings), wabisabiSettings!);
             }
-            
+            _memoryCache.Remove(GetCacheKey(storeId));
             await _walletProvider.SettingsUpdated(storeId, wabisabiSettings);
            // var existingProcessor = (await  _payoutProcessorService.GetProcessors(new PayoutProcessorService.PayoutProcessorQuery()
            // {

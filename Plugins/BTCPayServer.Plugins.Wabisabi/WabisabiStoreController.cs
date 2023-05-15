@@ -1,36 +1,27 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
-using AngleSharp.Dom.Events;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Common;
 using BTCPayServer.Configuration;
-using BTCPayServer.Data;
-using BTCPayServer.Filters;
-using BTCPayServer.Models.WalletViewModels;
 using BTCPayServer.Security;
 using BTCPayServer.Services;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.ModelBinding;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using NBitcoin;
 using NBitcoin.Payment;
 using NBitcoin.Secp256k1;
-using NBXplorer;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using NNostr.Client;
-using Org.BouncyCastle.Security;
 using WalletWasabi.Backend.Controllers;
 using WalletWasabi.Blockchain.TransactionBuilding;
 using WalletWasabi.Blockchain.TransactionOutputs;
@@ -48,18 +39,15 @@ namespace BTCPayServer.Plugins.Wabisabi
         private readonly IExplorerClientProvider _explorerClientProvider;
         private readonly WabisabiCoordinatorService _wabisabiCoordinatorService;
         private readonly IAuthorizationService _authorizationService;
-        private readonly BTCPayServerOptions _options;
         private readonly WabisabiCoordinatorClientInstanceManager _instanceManager;
         private readonly Socks5HttpClientHandler _socks5HttpClientHandler;
-
         public WabisabiStoreController(WabisabiService WabisabiService, WalletProvider walletProvider,
             IBTCPayServerClientFactory btcPayServerClientFactory,
             IExplorerClientProvider explorerClientProvider,
             WabisabiCoordinatorService wabisabiCoordinatorService,
             WabisabiCoordinatorClientInstanceManager instanceManager, 
             IAuthorizationService authorizationService,
-            IServiceProvider serviceProvider,
-            BTCPayServerOptions options)
+            IServiceProvider serviceProvider)
         {
             _WabisabiService = WabisabiService;
             _walletProvider = walletProvider;
@@ -67,13 +55,11 @@ namespace BTCPayServer.Plugins.Wabisabi
             _explorerClientProvider = explorerClientProvider;
             _wabisabiCoordinatorService = wabisabiCoordinatorService;
             _authorizationService = authorizationService;
-            _options = options;
             _instanceManager = instanceManager;
             _socks5HttpClientHandler = serviceProvider.GetRequiredService<Socks5HttpClientHandler>();
         }
 
         [HttpGet("")]
-        [HttpGet("add-coordinator")]
         public async Task<IActionResult> UpdateWabisabiStoreSettings(string storeId)
         {
             WabisabiStoreSettings Wabisabi = null;
