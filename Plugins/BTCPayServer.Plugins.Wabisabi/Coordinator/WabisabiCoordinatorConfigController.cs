@@ -33,9 +33,12 @@ Privacy risks: as the coordinator, the user may have access to sensitive transac
 
 Reputation risks: as the coordinator, the user may be associated with illegal activities and may face reputational damage.";
         private readonly WabisabiCoordinatorService _wabisabiCoordinatorService;
-        public WabisabiCoordinatorConfigController(WabisabiCoordinatorService wabisabiCoordinatorService)
+        private readonly BTCPayNetworkProvider _networkProvider;
+
+        public WabisabiCoordinatorConfigController(WabisabiCoordinatorService wabisabiCoordinatorService, BTCPayNetworkProvider  networkProvider)
         {
             _wabisabiCoordinatorService = wabisabiCoordinatorService;
+            _networkProvider = networkProvider;
         }
 
         [HttpGet("")]
@@ -86,9 +89,8 @@ Reputation risks: as the coordinator, the user may be associated with illegal ac
             switch (command)
             {
                 case "nostr-current-url":
-                    if (IsLocalNetwork(Request.GetAbsoluteRoot()))
+                    if (_networkProvider.NetworkType != ChainName.Regtest && IsLocalNetwork(Request.GetAbsoluteRoot()))
                     {
-                        
                         TempData["ErrorMessage"] = "the current url is only reachable from your local network. You need a public domain or use Tor.";
                         return View(vm);
                     }

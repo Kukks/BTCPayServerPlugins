@@ -13,7 +13,7 @@
     <PropertyGroup>
         <Product>Wabisabi Coinjoin</Product>
         <Description>Allows you to integrate your btcpayserver store with coinjoins.</Description>
-        <Version>1.0.42</Version>
+        <Version>1.0.43</Version>
     </PropertyGroup>
 
     <!-- Plugin development properties -->
@@ -43,7 +43,7 @@
         </ProjectReference>
     </ItemGroup>
     <ItemGroup>
-        <PackageReference Include="NNostr.Client" Version="0.0.27" />
+        <PackageReference Include="NNostr.Client" Version="0.0.28" />
         <PackageReference Include="WabiSabi" Version="1.0.1.2" />
     </ItemGroup>
     <Target Name="DeleteExampleFile" AfterTargets="Publish">
