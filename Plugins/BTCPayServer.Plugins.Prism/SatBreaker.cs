@@ -140,7 +140,7 @@ namespace BTCPayServer.Plugins.Prism
                                         if (lnClient is not null && proof?.PaymentHash is not null)
                                         {
                                             var p = await lnClient.GetPayment(proof.PaymentHash, CancellationToken);
-                                            feePaid = (long) p.Fee.ToUnit(LightMoneyUnit.Satoshi);
+                                            feePaid = (long) p?.Fee?.ToUnit(LightMoneyUnit.Satoshi);
                                         }
                                     }
 
