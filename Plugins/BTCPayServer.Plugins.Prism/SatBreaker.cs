@@ -139,8 +139,17 @@ namespace BTCPayServer.Plugins.Prism
 
                                         if (lnClient is not null && proof?.PaymentHash is not null)
                                         {
-                                            var p = await lnClient.GetPayment(proof.PaymentHash, CancellationToken);
-                                            feePaid = (long) p?.Fee?.ToUnit(LightMoneyUnit.Satoshi);
+                                            try
+                                            {
+
+                                                var p = await lnClient.GetPayment(proof.PaymentHash, CancellationToken);
+                                                feePaid = (long) p?.Fee?.ToUnit(LightMoneyUnit.Satoshi);
+                                            }
+                                            catch (Exception e)
+                                            {
+                                                _logger.LogError(e,
+                                                    "The payment fee could not be fetched from the lightning node due to an error, so we will use the allocated 2% as the fee.");
+                                            }
                                         }
                                     }
 
