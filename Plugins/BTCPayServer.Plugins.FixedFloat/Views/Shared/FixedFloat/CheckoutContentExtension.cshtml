@@ -1,10 +1,10 @@
 @using BTCPayServer.Plugins.FixedFloat
-@using Newtonsoft.Json
-@using Newtonsoft.Json.Linq
+@model BTCPayServer.Models.InvoicingModels.PaymentModel
 @inject FixedFloatService FixedFloatService
 @{
-    var storeId = ((JObject)JObject.Parse(JsonConvert.SerializeObject(Model)))["StoreId"].Value<string>();
+    var storeId = Model.StoreId;
     var settings = await FixedFloatService.GetFixedFloatForStore(storeId);
+    
     if (settings?.Enabled is true)
     {
         <div id="FixedFloat" class="bp-view payment manual-flow" style="padding:0" :class="{ active: currentTab == 'undefined' || currentTab == 'FixedFloat' }">

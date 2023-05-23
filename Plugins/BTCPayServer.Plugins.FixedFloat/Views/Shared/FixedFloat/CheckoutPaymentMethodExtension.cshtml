@@ -1,16 +1,28 @@
 @using BTCPayServer.Plugins.FixedFloat
-@using Newtonsoft.Json
-@using Newtonsoft.Json.Linq
+@model BTCPayServer.Models.InvoicingModels.PaymentModel 
 @inject FixedFloatService FixedFloatService
 @{
     const string id = "FixedFloat";
-    var storeId = ((JObject)JObject.Parse(JsonConvert.SerializeObject(Model)))["StoreId"].Value<string>();
+    var storeId = Model.StoreId;
     var settings = await FixedFloatService.GetFixedFloatForStore(storeId);
     
     if (settings?.Enabled is true)
     {
-        <a href="#@id" class="btcpay-pill m-0 payment-method" :class="{ active: pmId === '@id' }" v-on:click.prevent="changePaymentMethod('@id')">
-            @id
-        </a>
+        if (settings.ExplicitMethods?.Any() is true)
+        {
+            foreach (var explicitMethod in settings.ExplicitMethods)
+            {
+                <a href="#@id" class="btcpay-pill m-0 payment-method" :class="{ active: pmId === '@id' && window.ffExplicitId === '@explicitMethod'}" v-on:click.prevent="()=>{ window.ffExplicitId = '@explicitMethod'; changePaymentMethod('@id'); }">
+                    @FixedFloatSettings.AllowedSendingOptions[explicitMethod]
+                </a>
+            }
+        }
+        if (!settings.OnlyShowExplicitMethods || settings.ExplicitMethods?.Any() is not true)
+        {
+            <a href="#@id" class="btcpay-pill m-0 payment-method" :class="{ active: pmId === '@id' && !window.ffExplicitId  }" v-on:click.prevent="()=>{ window.ffExplicitId = null; changePaymentMethod('@id'); }">
+                @id
+            </a>
+        }
+     
     }
 }

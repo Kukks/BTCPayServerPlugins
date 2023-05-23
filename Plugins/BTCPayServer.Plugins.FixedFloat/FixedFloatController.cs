@@ -12,45 +12,31 @@ namespace BTCPayServer.Plugins.FixedFloat
     [Route("plugins/{storeId}/FixedFloat")]
     public class FixedFloatController : Controller
     {
-        private readonly BTCPayServerClient _btcPayServerClient;
         private readonly FixedFloatService _FixedFloatService;
 
-        public FixedFloatController(BTCPayServerClient btcPayServerClient, FixedFloatService FixedFloatService)
+        public FixedFloatController(FixedFloatService FixedFloatService)
         {
-            _btcPayServerClient = btcPayServerClient;
             _FixedFloatService = FixedFloatService;
         }
 
         [HttpGet("")]
         public async Task<IActionResult> UpdateFixedFloatSettings(string storeId)
         {
-            var store = await _btcPayServerClient.GetStore(storeId);
-
-            UpdateFixedFloatSettingsViewModel vm = new UpdateFixedFloatSettingsViewModel();
-            vm.StoreName = store.Name;
-            FixedFloatSettings FixedFloat = null;
+            FixedFloatSettings settings = null;
             try
             {
-                FixedFloat = await _FixedFloatService.GetFixedFloatForStore(storeId);
+                settings = await _FixedFloatService.GetFixedFloatForStore(storeId);
             }
             catch (Exception)
             {
                 // ignored
             }
 
-            SetExistingValues(FixedFloat, vm);
-            return View(vm);
-        }
-
-        private void SetExistingValues(FixedFloatSettings existing, UpdateFixedFloatSettingsViewModel vm)
-        {
-            if (existing == null)
-                return;
-            vm.Enabled = existing.Enabled;
+            return View(settings);
         }
 
         [HttpPost("")]
-        public async Task<IActionResult> UpdateFixedFloatSettings(string storeId, UpdateFixedFloatSettingsViewModel vm,
+        public async Task<IActionResult> UpdateFixedFloatSettings(string storeId, FixedFloatSettings vm,
             string command)
         {
             if (vm.Enabled)
@@ -61,15 +47,10 @@ namespace BTCPayServer.Plugins.FixedFloat
                 }
             }
 
-            var FixedFloatSettings = new FixedFloatSettings()
-            {
-                Enabled = vm.Enabled,
-            };
-
             switch (command)
             {
                 case "save":
-                    await _FixedFloatService.SetFixedFloatForStore(storeId, FixedFloatSettings);
+                    await _FixedFloatService.SetFixedFloatForStore(storeId, vm);
                     TempData["SuccessMessage"] = "FixedFloat settings modified";
                     return RedirectToAction(nameof(UpdateFixedFloatSettings), new {storeId});
 

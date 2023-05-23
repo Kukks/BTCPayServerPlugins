@@ -9,15 +9,13 @@ namespace BTCPayServer.Plugins.FixedFloat
     {
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
         {
-            new() { Identifier = nameof(BTCPayServer), Condition = ">=1.7.4" }
+            new() { Identifier = nameof(BTCPayServer), Condition = ">=1.9.0" }
         };
         public override void Execute(IServiceCollection applicationBuilder)
         {
             applicationBuilder.AddSingleton<FixedFloatService>();
             applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("FixedFloat/FixedFloatNav",
                 "store-integrations-nav"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("FixedFloat/StoreIntegrationFixedFloatOption",
-                "store-integrations-list"));
             // Checkout v2
             applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("FixedFloat/CheckoutPaymentMethodExtension",
                 "checkout-payment-method"));
