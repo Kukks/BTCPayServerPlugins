@@ -95,20 +95,19 @@ public class Nostr
                 new NostrSubscriptionFilter()
                 {
                     Kinds = new[] {Kind},
-                    Since = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromHours(1)),
                     ExtensionData = new Dictionary<string, JsonElement>()
                     {
                         ["#type"] = JsonSerializer.SerializeToElement(new[] {TypeTagValue}),
                         ["#network"] = JsonSerializer.SerializeToElement(new[] {network})
-                    }
+                    },
+                    Limit = 1000
                 }
             }, true, cts.Token).ToListAsync(cancellationToken);
 
         nostrClient.Dispose();
 
         return result.Where(@event =>
-            @event.PublicKey != ourPubKey &&
-            @event.CreatedAt >= DateTimeOffset.UtcNow.Subtract(TimeSpan.FromHours(1)) && 
+            @event.PublicKey != ourPubKey && 
             @event.Verify() &&
             @event.Tags.Any(tag =>
                 tag.TagIdentifier == EndpointTagIdentifier &&
