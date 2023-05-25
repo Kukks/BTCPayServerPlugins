@@ -16,11 +16,12 @@ namespace BTCPayServer.Plugins.LiquidPlus
     {
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
         {
-            new() { Identifier = nameof(BTCPayServer), Condition = ">=1.7.4" }
+            new() { Identifier = nameof(BTCPayServer), Condition = ">=1.9.0" }
         };
         public override void Execute(IServiceCollection services)
         {
             services.AddSingleton<IUIExtension>(new UIExtension("LiquidNav", "store-integrations-nav"));
+            services.AddSingleton<IUIExtension>(new UIExtension("OnChainWalletSetupLiquidExtension", "onchain-wallet-setup-post-body"));
             services.AddSingleton<IUIExtension>(new UIExtension("CustomLiquidAssetsNavExtension", "server-nav"));
             services.AddSingleton<IUIExtension>(new UIExtension("StoreNavLiquidExtension",  "store-nav"));
             services.AddSingleton<CustomLiquidAssetsRepository>();

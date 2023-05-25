@@ -97,10 +97,10 @@ Global
 		{DF85EFA4-0EF5-4A99-853F-E6F9C88E3F8C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{DF85EFA4-0EF5-4A99-853F-E6F9C88E3F8C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{DF85EFA4-0EF5-4A99-853F-E6F9C88E3F8C}.Release|Any CPU.Build.0 = Release|Any CPU
-		{DF85EFA4-0EF5-4A99-853F-E6F9C88E3F8C}.Altcoins-Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{DF85EFA4-0EF5-4A99-853F-E6F9C88E3F8C}.Altcoins-Debug|Any CPU.Build.0 = Debug|Any CPU
-		{DF85EFA4-0EF5-4A99-853F-E6F9C88E3F8C}.Altcoins-Release|Any CPU.ActiveCfg = Release|Any CPU
-		{DF85EFA4-0EF5-4A99-853F-E6F9C88E3F8C}.Altcoins-Release|Any CPU.Build.0 = Release|Any CPU
+		{DF85EFA4-0EF5-4A99-853F-E6F9C88E3F8C}.Altcoins-Debug|Any CPU.ActiveCfg = Altcoins-Debug|Any CPU
+		{DF85EFA4-0EF5-4A99-853F-E6F9C88E3F8C}.Altcoins-Debug|Any CPU.Build.0 = Altcoins-Debug|Any CPU
+		{DF85EFA4-0EF5-4A99-853F-E6F9C88E3F8C}.Altcoins-Release|Any CPU.ActiveCfg = Altcoins-Release|Any CPU
+		{DF85EFA4-0EF5-4A99-853F-E6F9C88E3F8C}.Altcoins-Release|Any CPU.Build.0 = Altcoins-Release|Any CPU
 		{2C5C4DF9-BA1F-4671-9F24-B22D7C9C3D21}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2C5C4DF9-BA1F-4671-9F24-B22D7C9C3D21}.Release|Any CPU.Build.0 = Release|Any CPU
 		{2C5C4DF9-BA1F-4671-9F24-B22D7C9C3D21}.Altcoins-Debug|Any CPU.ActiveCfg = Altcoins-Debug|Any CPU
