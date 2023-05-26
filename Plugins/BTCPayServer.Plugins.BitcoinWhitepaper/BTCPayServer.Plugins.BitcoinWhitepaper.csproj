@@ -10,7 +10,7 @@
         <PropertyGroup>
             <Product>Bitcoin Whitepaper</Product>
             <Description>This makes the Bitcoin whitepaper available on your BTCPay Server.</Description>
-            <Version>1.0.2</Version>
+            <Version>1.0.3</Version>
         </PropertyGroup>
         <!-- Plugin development properties -->
         <PropertyGroup>
@@ -30,7 +30,7 @@
 
 
         <ItemGroup>
-            <EmbeddedResource Include="Resources\**" />
+            <EmbeddedResource Include="bitcoin.pdf" />
             <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
         </ItemGroup>
         <ItemGroup>
