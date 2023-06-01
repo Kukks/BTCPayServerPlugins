@@ -154,7 +154,7 @@ public class Zapper : IHostedService
     {
         if (arg.EventCode != InvoiceEventCode.Completed && arg.EventCode != InvoiceEventCode.MarkedCompleted)
             return;
-        var pm = arg.Invoice.GetPaymentMethod(new PaymentMethodId("BTC", PaymentTypes.LNURLPay));
+        var pm = arg.Invoice.GetPaymentMethod(new PaymentMethodId("BTC", LNURLPayPaymentType.Instance));
         if (pm is null)
         {
             return;

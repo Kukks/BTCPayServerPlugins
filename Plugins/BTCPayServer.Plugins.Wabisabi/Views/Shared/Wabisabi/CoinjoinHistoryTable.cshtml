@@ -18,7 +18,7 @@
         var op = OutPoint.Parse(coin.Outpoint);
         <tr>
             <td>
-                <a href="@PaymentTypes.BTCLike.GetTransactionLink(BtcPayNetworkProvider.BTC, op.Hash.ToString())" target="_blank" class="text-break">
+                <a href="@BitcoinPaymentType.Instance.GetTransactionLink(BtcPayNetworkProvider.BTC, op.Hash.ToString())" target="_blank" class="text-break">
                     @coin.Outpoint
                 </a>
 
@@ -68,7 +68,7 @@
                     <span class="text-break">@cjData.CoordinatorName</span>
                 </td>
                 <td>
-                    <a href="@PaymentTypes.BTCLike.GetTransactionLink(network, cjData.Transaction)" target="_blank" class="text-break">
+                    <a href="@BitcoinPaymentType.Instance.GetTransactionLink(network, cjData.Transaction)" target="_blank" class="text-break">
                         @cjData.Transaction
                     </a>
                 </td>

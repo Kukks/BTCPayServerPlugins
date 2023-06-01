@@ -115,7 +115,7 @@ namespace BTCPayServer.Plugins.Prism
                                             var store = await _storeRepository.FindStore(payout.StoreDataId);
 
                                             var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>("BTC");
-                                            var id = new PaymentMethodId("BTC", PaymentTypes.LightningLike);
+                                            var id = new PaymentMethodId("BTC", LightningPaymentType.Instance);
                                             var existing = store.GetSupportedPaymentMethods(_btcPayNetworkProvider)
                                                 .OfType<LightningSupportedPaymentMethod>()
                                                 .FirstOrDefault(d => d.PaymentId == id);
@@ -286,7 +286,7 @@ namespace BTCPayServer.Plugins.Prism
                     new[] {InvoiceEventCode.Completed, InvoiceEventCode.MarkedCompleted}.Contains(
                         invoiceEvent.EventCode))
                 {
-                    var pm = invoiceEvent.Invoice.GetPaymentMethod(new PaymentMethodId("BTC", PaymentTypes.LNURLPay));
+                    var pm = invoiceEvent.Invoice.GetPaymentMethod(new PaymentMethodId("BTC", LNURLPayPaymentType.Instance));
                     var pmd = pm?.GetPaymentMethodDetails() as LNURLPayPaymentMethodDetails;
                     if (string.IsNullOrEmpty(pmd?.ConsumedLightningAddress))
                     {
@@ -363,7 +363,7 @@ namespace BTCPayServer.Plugins.Prism
                         Destination = new LNURLPayClaimDestinaton(destination),
                         PreApprove = true,
                         StoreId = storeId,
-                        PaymentMethodId = new PaymentMethodId("BTC", PaymentTypes.LightningLike),
+                        PaymentMethodId = new PaymentMethodId("BTC", LightningPaymentType.Instance),
                         Value = Money.Satoshis(payoutAmount).ToDecimal(MoneyUnit.BTC),
                     });
                     if (payout.Result == ClaimRequest.ClaimResult.Ok)

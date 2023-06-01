@@ -633,7 +633,7 @@ public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count,
            })).Select(async data =>
            {
                
-               var  claim = await _bitcoinLikePayoutHandler.ParseClaimDestination(new PaymentMethodId("BTC", PaymentTypes.BTCLike),
+               var  claim = await _bitcoinLikePayoutHandler.ParseClaimDestination(new PaymentMethodId("BTC", BitcoinPaymentType.Instance),
                    data.Destination, CancellationToken.None);
 
                if (!string.IsNullOrEmpty(claim.error) || claim.destination is not IBitcoinLikeClaimDestination bitcoinLikeClaimDestination )

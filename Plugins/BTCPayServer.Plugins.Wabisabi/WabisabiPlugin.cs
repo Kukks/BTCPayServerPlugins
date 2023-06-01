@@ -105,7 +105,7 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
     //
     //     public IEnumerable<PaymentMethodId> GetSupportedPaymentMethods()
     //     {
-    //         return new[] {new PaymentMethodId("BTC", PaymentTypes.BTCLike)};
+    //         return new[] {new PaymentMethodId("BTC", BitcoinPaymentType.Instance)};
     //     }
     //
     //     public Task<IHostedService> ConstructProcessor(PayoutProcessorData settings)
