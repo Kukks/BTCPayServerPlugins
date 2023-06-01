@@ -155,7 +155,7 @@ public class Smartifier
                 //if there is no account key path, it most likely means this is a watch only wallet. Fake the key path
                 var kp = _accountKeyPath?.Derive(coin.KeyPath).KeyPath ?? new KeyPath(0,0,0,0,0);
 
-                var hdPubKey = new HdPubKey(pubKey, kp, new SmartLabel(labels.labels ?? new HashSet<string>()),
+                var hdPubKey = new HdPubKey(pubKey, kp, new LabelsArray(labels.labels ?? new HashSet<string>()),
                     current == 1 ? KeyState.Clean : KeyState.Used);
 
                 hdPubKey.SetAnonymitySet(labels.anonset);
@@ -165,7 +165,7 @@ public class Smartifier
             });
             
             utxoLabels.TryGetValue(coin.OutPoint, out var labels);
-            smartCoin.HdPubKey.SetLabel(new SmartLabel(labels.labels ?? new HashSet<string>()));
+            smartCoin.HdPubKey.SetLabel(new LabelsArray(labels.labels ?? new HashSet<string>()));
             smartCoin.HdPubKey.SetKeyState(current == 1 ? KeyState.Clean : KeyState.Used);
             smartCoin.HdPubKey.SetAnonymitySet(labels.anonset);
             tx.TryAddWalletOutput(smartCoin);

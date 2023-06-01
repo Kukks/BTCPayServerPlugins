@@ -406,7 +406,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
                     var derivation = DerivationScheme.GetChild(si.Item2.Result.KeyPath).GetExtPubKeys().First()
                         .PubKey;
                     var hdPubKey = new HdPubKey(derivation, kp.Derive(si.Item2.Result.KeyPath).KeyPath,
-                        SmartLabel.Empty,
+                        LabelsArray.Empty, 
                         KeyState.Used);
                     
                     var coin = new SmartCoin(smartTx, si.txout.N, hdPubKey);

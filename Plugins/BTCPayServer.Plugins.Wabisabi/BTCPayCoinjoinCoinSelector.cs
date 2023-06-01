@@ -51,7 +51,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                     {
                         return true;
                     }
-                    if (!coin.HdPubKey.Label.Contains("coinjoin") || coin.HdPubKey.Label.Contains(utxoSelectionParameters.CoordinatorName))
+                    if (!coin.HdPubKey.Labels.Contains("coinjoin") || coin.HdPubKey.Labels.Contains(utxoSelectionParameters.CoordinatorName))
                     {
                         return true;
                     }
