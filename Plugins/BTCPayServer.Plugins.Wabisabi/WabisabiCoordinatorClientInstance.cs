@@ -227,7 +227,7 @@ public class WabisabiCoordinatorClientInstance
         switch (e)
         {
             case CoinJoinStatusEventArgs coinJoinStatusEventArgs:
-                _logger.LogInformation(coinJoinStatusEventArgs.CoinJoinProgressEventArgs.GetType() + "   :" +
+                _logger.LogTrace(coinJoinStatusEventArgs.CoinJoinProgressEventArgs.GetType() + "   :" +
                                        e.Wallet.WalletName);
                 break;
             case CompletedEventArgs completedEventArgs:
@@ -261,7 +261,7 @@ public class WabisabiCoordinatorClientInstance
                _ = CoinJoinManager.StartAsync(loadedEventArgs.Wallet, stopWhenAllMixed, false, CancellationToken.None);
                 break;
             case StartErrorEventArgs errorArgs:
-                _logger.LogInformation("Could not start wallet for coinjoin:" + errorArgs.Error.ToString() + "   :" + e.Wallet.WalletName);
+                _logger.LogTrace("Could not start wallet for coinjoin:" + errorArgs.Error.ToString() + "   :" + e.Wallet.WalletName);
                 break;
             case StoppedEventArgs stoppedEventArgs:
                 _logger.LogInformation("Stopped wallet for coinjoin: " + stoppedEventArgs.Reason + "   :" + e.Wallet.WalletName);
