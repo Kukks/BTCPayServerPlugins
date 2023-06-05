@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Reflection;
+using System.Text.Json;
 
 var plugins = Directory.GetDirectories("../../../../Plugins");
 var p = "";
@@ -6,15 +7,18 @@ foreach (var plugin in plugins)
 {
     try
     {
+        var assemblyConfigurationAttribute = typeof(Program).Assembly.GetCustomAttribute<AssemblyConfigurationAttribute>();
+        var buildConfigurationName = assemblyConfigurationAttribute?.Configuration;
         var x = Directory.GetDirectories(Path.Combine(plugin, "bin"));
-        if (x.Any(s => s.EndsWith("Altcoins-Debug")))
-        {
-            p += $"{Path.GetFullPath(plugin)}/bin/Altcoins-Debug/net6.0/{Path.GetFileName(plugin)}.dll;";
-        }
-        else
-        {
-            p += $"{Path.GetFullPath(plugin)}/bin/Debug/net6.0/{Path.GetFileName(plugin)}.dll;";
-        }
+        
+        p += $"{Path.GetFullPath(plugin)}/bin/{buildConfigurationName}/net6.0/{Path.GetFileName(plugin)}.dll;";
+        // if (x.Any(s => s.EndsWith("Altcoins-Debug")))
+        // {
+        //     p += $"{Path.GetFullPath(plugin)}/bin/Altcoins-Debug/net6.0/{Path.GetFileName(plugin)}.dll;";
+        // }
+        // else
+        // {
+        // }
     }
     catch (Exception e)
     {
