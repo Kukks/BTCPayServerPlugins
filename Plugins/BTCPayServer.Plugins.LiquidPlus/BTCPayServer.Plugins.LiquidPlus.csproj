@@ -11,7 +11,7 @@
     <PropertyGroup>
       <Product>Liquid+</Product>
       <Description>Enhanced support for the liquid network.</Description>
-      <Version>1.1.0</Version>
+      <Version>1.1.1</Version>
     </PropertyGroup>
 
     <!-- Plugin development properties -->
