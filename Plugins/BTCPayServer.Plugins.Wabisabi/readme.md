@@ -1,6 +1,6 @@
 # The BTCPay Server Coinjoin plugin
 
-This plugin allows every BTCPay Server instance to integrate with the Wabisabi coinjoin protocol developed by [zkSNACKS](docs/https://zksnacks.com/) ([Wasabi Wallet](docs/https://wasabiwallet.io/)).
+This plugin allows every BTCPay Server instance to integrate with the Wabisabi coinjoin protocol developed by [zkSNACKS](https://zksnacks.com/) ([Wasabi Wallet](https://wasabiwallet.io/)).
 
 
 <p align="center">
@@ -79,7 +79,7 @@ In the spirit of "be the change you want to see in the world", this plugin ships
 
 ![docs/img_8.png](docs/img_8.png)
 
-By default, the coordinator is configured to donate its generated fees to the [human rights foundation](docs/https://hrf.org/), and [opensats](docs/https://opensats.org/), along with a hardcoded plugin development fee split to continue expanding and maintaining the plugin. You can configure these using the `CoordinatorSplits` json key.
+By default, the coordinator is configured to donate its generated fees to the [human rights foundation](https://hrf.org/), and [opensats](https://opensats.org/), along with a hardcoded plugin development fee split to continue expanding and maintaining the plugin. You can configure these using the `CoordinatorSplits` json key.
 The format is as follows:
 ```
 [
