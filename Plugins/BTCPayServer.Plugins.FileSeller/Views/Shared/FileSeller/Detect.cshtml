@@ -1,0 +1,6 @@
+﻿@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Plugins.FileSeller
+@{
+
+    FileSellerService.UrlToUse = Context.Request.GetAbsoluteRootUri();
+}
