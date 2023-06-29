@@ -204,7 +204,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                 var maxCoinCapacityPercentage = Math.Floor((solution.Coins.Count / (decimal)maxCoins) * 100);
                 //aggressively attempt to reach max coin target if consolidation mode is on
                 //if we're less than the max output registration, we should be more aggressive in adding coins
-                var chance = consolidationMode ? 90 : 100m - Math.Min(maxCoinCapacityPercentage,  isLessThanMaxOutputRegistration ? 50m : maxCoinCapacityPercentage);
+                var chance = consolidationMode ? (isLessThanMaxOutputRegistration? 100: 90 ): 100m - Math.Min(maxCoinCapacityPercentage,  isLessThanMaxOutputRegistration ? 20m : maxCoinCapacityPercentage);
                 _logger.LogDebug(
                     $"coin selection: no payms left but at {solution.Coins.Count()} coins. random chance to add another coin if: {chance} <= {rand} (random 0-100) ");
                 if (chance <= rand)
