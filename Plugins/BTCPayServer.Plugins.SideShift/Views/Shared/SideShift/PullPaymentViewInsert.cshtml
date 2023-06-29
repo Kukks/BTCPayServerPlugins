@@ -1,0 +1,186 @@
+﻿@using System.Net.Http
+@using BTCPayServer.Plugins.SideShift
+@using Newtonsoft.Json
+@using Newtonsoft.Json.Linq
+@model BTCPayServer.Models.ViewPullPaymentModel
+@inject IHttpClientFactory HttpClientFactory
+@inject SideShiftService SideShiftService
+@{
+    var ss = await SideShiftService.GetSideShiftForStore(Model.StoreId);
+    if (ss?.Enabled is not true)
+    {
+        return;
+    }
+    var client = HttpClientFactory.CreateClient("sideshift");
+    var request = new HttpRequestMessage(HttpMethod.Get, "https://sideshift.ai/api/v2/coins");
+    var response = await client.SendAsync(request);
+    if (!response.IsSuccessStatusCode)
+    {
+        return;
+    }
+    var coins = await response.Content.ReadAsStringAsync().ContinueWith(t => JsonConvert.DeserializeObject<List<SideShiftAvailableCoin>>(t.Result));
+    var availableCoins = coins.SelectMany(coin => coin.networks.Select(s => (Coin: coin, Network: s)))
+        .Where(tuple => (tuple.Coin.fixedOnly.Type == JTokenType.Boolean && !tuple.Coin.fixedOnly.Value<bool>()) || (
+        tuple.Coin.fixedOnly is JArray varOnlyArray && varOnlyArray.All(v => v.Value<string>() != tuple.Network))).ToList();
+
+    var potentialPaymentMethods = Model.PaymentMethods;//.Where(id => id.CryptoCode.Equals(Model.Currency, StringComparison.OrdinalIgnoreCase)).ToList();
+    if (Model.IsPending && potentialPaymentMethods.Any() && availableCoins.Any())
+    {
+        <script>
+            const url = @Json.Serialize(Url.Action("CreatePayout", "SideShift", new {pullPaymentId = Model.Id }))
+            const ssAvailableCoins = @Json.Serialize(availableCoins.ToDictionary(tuple=> $"{tuple.Coin.coin}_{tuple.Network}",tuple =>
+                                         new {
+                                             coin = tuple.Coin.name,
+                                             code = tuple.Coin.coin,
+                                             memo = tuple.Coin.hasMemo,
+                                             network = tuple.Network
+                                         }));
+            const ssPaymentMethods = @Json.Serialize(potentialPaymentMethods.Select(id => new { id = id.ToString(), name= id.ToPrettyString()}));
+            document.addEventListener("DOMContentLoaded", ev => {
+                const ssButton = document.createElement("button");
+                ssButton.type= "button";
+                ssButton.title = "Claim through SideShift";
+                ssButton.classList.add("btn","btn-primary");
+                ssButton.innerHTML='            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28" alt="SideShift" class="icon"><g transform="translate(6,6)"><path d="M13.19 1.91A8 8 0 0 0 1.9 13.2L13.2 1.9Z" fill="currentColor"/><path d="M2.76 14.05a8 8 0 0 0 11.29-11.3l-11.3 11.3Z" fill="currentColor"/></g></svg>';
+                const destElement = document.getElementById("Destination");
+                destElement.parentElement.insertBefore(ssButton,destElement);
+                const modal = new bootstrap.Modal('#sideshiftModal');
+                ssButton.addEventListener("click", ev1 => modal.show());    
+                
+                const selectedSideShiftSource = document.getElementById("sspmi");
+                const selectedSideShiftCoin = document.getElementById("sscoin");
+                const specifiedSideShiftDestination = document.getElementById("ssdest");
+                const specifiedSideShiftMemo= document.getElementById("ssmemo");
+                const shiftButton = document.getElementById("ssshift");
+                let selectedCoin = null;
+                const destinationContainer = document.getElementById("ss-dest-info");
+                specifiedSideShiftDestination.addEventListener("input", ev1 => {
+                    if (isValid()){
+                        shiftButton.removeAttribute("disabled");
+                    }
+                });
+                specifiedSideShiftMemo.addEventListener("input", ev1 => {
+                    if (isValid()){
+                        shiftButton.removeAttribute("disabled");
+                    }else{
+                        shiftButton.setAttribute("disabled", "disabled");
+                    }
+                });
+                isValid = ()=>{
+                  return selectedSideShiftSource.value && selectedCoin && specifiedSideShiftDestination.value && 
+                   (!selectedCoin.memo || specifiedSideShiftMemo.value);
+                };
+                handleSelectChanges = ()=>{
+                    if (selectedSideShiftSource.value && selectedSideShiftCoin.value){                    
+                        destinationContainer.style.display =  "block";
+                    }else{
+                        destinationContainer.style.display = "none";
+                    }
+                };
+                selectedSideShiftSource.addEventListener("change", ev1 => {  
+                    handleSelectChanges();
+                });
+                selectedSideShiftCoin.addEventListener("change", ev1 => {     
+                    
+                    handleSelectChanges();
+                    if (!selectedSideShiftCoin.value){
+                        return;
+                    }
+                    selectedCoin = ssAvailableCoins[selectedSideShiftCoin.value];
+                    if (selectedCoin){ 
+                        specifiedSideShiftMemo.parentElement.style.display = selectedCoin.memo ? "block" : "none";
+                        specifiedSideShiftMemo.value = selectedCoin.memo ? specifiedSideShiftMemo.value : "";
+                    }
+                });
+                shiftButton.addEventListener("click", ev1 => { 
+                    if (isValid()){
+                        
+                        document.getElementById("ss-server-errors").innerHTML = "";
+                        shiftButton.setAttribute("disabled", "disabled");
+                        fetch(url, {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({
+                                amount: "@Model.Amount",
+                                paymentMethod: selectedSideShiftSource.value,
+                                shiftCurrency: selectedCoin.code,
+                                shiftNetwork: selectedCoin.network,
+                                destination: specifiedSideShiftDestination.value,
+                                memo: specifiedSideShiftMemo.value
+                            })
+                        }).then(async response => {
+                            if (response.ok) {
+                                window.location.reload();
+                            } else {
+                                const json = await response.json();
+                                let errorHtml = "";
+                                if(Array.isArray(json)){
+                                    for (const jsonElement of json) {
+                                      errorHtml += `${jsonElement.message}<br/>`;
+                                    }
+                                }else if(json.message){
+                                    errorHtml = json.message;
+                                }
+                                document.getElementById("ss-server-errors").innerHTML = errorHtml;
+                            }
+                        }).catch(err => {
+                            alert(err);
+                        }).finally(() => {
+                            shiftButton.removeAttribute("disabled");
+                        });
+                    }
+                    
+                });
+                handleSelectChanges();
+            });
+         
+        </script>
+        <div class="modal" tabindex="-1" id="sideshiftModal">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Claim through SideShift</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="ss-server-errors" class="text-danger"></div>
+                        <div class="form-group">
+                            <label class="form-label">Which payment method should BTCPay Server send to Sideshift with</label>
+                            <select id="sspmi" class="form-select">
+                                @foreach (var opt in potentialPaymentMethods)
+                                {
+                                    <option value="@opt.ToString()">@opt.ToPrettyString()</option>
+                                }
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">Which coin should Sideshift send you</label>
+                            <select id="sscoin" class="form-select">
+                                @foreach (var opt in availableCoins)
+                                {
+                                    <option value="@(opt.Coin.coin)_@(opt.Network)">@opt.Coin.name (@opt.Network)</option>
+                                }
+                            </select>
+                        </div>
+                        <div id="ss-dest-info" style="display: none">
+                            <div class="form-group">
+                                <label class="form-label">Destination</label>
+                                <input type="text" id="ssdest" class="form-control"/>
+
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Memo</label>
+                                <input type="text" id="ssmemo" class="form-control"/>
+
+                            </div>
+                            <button type="button" class="btn btn-primary" id="ssshift" disabled="disabled">Claim payout through Sideshift</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+}

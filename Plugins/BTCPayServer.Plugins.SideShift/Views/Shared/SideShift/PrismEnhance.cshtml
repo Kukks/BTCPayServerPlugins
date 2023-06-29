@@ -1,0 +1,149 @@
+﻿@using System.Net.Http
+@using BTCPayServer.Abstractions.TagHelpers
+@using BTCPayServer.Plugins.SideShift
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using Newtonsoft.Json
+@using Newtonsoft.Json.Linq
+@inject IHttpClientFactory HttpClientFactory
+@{
+    var client = HttpClientFactory.CreateClient("sideshift");
+    var request = new HttpRequestMessage(HttpMethod.Get, "https://sideshift.ai/api/v2/coins");
+    var response = await client.SendAsync(request);
+    if (!response.IsSuccessStatusCode)
+    {
+        return;
+    }
+    var coins = await response.Content.ReadAsStringAsync().ContinueWith(t => JsonConvert.DeserializeObject<List<SideShiftAvailableCoin>>(t.Result));
+    var availableCoins = coins.SelectMany(coin => coin.networks.Select(s => (Coin: coin, Network: s)))
+        .Where(tuple => (tuple.Coin.fixedOnly.Type == JTokenType.Boolean && !tuple.Coin.fixedOnly.Value<bool>()) || (
+            tuple.Coin.fixedOnly is JArray varOnlyArray && varOnlyArray.All(v => v.Value<string>() != tuple.Network))).ToList();
+    
+}
+
+<script>
+
+const ssAvailableCoins = @Json.Serialize(availableCoins.ToDictionary(tuple=> $"{tuple.Coin.coin}_{tuple.Network}",tuple =>
+    new {
+        coin = tuple.Coin.name,
+        code = tuple.Coin.coin,
+        memo = tuple.Coin.hasMemo,
+        network = tuple.Network
+    }));
+document.addEventListener('DOMContentLoaded', (event) => {
+    const sideshiftDestinationButton = document.createElement("button");
+    sideshiftDestinationButton.type= "button";
+    sideshiftDestinationButton.className = "btn btn-primary btn-sm";
+    sideshiftDestinationButton.innerText = "Generate SideShift destination";
+    
+    document.getElementById("add-prism").insertAdjacentElement("afterend", sideshiftDestinationButton);
+    
+    const modal = new bootstrap.Modal('#sideshiftModal');
+    sideshiftDestinationButton.addEventListener("click", ev => modal.show());
+    const selectedSideShiftCoin = document.getElementById("sscoin");
+    const specifiedSideShiftDestination = document.getElementById("ssdest");
+    const specifiedSideShiftMemo= document.getElementById("ssmemo");
+    const shiftButton = document.getElementById("ssshift");
+    let selectedCoin = null;
+    const destinationContainer = document.getElementById("ss-dest-info");
+    specifiedSideShiftDestination.addEventListener("input", ev1 => {
+        
+        document.getElementById("ss-result").style.display = "none";
+        if (isValid()){
+            shiftButton.removeAttribute("disabled");
+        }
+    });
+    specifiedSideShiftMemo.addEventListener("input", ev1 => {
+        if (isValid()){
+            shiftButton.removeAttribute("disabled");
+        }else{
+            shiftButton.setAttribute("disabled", "disabled");
+        }
+    });
+    isValid = ()=>{
+      return selectedCoin && specifiedSideShiftDestination.value && 
+       (!selectedCoin.memo || specifiedSideShiftMemo.value);
+    };
+    handleSelectChanges = ()=>{
+        if (selectedSideShiftCoin.value){     
+            selectedCoin = ssAvailableCoins[selectedSideShiftCoin.value];
+            destinationContainer.style.display =  "block";
+            if (selectedCoin){ 
+                specifiedSideShiftMemo.parentElement.style.display = selectedCoin.memo ? "block" : "none";
+                specifiedSideShiftMemo.value = selectedCoin.memo ? specifiedSideShiftMemo.value : "";
+            }
+        }else{
+            destinationContainer.style.display = "none";
+        }
+    };
+    selectedSideShiftCoin.addEventListener("change", ev1 => {     
+              
+        
+        handleSelectChanges();
+    });
+    shiftButton.addEventListener("click", ev1 => { 
+        
+                            document.getElementById("ss-result-txt").value = "";
+                        if (isValid()){
+                            
+                            shiftButton.setAttribute("disabled", "disabled");
+                            
+                            
+                            document.getElementById("ss-result").style.display = "block";
+                            document.getElementById("ss-result-txt").value = "sideshift:"+JSON.stringify({
+                                    shiftCoin:selectedCoin.code,
+                                    shiftNetwork: selectedCoin.network,
+                                    shiftDestination: specifiedSideShiftDestination.value,
+                                    shiftMemo: specifiedSideShiftMemo.value
+                            });
+                            shiftButton.removeAttribute("disabled");
+                        }
+                        
+                    });
+    
+    
+    handleSelectChanges();
+    
+});
+</script>
+
+<div class="modal" tabindex="-1" id="sideshiftModal">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Generate SideShift destination</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p>This will generate a piece of code based on Sideshift configuration that can work as a valid destination in prism. Prism will then generate a "shift" on Sideshift and send the funds through LN to it, and Sideshift will send you the conversion. </p>
+                        <div class="form-group">
+                            <label class="form-label">Which coin should Sideshift send you</label>
+                            <select id="sscoin" class="form-select">
+                                @foreach (var opt in availableCoins)
+                                {
+                                    <option value="@(opt.Coin.coin)_@(opt.Network)">@opt.Coin.name (@opt.Network)</option>
+                                }
+                            </select>
+                        </div>
+                        <div id="ss-dest-info" style="display: none">
+                            <div class="form-group">
+                                <label class="form-label">Destination</label>
+                                <input type="text" id="ssdest" class="form-control"/>
+
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Memo</label>
+                                <input type="text" id="ssmemo" class="form-control"/>
+
+                            </div>
+
+                            <button type="button" class="btn btn-primary" id="ssshift" disabled="disabled">Generate code</button>
+
+                            <div id="ss-result" class="form-group mt-4" style="display: none;">
+                                <label class="form-label">Generated code</label>
+                                <input type="text" id="ss-result-txt" class="form-control" readonly="readonly"/>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>

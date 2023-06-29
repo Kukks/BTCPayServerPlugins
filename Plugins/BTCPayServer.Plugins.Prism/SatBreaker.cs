@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Configuration;
 using BTCPayServer.Data;
@@ -17,6 +18,7 @@ using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NBitcoin;
+using LightningAddressData = BTCPayServer.Data.LightningAddressData;
 
 namespace BTCPayServer.Plugins.Prism
 {
@@ -34,6 +36,7 @@ namespace BTCPayServer.Plugins.Prism
         private readonly LightningClientFactoryService _lightningClientFactoryService;
         private readonly IOptions<LightningNetworkOptions> _lightningNetworkOptions;
         private readonly BTCPayNetworkJsonSerializerSettings _btcPayNetworkJsonSerializerSettings;
+        private readonly IPluginHookService _pluginHookService;
         private Dictionary<string, PrismSettings> _prismSettings;
 
         public SatBreaker(StoreRepository storeRepository,
@@ -45,7 +48,8 @@ namespace BTCPayServer.Plugins.Prism
             BTCPayNetworkProvider btcPayNetworkProvider,
             LightningClientFactoryService lightningClientFactoryService,
             IOptions<LightningNetworkOptions> lightningNetworkOptions,
-            BTCPayNetworkJsonSerializerSettings btcPayNetworkJsonSerializerSettings) : base(eventAggregator, logger)
+            BTCPayNetworkJsonSerializerSettings btcPayNetworkJsonSerializerSettings,
+            IPluginHookService pluginHookService) : base(eventAggregator, logger)
         {
             _storeRepository = storeRepository;
             _logger = logger;
@@ -56,6 +60,7 @@ namespace BTCPayServer.Plugins.Prism
             _lightningClientFactoryService = lightningClientFactoryService;
             _lightningNetworkOptions = lightningNetworkOptions;
             _btcPayNetworkJsonSerializerSettings = btcPayNetworkJsonSerializerSettings;
+            _pluginHookService = pluginHookService;
         }
 
         public override async Task StartAsync(CancellationToken cancellationToken)
@@ -286,22 +291,43 @@ namespace BTCPayServer.Plugins.Prism
                     new[] {InvoiceEventCode.Completed, InvoiceEventCode.MarkedCompleted}.Contains(
                         invoiceEvent.EventCode))
                 {
+                    
+
+                    if (!_prismSettings.TryGetValue(invoiceEvent.Invoice.StoreId, out var prismSettings) ||  !prismSettings.Enabled)
+                    {
+                        return;
+                    }
+
+                    var catchAllPrism = prismSettings.Splits.FirstOrDefault(split => split.Source == "*");
+                    Split prism = null;
+                    LightningAddressData address = null;
                     var pm = invoiceEvent.Invoice.GetPaymentMethod(new PaymentMethodId("BTC", LNURLPayPaymentType.Instance));
-                    var pmd = pm?.GetPaymentMethodDetails() as LNURLPayPaymentMethodDetails;
-                    if (string.IsNullOrEmpty(pmd?.ConsumedLightningAddress))
+                    var pmdRaw = pm?.GetPaymentMethodDetails();
+                    var pmd = pmdRaw as LNURLPayPaymentMethodDetails;
+                    if (string.IsNullOrEmpty(pmd?.ConsumedLightningAddress) && catchAllPrism is null)
                     {
                         return;
-                    }
-
-                    var address =
-                        await _lightningAddressService.ResolveByAddress(pmd.ConsumedLightningAddress.Split("@")[0]);
-                    if (address is null || !_prismSettings.TryGetValue(address.StoreDataId, out var prismSettings) ||
-                        !prismSettings.Enabled)
+                    }else if (!string.IsNullOrEmpty(pmd?.ConsumedLightningAddress))
                     {
-                        return;
-                    }
+                        address = await _lightningAddressService.ResolveByAddress(pmd.ConsumedLightningAddress.Split("@")[0]);
+                        if (address is null)
+                        {
+                            return;
+                        }
 
-                    var splits = prismSettings.Splits.FirstOrDefault(s => s.Source == address.Username)?.Destinations;
+                        prism = prismSettings.Splits.FirstOrDefault(s => s.Source.Equals(address.Username, StringComparison.InvariantCultureIgnoreCase));
+                    }
+                    else
+                    {
+                        //do not run prism on payments not LN based.
+                        if (invoiceEvent.Invoice.GetPayments("BTC", true).All(entity =>
+                            {
+                                var pmi = entity.GetPaymentMethodId();
+                                return pmi.CryptoCode == "BTC" && (pmi.PaymentType == LightningPaymentType.Instance || pmi.PaymentType == LNURLPayPaymentType.Instance);
+                            }))
+                            prism = catchAllPrism;
+                    }
+                    var splits = prism?.Destinations;
                     if (splits?.Any() is not true)
                     {
                         return;
@@ -357,10 +383,23 @@ namespace BTCPayServer.Plugins.Prism
                     {
                         continue;
                     }
+                    IClaimDestination dest = null;
+                    var dest2 = await _pluginHookService.ApplyFilter("prism-claim-destination", destination);
 
+                    dest = dest2 switch
+                    {
+                        IClaimDestination claimDestination => claimDestination,
+                        string destStr when !string.IsNullOrEmpty(destStr) => new LNURLPayClaimDestinaton(destStr),
+                        _ => null
+                    };
+
+                    if (dest is null)
+                    {
+                        continue;
+                    }
                     var payout = await _pullPaymentHostedService.Claim(new ClaimRequest()
                     {
-                        Destination = new LNURLPayClaimDestinaton(destination),
+                        Destination = dest,
                         PreApprove = true,
                         StoreId = storeId,
                         PaymentMethodId = new PaymentMethodId("BTC", LightningPaymentType.Instance),

@@ -1,20 +1,16 @@
 ﻿#nullable enable
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
+using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Extensions;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Client;
 using BTCPayServer.Filters;
-using BTCPayServer.Services.Stores;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Cors;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace BTCPayServer.Plugins.Prism;
 
@@ -24,10 +20,12 @@ namespace BTCPayServer.Plugins.Prism;
 public class PrismController : Controller
 {
     private readonly SatBreaker _satBreaker;
+    private readonly IPluginHookService _pluginHookService;
 
-    public PrismController( SatBreaker satBreaker)
+    public PrismController( SatBreaker satBreaker, IPluginHookService pluginHookService)
     {
         _satBreaker = satBreaker;
+        _pluginHookService = pluginHookService;
     }
 
     [HttpGet]
@@ -40,7 +38,8 @@ public class PrismController : Controller
     [HttpPost]
     public async Task<IActionResult> Edit(string storeId, PrismSettings settings, string command)
     {
-        for (int i = 0; i < settings.Splits?.Length; i++)
+        
+        for (var i = 0; i < settings.Splits?.Length; i++)
         {
             var prism = settings.Splits[i];
             if (string.IsNullOrEmpty(prism.Source))
@@ -77,6 +76,7 @@ public class PrismController : Controller
 
                 try
                 {
+                    
                     LNURL.LNURL.ExtractUriFromInternetIdentifier(dest);
                 }
                 catch (Exception e)
@@ -87,8 +87,9 @@ public class PrismController : Controller
                     }
                     catch (Exception exception)
                     {
-                        
-                        ModelState.AddModelError($"Splits[{i}].Destinations[{j}].Destination", "Destination is not a valid LN address or LNURL");
+                        var result = await _pluginHookService.ApplyFilter("prism-destination-validate", dest);
+                        if(result is not true)
+                            ModelState.AddModelError($"Splits[{i}].Destinations[{j}].Destination", "Destination is not a valid LN address or LNURL");
                     }
                 }
             }

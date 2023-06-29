@@ -34,8 +34,8 @@
 @if (!users.Any())
 {
     <div class="alert alert-warning mb-5" role="alert">
-        Prisms can currently only work on lightning addresses that are owned by the store. Please create a lightning address for the store.
-        <a class="alert-link p-0" asp-action="EditLightningAddress" asp-controller="UILNURL" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()">Configure now</a>
+        Prisms can currently mostly work on lightning addresses that are owned by the store. Please create a lightning address for the store.
+        <a class="alert-link p-0" asp-action="EditLightningAddress" asp-controller="UILNURL" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()">Configure now</a>. <br/><br/>Alternatively, you can use * as the source, which will match any settled invoice as long as it was paid through Lightning.
     </div>
 }
 
@@ -53,7 +53,7 @@
         </a>
     </h2>
 <p class="text-muted">
-    The prism plugin allows automated value splits for your lightning payments. You can set up multiple prisms, each with their own source (which is a <a asp-action="EditLightningAddress" asp-controller="UILNURL" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()">lightning address username</a>) and destinations (which are other lightning addresses or lnurls). The plugin will automatically credit the configured percentage of the payment to the destination (while also making sure there is 2% reserved to cater for fees, don't worry, once the lightning node tells us the exact fee amount, we credit/debit the balance after the payment), and once the configured threshold is reached, a <a asp-action="Payouts" asp-controller="UIStorePullPayments" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()" asp-route-payoutState="AwaitingPayment" asp-route-paymentMethodId="@pmi.ToString()">payout</a> will be created. Then, a <a asp-action="ConfigureStorePayoutProcessors" asp-controller="UIPayoutProcessors" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()">payout processor</a> will run at intervals and process the payout.
+    The prism plugin allows automated value splits for your lightning payments. You can set up multiple prisms, each with their own source (which is a <a asp-action="EditLightningAddress" asp-controller="UILNURL" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()">lightning address username</a>, or use * as a catch-all for all invoices settled through Lightning, excluding ones which Prism can handle explicitly) and destinations (which are other lightning addresses or lnurls). The plugin will automatically credit the configured percentage of the payment to the destination (while also making sure there is 2% reserved to cater for fees, don't worry, once the lightning node tells us the exact fee amount, we credit/debit the balance after the payment), and once the configured threshold is reached, a <a asp-action="Payouts" asp-controller="UIStorePullPayments" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()" asp-route-payoutState="AwaitingPayment" asp-route-paymentMethodId="@pmi.ToString()">payout</a> will be created. Then, a <a asp-action="ConfigureStorePayoutProcessors" asp-controller="UIPayoutProcessors" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()">payout processor</a> will run at intervals and process the payout.
 </p>
 
 <datalist id="users">
@@ -327,3 +327,4 @@ document.addEventListener("DOMContentLoaded", ()=>{
     }
 });
 </script>
+<vc:ui-extension-point location="prism-edit" model="@Model"></vc:ui-extension-point>
