@@ -1,0 +1,53 @@
+﻿<div class="row mt-4">
+    @if (DestinationBalance?.Any() is true)
+    {
+        <div class="col-sm-12 col-md-5 col-xxl-constrain border border-light">
+            <h4 class="text-center p-2">Destination Pending Balances</h4>
+            <table class="table table-responsive">
+                <tr>
+                    <th>Destination</th>
+                    <th>Sats</th>
+                </tr>
+                @foreach (var (dest, balance) in DestinationBalance)
+                {
+                    <tr>
+                        <td>@dest</td>
+                        <td>@(balance / 1000m)</td>
+                    </tr>
+                }
+            </table>
+        </div>
+    }
+
+    @if (PendingPayouts?.Any() is true)
+    {
+        <div class="col-sm-12 col-md-5 offset-md-1 col-xxl-constrain  border border-light">
+            <h4 class="text-center p-2">Pending Payouts</h4>
+            <table class="table">
+                <tr>
+                    <th>Payout Id</th>
+                    <th>Reserve fee</th>
+                    <th>Amount</th>
+                </tr>
+                @foreach (var (payoutId, pendingPayout) in PendingPayouts)
+                {
+                    <tr>
+                        <td>@payoutId</td>
+                        <td>@pendingPayout.FeeCharged</td>
+                        <td>@pendingPayout.PayoutAmount</td>
+                    </tr>
+                }
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+
+    [Parameter]
+    public Dictionary<string, long> DestinationBalance { get; set; }
+
+    [Parameter]
+    public Dictionary<string, PendingPayout> PendingPayouts { get; set; }
+
+}

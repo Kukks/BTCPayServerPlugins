@@ -17,9 +17,8 @@
     var availableCoins = coins.SelectMany(coin => coin.networks.Select(s => (Coin: coin, Network: s)))
         .Where(tuple => (tuple.Coin.fixedOnly.Type == JTokenType.Boolean && !tuple.Coin.fixedOnly.Value<bool>()) || (
             tuple.Coin.fixedOnly is JArray varOnlyArray && varOnlyArray.All(v => v.Value<string>() != tuple.Network))).ToList();
-    
 }
-
+<button type="button" class="btn btn-primary btn-sm mt-4" data-bs-toggle="modal" data-bs-target="#sideshiftModal" >Generate SideShift destination</button>
 <script>
 
 const ssAvailableCoins = @Json.Serialize(availableCoins.ToDictionary(tuple=> $"{tuple.Coin.coin}_{tuple.Network}",tuple =>
@@ -30,15 +29,14 @@ const ssAvailableCoins = @Json.Serialize(availableCoins.ToDictionary(tuple=> $"{
         network = tuple.Network
     }));
 document.addEventListener('DOMContentLoaded', (event) => {
-    const sideshiftDestinationButton = document.createElement("button");
-    sideshiftDestinationButton.type= "button";
-    sideshiftDestinationButton.className = "btn btn-primary btn-sm";
-    sideshiftDestinationButton.innerText = "Generate SideShift destination";
+    // const sideshiftDestinationButton = document.createElement("button");
+    // sideshiftDestinationButton.type= "button";
+    // sideshiftDestinationButton.className = "btn btn-primary btn-sm";
+    // sideshiftDestinationButton.innerText = "Generate SideShift destination";
+    // document.getElementById("add-prism").insertAdjacentElement("afterend", sideshiftDestinationButton);
     
-    document.getElementById("add-prism").insertAdjacentElement("afterend", sideshiftDestinationButton);
-    
-    const modal = new bootstrap.Modal('#sideshiftModal');
-    sideshiftDestinationButton.addEventListener("click", ev => modal.show());
+    // const modal = new bootstrap.Modal('#sideshiftModal');
+    // sideshiftDestinationButton.addEventListener("click", ev => modal.show());
     const selectedSideShiftCoin = document.getElementById("sscoin");
     const specifiedSideShiftDestination = document.getElementById("ssdest");
     const specifiedSideShiftMemo= document.getElementById("ssmemo");
@@ -76,29 +74,67 @@ document.addEventListener('DOMContentLoaded', (event) => {
         }
     };
     selectedSideShiftCoin.addEventListener("change", ev1 => {     
-              
-        
         handleSelectChanges();
     });
     shiftButton.addEventListener("click", ev1 => { 
         
-                            document.getElementById("ss-result-txt").value = "";
-                        if (isValid()){
-                            
-                            shiftButton.setAttribute("disabled", "disabled");
-                            
-                            
-                            document.getElementById("ss-result").style.display = "block";
-                            document.getElementById("ss-result-txt").value = "sideshift:"+JSON.stringify({
-                                    shiftCoin:selectedCoin.code,
-                                    shiftNetwork: selectedCoin.network,
-                                    shiftDestination: specifiedSideShiftDestination.value,
-                                    shiftMemo: specifiedSideShiftMemo.value
-                            });
-                            shiftButton.removeAttribute("disabled");
+        document.getElementById("ss-server-errors").innerHTML = "";
+        document.getElementById("ss-result-txt").value = "";
+        document.getElementById("ss-result-additional-info").value = "";
+        if (isValid()){
+            shiftButton.setAttribute("disabled", "disabled");
+            const type = "permanent";
+            
+            if (type ==="permanent"){
+                fetch("https://sideshift.ai/api/v2/shifts/variable",{
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        settleAddress: specifiedSideShiftDestination.value,
+                        settleMemo: specifiedSideShiftMemo.value,
+                        affiliateId: "qg0OrfHJV",
+                        depositCoin : "BTC",
+                        depositNetwork : "lightning",
+                        settleCoin: selectedCoin.code,
+                        settleNetwork: selectedCoin.network,
+                        permanent: true
+                    })})
+                    .then(async response => {
+                        if (!response.ok){
+                            try {
+                                document.getElementById("ss-server-errors").innerHTML = (await response.json())["error"]["message"];
+                            }catch{
+                                document.getElementById("ss-server-errors").innerHTML = JSON.stringify((await response.json()));
+                            }
+                            return;
                         }
+                        const shift =  await response.json();
+                        document.getElementById("ss-result").style.display = "block";
+                        document.getElementById("ss-result-txt").value = shift.depositAddress;
+                        const link = `https://sideshift.ai/orders/${shift.id}`;
+                        document.getElementById("ss-result-additional-info").innerHTML = "<b>IMPORTANT:</b> You must keep this link to be able to recover your funds in case of a problem. <a href='"+link+"' target='_blank'>"+link+"</a>  ";
                         
-                    });
+                    })
+                    .catch(error => document.getElementById("ss-server-errors").innerHTML =  error)
+                    .finally(() => shiftButton.removeAttribute("disabled"));
+            }else{
+                document.getElementById("ss-result").style.display = "block";
+                document.getElementById("ss-result-txt").value = "sideshift:"+JSON.stringify({
+                        shiftCoin:selectedCoin.code,
+                        shiftNetwork: selectedCoin.network,
+                        shiftDestination: specifiedSideShiftDestination.value,
+                        shiftMemo: specifiedSideShiftMemo.value
+                });
+                shiftButton.removeAttribute("disabled");
+            }
+            
+            
+            
+        }
+        
+    });
     
     
     handleSelectChanges();
@@ -114,6 +150,8 @@ document.addEventListener('DOMContentLoaded', (event) => {
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
+                        
+                        <div id="ss-server-errors" class="text-danger"></div>
                         <p>This will generate a piece of code based on Sideshift configuration that can work as a valid destination in prism. Prism will then generate a "shift" on Sideshift and send the funds through LN to it, and Sideshift will send you the conversion. </p>
                         <div class="form-group">
                             <label class="form-label">Which coin should Sideshift send you</label>
@@ -141,6 +179,7 @@ document.addEventListener('DOMContentLoaded', (event) => {
                             <div id="ss-result" class="form-group mt-4" style="display: none;">
                                 <label class="form-label">Generated code</label>
                                 <input type="text" id="ss-result-txt" class="form-control" readonly="readonly"/>
+                                <p id="ss-result-additional-info"></p>
                             </div>
                         </div>
                     </div>

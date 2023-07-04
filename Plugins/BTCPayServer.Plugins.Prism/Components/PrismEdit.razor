@@ -1,0 +1,296 @@
+﻿@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.Client.Models
+@using BTCPayServer.Payments
+@using BTCPayServer.PayoutProcessors
+@using Microsoft.AspNetCore.Http
+@using Microsoft.AspNetCore.Routing
+@using LightningAddressData = BTCPayServer.Data.LightningAddressData
+@inject IPluginHookService PluginHookService
+@inject LightningAddressService LightningAddressService
+@inject PayoutProcessorService PayoutProcessorService
+@inject IEnumerable<IPayoutProcessorFactory> PayoutProcessorFactories
+@inject SatBreaker SatBreaker
+@inject LinkGenerator LinkGenerator
+@inject IHttpContextAccessor httpContextAccessor
+
+@if (Loading)
+{
+}
+else
+{
+@if (NoPayoutProcessors)
+{
+    <div class="alert alert-warning mb-5" role="alert">
+        An automated payout procesor for Lightning is required in order to automate prism payouts.
+        <a class="alert-link p-0" href="@PayoutProcessorLink">Configure now</a>
+    </div>
+}
+@if (Users?.Any() is not true)
+{
+    <div class="alert alert-warning mb-5" role="alert">
+        Prisms can currently mostly work on lightning addresses that are owned by the store. Please create a lightning address for the store.
+        <a class="alert-link p-0" href="@LNAddressLink">Configure now</a>. <br/><br/>Alternatively, you can use * as the source, which will match any settled invoice as long as it was paid through Lightning.
+    </div>
+}
+
+    <datalist id="users">
+        <option value="*"></option>
+        @foreach (var user in Users)
+        {
+            <option value="@user.Username"></option>
+        }
+    </datalist>
+    <h2 class="mb-4">
+        Prism
+        <a href="https://dergigi.com/2023/03/12/lightning-prisms/" class="ms-1" target="_blank" rel="noreferrer noopener">
+            <span class="fa fa-question-circle-o text-secondary" title="More information..."></span>
+        </a>
+    </h2>
+    <p class="text-muted">
+        The prism plugin allows automated value splits for your lightning payments. You can set up multiple prisms, each with their own source (which is a <a href="@LNAddressLink">lightning address username</a>, or use * as a catch-all for all invoices settled through Lightning, excluding ones which Prism can handle explicitly) and destinations (which are other lightning addresses or lnurls). The plugin will automatically credit the configured percentage of the payment to the destination (while also making sure there is 2% reserved to cater for fees, don't worry, once the lightning node tells us the exact fee amount, we credit/debit the balance after the payment), and once the configured threshold is reached, a <a href="@PayoutsLink">payout</a> will be created. Then, a <a href="@PayoutProcessorLink">payout processor</a> will run at intervals and process the payout.
+    </p>
+
+
+    <EditForm EditContext="EditContext" OnValidSubmit="Save">
+
+        <div class="row">
+            <div class="col-xl-10 col-xxl-constrain">
+
+                <div class="form-group form-check">
+                    <input @bind="Settings.Enabled" type="checkbox" class="form-check-input"/>
+                    <label asp-for="Enabled" class="form-check-label">Enabled</label>
+                    <ValidationMessage2 For="() => Settings.Enabled" class="text-danger"></ValidationMessage2>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Sat Threshold</label>
+                    <input type="number" @bind="Settings.SatThreshold" min="1" class="form-control"/>
+                    <ValidationMessage2 For="() => Settings.SatThreshold" class="text-danger"></ValidationMessage2>
+                    <span class="text-muted">How many sats do you want to accumulate per destination before sending?</span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Reserve fee</label>
+                    <input type="number" @bind="Settings.Reserve" min="0" max="100" class="form-control"/>
+                    <ValidationMessage2 For="() => Settings.Reserve" class="text-danger"></ValidationMessage2>
+                    <span class="text-muted">When a payout is being generated, how many of its amount in percentage should be excluded to cover the fee? Once the payment is settled, if the lightning node provides the exact fee, the balance is adjusted accordingly.</span>
+                </div>
+            </div>
+            
+            
+        </div>
+
+        <div class="row" id="prism-holder">
+            @foreach (var item in Settings.Splits)
+            {
+                <PrismSplit Split="@item" OnRequestRemove="@RemovePrism"/>
+            }
+        </div>
+        <PrismBalances DestinationBalance="Settings.DestinationBalance" PendingPayouts="Settings.PendingPayouts"></PrismBalances>
+        @if (StatusMessageModel != null)
+        {
+            <div class="alert alert-@StatusMessageModel.ToString(StatusMessageModel.Severity)">
+                @StatusMessageModel.Message
+            </div>
+        }
+        <div class="row">
+            <div class="d-flex">
+                <button type="button" class="btn btn-primary  mx-2" id="add-prism" @onclick="CreateNewPrism">Add Prism</button>
+                <button type="submit" class="btn btn-primary  mx-2">Save</button>
+            </div>
+        </div>
+    </EditForm>
+}
+
+@code {
+    public bool Loading { get; set; } = true;
+    public List<LightningAddressData> Users { get; set; }
+    public PaymentMethodId pmi { get; set; } = new("BTC", LightningPaymentType.Instance);
+    public bool NoPayoutProcessors { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            PayoutProcessorLink = LinkGenerator.GetUriByAction(httpContextAccessor.HttpContext, "ConfigureStorePayoutProcessors", "UIPayoutProcessors", new {StoreId});
+            LNAddressLink = LinkGenerator.GetUriByAction(httpContextAccessor.HttpContext, "EditLightningAddress", "UILNURL", new {StoreId});
+            PayoutsLink = LinkGenerator.GetUriByAction(httpContextAccessor.HttpContext, "Payouts", "UIStorePullPayments", new {StoreId, payoutState = PayoutState.AwaitingPayment, paymentMethodId = pmi.ToString()});
+
+            var fetchSettings = SatBreaker.Get(StoreId);
+            var fetchLnAddresses = LightningAddressService.Get(new LightningAddressQuery()
+            {
+                StoreIds = new[] {StoreId}
+            });
+            var fetchProcessors = PayoutProcessorService.GetProcessors(new PayoutProcessorService.PayoutProcessorQuery()
+            {
+                Stores = new[] {StoreId},
+                PaymentMethods = new[] {pmi.ToString()}
+            });
+
+            var tasks = new Task[]
+            {
+                fetchSettings,
+                fetchLnAddresses,
+                fetchProcessors
+            };
+            await Task.WhenAll(tasks);
+            Settings = await fetchSettings;
+            Users = await fetchLnAddresses;
+
+            EditContext = new EditContext(Settings);
+            MessageStore = new ValidationMessageStore(EditContext);
+            EditContext.OnValidationRequested += Validate;
+            EditContext.OnFieldChanged += FieldChanged;
+            SatBreaker.PrismUpdated += SatBreakerOnPrismUpdated;
+            NoPayoutProcessors = PayoutProcessorFactories.Any(factory => factory.GetSupportedPaymentMethods().Contains(pmi)) && !(await fetchProcessors).Any();
+            Loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    private void FieldChanged(object sender, FieldChangedEventArgs e)
+    {
+        StatusMessageModel = null;
+    }
+
+    private void SatBreakerOnPrismUpdated(object sender, PrismPaymentDetectedEventArgs e)
+    {
+        if (e.Settings != Settings && e.Settings.Version != Settings.Version)
+        {
+            Settings.DestinationBalance = e.Settings.DestinationBalance;
+            Settings.PendingPayouts = e.Settings.PendingPayouts;
+            Settings.Version = e.Settings.Version;
+        }
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void Validate(object sender, ValidationRequestedEventArgs validationRequestedEventArgs)
+    {
+        var previousState = EditContext.GetValidationMessages().Any();
+        MessageStore.Clear();
+        StatusMessageModel = null;
+        foreach (var prism in Settings.Splits)
+        {
+            if (string.IsNullOrEmpty(prism.Source))
+            {
+                MessageStore.Add(() => prism.Source, "Source is required");
+            }
+            else if (Settings.Splits.Count(s => s.Source == prism.Source) > 1)
+            {
+                MessageStore.Add(() => prism.Source, "Sources must be unique");
+            }
+            if (!(prism.Destinations?.Count > 0))
+            {
+                MessageStore.Add(() => prism.Destinations, "At least one destination is required");
+                continue;
+            }
+
+            var sum = prism.Destinations.Sum(d => d.Percentage);
+            if (sum > 100)
+            {
+                MessageStore.Add(() => prism.Destinations, "Destinations must sum up to a 100 maximum");
+            }
+
+            foreach (var destination in prism.Destinations)
+            {
+                var dest = destination.Destination;
+    //check that the source is a valid internet identifier, which is username@domain(and optional port)
+                if (string.IsNullOrEmpty(dest))
+                {
+                    MessageStore.Add(() => destination.Destination, "Destination is required");
+                    continue;
+                }
+
+                if (!ValidateDestination(dest))
+                {
+                    MessageStore.Add(() => destination.Destination, "Destination is not valid");
+                }
+            }
+        }
+        if (previousState != EditContext.GetValidationMessages().Any())
+            EditContext.NotifyValidationStateChanged();
+    }
+
+    private bool ValidateDestination(string dest)
+    {
+        try
+        {
+            LNURL.LNURL.ExtractUriFromInternetIdentifier(dest);
+            return true;
+        }
+        catch (Exception e)
+        {
+            try
+            {
+                LNURL.LNURL.Parse(dest, out var tag);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                var result = PluginHookService.ApplyFilter("prism-destination-validate", dest).Result;
+                if (result is true)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    public ValidationMessageStore MessageStore { get; set; }
+
+    public EditContext EditContext { get; set; }
+    public StatusMessageModel StatusMessageModel { get; set; }
+
+    public PrismSettings Settings { get; set; }
+
+    public string PayoutProcessorLink { get; set; }
+
+    public string LNAddressLink { get; set; }
+    public string PayoutsLink { get; set; }
+
+    [Parameter]
+    public string StoreId { get; set; }
+
+    private async Task CreateNewPrism()
+    {
+        Settings.Splits.Add(new Split());
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RemovePrism(Split item)
+    {
+        if (Settings.Splits.Remove(item))
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task Save()
+    {
+        var settz = await SatBreaker.Get(StoreId);
+        settz.Splits = Settings.Splits;
+        settz.Destinations = Settings.Destinations;
+        settz.Enabled = Settings.Enabled;
+        settz.SatThreshold = Settings.SatThreshold;
+        settz.Reserve = Settings.Reserve;
+        Settings = settz;
+        var updateResult = await SatBreaker.UpdatePrismSettingsForStore(StoreId, settz);
+
+        if (!updateResult)
+        {
+            StatusMessageModel = new StatusMessageModel()
+            {
+                Severity = StatusMessageModel.StatusSeverity.Error,
+                Message = "The settings have been updated by another process. Please refresh the page and try again."
+            };
+        }
+        else
+        {
+            StatusMessageModel = new StatusMessageModel()
+            {
+                Severity = StatusMessageModel.StatusSeverity.Success,
+                Message = "Successfully saved settings"
+            };
+        }
+    }
+
+}

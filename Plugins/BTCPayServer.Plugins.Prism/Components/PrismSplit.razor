@@ -1,0 +1,104 @@
+﻿<div class="prism col-sm-12 col-xl-10 col-xxl-constrain border border-light p-2 m-1">
+    <div class="form-group">
+        <label class="form-label">Source</label>
+        <input type="text" @bind="Split.Source" list="users" class="form-control src"/>
+        <ValidationMessage2 For="() => Split.Source" class="text-danger"></ValidationMessage2>
+    </div>
+    <table class="table mb-0">
+        <thead>
+        <tr>
+            <th>
+                Destination
+            </th>
+            <th> Percentage</th>
+            <th> Actions</th>
+        </tr>
+        </thead>
+        <tbody>
+        @foreach(var destination in Split.Destinations)
+        {
+            <tr>
+                <td>
+                    <input type="text" @bind="@destination.Destination" class="form-control dest"/>
+
+                    <ValidationMessage2 For="() => destination.Destination" class="text-danger"></ValidationMessage2>
+                </td>
+                <td>
+                    <input type="range" value="@destination.Percentage" @oninput="@((e) => UpdateDestinationValue(destination, e.Value))" min="0" step='0.01' class="form-range" max="100"/>
+                    <div class="input-group input-group-sm">
+                        <input type="number" step='0.01' value="@destination.Percentage" @onchange="@((e) => UpdateDestinationValue(destination, e.Value))" class="form-control form-control-sm"/>
+                        <span class="input-group-text">%</span>
+                    </div>
+
+                    <ValidationMessage2 For="() => destination.Percentage" class="text-danger"></ValidationMessage2>
+                </td>
+                <td>
+                    <button class="btn btn-link remove-dest btn-danger" type="button" @onclick="@(() => Split.Destinations.Remove(destination))">Remove</button>
+                </td>
+            </tr>
+        }
+        </tbody>
+        <tfoot>
+        @if (Split.Destinations.Count > 1)
+        {
+            <tr>
+                <td colspan="3">
+                    Sending @(100 - Leftover)% to @Split.Destinations.Count destinations
+                </td>
+            </tr>
+        }
+        <tr>
+            <td colspan="3">
+                <button class="btn btn-link add-dest" type="button" @onclick="CreateDestination">Add</button>
+                <button class="btn btn-link remove-prism" type="button" @onclick="RemoveSplit">Remove Prism</button>
+            </td>
+        </tr>
+        </tfoot>
+    </table>
+</div>
+
+@code {
+    [CascadingParameter]
+    private EditContext CascadedEditContext { get; set; }
+
+    public decimal Leftover => 100 - Split.Destinations.Sum(split => split.Percentage);
+
+    [Parameter]
+    public Split Split { get; set; }
+
+    [Parameter]
+    public EventCallback<Split> OnRequestRemove { get; set; }
+
+    private void CreateDestination()
+    {
+        Split.Destinations.Add(new Prism.PrismSplit());
+    }
+
+    private void RemoveSplit()
+    {
+        OnRequestRemove.InvokeAsync(Split);
+    }
+
+    private void UpdateDestinationValue(Prism.PrismSplit destination, object eValue)
+    {
+        var newValue = Math.Min(100, Math.Round(Convert.ToDecimal(eValue), 2));
+
+        var allowedMax = Math.Round(destination.Percentage + Leftover, 2);
+
+        if (newValue > allowedMax)
+        {
+            //take the difference from the other destinations proportionally
+            var difference = Math.Round(newValue - allowedMax, 2);
+            var otherDestinations = Split.Destinations.Where(split => split != destination).ToList();
+            var totalPercentage = Math.Round(otherDestinations.Sum(split => split.Percentage), 2);
+            foreach (var otherDestination in otherDestinations)
+            {
+                var percentage = otherDestination.Percentage;
+                var newPercentage = Math.Round(percentage - (percentage / totalPercentage * difference), 2);
+                otherDestination.Percentage = newPercentage;
+            }
+        }
+        destination.Percentage = newValue;
+    }
+
+}

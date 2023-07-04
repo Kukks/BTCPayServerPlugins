@@ -18,6 +18,8 @@ using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NBitcoin;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using LightningAddressData = BTCPayServer.Data.LightningAddressData;
 
 namespace BTCPayServer.Plugins.Prism
@@ -39,6 +41,7 @@ namespace BTCPayServer.Plugins.Prism
         private readonly IPluginHookService _pluginHookService;
         private Dictionary<string, PrismSettings> _prismSettings;
 
+        public event EventHandler<PrismPaymentDetectedEventArgs> PrismUpdated;
         public SatBreaker(StoreRepository storeRepository,
             EventAggregator eventAggregator,
             ILogger<SatBreaker> logger,
@@ -202,7 +205,7 @@ namespace BTCPayServer.Plugins.Prism
 
         public async Task<PrismSettings> Get(string storeId)
         {
-            return _prismSettings.TryGetValue(storeId, out var settings) ? settings : new PrismSettings();
+            return JObject.FromObject(_prismSettings.TryGetValue(storeId, out var settings) ? settings : new PrismSettings()).ToObject<PrismSettings>();
         }
 
         public async Task<bool> UpdatePrismSettingsForStore(string storeId, PrismSettings updatedSettings,
@@ -233,7 +236,13 @@ namespace BTCPayServer.Plugins.Prism
                 if (!skipLock)
                     _updateLock.Release();
             }
-
+            
+            var prismPaymentDetectedEventArgs = new PrismPaymentDetectedEventArgs()
+            {
+                StoreId = storeId,
+                Settings = updatedSettings
+            };
+            PrismUpdated?.Invoke(this, prismPaymentDetectedEventArgs);
             return true; // Indicate that the update succeeded
         }
 
@@ -374,17 +383,22 @@ namespace BTCPayServer.Plugins.Prism
             var result = false;
             foreach (var (destination, amtMsats) in prismSettings.DestinationBalance)
             {
+                prismSettings.Destinations.TryGetValue(destination, out var destinationSettings);
+                var satThreshold = destinationSettings?.SatThreshold ?? prismSettings.SatThreshold;
+                var reserve = destinationSettings?.Reserve ?? prismSettings.Reserve;
+                
                 var amt = amtMsats / 1000;
-                if (amt >= prismSettings.SatThreshold)
+                if (amt >= satThreshold)
                 {
-                    var reserveFee = (long) Math.Max(1, Math.Round(amt * 0.02, 0, MidpointRounding.AwayFromZero));
+                    var percentage =  reserve / 100;
+                    var reserveFee = (long) Math.Max(0, Math.Round(amt * percentage, 0, MidpointRounding.AwayFromZero));
                     var payoutAmount = amt - reserveFee;
                     if (payoutAmount <= 0)
                     {
                         continue;
                     }
                     IClaimDestination dest = null;
-                    var dest2 = await _pluginHookService.ApplyFilter("prism-claim-destination", destination);
+                    var dest2 = await _pluginHookService.ApplyFilter("prism-claim-destination", destinationSettings?.Destination??destination);
 
                     dest = dest2 switch
                     {
@@ -397,12 +411,17 @@ namespace BTCPayServer.Plugins.Prism
                     {
                         continue;
                     }
+
+                    var pmi = string.IsNullOrEmpty(destinationSettings?.PaymentMethodId) ||
+                              !PaymentMethodId.TryParse(destinationSettings?.PaymentMethodId, out var pmi2)
+                        ? new PaymentMethodId("BTC", LightningPaymentType.Instance)
+                        : pmi2;
                     var payout = await _pullPaymentHostedService.Claim(new ClaimRequest()
                     {
                         Destination = dest,
                         PreApprove = true,
                         StoreId = storeId,
-                        PaymentMethodId = new PaymentMethodId("BTC", LightningPaymentType.Instance),
+                        PaymentMethodId = pmi,
                         Value = Money.Satoshis(payoutAmount).ToDecimal(MoneyUnit.BTC),
                     });
                     if (payout.Result == ClaimRequest.ClaimResult.Ok)
@@ -419,5 +438,11 @@ namespace BTCPayServer.Plugins.Prism
 
             return result;
         }
+    }
+
+    public class PrismPaymentDetectedEventArgs
+    {
+        public string StoreId { get; set; }
+        public PrismSettings Settings { get; set; }
     }
 }

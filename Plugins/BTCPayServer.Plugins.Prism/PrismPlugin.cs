@@ -24,4 +24,13 @@ public class PrismPlugin : BaseBTCPayServerPlugin
         applicationBuilder.AddHostedService(provider => provider.GetRequiredService<SatBreaker>());
         base.Execute(applicationBuilder);
     }
+
+    public override void Execute(IApplicationBuilder applicationBuilder, IServiceProvider applicationBuilderApplicationServices)
+    {
+        applicationBuilder.UseStaticFiles();
+        applicationBuilder.UseEndpoints(endpoints =>
+        {
+            endpoints.MapBlazorHub();
+        });
+    }
 }
