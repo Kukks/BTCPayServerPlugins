@@ -16,6 +16,7 @@
 @inject LinkGenerator LinkGenerator
 @inject IHttpContextAccessor HttpContextAccessor
 @inject ILogger<PrismEdit> Logger
+@implements IDisposable
 
 @if (Loading)
 {
@@ -114,9 +115,6 @@ else
     {
         if (firstRender)
         {
-            try
-            {
-                Logger.LogDebug("Loading prism settings");
             
             PayoutProcessorLink = LinkGenerator.GetUriByAction(HttpContextAccessor.HttpContext, "ConfigureStorePayoutProcessors", "UIPayoutProcessors", new {StoreId});
             LNAddressLink = LinkGenerator.GetUriByAction(HttpContextAccessor.HttpContext, "EditLightningAddress", "UILNURL", new {StoreId});
@@ -142,7 +140,6 @@ else
             await Task.WhenAll(tasks);
             Settings = await fetchSettings;
             Users = await fetchLnAddresses;
-                Logger.LogInformation(JObject.FromObject(Settings).ToString());
             EditContext = new EditContext(Settings);
             MessageStore = new ValidationMessageStore(EditContext);
             EditContext.OnValidationRequested += Validate;
@@ -151,11 +148,7 @@ else
             NoPayoutProcessors = PayoutProcessorFactories.Any(factory => factory.GetSupportedPaymentMethods().Contains(pmi)) && !(await fetchProcessors).Any();
             Loading = false;
             await InvokeAsync(StateHasChanged);
-            }
-            catch (Exception e)
-            {
-               Logger.LogError(e, "Error while loading sat breaker settings");
-            }
+            
         }
         await base.OnAfterRenderAsync(firstRender);
     }
@@ -303,6 +296,13 @@ else
                 Message = "Successfully saved settings"
             };
         }
+    }
+
+    public void Dispose()
+    {
+        EditContext.OnValidationRequested -= Validate;
+        EditContext.OnFieldChanged -= FieldChanged;
+        SatBreaker.PrismUpdated -= SatBreakerOnPrismUpdated;
     }
 
 }
