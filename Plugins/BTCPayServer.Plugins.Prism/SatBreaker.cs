@@ -69,6 +69,13 @@ namespace BTCPayServer.Plugins.Prism
         public override async Task StartAsync(CancellationToken cancellationToken)
         {
             _prismSettings = await _storeRepository.GetSettingsAsync<PrismSettings>(nameof(PrismSettings));
+            foreach (var keyValuePair in _prismSettings)
+            {
+                keyValuePair.Value.Splits ??= new List<Split>();
+                keyValuePair.Value.Destinations ??= new Dictionary<string, PrismDestination>();
+                keyValuePair.Value.PendingPayouts ??= new Dictionary<string, PendingPayout>();
+                
+            }
             await base.StartAsync(cancellationToken);
             _ = CheckPayouts(CancellationToken);
         }
