@@ -5,6 +5,8 @@
 @using BTCPayServer.PayoutProcessors
 @using Microsoft.AspNetCore.Http
 @using Microsoft.AspNetCore.Routing
+@using Microsoft.Extensions.Logging
+@using Newtonsoft.Json.Linq
 @using LightningAddressData = BTCPayServer.Data.LightningAddressData
 @inject IPluginHookService PluginHookService
 @inject LightningAddressService LightningAddressService
@@ -12,7 +14,8 @@
 @inject IEnumerable<IPayoutProcessorFactory> PayoutProcessorFactories
 @inject SatBreaker SatBreaker
 @inject LinkGenerator LinkGenerator
-@inject IHttpContextAccessor httpContextAccessor
+@inject IHttpContextAccessor HttpContextAccessor
+@inject ILogger<PrismEdit> Logger
 
 @if (Loading)
 {
@@ -103,7 +106,7 @@ else
 
 @code {
     public bool Loading { get; set; } = true;
-    public List<LightningAddressData> Users { get; set; }
+    public List<LightningAddressData> Users { get; set; } = new();
     public PaymentMethodId pmi { get; set; } = new("BTC", LightningPaymentType.Instance);
     public bool NoPayoutProcessors { get; set; }
 
@@ -111,9 +114,13 @@ else
     {
         if (firstRender)
         {
-            PayoutProcessorLink = LinkGenerator.GetUriByAction(httpContextAccessor.HttpContext, "ConfigureStorePayoutProcessors", "UIPayoutProcessors", new {StoreId});
-            LNAddressLink = LinkGenerator.GetUriByAction(httpContextAccessor.HttpContext, "EditLightningAddress", "UILNURL", new {StoreId});
-            PayoutsLink = LinkGenerator.GetUriByAction(httpContextAccessor.HttpContext, "Payouts", "UIStorePullPayments", new {StoreId, payoutState = PayoutState.AwaitingPayment, paymentMethodId = pmi.ToString()});
+            try
+            {
+                Logger.LogDebug("Loading prism settings");
+            
+            PayoutProcessorLink = LinkGenerator.GetUriByAction(HttpContextAccessor.HttpContext, "ConfigureStorePayoutProcessors", "UIPayoutProcessors", new {StoreId});
+            LNAddressLink = LinkGenerator.GetUriByAction(HttpContextAccessor.HttpContext, "EditLightningAddress", "UILNURL", new {StoreId});
+            PayoutsLink = LinkGenerator.GetUriByAction(HttpContextAccessor.HttpContext, "Payouts", "UIStorePullPayments", new {StoreId, payoutState = PayoutState.AwaitingPayment, paymentMethodId = pmi.ToString()});
 
             var fetchSettings = SatBreaker.Get(StoreId);
             var fetchLnAddresses = LightningAddressService.Get(new LightningAddressQuery()
@@ -135,7 +142,7 @@ else
             await Task.WhenAll(tasks);
             Settings = await fetchSettings;
             Users = await fetchLnAddresses;
-
+                Logger.LogInformation(JObject.FromObject(Settings).ToString());
             EditContext = new EditContext(Settings);
             MessageStore = new ValidationMessageStore(EditContext);
             EditContext.OnValidationRequested += Validate;
@@ -144,6 +151,11 @@ else
             NoPayoutProcessors = PayoutProcessorFactories.Any(factory => factory.GetSupportedPaymentMethods().Contains(pmi)) && !(await fetchProcessors).Any();
             Loading = false;
             await InvokeAsync(StateHasChanged);
+            }
+            catch (Exception e)
+            {
+               Logger.LogError(e, "Error while loading sat breaker settings");
+            }
         }
         await base.OnAfterRenderAsync(firstRender);
     }

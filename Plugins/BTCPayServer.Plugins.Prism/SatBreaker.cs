@@ -205,7 +205,7 @@ namespace BTCPayServer.Plugins.Prism
 
         public async Task<PrismSettings> Get(string storeId)
         {
-            return JObject.FromObject(_prismSettings.TryGetValue(storeId, out var settings) ? settings : new PrismSettings()).ToObject<PrismSettings>();
+            return JObject.FromObject(_prismSettings.TryGetValue(storeId, out var settings) && settings is not null ? settings : new PrismSettings()).ToObject<PrismSettings>();
         }
 
         public async Task<bool> UpdatePrismSettingsForStore(string storeId, PrismSettings updatedSettings,
@@ -381,6 +381,8 @@ namespace BTCPayServer.Plugins.Prism
         private async Task<bool> CreatePayouts(string storeId, PrismSettings prismSettings)
         {
             var result = false;
+            prismSettings.DestinationBalance ??= new Dictionary<string, long>();
+            prismSettings.Destinations ??= new Dictionary<string, PrismDestination>();
             foreach (var (destination, amtMsats) in prismSettings.DestinationBalance)
             {
                 prismSettings.Destinations.TryGetValue(destination, out var destinationSettings);
