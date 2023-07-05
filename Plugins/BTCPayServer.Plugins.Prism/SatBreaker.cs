@@ -362,7 +362,7 @@ namespace BTCPayServer.Plugins.Prism
                         {
                             prismSettings.DestinationBalance[destination] = currentBalance + splitMSats;
                         }
-                        else
+                        else if(splitMSats > 0)
                         {
                             prismSettings.DestinationBalance.Add(destination, splitMSats);
                         }
@@ -438,8 +438,13 @@ namespace BTCPayServer.Plugins.Prism
                         prismSettings.PendingPayouts ??= new();
                         prismSettings.PendingPayouts.Add(payout.PayoutData.Id,
                             new PendingPayout(payoutAmount, reserveFee));
-                        prismSettings.DestinationBalance.AddOrReplace(destination,
-                            amtMsats - (payoutAmount + reserveFee) * 1000);
+                        var newAmount = amtMsats - (payoutAmount + reserveFee) * 1000;
+                        if(newAmount == 0)
+                            prismSettings.DestinationBalance.Remove(destination);
+                        else
+                        {
+                            prismSettings.DestinationBalance.AddOrReplace(destination,newAmount);
+                        }
                         result = true;
                     }
                 }

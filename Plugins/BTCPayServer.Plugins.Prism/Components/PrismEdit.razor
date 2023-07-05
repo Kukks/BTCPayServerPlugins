@@ -160,6 +160,7 @@ else
 
     private void SatBreakerOnPrismUpdated(object sender, PrismPaymentDetectedEventArgs e)
     {
+        if(e.StoreId != StoreId) return;
         if (e.Settings != Settings && e.Settings.Version != Settings.Version)
         {
             Settings.DestinationBalance = e.Settings.DestinationBalance;
