@@ -1,4 +1,4 @@
-﻿<div class="prism col-sm-12 col-xl-10 col-xxl-constrain border border-light p-2 m-1">
+﻿<div class="border border-light p-2 m-1">
     <div class="form-group">
         <label class="form-label">Source</label>
         <input type="text" @bind="Split.Source" list="users" class="form-control src"/>
@@ -15,11 +15,11 @@
         </tr>
         </thead>
         <tbody>
-        @foreach(var destination in Split.Destinations)
+        @foreach (var destination in Split.Destinations)
         {
             <tr>
                 <td>
-                    <input type="text" @bind="@destination.Destination" class="form-control dest"/>
+                    <input type="text" @bind="@destination.Destination" list="destinations" class="form-control dest"/>
 
                     <ValidationMessage2 For="() => destination.Destination" class="text-danger"></ValidationMessage2>
                 </td>

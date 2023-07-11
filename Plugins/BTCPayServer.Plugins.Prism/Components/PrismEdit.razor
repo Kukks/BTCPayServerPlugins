@@ -6,7 +6,7 @@
 @using Microsoft.AspNetCore.Http
 @using Microsoft.AspNetCore.Routing
 @using Microsoft.Extensions.Logging
-@using Newtonsoft.Json.Linq
+@using NBitcoin
 @using LightningAddressData = BTCPayServer.Data.LightningAddressData
 @inject IPluginHookService PluginHookService
 @inject LightningAddressService LightningAddressService
@@ -39,12 +39,20 @@ else
 }
 
     <datalist id="users">
-        <option value="*"></option>
+        <option value="*">Catch-all lightning payments made against invoices in your store (excluding when other prisms are configured that capture those payments.)</option>
+
         @foreach (var user in Users)
         {
-            <option value="@user.Username"></option>
+            <option value="@user.Username">A lightning address configured on your store</option>
         }
     </datalist>
+    <datalist id="destinations">
+        @foreach (var destination in Destinations)
+        {
+            <option value="@destination">@destination</option>
+        }
+    </datalist>
+
     <h2 class="mb-4">
         Prism
         <a href="https://dergigi.com/2023/03/12/lightning-prisms/" class="ms-1" target="_blank" rel="noreferrer noopener">
@@ -79,17 +87,41 @@ else
                     <span class="text-muted">When a payout is being generated, how many of its amount in percentage should be excluded to cover the fee? Once the payment is settled, if the lightning node provides the exact fee, the balance is adjusted accordingly.</span>
                 </div>
             </div>
-            
-            
+
+
         </div>
 
         <div class="row" id="prism-holder">
-            @foreach (var item in Settings.Splits)
-            {
-                <PrismSplit Split="@item" OnRequestRemove="@RemovePrism"/>
-            }
+            
+            <div class="prism col-sm-12 col-md-8 border border-light p-2">
+                @foreach (var item in Settings.Splits)
+                {
+                    <PrismSplit Split="@item" OnRequestRemove="@RemovePrism"/>
+                }
+            </div>
+            <div class="prism col-sm-12 col-md-4 border border-light p-2">
+                @if (Destinations.Any())
+                {
+                    <div class="form-group">
+                        <select class="form-select" @bind="SelectedDestinationId">
+
+                            <option value="null">Select destination to configure</option>
+                            @foreach (var destination in Destinations)
+                            {
+                                <option value="@destination">@destination</option>
+                            }
+                        </select>
+                    </div>
+                }
+                @if (SelectedDestinationId is not null && SelectedDestinationId != "null")
+                {
+                    <PrismDestinationEditor ValidateId="ValidateId" Id="@SelectedDestinationId" IdChanged="OnIdRenamed" ValidateDestination="s => ValidateDestination(s, false)" @bind-Settings="SelectedDestination"></PrismDestinationEditor>
+                }
+            </div>
         </div>
-        <PrismBalances DestinationBalance="Settings.DestinationBalance" PendingPayouts="Settings.PendingPayouts"></PrismBalances>
+        <PrismBalances OnUpdate="OnUpdateBalance"  DestinationBalance="Settings.DestinationBalance" PendingPayouts="Settings.PendingPayouts"></PrismBalances>
+
+
         @if (StatusMessageModel != null)
         {
             <div class="alert alert-@StatusMessageModel.ToString(StatusMessageModel.Severity)">
@@ -99,6 +131,7 @@ else
         <div class="row">
             <div class="d-flex">
                 <button type="button" class="btn btn-primary  mx-2" id="add-prism" @onclick="CreateNewPrism">Add Prism</button>
+                <button type="button" class="btn btn-primary  mx-2" id="add-destination" @onclick="AddDestination">Add Destination</button>
                 <button type="submit" class="btn btn-primary  mx-2">Save</button>
             </div>
         </div>
@@ -106,6 +139,43 @@ else
 }
 
 @code {
+
+
+    private void AddDestination()
+    {
+        SelectedDestinationId = "";
+        StateHasChanged();
+    }
+
+    public string? SelectedDestinationId { get; set; }
+
+    public PrismDestination? SelectedDestination
+    {
+        get
+        {
+            if (SelectedDestinationId is null || SelectedDestinationId == "null")
+                return null;
+            Settings.Destinations.TryGetValue(SelectedDestinationId, out var res);
+            return res;
+        }
+        set
+        {
+            if (SelectedDestinationId is null)
+                return;
+            if (value is null)
+            {
+                Settings.Destinations.Remove(SelectedDestinationId);
+                SelectedDestinationId = null;
+            }
+            else
+            {
+                Settings.Destinations.AddOrReplace(SelectedDestinationId, value);
+            }
+        }
+    }
+
+    public string[] Destinations => Settings.Destinations.Keys.ToArray();
+
     public bool Loading { get; set; } = true;
     public List<LightningAddressData> Users { get; set; } = new();
     public PaymentMethodId pmi { get; set; } = new("BTC", LightningPaymentType.Instance);
@@ -115,7 +185,6 @@ else
     {
         if (firstRender)
         {
-            
             PayoutProcessorLink = LinkGenerator.GetUriByAction(HttpContextAccessor.HttpContext, "ConfigureStorePayoutProcessors", "UIPayoutProcessors", new {StoreId});
             LNAddressLink = LinkGenerator.GetUriByAction(HttpContextAccessor.HttpContext, "EditLightningAddress", "UILNURL", new {StoreId});
             PayoutsLink = LinkGenerator.GetUriByAction(HttpContextAccessor.HttpContext, "Payouts", "UIStorePullPayments", new {StoreId, payoutState = PayoutState.AwaitingPayment, paymentMethodId = pmi.ToString()});
@@ -148,7 +217,6 @@ else
             NoPayoutProcessors = PayoutProcessorFactories.Any(factory => factory.GetSupportedPaymentMethods().Contains(pmi)) && !(await fetchProcessors).Any();
             Loading = false;
             await InvokeAsync(StateHasChanged);
-            
         }
         await base.OnAfterRenderAsync(firstRender);
     }
@@ -160,7 +228,7 @@ else
 
     private void SatBreakerOnPrismUpdated(object sender, PrismPaymentDetectedEventArgs e)
     {
-        if(e.StoreId != StoreId) return;
+        if (e.StoreId != StoreId) return;
         if (e.Settings != Settings && e.Settings.Version != Settings.Version)
         {
             Settings.DestinationBalance = e.Settings.DestinationBalance;
@@ -200,14 +268,13 @@ else
             foreach (var destination in prism.Destinations)
             {
                 var dest = destination.Destination;
-    //check that the source is a valid internet identifier, which is username@domain(and optional port)
                 if (string.IsNullOrEmpty(dest))
                 {
                     MessageStore.Add(() => destination.Destination, "Destination is required");
                     continue;
                 }
 
-                if (!ValidateDestination(dest))
+                if (!ValidateDestination(dest, true))
                 {
                     MessageStore.Add(() => destination.Destination, "Destination is not valid");
                 }
@@ -217,8 +284,12 @@ else
             EditContext.NotifyValidationStateChanged();
     }
 
-    private bool ValidateDestination(string dest)
+    private bool ValidateDestination(string dest, bool allowAlias)
     {
+        if (allowAlias && Destinations.Contains(dest))
+        {
+            return true;
+        }
         try
         {
             LNURL.LNURL.ExtractUriFromInternetIdentifier(dest);
@@ -243,7 +314,7 @@ else
 
     public ValidationMessageStore MessageStore { get; set; }
 
-    public EditContext EditContext { get; set; }
+    public EditContext? EditContext { get; set; }
     public StatusMessageModel StatusMessageModel { get; set; }
 
     public PrismSettings Settings { get; set; }
@@ -301,9 +372,84 @@ else
 
     public void Dispose()
     {
-        EditContext.OnValidationRequested -= Validate;
-        EditContext.OnFieldChanged -= FieldChanged;
+        if (EditContext is not null)
+        {
+            EditContext.OnValidationRequested -= Validate;
+            EditContext.OnFieldChanged -= FieldChanged;
+        }
         SatBreaker.PrismUpdated -= SatBreakerOnPrismUpdated;
     }
 
+    private bool ValidateId(string arg)
+    {
+        if (string.IsNullOrEmpty(arg))
+            return false;
+
+        if (SelectedDestinationId == arg)
+        {
+            return true;
+        }
+        if (Destinations.Contains(arg))
+        {
+            return false;
+        }
+        return true;
+    }
+
+    private async Task OnIdRenamed(string s)
+    {
+        if(SelectedDestinationId == s)
+            return;
+        try
+        {
+            await SatBreaker._updateLock.WaitAsync();
+
+            if (SelectedDestinationId == s)
+            {
+                return;
+            }
+    // find all prisms splits that use this id + all destination balances that use this id + all pending payouts that use this id and rename them
+            foreach (var destination in Settings.Splits.SelectMany(split => split.Destinations.Where(destination => destination.Destination == SelectedDestinationId)))
+            {
+                destination.Destination = s;
+            }
+            if (Settings.DestinationBalance.Remove(SelectedDestinationId, out var db))
+            {
+                Settings.DestinationBalance.Add(s, db);
+            }
+            if(Settings.Destinations.Remove(SelectedDestinationId, out var dest))
+            {
+                Settings.Destinations.Add(s, dest);
+            }
+            SelectedDestinationId = s;
+
+            await SatBreaker.UpdatePrismSettingsForStore(StoreId, Settings, true);
+        }
+        finally
+        {
+            SatBreaker._updateLock.Release();
+        }
+    }
+
+    private async Task OnUpdateBalance((string destination, long newBalance) obj)
+    {
+        try
+        {
+            await SatBreaker._updateLock.WaitAsync();
+            if (obj.newBalance == 0)
+            {
+                Settings.DestinationBalance.Remove(obj.destination);
+            }
+            else
+            {
+                Settings.DestinationBalance.AddOrReplace(obj.destination, obj.newBalance);
+            }
+            await SatBreaker.UpdatePrismSettingsForStore(StoreId, Settings, true);
+
+        }
+        finally
+        {
+            SatBreaker._updateLock.Release();
+        }
+    }
 }

@@ -208,7 +208,7 @@ namespace BTCPayServer.Plugins.Prism
 
         record CreditDestination(string StoreId, Dictionary<string, long> Destcredits, List<string> PayoutsToRemove);
 
-        private readonly SemaphoreSlim _updateLock = new(1, 1);
+        public readonly SemaphoreSlim _updateLock = new(1, 1);
 
         public async Task<PrismSettings> Get(string storeId)
         {

@@ -7,12 +7,27 @@
                 <tr>
                     <th>Destination</th>
                     <th>Sats</th>
+                    <th>Actions</th>
                 </tr>
                 @foreach (var (dest, balance) in DestinationBalance)
                 {
                     <tr>
                         <td>@dest</td>
                         <td>@(balance / 1000m)</td>
+                        <td>
+                            @if (UpdatingDestination == dest)
+                            {
+                                <input type="number" @bind="UpdatingValue" min="0" />
+                                
+                                <button type="button" class="btn btn-sm btn-link" @onclick="() => UpdatingDestination = null">Cancel</button>
+                                <button type="button" class="btn btn-sm btn-link" @onclick="Update">Update</button>
+                            }
+                            else
+                            {
+                                
+                                <button type="button" class="btn btn-sm btn-link" @onclick="StartUpdate(dest,balance)">Update</button>
+                            }
+                        </td>
                     </tr>
                 }
             </table>
@@ -44,10 +59,33 @@
 
 @code {
 
+    private string? UpdatingDestination { get; set; }
+    private long? UpdatingValue { get; set; }
+    
     [Parameter]
     public Dictionary<string, long> DestinationBalance { get; set; }
 
     [Parameter]
     public Dictionary<string, PendingPayout> PendingPayouts { get; set; }
+    
+    [Parameter]
+    public EventCallback<(string destination, long newBalance)> OnUpdate { get; set; }
+
+    private EventCallback StartUpdate(string dest, long balance)
+    {
+        UpdatingDestination = dest;
+        UpdatingValue = Convert.ToInt32(balance/1000m);
+        return EventCallback.Empty;
+    }
+    private async Task Update()
+    {
+        if (UpdatingDestination is null || UpdatingValue is null)
+        {
+            return;
+        }
+        await OnUpdate.InvokeAsync((UpdatingDestination, Convert.ToInt64(UpdatingValue.Value * 1000m)));
+        UpdatingDestination = null;
+    }
+    
 
 }

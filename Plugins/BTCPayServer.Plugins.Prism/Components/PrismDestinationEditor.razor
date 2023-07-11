@@ -1,0 +1,112 @@
+﻿@using Newtonsoft.Json.Linq
+<div class=" border-light ">
+    <div class="form-group">
+        <label class="form-label">Destination Id</label>
+        <input type="text" @bind="WorkingId" class="form-control"/>
+        @if (InvalidId)
+        {
+            <span class="text-danger">Invalid</span>
+        }
+        <span class="form-text">An alias to reference in destinations of prisms.</span>
+    </div>
+    <div class="form-group">
+        <label class="form-label">Destination</label>
+        <input type="text" @bind="WorkingCopy.Destination" class="form-control"/>
+        @if (Invalid)
+        {
+            <span class="text-danger">Invalid</span>
+        }
+        <span class="form-text">Can be a lightning address, LNURL, or a custom value that another plugin supports</span>
+    </div>
+    <div class="form-group">
+        <label class="form-label">Sat Threshold</label>
+        <input type="number" @bind="WorkingCopy.SatThreshold" min="1" class="form-control"/>
+        <span class="form-text">How many sats do you want to accumulate before sending? Leave blank to use default setting.</span>
+    </div>
+    <div class="form-group">
+        <label class="form-label">Reserve fee</label>
+        <input type="number" @bind="WorkingCopy.Reserve" min="0" max="100" class="form-control"/>
+        <span class="form-text">When a payout is being generated, how much of its amount in percentage should be excluded to cover the fee? Once the payment is settled, if the lightning node provides the exact fee, the balance is adjusted accordingly. Leave blank to use default setting.</span>
+    </div>
+    <div>
+        <button type="button" class="btn btn-primary" @onclick="Update">Update</button>
+        <button type="button" class="btn btn-outline-danger" @onclick="() => SettingsChanged.InvokeAsync(null)">Remove</button>
+    </div>
+</div>
+
+@code {
+
+    public bool Invalid { get; set; } = false;
+
+    private PrismDestination WorkingCopy { get; set; }
+    private string WorkingId { get; set; }
+    private string OriginalWorkingId { get; set; }
+    
+
+    [Parameter]
+    public Func<string, bool> ValidateDestination { get; set; }
+
+    [Parameter]
+    public Func<string, bool> ValidateId { get; set; }
+
+    [Parameter]
+    public PrismDestination Settings
+    {
+        get => WorkingCopy;
+        set
+        {
+            WorkingCopy = JObject.FromObject(value ?? new PrismDestination()).ToObject<PrismDestination>();
+            Invalid = false;
+        }
+    }
+
+    [Parameter]
+    public string Id
+    {
+        get => WorkingId;
+        set
+        {
+            if (OriginalWorkingId != value)
+            {
+                WorkingId = value;
+                OriginalWorkingId = value;
+                InvalidId = false;
+            }
+        }
+    }
+
+    public bool InvalidId { get; set; }
+
+    public async Task Update()
+    {
+        if (ValidateDestination.Invoke(WorkingCopy.Destination))
+        {
+            await SettingsChanged.InvokeAsync(WorkingCopy);
+
+            Invalid = false;
+        }
+        else
+        {
+            Invalid = true;
+        }
+
+        if (ValidateId.Invoke(WorkingId))
+        {
+            await IdChanged.InvokeAsync(WorkingId);
+            InvalidId = false;
+            
+        }
+        else
+        {
+            InvalidId = true;
+        }
+    }
+
+    [Parameter]
+    public EventCallback<PrismDestination?> SettingsChanged { get; set; }
+
+    [Parameter]
+    public EventCallback<string> IdChanged { get; set; }
+
+
+}
