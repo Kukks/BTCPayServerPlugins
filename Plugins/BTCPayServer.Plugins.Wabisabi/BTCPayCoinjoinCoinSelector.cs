@@ -10,6 +10,7 @@ using WalletWasabi.Blockchain.Keys;
 using WalletWasabi.Blockchain.TransactionOutputs;
 using WalletWasabi.Crypto.Randomness;
 using WalletWasabi.Extensions;
+using WalletWasabi.Helpers;
 using WalletWasabi.WabiSabi.Backend.Rounds;
 using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.Wallets;
@@ -197,14 +198,13 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                 
                 //if we have less than the max suggested output registration, we should add more coins to reach that number to avoid breaking up into too many coins?
                 var isLessThanMaxOutputRegistration = solution.Coins.Count < 8;
-
                 var rand = Random.Shared.Next(1, 101);
                 //let's check how many coins we are allowed to add max and how many we added, and use that percentage as the random chance of not adding it.
                 // if max coins = 20, and current coins  = 5 then 5/20 = 0.25 * 100 = 25
                 var maxCoinCapacityPercentage = Math.Floor((solution.Coins.Count / (decimal)maxCoins) * 100);
                 //aggressively attempt to reach max coin target if consolidation mode is on
                 //if we're less than the max output registration, we should be more aggressive in adding coins
-                var chance = consolidationMode ? (isLessThanMaxOutputRegistration? 100: 90 ): 100m - Math.Min(maxCoinCapacityPercentage,  isLessThanMaxOutputRegistration ? 20m : maxCoinCapacityPercentage);
+                var chance = consolidationMode ? (isLessThanMaxOutputRegistration? 100: 90 ): 100m - Math.Min(maxCoinCapacityPercentage,  isLessThanMaxOutputRegistration ? 10m : maxCoinCapacityPercentage);
                 _logger.LogDebug(
                     $"coin selection: no payms left but at {solution.Coins.Count()} coins. random chance to add another coin if: {chance} <= {rand} (random 0-100) ");
                 if (chance <= rand)
@@ -217,7 +217,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
         if (coinjoiningOnlyForPayments && solution.HandledPayments?.Any() is not true)
         {
             _logger.LogInformation(
-                "Attempted to coinjoin only to fulfill payments but the coin selection results yieleded no handled payment.");
+                "Attempted to coinjoin only to fulfill payments but the coin selection results yielded no handled payment.");
             return  new SubsetSolution(remainingPendingPayments.Count, _wallet.AnonScoreTarget,
                 utxoSelectionParameters);
         }
@@ -276,6 +276,7 @@ public static class SmartCoinExtensions
 {
     public static AnonsetType CoinColor(this SmartCoin coin, int anonsetTarget)
     {
+        return coin.IsPrivate(anonsetTarget)? AnonsetType.Green: coin.IsSemiPrivate(anonsetTarget)? AnonsetType.Orange: AnonsetType.Red;
         return coin.AnonymitySet <= 1 ? AnonsetType.Red :
             coin.AnonymitySet >= anonsetTarget ? AnonsetType.Green : AnonsetType.Orange;
     }
