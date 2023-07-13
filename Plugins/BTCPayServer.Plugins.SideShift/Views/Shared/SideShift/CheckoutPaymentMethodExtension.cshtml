@@ -1,15 +1,36 @@
 @using BTCPayServer.Plugins.SideShift
-@using Newtonsoft.Json
-@using Newtonsoft.Json.Linq
 @inject SideShiftService SideShiftService
+@model BTCPayServer.Models.InvoicingModels.PaymentModel
 @{
     const string id = "SideShift";
-    var storeId = ((JObject)JObject.Parse(JsonConvert.SerializeObject(Model)))["StoreId"].Value<string>();
+    var storeId = Model.StoreId;
     var settings = await SideShiftService.GetSideShiftForStore(storeId);
     if (settings?.Enabled is true)
     {
-        <a href="#@id" class="btcpay-pill m-0 payment-method" :class="{ active: pmId === '@id' }" v-on:click.prevent="changePaymentMethod('@id')">
-            @id
-        </a>
+        
+        var coins = await SideShiftService.GetDepositOptions();
+        if (settings.ExplicitMethods?.Any() is true)
+        {
+            foreach (var explicitMethod in settings.ExplicitMethods)
+            {
+                var s = explicitMethod.Split("_");
+                var coin = s[0];
+                var network = s[1];
+                var coinInfo = coins.FirstOrDefault(c => c.CryptoCode == coin && c.Network == network);
+                if(coinInfo is null)
+                    continue;
+                <a href="#@id" class="btcpay-pill m-0 payment-method" :class="{ active: pmId === '@id' && window.ssExplicitId === '@coinInfo.Id'}" v-on:click.prevent="()=>{ window.ssExplicitId = '@coinInfo.Id'; changePaymentMethod('@id'); }">
+                    @coinInfo.DisplayName @(coinInfo.DisplayName.Equals(coinInfo.Network, StringComparison.InvariantCultureIgnoreCase)? string.Empty: $"({coinInfo.Network})")
+                </a>
+            }
+        }
+        if (!settings.OnlyShowExplicitMethods || settings.ExplicitMethods?.Any() is not true)
+        {
+             <a href="#@id" class="btcpay-pill m-0 payment-method" :class="{ active: pmId === '@id'  && !window.ssExplicitId  }" v-on:click.prevent="()=>{ window.ssExplicitId = null; changePaymentMethod('@id'); }">
+                 @id
+             </a>
+        }
+        
+       
     }
 }

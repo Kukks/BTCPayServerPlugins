@@ -1,7 +1,5 @@
 ﻿@using System.Net.Http
 @using BTCPayServer.Plugins.SideShift
-@using Newtonsoft.Json
-@using Newtonsoft.Json.Linq
 @model BTCPayServer.Models.ViewPullPaymentModel
 @inject IHttpClientFactory HttpClientFactory
 @inject SideShiftService SideShiftService
@@ -11,28 +9,23 @@
     {
         return;
     }
-    var client = HttpClientFactory.CreateClient("sideshift");
-    var request = new HttpRequestMessage(HttpMethod.Get, "https://sideshift.ai/api/v2/coins");
-    var response = await client.SendAsync(request);
-    if (!response.IsSuccessStatusCode)
+    var coins = await SideShiftService.GetSettleCoins();
+    coins = coins.Where(tuple => new[] {SideShiftService.CoinType.FixedOnly, SideShiftService.CoinType.Both}.Contains(tuple.Type)).ToList();
+    if(coins.Any() is not true)
     {
         return;
     }
-    var coins = await response.Content.ReadAsStringAsync().ContinueWith(t => JsonConvert.DeserializeObject<List<SideShiftAvailableCoin>>(t.Result));
-    var availableCoins = coins.SelectMany(coin => coin.networks.Select(s => (Coin: coin, Network: s)))
-        .Where(tuple => (tuple.Coin.fixedOnly.Type == JTokenType.Boolean && !tuple.Coin.fixedOnly.Value<bool>()) || (
-        tuple.Coin.fixedOnly is JArray varOnlyArray && varOnlyArray.All(v => v.Value<string>() != tuple.Network))).ToList();
 
     var potentialPaymentMethods = Model.PaymentMethods;//.Where(id => id.CryptoCode.Equals(Model.Currency, StringComparison.OrdinalIgnoreCase)).ToList();
-    if (Model.IsPending && potentialPaymentMethods.Any() && availableCoins.Any())
+    if (Model.IsPending && potentialPaymentMethods.Any())
     {
         <script>
             const url = @Json.Serialize(Url.Action("CreatePayout", "SideShift", new {pullPaymentId = Model.Id }))
-            const ssAvailableCoins = @Json.Serialize(availableCoins.ToDictionary(tuple=> $"{tuple.Coin.coin}_{tuple.Network}",tuple =>
+            const ssAvailableCoins = @Json.Serialize(coins.ToDictionary(tuple=> $"{tuple.CryptoCode}_{tuple.Network}",tuple =>
                                          new {
-                                             coin = tuple.Coin.name,
-                                             code = tuple.Coin.coin,
-                                             memo = tuple.Coin.hasMemo,
+                                             coin = tuple.DisplayName,
+                                             code = tuple.CryptoCode,
+                                             memo = tuple.HasMemo,
                                              network = tuple.Network
                                          }));
             const ssPaymentMethods = @Json.Serialize(potentialPaymentMethods.Select(id => new { id = id.ToString(), name= id.ToPrettyString()}));
@@ -159,9 +152,9 @@
                         <div class="form-group">
                             <label class="form-label">Which coin should Sideshift send you</label>
                             <select id="sscoin" class="form-select">
-                                @foreach (var opt in availableCoins)
+                                @foreach (var opt in coins)
                                 {
-                                    <option value="@(opt.Coin.coin)_@(opt.Network)">@opt.Coin.name (@opt.Network)</option>
+                                    <option value="@($"{opt.CryptoCode}_{opt.Network}")">@opt.ToString()</option>
                                 }
                             </select>
                         </div>

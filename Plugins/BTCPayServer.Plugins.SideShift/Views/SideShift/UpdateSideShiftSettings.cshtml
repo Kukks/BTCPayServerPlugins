@@ -1,8 +1,19 @@
-﻿@using BTCPayServer.Abstractions.Extensions
+﻿@using BTCPayServer
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Data
+@using BTCPayServer.Plugins.SideShift
 @using Microsoft.AspNetCore.Mvc.TagHelpers
-@model BTCPayServer.Plugins.SideShift.UpdateSideShiftSettingsViewModel
+@model BTCPayServer.Plugins.SideShift.SideShiftSettings
+@inject BTCPayNetworkProvider BTCPayNetworkProvider
+@inject SideShiftService SideShiftService
 @{
     ViewData.SetActivePage("SideShift", "SideShift", "SideShift");
+    var store = Context.GetStoreData();
+    var allowedPaymentMethods = store.GetEnabledPaymentIds(BTCPayNetworkProvider)
+        .Select(pmi => new SelectListItem(pmi.ToPrettyString(), pmi.ToString()))
+        .Prepend(new SelectListItem("Any", ""));
+    var coins = await SideShiftService.GetDepositOptions();
+    var allowedCoins = coins.OrderBy(coin => coin.ToString()).Select(c => new SelectListItem(c.ToString(), $"{c.CryptoCode}_{c.Network}"));
 }
 
 <partial name="_StatusMessage" />
@@ -22,6 +33,21 @@
                     <label asp-for="Enabled" class="form-label mb-0 me-1"></label>
                 </div>
             </div>
+            <div class="form-group">
+                            <label asp-for="PreferredTargetPaymentMethodId" class="form-label" data-required>Convert always to this payment method, if possible</label>
+                            <select asp-for="PreferredTargetPaymentMethodId" asp-items="allowedPaymentMethods" class="form-select"></select>
+                        </div>
+                        <div class="form-group">
+                            <label asp-for="ExplicitMethods" class="form-label" data-required>Show these conversion options as individual payment methods</label>
+                            <select style="min-height: 300px;" multiple asp-for="ExplicitMethods" asp-items="@allowedCoins" class="form-select"></select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <div class="d-flex align-items-center">
+                                <input asp-for="OnlyShowExplicitMethods" type="checkbox" class="btcpay-toggle me-2"/>
+                                <label asp-for="OnlyShowExplicitMethods" class="form-label mb-0 me-1">Only show explicit methods</label>
+                            </div>
+                        </div>
             <button name="command" type="submit" value="save" class="btn btn-primary">Submit</button>
         </form>
     </div>

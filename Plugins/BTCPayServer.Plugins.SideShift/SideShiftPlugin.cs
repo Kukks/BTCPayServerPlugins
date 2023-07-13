@@ -148,5 +148,6 @@ namespace BTCPayServer.Plugins.SideShift
         public bool hasMemo { get; set; }
         public JToken fixedOnly { get; set; }
         public JToken variableOnly { get; set; }
+        public JToken settleOffline { get; set; }
     }
 }

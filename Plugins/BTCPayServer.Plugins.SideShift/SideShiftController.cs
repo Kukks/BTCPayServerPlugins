@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,7 +10,6 @@ using BTCPayServer.Data;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Payments;
 using BTCPayServer.Services;
-using BTCPayServer.Services.Stores;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -26,29 +24,24 @@ namespace BTCPayServer.Plugins.SideShift
     [Route("plugins/{storeId}/SideShift")]
     public class SideShiftController : Controller
     {
-        private readonly BTCPayServerClient _btcPayServerClient;
         private readonly SideShiftService _sideShiftService;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IEnumerable<IPayoutHandler> _payoutHandlers;
         private readonly PullPaymentHostedService _pullPaymentHostedService;
-        private readonly StoreRepository _storeRepository;
         private readonly BTCPayNetworkJsonSerializerSettings _serializerSettings;
         private readonly ApplicationDbContextFactory _dbContextFactory;
 
-        public SideShiftController(BTCPayServerClient btcPayServerClient,
+        public SideShiftController(
             SideShiftService sideShiftService,
             IHttpClientFactory httpClientFactory,
             IEnumerable<IPayoutHandler> payoutHandlers,
             PullPaymentHostedService pullPaymentHostedService,
-            StoreRepository storeRepository,
             BTCPayNetworkJsonSerializerSettings serializerSettings, ApplicationDbContextFactory dbContextFactory)
         {
-            _btcPayServerClient = btcPayServerClient;
             _sideShiftService = sideShiftService;
             _httpClientFactory = httpClientFactory;
             _payoutHandlers = payoutHandlers;
             _pullPaymentHostedService = pullPaymentHostedService;
-            _storeRepository = storeRepository;
             _serializerSettings = serializerSettings;
             _dbContextFactory = dbContextFactory;
         }
@@ -56,10 +49,6 @@ namespace BTCPayServer.Plugins.SideShift
         [HttpGet("")]
         public async Task<IActionResult> UpdateSideShiftSettings(string storeId)
         {
-            var store = await _btcPayServerClient.GetStore(storeId);
-
-            UpdateSideShiftSettingsViewModel vm = new UpdateSideShiftSettingsViewModel();
-            vm.StoreName = store.Name;
             SideShiftSettings SideShift = null;
             try
             {
@@ -70,19 +59,12 @@ namespace BTCPayServer.Plugins.SideShift
                 // ignored
             }
 
-            SetExistingValues(SideShift, vm);
-            return View(vm);
+            return View(SideShift??new SideShiftSettings());
         }
 
-        private void SetExistingValues(SideShiftSettings existing, UpdateSideShiftSettingsViewModel vm)
-        {
-            if (existing == null)
-                return;
-            vm.Enabled = existing.Enabled;
-        }
 
         [HttpPost("")]
-        public async Task<IActionResult> UpdateSideShiftSettings(string storeId, UpdateSideShiftSettingsViewModel vm,
+        public async Task<IActionResult> UpdateSideShiftSettings(string storeId, SideShiftSettings vm,
             string command)
         {
             if (vm.Enabled)
@@ -93,15 +75,11 @@ namespace BTCPayServer.Plugins.SideShift
                 }
             }
 
-            var sideShiftSettings = new SideShiftSettings()
-            {
-                Enabled = vm.Enabled,
-            };
 
             switch (command)
             {
                 case "save":
-                    await _sideShiftService.SetSideShiftForStore(storeId, sideShiftSettings);
+                    await _sideShiftService.SetSideShiftForStore(storeId, vm);
                     TempData["SuccessMessage"] = "SideShift settings modified";
                     return RedirectToAction(nameof(UpdateSideShiftSettings), new {storeId});
 
@@ -223,7 +201,7 @@ namespace BTCPayServer.Plugins.SideShift
             if (claim.Result == ClaimRequest.ClaimResult.Ok)
             {
                 await using var ctx = _dbContextFactory.CreateContext();
-                ppBlob.Description += $"The payout of {claim.PayoutData.Destination} will be forwarded to SideShift.ai for further conversion. Please go to <a href=\"https://sideshift.ai/orders/{shift.id}\">the order page</a> for support.";
+                ppBlob.Description += $"The payout of {claim.PayoutData.Destination} will be forwarded to SideShift.ai for further conversion. Please go to <a href=\"https://sideshift.ai/orders/{shift.id}?openSupport=true\">the order page</a> for support.";
                 pp.SetBlob(ppBlob);
                 ctx.Attach(pp).State = EntityState.Modified;
                 await ctx.SaveChangesAsync();
