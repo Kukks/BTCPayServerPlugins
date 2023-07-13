@@ -25,7 +25,7 @@ namespace BTCPayServer.Plugins.SideShift
             applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/SideShiftNav",
                 "store-integrations-nav"));
             applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/PullPaymentViewInsert",
-                "pullpayment-view"));
+                "pullpayment-foot"));
             applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/StoreIntegrationSideShiftOption",
                 "store-integrations-list"));
             // Checkout v2
