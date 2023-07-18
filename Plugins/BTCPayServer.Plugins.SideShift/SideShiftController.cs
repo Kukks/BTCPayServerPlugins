@@ -201,7 +201,7 @@ namespace BTCPayServer.Plugins.SideShift
             if (claim.Result == ClaimRequest.ClaimResult.Ok)
             {
                 await using var ctx = _dbContextFactory.CreateContext();
-                ppBlob.Description += $"The payout of {claim.PayoutData.Destination} will be forwarded to SideShift.ai for further conversion. Please go to <a href=\"https://sideshift.ai/orders/{shift.id}?openSupport=true\">the order page</a> for support.";
+                ppBlob.Description += $"<br/>The payout of {claim.PayoutData.Destination} will be forwarded to SideShift.ai for further conversion. Please go to <a href=\"https://sideshift.ai/orders/{shift.id}?openSupport=true\">the order page</a> for support.";
                 pp.SetBlob(ppBlob);
                 ctx.Attach(pp).State = EntityState.Modified;
                 await ctx.SaveChangesAsync();

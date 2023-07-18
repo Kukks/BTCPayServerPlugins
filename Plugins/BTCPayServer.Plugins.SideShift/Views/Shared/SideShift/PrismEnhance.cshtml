@@ -11,7 +11,6 @@
         return;
     }
 }
-<button type="button" class="btn btn-primary btn-sm mt-4" data-bs-toggle="modal" data-bs-target="#sideshiftModal" >Generate SideShift destination</button>
 <script>
 
 const ssAvailableCoins = @Json.Serialize(coins.ToDictionary(tuple=> $"{tuple.CryptoCode}_{tuple.Network}",tuple =>
@@ -76,7 +75,6 @@ document.addEventListener('DOMContentLoaded', (event) => {
         document.getElementById("ss-result-additional-info").value = "";
         if (isValid()){
             shiftButton.setAttribute("disabled", "disabled");
-            const type = "permanent";
             
             if (type ==="permanent"){
                 fetch("https://sideshift.ai/api/v2/shifts/variable",{
@@ -171,9 +169,15 @@ document.addEventListener('DOMContentLoaded', (event) => {
 
                             <div id="ss-result" class="form-group mt-4" style="display: none;">
                                 <label class="form-label">Generated code</label>
-                                <input type="text" id="ss-result-txt" class="form-control" readonly="readonly"/>
+                                <div class="input-group">
+                                    <input type="text" id="ss-result-txt" class="form-control" readonly="readonly"/>
+                                    <button type="button" class="btn btn-secondary" data-clipboard-target="#ss-result-txt">
+                                        <vc:icon symbol="copy"/>
+                                    </button>
+                                </div>
                                 <p id="ss-result-additional-info"></p>
                             </div>
+                            
                         </div>
                     </div>
                 </div>
