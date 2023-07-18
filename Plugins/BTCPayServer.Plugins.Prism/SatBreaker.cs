@@ -406,47 +406,44 @@ namespace BTCPayServer.Plugins.Prism
                     {
                         continue;
                     }
-                    IClaimDestination dest = null;
-                    var dest2 = await _pluginHookService.ApplyFilter("prism-claim-destination", destinationSettings?.Destination??destination);
-
-                    dest = dest2 switch
-                    {
-                        IClaimDestination claimDestination => claimDestination,
-                        string destStr when !string.IsNullOrEmpty(destStr) => new LNURLPayClaimDestinaton(destStr),
-                        _ => null
-                    };
-
-                    if (dest is null)
-                    {
-                        continue;
-                    }
 
                     var pmi = string.IsNullOrEmpty(destinationSettings?.PaymentMethodId) ||
                               !PaymentMethodId.TryParse(destinationSettings?.PaymentMethodId, out var pmi2)
                         ? new PaymentMethodId("BTC", LightningPaymentType.Instance)
                         : pmi2;
-                    var payout = await _pullPaymentHostedService.Claim(new ClaimRequest()
+
+                    var claimRequest = new ClaimRequest()
                     {
-                        Destination = dest,
+                        Destination = new LNURLPayClaimDestinaton(destinationSettings?.Destination??destination),
                         PreApprove = true,
                         StoreId = storeId,
                         PaymentMethodId = pmi,
                         Value = Money.Satoshis(payoutAmount).ToDecimal(MoneyUnit.BTC),
-                    });
-                    if (payout.Result == ClaimRequest.ClaimResult.Ok)
-                    {
-                        prismSettings.PendingPayouts ??= new();
-                        prismSettings.PendingPayouts.Add(payout.PayoutData.Id,
-                            new PendingPayout(payoutAmount, reserveFee));
-                        var newAmount = amtMsats - (payoutAmount + reserveFee) * 1000;
-                        if(newAmount == 0)
-                            prismSettings.DestinationBalance.Remove(destination);
-                        else
+                        Metadata = JObject.FromObject(new
                         {
-                            prismSettings.DestinationBalance.AddOrReplace(destination,newAmount);
-                        }
-                        result = true;
+                            Source = "Prism"
+                        })
+                    };
+                    claimRequest = (await _pluginHookService.ApplyFilter("prism-claim-create", claimRequest)) as ClaimRequest;
+                    
+                    if (claimRequest is null)
+                    {
+                        continue;
                     }
+
+                    var payout = await _pullPaymentHostedService.Claim(claimRequest);
+                    if (payout.Result != ClaimRequest.ClaimResult.Ok) continue;
+                    prismSettings.PendingPayouts ??= new Dictionary<string, PendingPayout>();
+                    prismSettings.PendingPayouts.Add(payout.PayoutData.Id,
+                        new PendingPayout(payoutAmount, reserveFee));
+                    var newAmount = amtMsats - (payoutAmount + reserveFee) * 1000;
+                    if(newAmount == 0)
+                        prismSettings.DestinationBalance.Remove(destination);
+                    else
+                    {
+                        prismSettings.DestinationBalance.AddOrReplace(destination,newAmount);
+                    }
+                    result = true;
                 }
             }
 

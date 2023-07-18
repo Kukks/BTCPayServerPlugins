@@ -26,7 +26,7 @@ else
 @if (NoPayoutProcessors)
 {
     <div class="alert alert-warning mb-5" role="alert">
-        An automated payout procesor for Lightning is required in order to automate prism payouts.
+        An automated payout processor for Lightning is required in order to automate prism payouts.
         <a class="alert-link p-0" href="@PayoutProcessorLink">Configure now</a>
     </div>
 }
@@ -133,6 +133,10 @@ else
                 <button type="button" class="btn btn-primary  mx-2" id="add-prism" @onclick="CreateNewPrism">Add Prism</button>
                 <button type="button" class="btn btn-primary  mx-2" id="add-destination" @onclick="AddDestination">Add Destination</button>
                 <button type="submit" class="btn btn-primary  mx-2">Save</button>
+                @if (PrismEditButtonsFilter is not null)
+                {
+                    @((MarkupString)PrismEditButtonsFilter)
+                }
             </div>
         </div>
     </EditForm>
@@ -181,10 +185,12 @@ else
     public PaymentMethodId pmi { get; set; } = new("BTC", LightningPaymentType.Instance);
     public bool NoPayoutProcessors { get; set; }
 
+    private string PrismEditButtonsFilter { get; set; }
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
+            PrismEditButtonsFilter = (await PluginHookService.ApplyFilter("prism-edit-buttons", "")) as string;
             PayoutProcessorLink = LinkGenerator.GetUriByAction(HttpContextAccessor.HttpContext, "ConfigureStorePayoutProcessors", "UIPayoutProcessors", new {StoreId});
             LNAddressLink = LinkGenerator.GetUriByAction(HttpContextAccessor.HttpContext, "EditLightningAddress", "UILNURL", new {StoreId});
             PayoutsLink = LinkGenerator.GetUriByAction(HttpContextAccessor.HttpContext, "Payouts", "UIStorePullPayments", new {StoreId, payoutState = PayoutState.AwaitingPayment, paymentMethodId = pmi.ToString()});
