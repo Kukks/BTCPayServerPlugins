@@ -350,7 +350,7 @@ namespace BTCPayServer.Plugins.Prism
                     }
 
 
-                    var msats = pm.Calculate().CryptoPaid.Satoshi * 1000;
+                    var msats = LightMoney.FromUnit(pm.Calculate().CryptoPaid, LightMoneyUnit.BTC).ToUnit(LightMoneyUnit.MilliSatoshi);
                     //compute the sats for each destination  based on splits percentage
                     var msatsPerDestination =
                         splits.ToDictionary(s => s.Destination, s => (long) (msats * (s.Percentage / 100)));
