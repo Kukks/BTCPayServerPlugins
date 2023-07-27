@@ -157,7 +157,7 @@ else
     {
         get
         {
-            if (SelectedDestinationId is null || SelectedDestinationId == "null")
+            if (SelectedDestinationId is null or "null")
                 return null;
             Settings.Destinations.TryGetValue(SelectedDestinationId, out var res);
             return res;

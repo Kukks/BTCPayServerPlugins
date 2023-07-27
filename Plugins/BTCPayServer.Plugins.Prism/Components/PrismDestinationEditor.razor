@@ -5,7 +5,7 @@
         <input type="text" @bind="WorkingId" class="form-control"/>
         @if (InvalidId)
         {
-            <span class="text-danger">Invalid</span>
+            <span class="text-danger  w-100">Invalid</span>
         }
         <span class="form-text">An alias to reference in destinations of prisms.</span>
     </div>
@@ -14,7 +14,7 @@
         <input type="text" @bind="WorkingCopy.Destination" class="form-control"/>
         @if (Invalid)
         {
-            <span class="text-danger">Invalid</span>
+            <span class="text-danger w-100">Invalid</span>
         }
         <span class="form-text">Can be a lightning address, LNURL, or a custom value that another plugin supports</span>
     </div>
@@ -79,27 +79,16 @@
 
     public async Task Update()
     {
-        if (ValidateDestination.Invoke(WorkingCopy.Destination))
-        {
-            await SettingsChanged.InvokeAsync(WorkingCopy);
+        Invalid = !ValidateDestination.Invoke(WorkingCopy.Destination);
 
-            Invalid = false;
-        }
-        else
+        InvalidId = !ValidateId.Invoke(WorkingId);
+        
+        if(Invalid || InvalidId)
         {
-            Invalid = true;
+            return;
         }
-
-        if (ValidateId.Invoke(WorkingId))
-        {
-            await IdChanged.InvokeAsync(WorkingId);
-            InvalidId = false;
-            
-        }
-        else
-        {
-            InvalidId = true;
-        }
+        await SettingsChanged.InvokeAsync(WorkingCopy);
+        await IdChanged.InvokeAsync(WorkingId);
     }
 
     [Parameter]
