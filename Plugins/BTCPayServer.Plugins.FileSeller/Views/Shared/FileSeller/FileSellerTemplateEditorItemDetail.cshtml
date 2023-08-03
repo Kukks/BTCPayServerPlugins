@@ -12,8 +12,10 @@
         UserIds = await UserService.IsAdminUser(userId) ? Array.Empty<string>() : new[] {userId},
     })).Select(file => new SelectListItem(file.FileName, file.Id)).Prepend(new SelectListItem("No file", ""));
 }
-<div class="form-group">
-    <label class="form-label">Downloadable file</label>
-    <select :value="editingItem['file'] || ''"  asp-items="files" class="form-select w-auto" v-on:change=" if(event.target.value) editingItem['file']= event.target.value; else delete editingItem['file'];"></select>
-    <span class="form-text">If a file is selected, when a user buys this item, a download link is generated in the payment receipt once the invoice is settled. <a target="_blank" asp-action="Files" asp-controller="UIServer">Upload files here</a></span>
-</div>
+<template v-if="editingItem">
+    <div class="form-group">
+        <label class="form-label">Downloadable file</label>
+        <select :value="editingItem['file'] || ''" asp-items="files" class="form-select w-auto" v-on:change=" if(event.target.value) editingItem['file']= event.target.value; else delete editingItem['file'];"></select>
+        <span class="form-text">If a file is selected, when a user buys this item, a download link is generated in the payment receipt once the invoice is settled. <a target="_blank" asp-action="Files" asp-controller="UIServer">Upload files here</a></span>
+    </div>
+</template>
