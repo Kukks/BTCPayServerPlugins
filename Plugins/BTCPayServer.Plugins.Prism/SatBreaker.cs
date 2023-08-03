@@ -368,10 +368,10 @@ namespace BTCPayServer.Plugins.Prism
                         }
                     }
 
-                    await UpdatePrismSettingsForStore(address.StoreDataId, prismSettings, true);
-                    if (await CreatePayouts(address.StoreDataId, prismSettings))
+                    await UpdatePrismSettingsForStore(invoiceEvent.Invoice.StoreId, prismSettings, true);
+                    if (await CreatePayouts(invoiceEvent.Invoice.StoreId, prismSettings))
                     {
-                        await UpdatePrismSettingsForStore(address.StoreDataId, prismSettings, true);
+                        await UpdatePrismSettingsForStore(invoiceEvent.Invoice.StoreId, prismSettings, true);
                     }
                 }
             }
