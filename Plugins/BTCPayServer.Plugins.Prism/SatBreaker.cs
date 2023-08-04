@@ -340,14 +340,12 @@ var onChainCatchAllIdentifier = "*"+ PaymentTypes.BTCLike.ToStringNormalized();
                     }
                     else
                     {
-                        if (pmd is null)
-                        {
-                            pm = invoiceEvent.Invoice.GetPaymentMethod(new PaymentMethodId("BTC",  PaymentTypes.LightningLike));
-                        }
+                        pm = invoiceEvent.Invoice.GetPaymentMethod(invoiceEvent.Invoice.GetPayments(true)
+                            .FirstOrDefault()?.GetPaymentMethodId());
                         prism = catchAllPrism;
                     }
                     var splits = prism?.Destinations;
-                    if (splits?.Any() is not true)
+                    if (splits?.Any() is not true || pm is null)
                     {
                         return;
                     }

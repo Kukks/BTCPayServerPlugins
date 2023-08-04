@@ -1,7 +1,7 @@
 ﻿<div class="row mt-4">
     @if (DestinationBalance?.Any() is true)
     {
-        <div class="col-sm-12 col-md-5 col-xxl-constrain border border-light">
+        <div class="col-sm-12 col-md-6 col-xxl-constrain border border-light">
             <h4 class="text-center p-2">Destination Pending Balances</h4>
             <table class="table table-responsive">
                 <tr>
@@ -12,7 +12,7 @@
                 @foreach (var (dest, balance) in DestinationBalance)
                 {
                     <tr>
-                        <td>@dest</td>
+                        <td class="text-truncate" style="max-width: 200px">@dest</td>
                         <td>@(balance / 1000m)</td>
                         <td>
                             @if (UpdatingDestination == dest)
@@ -36,7 +36,7 @@
 
     @if (PendingPayouts?.Any() is true)
     {
-        <div class="col-sm-12 col-md-5 offset-md-1 col-xxl-constrain  border border-light">
+        <div class="col-sm-12 col-md-6 col-xxl-constrain  border border-light">
             <h4 class="text-center p-2">Pending Payouts</h4>
             <table class="table">
                 <tr>

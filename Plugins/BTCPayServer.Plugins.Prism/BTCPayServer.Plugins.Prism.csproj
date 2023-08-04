@@ -11,7 +11,7 @@
     <PropertyGroup>
         <Product>LN Prism</Product>
         <Description>Automated value splits for lightning.</Description>
-        <Version>1.1.9</Version>
+        <Version>1.1.10</Version>
     </PropertyGroup>
     <!-- Plugin development properties -->
     <PropertyGroup>
