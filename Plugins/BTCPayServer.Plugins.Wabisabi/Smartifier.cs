@@ -85,15 +85,22 @@ public class Smartifier
                     potentialMatches.TryAdd(matchedInput, potentialMatchesForInput.ToArray());
                     foreach (IndexedTxIn potentialMatchForInput in potentialMatchesForInput)
                     {
-                        var ti = await CachedTransactions.GetOrAdd(potentialMatchForInput.PrevOut.Hash,
-                            _explorerClient.GetTransactionAsync(DerivationScheme,
-                                potentialMatchForInput.PrevOut.Hash));
-
+                        TransactionInformation ti = null;
+                        try
+                        {
+                            ti = await CachedTransactions.GetOrAdd(potentialMatchForInput.PrevOut.Hash,
+                                _explorerClient.GetTransactionAsync(DerivationScheme,
+                                    potentialMatchForInput.PrevOut.Hash));
+                        }
+                        catch (Exception e)
+                        {
+                            CachedTransactions.Remove(potentialMatchForInput.PrevOut.Hash, out _);
+                        }
                         if (ti is not null)
                         {
                             MatchedOutput found = ti.Outputs.Find(output =>
                                 matchedInput.Index == output.Index &&
-                                matchedInput.Value == output.Value &&
+                                matchedInput.Value.Equals(output.Value) &&
                                 matchedInput.KeyPath == output.KeyPath &&
                                 matchedInput.ScriptPubKey == output.ScriptPubKey
                             );
