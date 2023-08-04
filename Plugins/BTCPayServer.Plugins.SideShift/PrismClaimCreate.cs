@@ -66,7 +66,7 @@ public class PrismClaimCreate : IPluginHookFilter
         }
         catch (Exception e)
         {
-            if (BOLT11PaymentRequest.TryParse(shift.depositAddress, out var bolt11,  network.NBitcoinNetwork))
+            if (BOLT11PaymentRequest.TryParse(shift.depositAddress, out var bolt11, network.NBitcoinNetwork))
             {
                 claimRequest.Destination =  new BoltInvoiceClaimDestination(shift.depositAddress, bolt11);
                 claimRequest.Metadata = JObject.FromObject(new

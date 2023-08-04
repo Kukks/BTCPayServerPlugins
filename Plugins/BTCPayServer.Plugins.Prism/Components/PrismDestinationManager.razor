@@ -1,0 +1,54 @@
+﻿@* @using NBitcoin *@
+@* @if (Destinations.Any()) *@
+@* { *@
+@*     <div class="form-group"> *@
+@*         <select class="form-select" @bind="SelectedDestinationId"> *@
+@* *@
+@*             <option value="null">Select destination to configure</option> *@
+@*             @foreach (var destination in Destinations) *@
+@*             { *@
+@*                 <option value="@destination.Key">@destination.Key</option> *@
+@*             } *@
+@*         </select> *@
+@*     </div> *@
+@*      *@
+@*     @if (SelectedDestinationId is not null && SelectedDestinationId != "null") *@
+@*     { *@
+@*         <PrismDestinationEditor ValidateId="ValidateId" Id="@SelectedDestinationId" IdChanged="OnIdRenamed" ValidateDestination="s => ValidateDestination(s, false)" @bind-Settings="SelectedDestination"></PrismDestinationEditor> *@
+@*     } *@
+@* } *@
+@* *@
+@* @code { *@
+@* *@
+@*     [Parameter] *@
+@*     public Dictionary<string, PrismDestination> Destinations { get; set; } *@
+@* *@
+@* *@
+@*     public string? SelectedDestinationId { get; set; } *@
+@* *@
+@*     public PrismDestination? SelectedDestination *@
+@*     { *@
+@*         get *@
+@*         { *@
+@*             if (SelectedDestinationId is null or "null") *@
+@*                 return null; *@
+@*             Destinations.TryGetValue(SelectedDestinationId, out var res); *@
+@*             return res; *@
+@*         } *@
+@*         set *@
+@*         { *@
+@*             if (SelectedDestinationId is null) *@
+@*                 return; *@
+@*             if (value is null) *@
+@*             { *@
+@*                 Destinations.Remove(SelectedDestinationId); *@
+@*                 SelectedDestinationId = null; *@
+@*             } *@
+@*             else *@
+@*             { *@
+@*                 Destinations.AddOrReplace(SelectedDestinationId, value); *@
+@*             } *@
+@*         } *@
+@*     } *@
+@* *@
+@* } *@
