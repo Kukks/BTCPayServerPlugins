@@ -29,8 +29,12 @@
         <span class="form-text">When a payout is being generated, how much of its amount in percentage should be excluded to cover the fee? Once the payment is settled, if the lightning node provides the exact fee, the balance is adjusted accordingly. Leave blank to use default setting.</span>
     </div>
     <div>
-        <button type="button" class="btn btn-primary" @onclick="Update">Update</button>
-        <button type="button" class="btn btn-outline-danger" @onclick="() => SettingsChanged.InvokeAsync(null)">Remove</button>
+    <button type="button" class="btn btn-primary" @onclick="Update">@(string.IsNullOrEmpty(OriginalWorkingId)? "Create": "Update")</button>
+        <button type="button" class="btn btn-secondary" @onclick="Cancel">Cancel</button>
+        @if (!string.IsNullOrEmpty(OriginalWorkingId))
+        {
+            <button type="button" class="btn btn-outline-danger" @onclick="() => SettingsChanged.InvokeAsync(null)">Remove</button>
+        }
     </div>
 </div>
 
@@ -42,7 +46,8 @@
     private string WorkingId { get; set; }
     private string OriginalWorkingId { get; set; }
     
-
+[Parameter]
+public EventCallback OnCancel { get; set; }
     [Parameter]
     public Func<string, bool> ValidateDestination { get; set; }
 
@@ -66,8 +71,9 @@
         get => WorkingId;
         set
         {
-            if (OriginalWorkingId != value)
+            if (OriginalWorkingId != value )
             {
+                
                 WorkingId = value;
                 OriginalWorkingId = value;
                 InvalidId = false;
@@ -87,8 +93,7 @@
         {
             return;
         }
-        await SettingsChanged.InvokeAsync(WorkingCopy);
-        await IdChanged.InvokeAsync(WorkingId);
+        await IdChanged.InvokeAsync(WorkingId).ContinueWith(task => SettingsChanged.InvokeAsync(WorkingCopy));
     }
 
     [Parameter]
@@ -97,5 +102,10 @@
     [Parameter]
     public EventCallback<string> IdChanged { get; set; }
 
+
+    private Task Cancel()
+    {  
+        return OnCancel.InvokeAsync(null);
+    }
 
 }

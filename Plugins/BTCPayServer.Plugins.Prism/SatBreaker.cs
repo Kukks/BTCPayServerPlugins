@@ -313,7 +313,7 @@ namespace BTCPayServer.Plugins.Prism
                     {
                         return;
                     }
-var onChainCatchAllIdentifier = "*"+ PaymentTypes.BTCLike.ToStringNormalized();
+                    var onChainCatchAllIdentifier = "*"+ PaymentTypes.BTCLike.ToStringNormalized();
                     var catchAllPrism = prismSettings.Splits.FirstOrDefault(split => split.Source == "*" || split.Source ==onChainCatchAllIdentifier);
                     Split prism = null;
                     LightningAddressData address = null;

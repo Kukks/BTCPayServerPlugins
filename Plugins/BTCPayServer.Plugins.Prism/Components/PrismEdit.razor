@@ -66,60 +66,75 @@ else
 
     <EditForm EditContext="EditContext" OnValidSubmit="Save">
 
-        <div class="row">
-            <div class="col-xl-10 col-xxl-constrain">
-
-                <div class="form-group form-check">
-                    <input @bind="Settings.Enabled" type="checkbox" class="form-check-input"/>
-                    <label asp-for="Enabled" class="form-check-label">Enabled</label>
-                    <ValidationMessage2 For="() => Settings.Enabled" class="text-danger"></ValidationMessage2>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Sat Threshold</label>
-                    <input type="number" @bind="Settings.SatThreshold" min="1" class="form-control"/>
-                    <ValidationMessage2 For="() => Settings.SatThreshold" class="text-danger"></ValidationMessage2>
-                    <span class="text-muted">How many sats do you want to accumulate per destination before sending?</span>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Reserve fee</label>
-                    <input type="number" @bind="Settings.Reserve" min="0" max="100" class="form-control"/>
-                    <ValidationMessage2 For="() => Settings.Reserve" class="text-danger"></ValidationMessage2>
-                    <span class="text-muted">When a payout is being generated, how many of its amount in percentage should be excluded to cover the fee? Once the payment is settled, if the lightning node provides the exact fee, the balance is adjusted accordingly.</span>
-                </div>
-            </div>
-
-
-        </div>
+       
 
         <div class="row" id="prism-holder">
-            
-            <div class="prism col-sm-12 col-md-8 border border-light p-2">
-                @foreach (var item in Settings.Splits)
-                {
-                    <PrismSplit Split="@item" OnRequestRemove="@RemovePrism"/>
-                }
-            </div>
-            <div class="prism col-sm-12 col-md-4 border border-light p-2">
-                @if (Destinations.Any())
-                {
-                    <div class="form-group">
-                        <select class="form-select" @bind="SelectedDestinationId">
 
-                            <option value="null">Select destination to configure</option>
-                            @foreach (var destination in Destinations)
-                            {
-                                <option value="@destination">@destination</option>
-                            }
-                        </select>
-                    </div>
-                }
-                @if (SelectedDestinationId is not null && SelectedDestinationId != "null")
+            <div class="prism col-sm-12 border border-light p-2">
+                @if (SelectedDestinationId is null or "null")
                 {
-                    <PrismDestinationEditor ValidateId="ValidateId" Id="@SelectedDestinationId" IdChanged="OnIdRenamed" ValidateDestination="s => ValidateDestination(s, false)" @bind-Settings="SelectedDestination"></PrismDestinationEditor>
+                    <h2>Global Prism Settings</h2>
+                    <div class="row mb-4">
+                        <div class="col-xl-10 col-xxl-constrain">
+
+                            <div class="form-group form-check">
+                                <input @bind="Settings.Enabled" type="checkbox" class="form-check-input"/>
+                                <label asp-for="Enabled" class="form-check-label">Enabled</label>
+                                <ValidationMessage2 For="() => Settings.Enabled" class="text-danger"></ValidationMessage2>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Sat Threshold</label>
+                                <input type="number" @bind="Settings.SatThreshold" min="1" class="form-control"/>
+                                <ValidationMessage2 For="() => Settings.SatThreshold" class="text-danger"></ValidationMessage2>
+                                <span class="text-muted">How many sats do you want to accumulate per destination before sending?</span>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Reserve fee</label>
+                                <input type="number" @bind="Settings.Reserve" min="0" max="100" class="form-control"/>
+                                <ValidationMessage2 For="() => Settings.Reserve" class="text-danger"></ValidationMessage2>
+                                <span class="text-muted">When a payout is being generated, how many of its amount in percentage should be excluded to cover the fee? Once the payment is settled, if the lightning node provides the exact fee, the balance is adjusted accordingly.</span>
+                            </div>
+                        </div>
+
+
+                    </div>
+                    
+                    @if(Settings.Splits.Any())
+                    {
+                        <h2>Your Prisms</h2>
+                        @foreach (var item in Settings.Splits)
+                        {
+                            <PrismSplit Split="@item" OnRequestRemove="@RemovePrism"/>
+                        }
+                    }
+                }
+                else
+                {
+                    @if (SelectedDestinationId is not null && SelectedDestinationId != "null")
+                    {
+                        switch (SelectedDestinationId)
+                        {
+                            case "":
+                                <h2>Create new Destination</h2>
+                                break;
+                                default: 
+                                    <h2>Editing @SelectedDestinationId Destination</h2>
+                                    break;
+                        }
+                        
+                        <PrismDestinationEditor
+                            ValidateId="ValidateId"
+                            ValidateDestination="s => ValidateDestination(s, false)"
+                            Id="@SelectedDestinationId"
+                            IdChanged="OnIdRenamed"
+                            @bind-Settings="SelectedDestination"
+                            OnCancel="o => SelectedDestinationId = null">
+                        </PrismDestinationEditor>
+                    }
                 }
             </div>
         </div>
-        <PrismBalances OnUpdate="OnUpdateBalance"  DestinationBalance="Settings.DestinationBalance" PendingPayouts="Settings.PendingPayouts"></PrismBalances>
+        <PrismBalances OnUpdate="OnUpdateBalance" DestinationBalance="Settings.DestinationBalance" PendingPayouts="Settings.PendingPayouts"></PrismBalances>
 
 
         @if (StatusMessageModel != null)
@@ -130,12 +145,25 @@ else
         }
         <div class="row">
             <div class="d-flex">
-                <button type="button" class="btn btn-primary  mx-2" id="add-prism" @onclick="CreateNewPrism">Add Prism</button>
-                <button type="button" class="btn btn-primary  mx-2" id="add-destination" @onclick="AddDestination">Add Destination</button>
-                <button type="submit" class="btn btn-primary  mx-2">Save</button>
+                @if (SelectedDestinationId is null or "null")
+                {
+                    
+                    <button type="button" class="btn btn-primary  mx-2" id="add-prism" @onclick="CreateNewPrism">Add Prism</button>
+                    <button type="submit" class="btn btn-primary  mx-2">Save</button>
+                    <select class="form-select mx-2" style="max-width: fit-content" @bind="SelectedDestinationId" disabled="@(SelectedDestinationId is not null && SelectedDestinationId != "null")">
+
+                        <option value="null">Select destination to configure</option>
+                        @foreach (var destination in Destinations)
+                        {
+                            <option value="@destination">@destination</option>
+                        }
+                        <option value="">Create new destination</option>
+                    </select>
+                }
+               
                 @if (PrismEditButtonsFilter is not null)
                 {
-                    @((MarkupString)PrismEditButtonsFilter)
+                    @((MarkupString) PrismEditButtonsFilter)
                 }
             </div>
         </div>
@@ -151,7 +179,7 @@ else
         StateHasChanged();
     }
 
-    public string? SelectedDestinationId { get; set; }
+    public string? SelectedDestinationId { get; set; } = "null";
 
     public PrismDestination? SelectedDestination
     {
@@ -169,12 +197,23 @@ else
             if (value is null)
             {
                 Settings.Destinations.Remove(SelectedDestinationId);
+
+                foreach (var settingsSplit in Settings.Splits)
+                {
+                    settingsSplit.Destinations.RemoveAll(split => split.Destination == SelectedDestinationId);
+                }
+                
                 SelectedDestinationId = null;
             }
             else
             {
                 Settings.Destinations.AddOrReplace(SelectedDestinationId, value);
+                
+                SelectedDestinationId = "null";
             }
+            
+            _ = SaveDestinations();
+            
         }
     }
 
@@ -186,6 +225,7 @@ else
     public bool NoPayoutProcessors { get; set; }
 
     private string PrismEditButtonsFilter { get; set; }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
@@ -347,6 +387,13 @@ else
         }
     }
 
+    private async Task SaveDestinations()
+    {
+        var settz = await SatBreaker.Get(StoreId);
+        settz.Destinations = Settings.Destinations;
+        await UpdateAndShowResult(settz);
+    }
+    
     private async Task Save()
     {
         var settz = await SatBreaker.Get(StoreId);
@@ -356,6 +403,11 @@ else
         settz.SatThreshold = Settings.SatThreshold;
         settz.Reserve = Settings.Reserve;
         Settings = settz;
+        await UpdateAndShowResult(settz);
+    }
+
+    private async Task UpdateAndShowResult(PrismSettings settz)
+    {
         var updateResult = await SatBreaker.UpdatePrismSettingsForStore(StoreId, settz);
 
         if (!updateResult)
@@ -404,8 +456,13 @@ else
 
     private async Task OnIdRenamed(string s)
     {
-        if(SelectedDestinationId == s)
+        if (SelectedDestinationId == s)
             return;
+        if (string.IsNullOrEmpty(SelectedDestinationId))
+        {
+            SelectedDestinationId = s;
+            return;
+        }
         try
         {
             await SatBreaker._updateLock.WaitAsync();
@@ -414,7 +471,7 @@ else
             {
                 return;
             }
-    // find all prisms splits that use this id + all destination balances that use this id + all pending payouts that use this id and rename them
+            // find all prisms splits that use this id + all destination balances that use this id + all pending payouts that use this id and rename them
             foreach (var destination in Settings.Splits.SelectMany(split => split.Destinations.Where(destination => destination.Destination == SelectedDestinationId)))
             {
                 destination.Destination = s;
@@ -423,7 +480,7 @@ else
             {
                 Settings.DestinationBalance.Add(s, db);
             }
-            if(Settings.Destinations.Remove(SelectedDestinationId, out var dest))
+            if (Settings.Destinations.Remove(SelectedDestinationId, out var dest))
             {
                 Settings.Destinations.Add(s, dest);
             }
@@ -451,11 +508,11 @@ else
                 Settings.DestinationBalance.AddOrReplace(obj.destination, obj.newBalance);
             }
             await SatBreaker.UpdatePrismSettingsForStore(StoreId, Settings, true);
-
         }
         finally
         {
             SatBreaker._updateLock.Release();
         }
     }
+
 }
