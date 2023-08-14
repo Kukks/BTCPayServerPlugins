@@ -126,8 +126,8 @@ else
                             ValidateId="ValidateId"
                             ValidateDestination="s => ValidateDestination(s, false)"
                             Id="@SelectedDestinationId"
-                            IdChanged="OnIdRenamed"
-                            @bind-Settings="SelectedDestination"
+                            Settings="@SelectedDestination"
+                            OnUpdate="OnDestinationUpdated"
                             OnCancel="o => SelectedDestinationId = null">
                         </PrismDestinationEditor>
                     }
@@ -189,31 +189,6 @@ else
                 return null;
             Settings.Destinations.TryGetValue(SelectedDestinationId, out var res);
             return res;
-        }
-        set
-        {
-            if (SelectedDestinationId is null)
-                return;
-            if (value is null)
-            {
-                Settings.Destinations.Remove(SelectedDestinationId);
-
-                foreach (var settingsSplit in Settings.Splits)
-                {
-                    settingsSplit.Destinations.RemoveAll(split => split.Destination == SelectedDestinationId);
-                }
-                
-                SelectedDestinationId = null;
-            }
-            else
-            {
-                Settings.Destinations.AddOrReplace(SelectedDestinationId, value);
-                
-                SelectedDestinationId = "null";
-            }
-            
-            _ = SaveDestinations();
-            
         }
     }
 
@@ -454,46 +429,6 @@ else
         return true;
     }
 
-    private async Task OnIdRenamed(string s)
-    {
-        if (SelectedDestinationId == s)
-            return;
-        if (string.IsNullOrEmpty(SelectedDestinationId))
-        {
-            SelectedDestinationId = s;
-            return;
-        }
-        try
-        {
-            await SatBreaker._updateLock.WaitAsync();
-
-            if (SelectedDestinationId == s)
-            {
-                return;
-            }
-            // find all prisms splits that use this id + all destination balances that use this id + all pending payouts that use this id and rename them
-            foreach (var destination in Settings.Splits.SelectMany(split => split.Destinations.Where(destination => destination.Destination == SelectedDestinationId)))
-            {
-                destination.Destination = s;
-            }
-            if (Settings.DestinationBalance.Remove(SelectedDestinationId, out var db))
-            {
-                Settings.DestinationBalance.Add(s, db);
-            }
-            if (Settings.Destinations.Remove(SelectedDestinationId, out var dest))
-            {
-                Settings.Destinations.Add(s, dest);
-            }
-            SelectedDestinationId = s;
-
-            await SatBreaker.UpdatePrismSettingsForStore(StoreId, Settings, true);
-        }
-        finally
-        {
-            SatBreaker._updateLock.Release();
-        }
-    }
-
     private async Task OnUpdateBalance((string destination, long newBalance) obj)
     {
         try
@@ -513,6 +448,65 @@ else
         {
             SatBreaker._updateLock.Release();
         }
+    }
+
+    private async Task OnDestinationUpdated((string Id, PrismDestination? Destination) obj)
+    {
+
+        if (obj.Destination is null && !string.IsNullOrEmpty(SelectedDestinationId))
+        {
+                Settings.Destinations.Remove(SelectedDestinationId);
+
+                foreach (var settingsSplit in Settings.Splits)
+                {
+                    settingsSplit.Destinations.RemoveAll(split => split.Destination == SelectedDestinationId);
+                }
+                
+                SelectedDestinationId = null;
+        }
+
+        else
+        {
+            Settings.Destinations.AddOrReplace(SelectedDestinationId, obj.Destination);
+            await SaveDestinations();
+            var needSave = false;
+            if (!string.IsNullOrEmpty(SelectedDestinationId) && SelectedDestinationId != obj.Id)
+            {
+                try
+                {
+                    await SatBreaker._updateLock.WaitAsync();
+
+    // find all prisms splits that use this id + all destination balances that use this id + all pending payouts that use this id and rename them
+                    foreach (var destination in Settings.Splits.SelectMany(split => split.Destinations.Where(destination => destination.Destination == SelectedDestinationId)))
+                    {
+                        destination.Destination =  obj.Id;
+                        needSave = true;
+                    }
+                    if (Settings.DestinationBalance.Remove(SelectedDestinationId, out var db))
+                        {
+                            needSave = true;
+                        Settings.DestinationBalance.Add( obj.Id, db);
+                    }
+                    if (Settings.Destinations.Remove(SelectedDestinationId, out var dest))
+                    {
+                        needSave = true;
+                        Settings.Destinations.Add( obj.Id, dest);
+                    }
+                    if (needSave)
+                    {
+                        await SatBreaker.UpdatePrismSettingsForStore(StoreId, Settings, true);
+                    }
+                }
+                finally
+                {
+                    SatBreaker._updateLock.Release();
+                }
+            }
+            SelectedDestinationId = "null";
+        }
+
+       
+
     }
 
 }

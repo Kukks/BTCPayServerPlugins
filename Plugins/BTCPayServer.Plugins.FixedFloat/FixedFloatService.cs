@@ -40,7 +40,7 @@ namespace BTCPayServer.Plugins.FixedFloat
         {
             var k = $"{nameof(FixedFloatSettings)}_{storeId}";
             await _storeRepository.UpdateSetting(storeId, nameof(FixedFloatSettings), fixedFloatSettings);
-            _memoryCache.Set(k, fixedFloatSettings);
+            _memoryCache.Remove(k);
         }
     }
 }

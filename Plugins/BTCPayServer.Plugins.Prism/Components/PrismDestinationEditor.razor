@@ -9,34 +9,37 @@
         }
         <span class="form-text">An alias to reference in destinations of prisms.</span>
     </div>
-    <div class="form-group">
-        <label class="form-label">Destination</label>
-        <input type="text" @bind="WorkingCopy.Destination" class="form-control"/>
-        @if (Invalid)
-        {
-            <span class="text-danger w-100">Invalid</span>
-        }
-        <span class="form-text">Can be a lightning address, LNURL, or a custom value that another plugin supports</span>
-    </div>
-    <div class="form-group">
-        <label class="form-label">Sat Threshold</label>
-        <input type="number" @bind="WorkingCopy.SatThreshold" min="1" class="form-control"/>
-        <span class="form-text">How many sats do you want to accumulate before sending? Leave blank to use default setting.</span>
-    </div>
-    <div class="form-group">
-        <label class="form-label">Reserve fee</label>
-        <input type="number" @bind="WorkingCopy.Reserve" min="0" max="100" class="form-control"/>
-        <span class="form-text">When a payout is being generated, how much of its amount in percentage should be excluded to cover the fee? Once the payment is settled, if the lightning node provides the exact fee, the balance is adjusted accordingly. Leave blank to use default setting.</span>
-    </div>
-    <div>
-    <button type="button" class="btn btn-primary" @onclick="Update">@(string.IsNullOrEmpty(OriginalWorkingId)? "Create": "Update")</button>
-        <button type="button" class="btn btn-secondary" @onclick="Cancel">Cancel</button>
-        @if (!string.IsNullOrEmpty(OriginalWorkingId))
-        {
-            <button type="button" class="btn btn-outline-danger" @onclick="() => SettingsChanged.InvokeAsync(null)">Remove</button>
-        }
-    </div>
-</div>
+    @if (WorkingCopy is not null)
+    {
+        <div class="form-group">
+            <label class="form-label">Destination</label>
+            <input type="text" @bind="WorkingCopy.Destination" class="form-control"/>
+            @if (Invalid)
+            {
+                <span class="text-danger w-100">Invalid</span>
+            }
+            <span class="form-text">Can be a lightning address, LNURL, or a custom value that another plugin supports</span>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Sat Threshold</label>
+            <input type="number" @bind="WorkingCopy.SatThreshold" min="1" class="form-control"/>
+            <span class="form-text">How many sats do you want to accumulate before sending? Leave blank to use default setting.</span>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Reserve fee</label>
+            <input type="number" @bind="WorkingCopy.Reserve" min="0" max="100" class="form-control"/>
+            <span class="form-text">When a payout is being generated, how much of its amount in percentage should be excluded to cover the fee? Once the payment is settled, if the lightning node provides the exact fee, the balance is adjusted accordingly. Leave blank to use default setting.</span>
+        </div>
+        <div>
+            <button type="button" class="btn btn-primary" @onclick="Update">@(string.IsNullOrEmpty(OriginalWorkingId) ? "Create" : "Update")</button>
+            <button type="button" class="btn btn-secondary" @onclick="Cancel">Cancel</button>
+            @if (!string.IsNullOrEmpty(OriginalWorkingId))
+            {
+                <button type="button" class="btn btn-outline-danger" @onclick="() => OnUpdate.InvokeAsync((OriginalWorkingId, null))">Remove</button>
+            }
+        </div>
+    }
+</div >
 
 @code {
 
@@ -45,9 +48,10 @@
     private PrismDestination WorkingCopy { get; set; }
     private string WorkingId { get; set; }
     private string OriginalWorkingId { get; set; }
-    
-[Parameter]
-public EventCallback OnCancel { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
     [Parameter]
     public Func<string, bool> ValidateDestination { get; set; }
 
@@ -71,9 +75,8 @@ public EventCallback OnCancel { get; set; }
         get => WorkingId;
         set
         {
-            if (OriginalWorkingId != value )
+            if (OriginalWorkingId != value)
             {
-                
                 WorkingId = value;
                 OriginalWorkingId = value;
                 InvalidId = false;
@@ -88,23 +91,21 @@ public EventCallback OnCancel { get; set; }
         Invalid = !ValidateDestination.Invoke(WorkingCopy.Destination);
 
         InvalidId = !ValidateId.Invoke(WorkingId);
-        
-        if(Invalid || InvalidId)
+
+        if (Invalid || InvalidId)
         {
             return;
         }
-        await IdChanged.InvokeAsync(WorkingId).ContinueWith(task => SettingsChanged.InvokeAsync(WorkingCopy));
+        await OnUpdate.InvokeAsync((WorkingId, WorkingCopy));
     }
 
-    [Parameter]
-    public EventCallback<PrismDestination?> SettingsChanged { get; set; }
 
     [Parameter]
-    public EventCallback<string> IdChanged { get; set; }
+    public EventCallback<(string Id, PrismDestination? Destination)> OnUpdate { get; set; }
 
 
     private Task Cancel()
-    {  
+    {
         return OnCancel.InvokeAsync(null);
     }
 
