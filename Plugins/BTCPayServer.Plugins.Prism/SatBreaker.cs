@@ -77,14 +77,23 @@ namespace BTCPayServer.Plugins.Prism
                 
             }
             await base.StartAsync(cancellationToken);
-            _ = CheckPayouts(CancellationToken);
+            PushEvent(new CheckPayoutsEvt());
         }
 
         protected override void SubscribeToEvents()
         {
             base.SubscribeToEvents();
             Subscribe<InvoiceEvent>();
+            Subscribe<CheckPayoutsEvt>();
+            Subscribe<PayoutEvent>();
         }
+
+        class CheckPayoutsEvt
+        {
+            
+        }
+        
+        private TaskCompletionSource _checkPayoutTcs = new();
 
         /// <summary>
         /// Go through generated payouts and check if they are completed or cancelled, and then remove them from the list.
@@ -94,117 +103,117 @@ namespace BTCPayServer.Plugins.Prism
         /// <param name="cancellationToken"></param>
         private async Task CheckPayouts(CancellationToken cancellationToken)
         {
-            while (!cancellationToken.IsCancellationRequested)
+            try
             {
-                try
+                _checkPayoutTcs = new TaskCompletionSource();
+                var payoutsToCheck =
+                    _prismSettings.ToDictionary(pair => pair.Key, pair => pair.Value.PendingPayouts);
+                var payoutIds = payoutsToCheck
+                    .SelectMany(pair => pair.Value?.Keys.ToArray() ?? Array.Empty<string>()).ToArray();
+                var payouts = (await _pullPaymentHostedService.GetPayouts(new PullPaymentHostedService.PayoutQuery()
                 {
-                    var payoutsToCheck =
-                        _prismSettings.ToDictionary(pair => pair.Key, pair => pair.Value.PendingPayouts);
-                    var payoutIds = payoutsToCheck
-                        .SelectMany(pair => pair.Value?.Keys.ToArray() ?? Array.Empty<string>()).ToArray();
-                    var payouts = (await _pullPaymentHostedService.GetPayouts(new PullPaymentHostedService.PayoutQuery()
-                    {
-                        PayoutIds = payoutIds,
-                        States = new[] {PayoutState.Cancelled, PayoutState.Completed}
-                    }));
-                    var lnClients = new Dictionary<string, ILightningClient>();
-                    var res = new Dictionary<string, CreditDestination>();
+                    PayoutIds = payoutIds,
+                    States = new[] {PayoutState.Cancelled, PayoutState.Completed}
+                }));
+                var lnClients = new Dictionary<string, ILightningClient>();
+                var res = new Dictionary<string, CreditDestination>();
 
-                    foreach (var payout in payouts)
+                foreach (var payout in payouts)
+                {
+                    if (payoutsToCheck.TryGetValue(payout.StoreDataId, out var pendingPayouts) &&
+                        pendingPayouts.TryGetValue(payout.Id, out var pendingPayout))
                     {
-                        if (payoutsToCheck.TryGetValue(payout.StoreDataId, out var pendingPayouts) &&
-                            pendingPayouts.TryGetValue(payout.Id, out var pendingPayout))
+                        long toCredit = 0;
+                        switch (payout.State)
                         {
-                            long toCredit = 0;
-                            switch (payout.State)
-                            {
-                                case PayoutState.Completed:
+                            case PayoutState.Completed:
 
-                                    var proof = _lightningLikePayoutHandler.ParseProof(payout) as PayoutLightningBlob;
+                                var proof = _lightningLikePayoutHandler.ParseProof(payout) as PayoutLightningBlob;
 
-                                    long? feePaid = null;
-                                    if (!string.IsNullOrEmpty(proof?.PaymentHash))
+                                long? feePaid = null;
+                                if (!string.IsNullOrEmpty(proof?.PaymentHash))
+                                {
+                                    if (!lnClients.TryGetValue(payout.StoreDataId, out var lnClient))
                                     {
-                                        if (!lnClients.TryGetValue(payout.StoreDataId, out var lnClient))
+                                        var store = await _storeRepository.FindStore(payout.StoreDataId);
+
+                                        var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>("BTC");
+                                        var id = new PaymentMethodId("BTC", LightningPaymentType.Instance);
+                                        var existing = store.GetSupportedPaymentMethods(_btcPayNetworkProvider)
+                                            .OfType<LightningSupportedPaymentMethod>()
+                                            .FirstOrDefault(d => d.PaymentId == id);
+                                        if (existing?.GetExternalLightningUrl() is { } connectionString)
                                         {
-                                            var store = await _storeRepository.FindStore(payout.StoreDataId);
-
-                                            var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>("BTC");
-                                            var id = new PaymentMethodId("BTC", LightningPaymentType.Instance);
-                                            var existing = store.GetSupportedPaymentMethods(_btcPayNetworkProvider)
-                                                .OfType<LightningSupportedPaymentMethod>()
-                                                .FirstOrDefault(d => d.PaymentId == id);
-                                            if (existing?.GetExternalLightningUrl() is { } connectionString)
-                                            {
-                                                lnClient = _lightningClientFactoryService.Create(connectionString,
-                                                    network);
-                                            }
-                                            else if (existing?.IsInternalNode is true &&
-                                                     _lightningNetworkOptions.Value.InternalLightningByCryptoCode
-                                                         .TryGetValue(network.CryptoCode,
-                                                             out var internalLightningNode))
-                                            {
-                                                lnClient = _lightningClientFactoryService.Create(internalLightningNode,
-                                                    network);
-                                            }
-
-
-                                            lnClients.Add(payout.StoreDataId, lnClient);
+                                            lnClient = _lightningClientFactoryService.Create(connectionString,
+                                                network);
+                                        }
+                                        else if (existing?.IsInternalNode is true &&
+                                                 _lightningNetworkOptions.Value.InternalLightningByCryptoCode
+                                                     .TryGetValue(network.CryptoCode,
+                                                         out var internalLightningNode))
+                                        {
+                                            lnClient = _lightningClientFactoryService.Create(internalLightningNode,
+                                                network);
                                         }
 
-                                        if (lnClient is not null && proof?.PaymentHash is not null)
-                                        {
-                                            try
-                                            {
 
-                                                var p = await lnClient.GetPayment(proof.PaymentHash, CancellationToken);
-                                                feePaid = (long) p?.Fee?.ToUnit(LightMoneyUnit.Satoshi);
-                                            }
-                                            catch (Exception e)
-                                            {
-                                                _logger.LogError(e,
-                                                    "The payment fee could not be fetched from the lightning node due to an error, so we will use the allocated 2% as the fee.");
-                                            }
+                                        lnClients.Add(payout.StoreDataId, lnClient);
+                                    }
+
+                                    if (lnClient is not null && proof?.PaymentHash is not null)
+                                    {
+                                        try
+                                        {
+
+                                            var p = await lnClient.GetPayment(proof.PaymentHash, CancellationToken);
+                                            feePaid = (long) p?.Fee?.ToUnit(LightMoneyUnit.Satoshi);
+                                        }
+                                        catch (Exception e)
+                                        {
+                                            _logger.LogError(e,
+                                                "The payment fee could not be fetched from the lightning node due to an error, so we will use the allocated 2% as the fee.");
                                         }
                                     }
+                                }
 
-                                    if (feePaid is not null)
-                                    {
-                                        toCredit = pendingPayout.FeeCharged - feePaid.Value;
-                                    }
+                                if (feePaid is not null)
+                                {
+                                    toCredit = pendingPayout.FeeCharged - feePaid.Value;
+                                }
 
-                                    break;
-                                case PayoutState.Cancelled:
-                                    toCredit = pendingPayout.PayoutAmount + pendingPayout.FeeCharged;
-                                    break;
-                            }
-
-                            res.TryAdd(payout.StoreDataId,
-                                new CreditDestination(payout.StoreDataId, new Dictionary<string, long>(),
-                                    new List<string>()));
-                            var credDest = res[payout.StoreDataId];
-                            credDest.PayoutsToRemove.Add(payout.Id);
-
-                            credDest.Destcredits.Add(payout.GetBlob(_btcPayNetworkJsonSerializerSettings).Destination,
-                                toCredit);
+                                break;
+                            case PayoutState.Cancelled:
+                                toCredit = pendingPayout.PayoutAmount + pendingPayout.FeeCharged;
+                                break;
                         }
+
+                        res.TryAdd(payout.StoreDataId,
+                            new CreditDestination(payout.StoreDataId, new Dictionary<string, long>(),
+                                new List<string>()));
+                        var credDest = res[payout.StoreDataId];
+                        credDest.PayoutsToRemove.Add(payout.Id);
+
+                        credDest.Destcredits.Add(payout.GetBlob(_btcPayNetworkJsonSerializerSettings).Destination,
+                            toCredit);
                     }
-
-                    var tcs = new TaskCompletionSource(cancellationToken);
-                    PushEvent(new PayoutCheckResult(res.Values.ToArray(), tcs));
-                    //we wait for ProcessEvent to handle this result so that we avoid race conditions.
-                    await tcs.Task;
-                }
-                catch (Exception e)
-                {
-                    _logger.LogError(e, "Error while checking payouts");
                 }
 
-                await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken);
+                PushEvent(new PayoutCheckResult(res.Values.ToArray()));
+              
             }
-        }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Error while checking payouts");
+            }
 
-        record PayoutCheckResult(CreditDestination[] CreditDestinations, TaskCompletionSource Tcs);
+            _ = Task.WhenAny(_checkPayoutTcs.Task, Task.Delay(TimeSpan.FromMinutes(1), cancellationToken)).ContinueWith(
+                task =>
+                {
+                    if(!task.IsCanceled)
+                        PushEvent(new CheckPayoutsEvt());
+                }, cancellationToken);
+        }
+        record PayoutCheckResult(CreditDestination[] CreditDestinations);
 
         record CreditDestination(string StoreId, Dictionary<string, long> Destcredits, List<string> PayoutsToRemove);
 
@@ -298,8 +307,6 @@ namespace BTCPayServer.Plugins.Prism
                             }
                         }
                     }
-
-                    payoutCheckResult.Tcs.SetResult();
                     return;
                 }
 
@@ -379,6 +386,19 @@ namespace BTCPayServer.Plugins.Prism
                         await UpdatePrismSettingsForStore(invoiceEvent.Invoice.StoreId, prismSettings, true);
                     }
                 }
+                
+                if(evt is CheckPayoutsEvt)
+                {
+                    await CheckPayouts(cancellationToken);
+                }
+                if(evt is PayoutEvent payoutEvent)
+                {
+                    if (!_prismSettings.TryGetValue(payoutEvent.Payout.StoreDataId, out var prismSettings))
+                    {
+                        return;
+                    }
+                    //TODO: Trigger checking payouts, but we have to make sure we dont end up calling it multiple times at the same time as they schedule recursively.
+                }
             }
             catch (Exception e)
             {
@@ -390,6 +410,7 @@ namespace BTCPayServer.Plugins.Prism
             }
         }
 
+        
         private async Task<bool> CreatePayouts(string storeId, PrismSettings prismSettings)
         {
             var result = false;

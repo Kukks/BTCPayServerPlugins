@@ -1,6 +1,7 @@
 ﻿@using BTCPayServer.Abstractions.Contracts
 @using BTCPayServer.Abstractions.Models
 @using BTCPayServer.Client.Models
+@using BTCPayServer.HostedServices
 @using BTCPayServer.Payments
 @using BTCPayServer.PayoutProcessors
 @using Microsoft.AspNetCore.Http
@@ -14,6 +15,7 @@
 @inject IEnumerable<IPayoutProcessorFactory> PayoutProcessorFactories
 @inject SatBreaker SatBreaker
 @inject LinkGenerator LinkGenerator
+@inject PullPaymentHostedService PullPaymentHostedService
 @inject IHttpContextAccessor HttpContextAccessor
 @inject ILogger<PrismEdit> Logger
 @implements IDisposable
@@ -134,7 +136,13 @@ else
                 }
             </div>
         </div>
-        <PrismBalances OnUpdate="OnUpdateBalance" DestinationBalance="Settings.DestinationBalance" PendingPayouts="Settings.PendingPayouts"></PrismBalances>
+        <PrismBalances 
+            OnUpdate="OnUpdateBalance" 
+            OnCancelPayout="CancelPayout"
+            DestinationBalance="Settings.DestinationBalance" 
+            PendingPayouts="Settings.PendingPayouts"
+        
+            ></PrismBalances>
 
 
         @if (StatusMessageModel != null)
@@ -467,6 +475,10 @@ else
 
         else
         {
+            if (string.IsNullOrEmpty(SelectedDestinationId))
+            {
+                SelectedDestinationId = obj.Id;
+            }
             Settings.Destinations.AddOrReplace(SelectedDestinationId, obj.Destination);
             await SaveDestinations();
             var needSave = false;
@@ -507,6 +519,12 @@ else
 
        
 
+    }
+
+    private async Task CancelPayout(string payoutId)
+    {
+        await PullPaymentHostedService.Cancel(
+            new PullPaymentHostedService.CancelRequest(new[] {payoutId}, new[] {StoreId}));
     }
 
 }

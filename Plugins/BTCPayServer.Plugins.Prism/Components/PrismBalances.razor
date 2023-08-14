@@ -43,6 +43,7 @@
                     <th>Payout Id</th>
                     <th>Reserve fee</th>
                     <th>Amount</th>
+                    <th>Actions</th>
                 </tr>
                 @foreach (var (payoutId, pendingPayout) in PendingPayouts)
                 {
@@ -50,6 +51,8 @@
                         <td>@payoutId</td>
                         <td>@pendingPayout.FeeCharged</td>
                         <td>@pendingPayout.PayoutAmount</td>
+                        <td>
+                                <button type="button" class="btn btn-sm btn-link" @onclick="() => OnCancelPayout.InvokeAsync(payoutId)">Update</button></td>
                     </tr>
                 }
             </table>
@@ -70,6 +73,9 @@
     
     [Parameter]
     public EventCallback<(string destination, long newBalance)> OnUpdate { get; set; }
+    
+    [Parameter]
+    public EventCallback<string> OnCancelPayout { get; set; }
 
     private EventCallback StartUpdate(string dest, long balance)
     {
@@ -86,6 +92,5 @@
         await OnUpdate.InvokeAsync((UpdatingDestination, Convert.ToInt64(UpdatingValue.Value * 1000m)));
         UpdatingDestination = null;
     }
-    
 
 }
