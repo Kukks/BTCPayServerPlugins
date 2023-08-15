@@ -234,11 +234,17 @@ namespace BTCPayServer.Plugins.Prism
                         PushEvent(new CheckPayoutsEvt());
                 }, cancellationToken);
         }
-        // record PayoutCheckResult(CreditDestination[] CreditDestinations);
 
-        record CreditDestination(string StoreId, Dictionary<string, long> Destcredits, List<string> PayoutsToRemove);
+        public async Task WaitAndLock(CancellationToken cancellationToken = default)
+        {
+            await _updateLock.WaitAsync(cancellationToken);
+        }
 
-        public readonly SemaphoreSlim _updateLock = new(1, 1);
+        public void Unlock()
+        {
+            _updateLock.Release();
+        }
+        private readonly SemaphoreSlim _updateLock = new(1, 1);
 
         public async Task<PrismSettings> Get(string storeId)
         {
@@ -254,7 +260,7 @@ namespace BTCPayServer.Plugins.Prism
             try
             {
                 if (!skipLock)
-                    await _updateLock.WaitAsync();
+                    await WaitAndLock();
                 var currentSettings = await Get(storeId);
 
                 if (currentSettings.Version != updatedSettings.Version)
@@ -274,7 +280,7 @@ namespace BTCPayServer.Plugins.Prism
             finally
             {
                 if (!skipLock)
-                    _updateLock.Release();
+                    Unlock();
             }
 
             var prismPaymentDetectedEventArgs = new PrismPaymentDetectedEventArgs()
@@ -296,7 +302,7 @@ namespace BTCPayServer.Plugins.Prism
         {
             try
             {
-                await _updateLock.WaitAsync(cancellationToken);
+                await WaitAndLock(cancellationToken);
 
                 if (evt is InvoiceEvent invoiceEvent &&
                     new[] {InvoiceEventCode.Confirmed, InvoiceEventCode.MarkedCompleted}.Contains(
@@ -395,7 +401,6 @@ namespace BTCPayServer.Plugins.Prism
                         return;
                     }
                     _checkPayoutTcs?.TrySetResult();
-                    //TODO: Trigger checking payouts, but we have to make sure we dont end up calling it multiple times at the same time as they schedule recursively.
                 }
             }
             catch (Exception e)
@@ -404,7 +409,7 @@ namespace BTCPayServer.Plugins.Prism
             }
             finally
             {
-                _updateLock.Release();
+                Unlock();
             }
         }
 
@@ -444,7 +449,7 @@ namespace BTCPayServer.Plugins.Prism
                     Value = Money.Satoshis(payoutAmount).ToDecimal(MoneyUnit.BTC),
                     Metadata = JObject.FromObject(new
                     {
-                        Source = "Prism"
+                        Source = $"Prism ({(destinationSettings?.Destination ?? destination)})" 
                     })
                 };
                 claimRequest =
@@ -472,6 +477,11 @@ namespace BTCPayServer.Plugins.Prism
             }
 
             return result;
+        }
+
+        public void TriggerPayoutCheck()
+        {
+            _checkPayoutTcs?.TrySetResult();
         }
     }
 
