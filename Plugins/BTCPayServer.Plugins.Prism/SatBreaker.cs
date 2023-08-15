@@ -447,6 +447,11 @@ namespace BTCPayServer.Plugins.Prism
                     ? new PaymentMethodId("BTC", LightningPaymentType.Instance)
                     : pmi2;
 
+                var source = "Prism";
+                if (destinationSettings is not null)
+                {
+                    source+= $" ({destination})";
+                }
                 var claimRequest = new ClaimRequest()
                 {
                     Destination = new LNURLPayClaimDestinaton(destinationSettings?.Destination ?? destination),
@@ -456,7 +461,7 @@ namespace BTCPayServer.Plugins.Prism
                     Value = Money.Satoshis(payoutAmount).ToDecimal(MoneyUnit.BTC),
                     Metadata = JObject.FromObject(new
                     {
-                        Source = $"Prism ({(destinationSettings?.Destination ?? destination)})" 
+                        Source = source 
                     })
                 };
                 claimRequest =
