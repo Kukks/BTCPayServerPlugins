@@ -449,6 +449,7 @@ else
                 Settings.DestinationBalance.AddOrReplace(obj.destination, obj.newBalance);
             }
             await SatBreaker.UpdatePrismSettingsForStore(StoreId, Settings, true);
+            SatBreaker.TriggerPayoutCheck();
         }
         finally
         {
