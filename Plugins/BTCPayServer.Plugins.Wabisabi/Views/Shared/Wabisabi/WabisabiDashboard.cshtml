@@ -299,9 +299,11 @@
                                 }
                             </div>
                             @{
-                                if (WalletProvider.BannedCoins.TryGetValue(coordinator.CoordinatorName, out var bannedCoinsList))
+                                
+                                if (coordinator.CoinPrison is not null)
                                 {
-                                    var bannedCoins = coins.Where(coin => bannedCoinsList.ContainsKey(coin.Outpoint));
+                                   
+                                    var bannedCoins = coins.Where(coin =>  coordinator.CoinPrison.TryGetOrRemoveBannedCoin(coin.Outpoint, out _));
                                     @if (bannedCoins.Any())
                                     {
                                         <div>

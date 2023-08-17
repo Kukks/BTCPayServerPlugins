@@ -58,9 +58,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     }
 
     public readonly  ConcurrentDictionary<string, Task<IWallet?>> LoadedWallets = new();
-    public ConcurrentDictionary<string, Dictionary<OutPoint, DateTimeOffset>> BannedCoins = new();
 
-   
     public class WalletUnloadEventArgs : EventArgs
     {
         public IWallet Wallet { get; }
@@ -129,8 +127,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
                 _serviceProvider.GetRequiredService<PullPaymentHostedService>(),derivationStrategy, explorerClient, keychain,
                 name, wabisabiStoreSettings, UtxoLocker,
                 _loggerFactory, 
-                _serviceProvider.GetRequiredService<StoreRepository>(), BannedCoins,
-                _eventAggregator);
+                _serviceProvider.GetRequiredService<StoreRepository>());
             
         });
         
@@ -273,18 +270,6 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
             await GetWalletAsync(storeId);
         }
     }
-
-    public void OnBan(string coordinatorName, BannedCoinEventArgs args)
-    {
-        BannedCoins.AddOrUpdate(coordinatorName,
-            s => new Dictionary<OutPoint, DateTimeOffset>() {{args.Utxo, args.BannedTime}},
-            (s, offsets) =>
-            {
-                offsets.TryAdd(args.Utxo, args.BannedTime);
-                return offsets;
-            });
-    }
-    
     public override Task StartAsync(CancellationToken cancellationToken)
     {
         Task.Run(async () =>

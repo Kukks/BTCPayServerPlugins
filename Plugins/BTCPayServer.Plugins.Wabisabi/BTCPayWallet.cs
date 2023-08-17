@@ -66,8 +66,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         WabisabiStoreSettings wabisabiStoreSettings,
         IUTXOLocker utxoLocker,
         ILoggerFactory loggerFactory,
-        StoreRepository storeRepository,
-        ConcurrentDictionary<string, Dictionary<OutPoint, DateTimeOffset>> bannedCoins, EventAggregator eventAggregator)
+        StoreRepository storeRepository)
     {
         KeyChain = keyChain;
         _walletRepository = walletRepository;
@@ -82,7 +81,6 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         WabisabiStoreSettings = wabisabiStoreSettings;
         UtxoLocker = utxoLocker;
         _storeRepository = storeRepository;
-        _bannedCoins = bannedCoins;
         Logger = loggerFactory.CreateLogger($"BTCPayWallet_{storeId}");
 
     }
@@ -149,7 +147,6 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     private IRoundCoinSelector _coinSelector;
     public Smartifier _smartifier => (KeyChain as BTCPayKeyChain)?.Smartifier;
     private readonly StoreRepository _storeRepository;
-    private readonly ConcurrentDictionary<string, Dictionary<OutPoint, DateTimeOffset>> _bannedCoins;
 
     public IRoundCoinSelector GetCoinSelector()
     {
@@ -229,17 +226,6 @@ public class BTCPayWallet : IWallet, IDestinationProvider
 
             var locks = await UtxoLocker.FindLocks(utxos.Select(data => data.OutPoint).ToArray());
             utxos = utxos.Where(data => !locks.Contains(data.OutPoint)).Where(data => data.Confirmations > 0).ToArray();
-            if (_bannedCoins.TryGetValue(coordinatorName, out var bannedCoins))
-            {
-                var expired = bannedCoins.Where(pair => pair.Value < DateTimeOffset.Now).ToArray();
-                foreach (var c in expired)
-                {
-                    bannedCoins.Remove(c.Key);
-
-                }
-
-                utxos = utxos.Where(data => !bannedCoins.ContainsKey(data.OutPoint)).ToArray();
-            }
             await _smartifier.LoadCoins(utxos.Where(data => data.Confirmations>0).ToList(), 1, utxoLabels);
             
             var resultX =  await Task.WhenAll(_smartifier.Coins.Where(pair =>  utxos.Any(data => data.OutPoint == pair.Key))

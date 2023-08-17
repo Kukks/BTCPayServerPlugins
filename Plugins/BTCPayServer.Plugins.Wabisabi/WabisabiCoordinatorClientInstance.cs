@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Payments.PayJoin;
+using BTCPayServer.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -15,6 +16,7 @@ using WalletWasabi.Tor.Socks5.Pool.Circuits;
 using WalletWasabi.Userfacing;
 using WalletWasabi.WabiSabi.Backend.PostRequests;
 using WalletWasabi.WabiSabi.Client;
+using WalletWasabi.WabiSabi.Client.Banning;
 using WalletWasabi.WabiSabi.Client.RoundStateAwaiters;
 using WalletWasabi.WabiSabi.Client.StatusChangedEvents;
 using WalletWasabi.Wallets;
@@ -137,6 +139,7 @@ public class WabisabiCoordinatorClientInstance
     public string TermsConditions { get; set; }
     public HttpClientFactory WasabiHttpClientFactory { get; set; }
     public RoundStateUpdater RoundStateUpdater { get; set; }
+    public CoinPrison CoinPrison { get; private set; }
     public WasabiCoordinatorStatusFetcher WasabiCoordinatorStatusFetcher { get; set; }
     public CoinJoinManager CoinJoinManager { get; set; }
     public string Description { get; set; }
@@ -196,24 +199,22 @@ public class WabisabiCoordinatorClientInstance
         WasabiCoordinatorStatusFetcher = new WasabiCoordinatorStatusFetcher(sharedWabisabiClient, _logger);
         
         RoundStateUpdater = new RoundStateUpdater(TimeSpan.FromSeconds(5),sharedWabisabiClient, WasabiCoordinatorStatusFetcher);
+
+        CoinPrison = SettingsCoinPrison.CreateFromCoordinatorName(serviceProvider.GetRequiredService<SettingsRepository>(),
+            CoordinatorName).GetAwaiter().GetResult();
         if (coordinatorName == "local")
         {
             CoinJoinManager = new CoinJoinManager(coordinatorName, WalletProvider, RoundStateUpdater,
                 sharedWabisabiClient, null,
-                WasabiCoordinatorStatusFetcher, coordinatorIdentifier);
+                WasabiCoordinatorStatusFetcher, coordinatorIdentifier, CoinPrison);
         }
         else
         {
             CoinJoinManager = new CoinJoinManager(coordinatorName,WalletProvider, RoundStateUpdater,null,  WasabiHttpClientFactory,
-                WasabiCoordinatorStatusFetcher, coordinatorIdentifier);
+                WasabiCoordinatorStatusFetcher, coordinatorIdentifier, CoinPrison);
         }
 
         CoinJoinManager.StatusChanged += OnStatusChanged;
-        CoinJoinManager.OnBan += (sender, args) =>
-        {
-            WalletProvider.OnBan(coordinatorName, args);
-        };
-
     }
 
     public async Task StopWallet(IWallet wallet)

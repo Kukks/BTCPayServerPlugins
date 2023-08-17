@@ -81,7 +81,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             Random.Shared.Next(10, 31),
             minCoins,
             new Dictionary<AnonsetType, int>() {{AnonsetType.Red, 1}, {AnonsetType.Orange, 1}, {AnonsetType.Green, 1}},
-            _wallet.ConsolidationMode, liquidityClue);
+            _wallet.ConsolidationMode, liquidityClue, secureRandom);
         _logger.LogTrace(solution.ToString());
         return solution.Coins.ToImmutableList();
     }
@@ -90,7 +90,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
         IEnumerable<SmartCoin> coins, IEnumerable<PendingPayment> pendingPayments,
         int maxCoins,
         Dictionary<AnonsetType, int> maxPerType, Dictionary<AnonsetType, int> idealMinimumPerType,
-        bool consolidationMode, Money liquidityClue)
+        bool consolidationMode, Money liquidityClue, SecureRandom random)
     {
         // Sort the coins by their anon score and then by descending order their value, and then slightly randomize in 2 ways:
         //attempt to shift coins that comes from the same tx AND also attempt to shift coins based on percentage probability
@@ -128,7 +128,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             var coinColorCount = solution.SortedCoins.ToDictionary(pair => pair.Key, pair => pair.Value.Length);
 
             var predicate = new Func<SmartCoin, bool>(_ => true);
-            foreach (var coinColor in idealMinimumPerType.ToShuffled())
+            foreach (var coinColor in idealMinimumPerType.ToShuffled(random))
             {
                 if (coinColor.Value != 0)
                 {
@@ -176,7 +176,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             var potentialPayments = remainingPendingPayments
                 .Where(payment =>
                     payment.ToTxOut().EffectiveCost(utxoSelectionParameters.MiningFeeRate).ToDecimal(MoneyUnit.BTC) <=
-                    solution.LeftoverValue).ToShuffled();
+                    solution.LeftoverValue).ToShuffled(random);
 
             while (potentialPayments.Any())
             {
@@ -185,7 +185,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                 remainingPendingPayments.Remove(payment);
                 potentialPayments = remainingPendingPayments.Where(payment =>
                     payment.ToTxOut().EffectiveCost(utxoSelectionParameters.MiningFeeRate).ToDecimal(MoneyUnit.BTC) <=
-                    solution.LeftoverValue).ToShuffled();
+                    solution.LeftoverValue).ToShuffled(random);
             }
 
             if (!remainingPendingPayments.Any())
