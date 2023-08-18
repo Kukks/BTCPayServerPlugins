@@ -171,7 +171,7 @@ namespace BTCPayServer.Plugins.Wabisabi
                         {
                             ECPrivKey.TryCreate(new ReadOnlySpan<byte>(RandomNumberGenerator.GetBytes(32)),
                                 out var key);
-                            evts.Add(await Nostr.CreateCoordinatorDiscoveryEvent(network, key.ToHex(),
+                            evts.Add(await Nostr.CreateCoordinatorDiscoveryEvent(network, key,
                                 new Uri($"https://{Guid.NewGuid()}.com"), "fake regtest coord test"));
                         }
 
