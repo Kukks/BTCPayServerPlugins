@@ -16,10 +16,7 @@ public class WabisabiCoordinatorSettings
     public List<DiscoveredCoordinator> DiscoveredCoordinators { get; set; } = new();
 
 
-    public ECPrivKey GetKey()
-    {
-        return string.IsNullOrEmpty(NostrIdentity) ? null : NostrExtensions.ParseKey(NostrIdentity);
-    }
+    public ECPrivKey GetKey() => string.IsNullOrEmpty(NostrIdentity) ? null : NostrExtensions.ParseKey(NostrIdentity);
 
     public ECXOnlyPubKey GetPubKey() => GetKey()?.CreatePubKey().ToXOnlyPubKey();
     public Uri UriToAdvertise { get; set; }

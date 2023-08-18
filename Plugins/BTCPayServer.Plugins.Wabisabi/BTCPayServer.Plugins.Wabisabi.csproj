@@ -43,7 +43,7 @@
         </ProjectReference>
     </ItemGroup>
     <ItemGroup>
-        <PackageReference Include="NNostr.Client" Version="0.0.33" />
+        <PackageReference Include="NNostr.Client" Version="0.0.34" />
         <PackageReference Include="WabiSabi" Version="1.0.1.2" />
     </ItemGroup>
     <Target Name="DeleteExampleFile" AfterTargets="Publish">
