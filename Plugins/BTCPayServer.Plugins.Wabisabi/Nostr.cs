@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using BTCPayServer.Services;
 using LNURL;
 using NBitcoin;
+using NBitcoin.Secp256k1;
 using NNostr.Client;
 using WalletWasabi.Backend.Controllers;
 
@@ -46,11 +47,10 @@ public class Nostr
     }
 
     public static async Task<NostrEvent> CreateCoordinatorDiscoveryEvent(Network currentNetwork,
-        string key,
+        ECPrivKey key,
         Uri coordinatorUri,
         string description)
     {
-        var privateKey = NostrExtensions.ParseKey(key);
         var evt = new NostrEvent()
         {
             Kind = Kind,
@@ -63,7 +63,7 @@ public class Nostr
             }
         };
         
-        await evt.ComputeIdAndSignAsync(privateKey);
+        await evt.ComputeIdAndSignAsync(key);
         return evt;
     }
 

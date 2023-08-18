@@ -10,12 +10,10 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Common;
-using BTCPayServer.Configuration;
 using BTCPayServer.Security;
 using BTCPayServer.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using NBitcoin;
 using NBitcoin.Payment;
@@ -31,7 +29,7 @@ namespace BTCPayServer.Plugins.Wabisabi
     [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     [Route("plugins/{storeId}/Wabisabi")]
-    public partial class WabisabiStoreController : Controller
+    public class WabisabiStoreController : Controller
     {
         private readonly WabisabiService _WabisabiService;
         private readonly WalletProvider _walletProvider;

@@ -16,8 +16,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NBitcoin;
 using NBitcoin.RPC;
+using NBitcoin.Secp256k1;
 using NBXplorer;
 using Newtonsoft.Json.Linq;
+using NNostr.Client;
 using WalletWasabi.Bases;
 using WalletWasabi.BitcoinCore.Rpc;
 using WalletWasabi.Cache;
@@ -95,9 +97,10 @@ public class WabisabiCoordinatorService : PeriodicRunner
             instance.TermsConditions = wabisabiCoordinatorSettings.TermsConditions;
         }
 
-        _ =  ActionAsync(CancellationToken.None);
         
         await _settingsRepository.UpdateSetting(wabisabiCoordinatorSettings, nameof(WabisabiCoordinatorSettings));
+        
+        TriggerRound();
     }
 
     public class BtcPayRpcClient : CachedRpcClient
@@ -217,10 +220,21 @@ public class WabisabiCoordinatorService : PeriodicRunner
         if (s.Enabled && !string.IsNullOrEmpty(s.NostrIdentity) && s.NostrRelay is not null &&
             s.UriToAdvertise is not null)
         {
+            ECPrivKey key;
+            try
+            {
+                key = NostrExtensions.ParseKey(s.NostrIdentity);
+            }
+            catch (Exception e)
+            {
+                s.NostrIdentity = null;
+                await UpdateSettings(s);
+                throw;
+            }
             await Nostr.Publish(s.NostrRelay,
                 new[]
                 {
-                    await Nostr.CreateCoordinatorDiscoveryEvent(network, s.NostrIdentity, s.UriToAdvertise,
+                    await Nostr.CreateCoordinatorDiscoveryEvent(network, key, s.UriToAdvertise,
                         s.CoordinatorDescription)
                 },s.UriToAdvertise.IsOnion()?  _socks5HttpClientHandler: null, cancel);
         }
