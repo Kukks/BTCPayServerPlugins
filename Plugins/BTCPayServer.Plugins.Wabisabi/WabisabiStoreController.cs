@@ -183,7 +183,7 @@ namespace BTCPayServer.Plugins.Wabisabi
                         var result = await Nostr.Discover(
                             _socks5HttpClientHandler, relayUri,
                             network,
-                            coordSettings.Key?.CreateXOnlyPubKey().ToHex(), CancellationToken.None);
+                            coordSettings.GetPubKey()?.ToHex(), CancellationToken.None);
                         if(result.Any())
                             TempData["DiscoveredCoordinators"] = JsonConvert.SerializeObject(result);
                         else

@@ -14,9 +14,14 @@ public class WabisabiCoordinatorSettings
     public Uri NostrRelay { get; set; } = new Uri("wss://kukks.org/nostr");
     
     public List<DiscoveredCoordinator> DiscoveredCoordinators { get; set; } = new();
-    
-    [JsonIgnore] public ECPrivKey? Key =>  string.IsNullOrEmpty(NostrIdentity)? null: NostrExtensions.ParseKey(NostrIdentity);
-    [JsonIgnore] public ECXOnlyPubKey PubKey =>  Key?.CreatePubKey().ToXOnlyPubKey();
+
+
+    public ECPrivKey GetKey()
+    {
+        return string.IsNullOrEmpty(NostrIdentity) ? null : NostrExtensions.ParseKey(NostrIdentity);
+    }
+
+    public ECXOnlyPubKey GetPubKey() => GetKey()?.CreatePubKey().ToXOnlyPubKey();
     public Uri UriToAdvertise { get; set; }
     public string TermsConditions { get; set; } =  @"
 These terms and conditions govern your use of the Coinjoin Coordinator service. By using the service, you agree to be bound by these terms and conditions. If you do not agree to these terms and conditions, you should not use the service.
