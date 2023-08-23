@@ -13,7 +13,7 @@ namespace BTCPayServer.Plugins.FixedFloat
 
         public string? PreferredTargetPaymentMethodId { get; set; }
 
-        public string[] ExplicitMethods { get; set; }
+        public string[]? ExplicitMethods { get; set; }
         public bool OnlyShowExplicitMethods { get; set; } = false;
 
         public static Dictionary<string, string> AllowedSendingOptions = new()
