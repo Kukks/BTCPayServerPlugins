@@ -92,7 +92,7 @@ else
                             </div>
                             <div class="form-group">
                                 <label class="form-label">Reserve fee</label>
-                                <input type="number" @bind="Settings.Reserve" min="0" max="100" class="form-control"/>
+                                <input type="number" @bind="Settings.Reserve" min="0" max="100" step="any" class="form-control"/>
                                 <ValidationMessage2 For="() => Settings.Reserve" class="text-danger"></ValidationMessage2>
                                 <span class="text-muted">When a payout is being generated, how many of its amount in percentage should be excluded to cover the fee? Once the payment is settled, if the lightning node provides the exact fee, the balance is adjusted accordingly.</span>
                             </div>
