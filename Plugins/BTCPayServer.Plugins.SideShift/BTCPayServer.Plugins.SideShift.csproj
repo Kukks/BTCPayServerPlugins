@@ -9,7 +9,7 @@
   <PropertyGroup>
     <Product>SideShift</Product>
     <Description>Allows you to embed a SideShift conversion screen to allow customers to pay with altcoins.</Description>
-    <Version>1.1.2</Version>
+    <Version>1.1.3</Version>
   </PropertyGroup>
   <!-- Plugin development properties -->
   <PropertyGroup>
