@@ -38,12 +38,7 @@ public class ZapperSettings
     public ECXOnlyPubKey ZappingPublicKey => ZappingKey.CreateXOnlyPubKey();
     [JsonIgnore]
     public string ZappingPublicKeyHex => ZappingPublicKey.ToHex();
-    public string ZapperPrivateKey { get; init; }
-
-    public void Deconstruct(out string ZapperPrivateKey)
-    {
-        ZapperPrivateKey = this.ZapperPrivateKey;
-    }
+    public string ZapperPrivateKey { get; set; }
 }
 public class Zapper : IHostedService
 {
@@ -55,11 +50,18 @@ public class Zapper : IHostedService
     private readonly ILogger<Zapper> _logger;
     private readonly SettingsRepository _settingsRepository;
     private IEventAggregatorSubscription _subscription;
-    private ConcurrentBag<PendingZapEvent> _pendingZapEvents = new();
+    private readonly ConcurrentBag<PendingZapEvent> _pendingZapEvents = new();
 
     public async Task<ZapperSettings> GetSettings()
-    { var result = await _settingsRepository.GetSettingAsync<ZapperSettings>( "Zapper");
-        if (result is not null) return result;
+    {
+        var result = await _settingsRepository.GetSettingAsync<ZapperSettings>("Zapper");
+
+        if (result is not null)
+        {
+            result.ZapperPrivateKey ??= Convert.ToHexString(RandomUtils.GetBytes(32));
+            return result;
+        }
+
         result = new ZapperSettings(Convert.ToHexString(RandomUtils.GetBytes(32)));
         await _settingsRepository.UpdateSetting(result, "Zapper");
 

@@ -34,8 +34,12 @@ public class LnurlDescriptionFilter : PluginHookFilter<string>
 
     public override async Task<string> Execute(string arg)
     {
+        if(_httpContextAccessor.HttpContext is null)
+            return arg;
         if (_httpContextAccessor.HttpContext.Request.Query.TryGetValue("nostr", out var nostr) &&
-            _httpContextAccessor.HttpContext.Request.RouteValues.TryGetValue("invoiceId", out var invoiceId))
+            (_httpContextAccessor.HttpContext.Request.RouteValues.TryGetValue("invoiceId", out var invoiceId) ||
+             _httpContextAccessor.HttpContext.Items.TryGetValue("invoiceId", out invoiceId)
+             ))
         {
             try
             {
@@ -47,38 +51,33 @@ public class LnurlDescriptionFilter : PluginHookFilter<string>
                 {
                     return arg;
                 }
+                else
+                {
+                    var lnAddress = await _lightningAddressService.ResolveByAddress(username);
+                    if (lnAddress is null)
+                    {
+                        return arg;
+                    }
+                }
 
-                var lnAddress = await _lightningAddressService.ResolveByAddress(username);
-                if (lnAddress is null)
+               
+
+                var parsedNote = System.Text.Json.JsonSerializer.Deserialize<NostrEvent>(nostr);
+                if (parsedNote?.Kind != 9734)
                 {
                     return arg;
                 }
 
-                var user = await _nip5Controller.Get(username);
-                if (user.storeId is not null)
+                if (!parsedNote.Verify())
                 {
-                    if (user.storeId != lnAddress.StoreDataId)
-                    {
-                        return arg;
-                    }
-
-                    var parsedNote = System.Text.Json.JsonSerializer.Deserialize<NostrEvent>(nostr);
-                    if (parsedNote?.Kind != 9734)
-                    {
-                        return arg;
-                    }
-
-                    if (!parsedNote.Verify())
-                    {
-                        return arg;
-                    }
-
-                    using var entry = _memoryCache.CreateEntry(Nip05Plugin.GetZapRequestCacheKey(invoiceId.ToString()));
-                    entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
-                    entry.SetAbsoluteExpiration(TimeSpan.FromMinutes(5));
-                    entry.SetValue(nostr);
-                    return nostr;
+                    return arg;
                 }
+
+                using var entry = _memoryCache.CreateEntry(Nip05Plugin.GetZapRequestCacheKey(invoiceId.ToString()));
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
+                entry.SetAbsoluteExpiration(TimeSpan.FromMinutes(5));
+                entry.SetValue(nostr);
+                return nostr;
             }
             catch (Exception e)
             {
