@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -107,10 +108,12 @@ public class WabisabiCoordinatorService : PeriodicRunner
     public class BtcPayRpcClient : CachedRpcClient
     {
         private readonly ExplorerClient _explorerClient;
+        private readonly Stopwatch _uptime;
 
         public BtcPayRpcClient(RPCClient rpc, IMemoryCache cache, ExplorerClient explorerClient) : base(rpc, cache)
         {
             _explorerClient = explorerClient;
+            _uptime = Stopwatch.StartNew();
         }
 
         public override async Task<Transaction> GetRawTransactionAsync(uint256 txid, bool throwIfNotFound = true,
@@ -142,6 +145,10 @@ public class WabisabiCoordinatorService : PeriodicRunner
             var result = await _explorerClient.GetStatusAsync(cancellationToken);
             return result.BitcoinStatus.Blocks;
         }
+        public override Task<TimeSpan> UptimeAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(_uptime.Elapsed);
+        }
 
         public override async Task<EstimateSmartFeeResponse> EstimateSmartFeeAsync(int confirmationTarget,
             EstimateSmartFeeMode estimateMode = EstimateSmartFeeMode.Conservative,
@@ -160,6 +167,25 @@ public class WabisabiCoordinatorService : PeriodicRunner
                 options: CacheOptionsWithExpirationToken(size: 1, expireInSeconds: 60),
                 cancellationToken).ConfigureAwait(false);
 
+        }
+
+
+        public override async Task<BlockchainInfo> GetBlockchainInfoAsync(CancellationToken cancellationToken = default)
+        {
+            var status = await _explorerClient.GetStatusAsync(cancellationToken);
+
+            return new BlockchainInfo()
+            {
+                Chain = _explorerClient.Network.NBitcoinNetwork,
+                InitialBlockDownload = status.BitcoinStatus.VerificationProgress > 0.999,
+                Blocks = (ulong) status.BitcoinStatus.Blocks,
+                Headers = (ulong) status.BitcoinStatus.Headers,
+            };
+        }
+
+        public override async Task<PeerInfo[]> GetPeersInfoAsync(CancellationToken cancellationToken = default)
+        {
+            return new[] {new PeerInfo()};
         }
     }
 
