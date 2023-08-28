@@ -13,6 +13,7 @@ using BTCPayServer.Services;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NBitcoin;
 using NBitcoin.RPC;
@@ -38,7 +39,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
     private readonly IMemoryCache _memoryCache;
     private readonly WabisabiCoordinatorClientInstanceManager _instanceManager;
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly LinkGenerator _linkGenerator;
+    private readonly ILogger<WabisabiCoordinatorService> _logger;
 
     public readonly IdempotencyRequestCache IdempotencyRequestCache;
 
@@ -51,7 +52,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
         WabisabiCoordinatorClientInstanceManager instanceManager,
         IHttpClientFactory httpClientFactory,
         IServiceProvider serviceProvider,
-        LinkGenerator linkGenerator) : base(TimeSpan.FromMinutes(15))
+        ILogger<WabisabiCoordinatorService> logger ) : base(TimeSpan.FromMinutes(15))
     {
         _settingsRepository = settingsRepository;
         _dataDirectories = dataDirectories;
@@ -59,7 +60,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
         _memoryCache = memoryCache;
         _instanceManager = instanceManager;
         _httpClientFactory = httpClientFactory;
-        _linkGenerator = linkGenerator;
+        _logger = logger;
         _socks5HttpClientHandler = serviceProvider.GetRequiredService<Socks5HttpClientHandler>();
         IdempotencyRequestCache = new(memoryCache);
     }
@@ -195,6 +196,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
 
     public async Task StartCoordinator(CancellationToken cancellationToken)
     {
+        _logger.LogInformation("Starting local coordinator");
         await HostedServices.StartAllAsync(cancellationToken);
         if (_instanceManager.HostedServices.TryGetValue("local", out var instance))
         {

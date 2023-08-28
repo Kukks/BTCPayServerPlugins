@@ -75,7 +75,7 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
             "onchain-wallet-send"));
 
         // applicationBuilder.AddSingleton<IPayoutProcessorFactory, WabisabiPayoutProcessor>();
-        Logger.SetMinimumLevel(LogLevel.Warning);
+        Logger.SetMinimumLevel(LogLevel.Info);
         Logger.SetModes(LogMode.DotNetLoggers);
 
 
@@ -136,7 +136,6 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
                 (WalletProvider)applicationBuilderApplicationServices.GetRequiredService<IWalletProvider>();
             await walletProvider.ResetWabisabiStuckPayouts(null);
         });
-
         Logger.DotnetLogger = applicationBuilderApplicationServices.GetService<ILogger<WabisabiPlugin>>();
         base.Execute(applicationBuilder, applicationBuilderApplicationServices);
     }
