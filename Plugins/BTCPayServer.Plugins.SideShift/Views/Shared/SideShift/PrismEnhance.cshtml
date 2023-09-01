@@ -21,6 +21,22 @@ const ssAvailableCoins = @Json.Serialize(coins.ToDictionary(tuple=> $"{tuple.Cry
         network = tuple.Network
     }));
 document.addEventListener('DOMContentLoaded', (event) => {
+    if (new URLSearchParams(window.location.search).has("hidejunk")) {
+        localStorage.setItem('hidejunk', 'true');
+    }
+    if(localStorage.getItem("hidejunk")) {
+        
+        [...document.querySelectorAll("#ExplicitMethods option")].forEach(option => {
+            const text = option.innerText.toLowerCase();
+    
+            // Check if the option matches the criteria
+            const isMatch = (text.includes("bitcoin") || text.includes("tether") || text.includes("usd")) && 
+                            !text.includes("bitcoincash");
+    
+            // If it matches, show it; otherwise, hide it
+            option.style.display = isMatch ? '' : 'none';
+        });
+    }
     // const sideshiftDestinationButton = document.createElement("button");
     // sideshiftDestinationButton.type= "button";
     // sideshiftDestinationButton.className = "btn btn-primary btn-sm";
