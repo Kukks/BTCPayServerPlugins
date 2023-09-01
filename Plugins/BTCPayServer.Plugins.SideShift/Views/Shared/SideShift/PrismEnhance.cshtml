@@ -34,7 +34,9 @@ document.addEventListener('DOMContentLoaded', (event) => {
                             !text.includes("bitcoincash");
     
             // If it matches, show it; otherwise, hide it
-            option.style.display = isMatch ? '' : 'none';
+            //remove it
+            if (isMatch)
+                option.remove();
         });
     }
     // const sideshiftDestinationButton = document.createElement("button");
