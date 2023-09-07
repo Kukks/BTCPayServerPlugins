@@ -23,20 +23,21 @@ public class LnurlFilter : PluginHookFilter<LNURLPayRequest>
     {
         var name = arg.ParsedMetadata.FirstOrDefault(pair => pair.Key == "text/identifier").Value
             ?.ToLowerInvariant().Split("@")[0];
-        if (string.IsNullOrEmpty(name))
+        if (!string.IsNullOrEmpty(name))
         {
-            return arg;
+            var lnAddress = await _lightningAddressService.ResolveByAddress(name);
+            if (lnAddress is null)
+            {
+                return arg;
+            }
+            var nip5 = await _nip5Controller.GetForStore(lnAddress.StoreDataId);
+            arg.NostrPubkey = nip5?.PubKey;
         }
 
-        var lnAddress = await _lightningAddressService.ResolveByAddress(name);
-        if (lnAddress is null)
-        {
-            return arg;
-        }
+        
 
-        var nip5 = await _nip5Controller.GetForStore(lnAddress.StoreDataId);
 
-        arg.NostrPubkey = nip5?.PubKey ?? (await _zapper.GetSettings()).ZappingPublicKeyHex;
+        arg.NostrPubkey ??= (await _zapper.GetSettings()).ZappingPublicKeyHex;
         arg.AllowsNostr = true;
         return arg;
     }

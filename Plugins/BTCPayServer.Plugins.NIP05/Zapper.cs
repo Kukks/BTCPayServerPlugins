@@ -5,8 +5,10 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Events;
+using BTCPayServer.Models.InvoicingModels;
 using BTCPayServer.Payments;
 using BTCPayServer.Services;
+using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Hosting;
@@ -49,6 +51,7 @@ public class Zapper : IHostedService
     private readonly IMemoryCache _memoryCache;
     private readonly ILogger<Zapper> _logger;
     private readonly SettingsRepository _settingsRepository;
+    private readonly InvoiceRepository _invoiceRepository;
     private IEventAggregatorSubscription _subscription;
     private readonly ConcurrentBag<PendingZapEvent> _pendingZapEvents = new();
 
@@ -70,13 +73,18 @@ public class Zapper : IHostedService
 
 
     public Zapper(EventAggregator eventAggregator, 
-        Nip5Controller nip5Controller, IMemoryCache memoryCache, ILogger<Zapper> logger, SettingsRepository settingsRepository, StoreRepository storeRepository)
+        Nip5Controller nip5Controller, 
+        IMemoryCache memoryCache, 
+        ILogger<Zapper> logger, 
+        SettingsRepository settingsRepository, 
+        InvoiceRepository invoiceRepository)
     {
         _eventAggregator = eventAggregator;
         _nip5Controller = nip5Controller;
         _memoryCache = memoryCache;
         _logger = logger;
         _settingsRepository = settingsRepository;
+        _invoiceRepository = invoiceRepository;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -202,9 +210,16 @@ public class Zapper : IHostedService
             Tags = tags
         };
 
-
-        await zapReceipt.ComputeIdAndSignAsync(key);
-        _pendingZapEvents.Add(new PendingZapEvent(relays.Concat(userNostrSettings?.Relays?? Array.Empty<string>()).Distinct().ToArray(), zapReceipt));
+        zapReceipt = await zapReceipt.ComputeIdAndSignAsync(key);
+        relays = relays.Concat(userNostrSettings?.Relays ?? Array.Empty<string>()).Distinct().ToArray();
+        arg.Invoice.Metadata.SetAdditionalData("Nostr", new Dictionary<string,string>()
+        {
+            {"Zap Request", zapRequestEvent.Id},
+            {"Zap Receipt", zapReceipt.Id},
+            {"Relays", string.Join(',', relays)}
+        });
+        await _invoiceRepository.UpdateInvoiceMetadata(arg.InvoiceId, arg.Invoice.StoreId, arg.Invoice.Metadata.ToJObject());
+        _pendingZapEvents.Add(new PendingZapEvent(relays, zapReceipt));
     }
 
     public Task StopAsync(CancellationToken cancellationToken)

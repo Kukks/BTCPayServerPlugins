@@ -2,14 +2,18 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Client;
+using BTCPayServer.Filters;
 using BTCPayServer.Services.Stores;
+using LNURL;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
+using NBitcoin;
 using NBitcoin.DataEncoders;
 using NBitcoin.Secp256k1;
 using NNostr.Client;
@@ -204,5 +208,34 @@ public class Nip5Controller : Controller
                     }
                     : null
             });
+    }
+
+    [CheatModeRoute]
+    [HttpGet("~/nostr-fake")]
+    [EnableCors(CorsPolicies.All)]
+    [IgnoreAntiforgeryToken]
+    [AllowAnonymous]
+    public async Task<IActionResult> FakeNostr(string lnurl)
+    {
+        if (lnurl.Contains("@"))
+        {
+            lnurl = LNURL.LNURL.ExtractUriFromInternetIdentifier(lnurl).ToString();
+        }
+        var lnurlRequest = (LNURLPayRequest) await LNURL.LNURL.FetchInformation(new Uri(lnurl), new HttpClient());
+        var nKey = ECPrivKey.Create(RandomUtils.GetBytes(32));
+        var nostrEvent = new NostrEvent()
+        {
+            Kind = 9734,
+            Content = "",
+
+        };
+        var lnurlBech32x = LNURL.LNURL.EncodeBech32(new Uri(lnurl));
+        nostrEvent.SetTag("relays", "wss://btcpay.kukks.org/nostr");
+        nostrEvent.SetTag("lnurl", lnurlBech32x);
+        nostrEvent.SetTag("amount", lnurlRequest.MinSendable.MilliSatoshi.ToString());
+        nostrEvent = await nostrEvent.ComputeIdAndSignAsync(nKey);
+        var response = await new HttpClient().GetAsync(lnurlRequest.Callback + "?amount=" + lnurlRequest.MinSendable.MilliSatoshi +
+                                  "&nostr=" +System.Text.Json.JsonSerializer.Serialize(nostrEvent));
+        return Content(await response.Content.ReadAsStringAsync());
     }
 }

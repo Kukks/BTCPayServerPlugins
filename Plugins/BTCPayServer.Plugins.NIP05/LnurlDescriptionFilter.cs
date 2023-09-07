@@ -47,11 +47,7 @@ public class LnurlDescriptionFilter : PluginHookFilter<string>
                 var username = metadata
                     .FirstOrDefault(strings => strings.FirstOrDefault()?.Equals("text/identifier") is true)
                     ?.ElementAtOrDefault(1)?.ToLowerInvariant().Split("@")[0];
-                if (string.IsNullOrEmpty(username))
-                {
-                    return arg;
-                }
-                else
+                if (!string.IsNullOrEmpty(username))
                 {
                     var lnAddress = await _lightningAddressService.ResolveByAddress(username);
                     if (lnAddress is null)
@@ -59,9 +55,6 @@ public class LnurlDescriptionFilter : PluginHookFilter<string>
                         return arg;
                     }
                 }
-
-               
-
                 var parsedNote = System.Text.Json.JsonSerializer.Deserialize<NostrEvent>(nostr);
                 if (parsedNote?.Kind != 9734)
                 {
