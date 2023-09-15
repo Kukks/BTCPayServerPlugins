@@ -136,27 +136,31 @@ public class Zapper : IHostedService
                 
                     
             }
-            var waitingToken = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            waitingToken.CancelAfter(TimeSpan.FromMinutes(2));
-            while (!waitingToken.IsCancellationRequested)
-            {
-                if (_pendingZapEvents.Count > 10)
-                {
-                    waitingToken.Cancel();
-                }
-                else
-                {
-                    try
-                    {
 
-                        await Task.Delay(100, waitingToken.Token);
-                    }
-                    catch (TaskCanceledException e)
-                    {
-                        break;
-                    }
-                }
-            }
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            //we used to have some waiting logic so that we dont open a websocket to every relay for every individual zap only.
+            //but people need their instant gratification so we removed it.
+            // var waitingToken = CancellationTokenSource.CreateLinkedTokenSource();
+            // waitingToken.CancelAfter(TimeSpan.FromSeconds(5));
+            // while (!waitingToken.IsCancellationRequested)
+            // {
+            //     if (_pendingZapEvents.Count > 10)
+            //     {
+            //         waitingToken.Cancel();
+            //     }
+            //     else
+            //     {
+            //         try
+            //         {
+            //
+            //             await Task.Delay(100, waitingToken.Token);
+            //         }
+            //         catch (TaskCanceledException e)
+            //         {
+            //             break;
+            //         }
+            //     }
+            // }
         }
     }
 
