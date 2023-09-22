@@ -11,7 +11,7 @@ public class PrismPlugin : BaseBTCPayServerPlugin
 {
     public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
     {
-        new() {Identifier = nameof(BTCPayServer), Condition = ">=1.11.0"}
+        new() {Identifier = nameof(BTCPayServer), Condition = ">=1.11.5"}
     };
 
     public override void Execute(IServiceCollection applicationBuilder)
@@ -27,10 +27,6 @@ public class PrismPlugin : BaseBTCPayServerPlugin
 
     public override void Execute(IApplicationBuilder applicationBuilder, IServiceProvider applicationBuilderApplicationServices)
     {
-        applicationBuilder.UseStaticFiles();
-        applicationBuilder.UseEndpoints(endpoints =>
-        {
-            endpoints.MapBlazorHub();
-        });
+      
     }
 }
