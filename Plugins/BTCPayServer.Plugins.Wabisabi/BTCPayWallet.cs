@@ -15,6 +15,7 @@ using BTCPayServer.Payments.PayJoin;
 using BTCPayServer.Services;
 using BTCPayServer.Services.Stores;
 using BTCPayServer.Services.Wallets;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
 using NBXplorer;
@@ -53,7 +54,8 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     public readonly ILogger Logger;
     public static readonly BlockchainAnalyzer BlockchainAnalyzer = new();
 
-    public BTCPayWallet(WalletRepository walletRepository,
+    public BTCPayWallet(
+        WalletRepository walletRepository,
         BTCPayNetworkProvider btcPayNetworkProvider,
         BitcoinLikePayoutHandler bitcoinLikePayoutHandler,
         BTCPayNetworkJsonSerializerSettings btcPayNetworkJsonSerializerSettings,
@@ -66,7 +68,8 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         WabisabiStoreSettings wabisabiStoreSettings,
         IUTXOLocker utxoLocker,
         ILoggerFactory loggerFactory,
-        StoreRepository storeRepository)
+        StoreRepository storeRepository,
+        IMemoryCache memoryCache)
     {
         KeyChain = keyChain;
         _walletRepository = walletRepository;
@@ -81,6 +84,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         WabisabiStoreSettings = wabisabiStoreSettings;
         UtxoLocker = utxoLocker;
         _storeRepository = storeRepository;
+        _memoryCache = memoryCache;
         Logger = loggerFactory.CreateLogger($"BTCPayWallet_{storeId}");
 
     }
@@ -147,6 +151,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     private IRoundCoinSelector _coinSelector;
     public Smartifier _smartifier => (KeyChain as BTCPayKeyChain)?.Smartifier;
     private readonly StoreRepository _storeRepository;
+    private readonly IMemoryCache _memoryCache;
 
     public IRoundCoinSelector GetCoinSelector()
     {
@@ -492,7 +497,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
                      }))}, "utxo");
 
              }
-            _smartifier.Transactions.AddOrReplace(txHash, Task.FromResult(smartTx));
+            _smartifier.SmartTransactions.AddOrReplace(txHash, Task.FromResult(smartTx));
             //
             // var kp = await ExplorerClient.GetMetadataAsync<RootedKeyPath>(DerivationScheme,
             //     WellknownMetadataKeys.AccountKeyPath);
@@ -552,6 +557,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
                 stopwatch.Stop();
                 
                 Logger.LogInformation($"Registered coinjoin result for {StoreId} in {stopwatch.Elapsed}");
+                _memoryCache.Remove(WabisabiService.GetCacheKey(StoreId) + "cjhistory");
 
         }
         catch (Exception e)

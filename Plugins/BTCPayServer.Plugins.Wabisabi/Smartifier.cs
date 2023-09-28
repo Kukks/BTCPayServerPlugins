@@ -8,6 +8,7 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Payments.PayJoin;
 using BTCPayServer.Services;
 using BTCPayServer.Services.Wallets;
+using Microsoft.Extensions.Logging;
 using NBitcoin;
 using NBXplorer;
 using NBXplorer.DerivationStrategy;
@@ -22,6 +23,7 @@ namespace BTCPayServer.Plugins.Wabisabi;
 
 public class Smartifier
 {
+    private readonly ILogger _logger;
     private readonly WalletRepository _walletRepository;
     private readonly ExplorerClient _explorerClient;
     public DerivationStrategyBase DerivationScheme { get; }
@@ -29,10 +31,12 @@ public class Smartifier
     private readonly IUTXOLocker _utxoLocker;
 
     public Smartifier(
+        ILogger logger, 
         WalletRepository walletRepository,
         ExplorerClient explorerClient, DerivationStrategyBase derivationStrategyBase, string storeId,
         IUTXOLocker utxoLocker, RootedKeyPath accountKeyPath)
     {
+        _logger = logger;
         _walletRepository = walletRepository;
         _explorerClient = explorerClient;
         DerivationScheme = derivationStrategyBase;
@@ -40,10 +44,49 @@ public class Smartifier
         _utxoLocker = utxoLocker;
         _accountKeyPath = accountKeyPath;
     }
-
-    public readonly  ConcurrentDictionary<uint256, Task<TransactionInformation>> CachedTransactions = new();
-    public readonly ConcurrentDictionary<uint256, Task<SmartTransaction>> Transactions = new();
+     public readonly  ConcurrentDictionary<uint256, Lazy<Task<TransactionInformation>>> TransactionInformations = new();
+     public readonly ConcurrentDictionary<uint256, Task<SmartTransaction>> SmartTransactions = new();
     public readonly  ConcurrentDictionary<OutPoint, Task<SmartCoin>> Coins = new();
+
+    public static async Task<T?> GetOrCreate<T, Y>(ConcurrentDictionary<Y, Lazy<Task<T?>>> collection, Y key, Func<Task<T?>> create, ILogger logger = null)
+    {
+        var lazyTask = new Lazy<Task<T?>>(() => FetchFromServer(create, logger, key));
+
+        // Even if multiple threads provide their own new Lazy instances, only one will be stored.
+        var task = collection.GetOrAdd(key, lazyTask).Value;
+
+        try
+        {
+            return await task;
+        }
+        catch (Exception)
+        {
+            // If there's an error, remove the lazy task from the dictionary.
+            collection.TryRemove(key, out _);
+            // The error has already been logged inside FetchFromServer.
+            return default;
+        }
+    }
+
+    private static async Task<T?> FetchFromServer<T, Y>(Func<Task<T?>> create, ILogger logger, Y key)
+    {
+        try
+        {
+            return await create();
+        }
+        catch (Exception e)
+        {
+            logger?.LogError(e, "Error while loading(and caching) {key}", key);
+            throw; // Re-throw the exception so the outer catch can handle it.
+        }
+    }
+
+    
+    public async Task<TransactionInformation?> GetTransactionInfo(uint256 hash)
+    {
+        return await GetOrCreate(TransactionInformations , hash, () => _explorerClient.GetTransactionAsync(DerivationScheme, hash), _logger);
+    }
+    
     private readonly RootedKeyPath _accountKeyPath;
 
     public async Task LoadCoins(List<ReceivedCoin> coins, int current ,
@@ -57,15 +100,14 @@ public class Smartifier
         var txs = coins.Select(data => data.OutPoint.Hash).Distinct();
         foreach (uint256 tx in txs)
         {
-            if(!CachedTransactions.ContainsKey(tx))
-                CachedTransactions.TryAdd(tx, _explorerClient.GetTransactionAsync(DerivationScheme, tx));
+            _ =GetTransactionInfo(tx);
         }
 
         foreach (var coin in coins)
         {
-            var tx = await Transactions.GetOrAdd(coin.OutPoint.Hash, async uint256 =>
+            var tx = await SmartTransactions.GetOrAdd(coin.OutPoint.Hash, async uint256 =>
             {
-                var unsmartTx = await CachedTransactions[coin.OutPoint.Hash];
+                var unsmartTx = await GetTransactionInfo(coin.OutPoint.Hash);
                 if (unsmartTx?.Transaction is null)
                 {
                     return null;
@@ -85,17 +127,7 @@ public class Smartifier
                     potentialMatches.TryAdd(matchedInput, potentialMatchesForInput.ToArray());
                     foreach (IndexedTxIn potentialMatchForInput in potentialMatchesForInput)
                     {
-                        TransactionInformation ti = null;
-                        try
-                        {
-                            ti = await CachedTransactions.GetOrAdd(potentialMatchForInput.PrevOut.Hash,
-                                _explorerClient.GetTransactionAsync(DerivationScheme,
-                                    potentialMatchForInput.PrevOut.Hash));
-                        }
-                        catch (Exception e)
-                        {
-                            CachedTransactions.Remove(potentialMatchForInput.PrevOut.Hash, out _);
-                        }
+                        var ti = await GetTransactionInfo(potentialMatchForInput.PrevOut.Hash);
                         if (ti is not null)
                         {
                             MatchedOutput found = ti.Outputs.Find(output =>
@@ -157,7 +189,6 @@ public class Smartifier
             var smartCoin = await Coins.GetOrAdd(coin.OutPoint, async point =>
             {
                 utxoLabels.TryGetValue(coin.OutPoint, out var labels);
-                var unsmartTx = await CachedTransactions[coin.OutPoint.Hash];
                 var pubKey = DerivationScheme.GetChild(coin.KeyPath).GetExtPubKeys().First().PubKey;
                 //if there is no account key path, it most likely means this is a watch only wallet. Fake the key path
                 var kp = _accountKeyPath?.Derive(coin.KeyPath).KeyPath ?? new KeyPath(0,0,0,0,0);

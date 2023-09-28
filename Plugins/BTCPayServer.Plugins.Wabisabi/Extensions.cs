@@ -1,12 +1,18 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace BTCPayServer.Plugins.Wabisabi;
 
 public static class Extensions
 {
+    public static string ToSentenceCase(this string str)
+    {
+        return Regex.Replace(str, "[a-z][A-Z]", m => m.Value[0] + " " + char.ToLower(m.Value[1]));
+    }
+    
     /// <summary>
     /// Returns an existing task from the concurrent dictionary, or adds a new task
     /// using the specified asynchronous factory method. Concurrent invocations for

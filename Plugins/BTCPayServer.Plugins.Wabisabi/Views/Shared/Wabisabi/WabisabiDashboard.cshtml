@@ -1,15 +1,13 @@
 ﻿@using BTCPayServer.Abstractions.Contracts
-@using BTCPayServer.Client
-@using BTCPayServer.Client.Models
 @using BTCPayServer.Common
 @using BTCPayServer.Plugins.Wabisabi
-@using BTCPayServer.Security
-@using Microsoft.AspNetCore.Mvc.TagHelpers
 @using NBitcoin
-@using WalletWasabi.Blockchain.Analysis
+@using WalletWasabi.Extensions
+@using WalletWasabi.WabiSabi.Backend.Rounds
+@using WalletWasabi.WabiSabi.Client
+@using WalletWasabi.WabiSabi.Models
 @model object
 @inject IScopeProvider ScopeProvider
-@inject BTCPayServerClient Client
 @inject WabisabiService WabisabiService;
 @inject WalletProvider WalletProvider;
 @inject WabisabiCoordinatorClientInstanceManager WabisabiCoordinatorClientInstanceManager
@@ -20,12 +18,6 @@
     var available = true;
     @if (((dynamic) Model).CryptoCode != "BTC" || ((dynamic) Model).WalletEnabled is not true)
     {
-        return;
-    }
-
-    @if (!(await ExplorerClientProvider.GetExplorerClient("BTC").GetStatusAsync()).IsFullySynched)
-    {
-        available = false;
         return;
     }
     var storeId = ScopeProvider.GetCurrentStoreId();
@@ -57,7 +49,7 @@
         }
         else
         {
-            <div class="widget store-wallet-balance" >
+            <div class="widget store-wallet-balance">
                 <header>
                     <h3>Recent Coinjoins</h3>
                     @if (cjHistory.Any())
@@ -89,7 +81,7 @@
 
             var privacyPercentage = Math.Round(privacy * 100);
             var colorCoins = coins.GroupBy(coin => coin.CoinColor(wallet.AnonScoreTarget)).ToDictionary(grouping => grouping.Key, grouping => grouping);
-            <div class="widget store-numbers" >
+            <div class="widget store-numbers">
 
             @if (wallet is { })
             {
@@ -151,35 +143,35 @@
                     }
                 </div>
             </div>
-            @{
-                var coinjoined = @coins.CoinJoinInProcess();
-            }
-            @if (coinjoined.Any())
-            {
-                var count = @coins.CoinJoinInProcess().Count();
-                var totalCount = @coins.Count();
-                var sum = @coinjoined.TotalAmount().ToDecimal(MoneyUnit.BTC);
-                var totalSum = @coins.TotalAmount().ToDecimal(MoneyUnit.BTC);
-                var sumPercentage = decimal.Divide(sum, totalSum) * 100;
-                var countPercentage = decimal.Divide(count, totalCount) * 100;
-
-                <div>
-                    <h6 class="mb-2">Coins currently joining</h6>
-                    <div class="progress mb-2 position-relative" style="height: 2rem;">
-                        <div class="w-100 text-center position-absolute bg-transparent progress-bar h-100">@count </div>
-                        <div class="progress-bar bg-info progress-bar-striped progress-bar-animated w-100" role="progressbar"></div>
-                    </div>
-                </div>
-                <div>
-                    <h6 class="mb-2">Value currently joining</h6>
-                    <div class="progress mb-2 position-relative" style="height: 2rem;">
-                        <div class="w-100 text-center position-absolute bg-transparent progress-bar h-100">@sum BTC</div>
-                        <div class="progress-bar bg-info progress-bar-striped progress-bar-animated w-100" role="progressbar"></div>
-
-
-                    </div>
-                </div>
-            }
+            @* @{ *@
+            @*     var coinjoined = @coins.CoinJoinInProcess(); *@
+            @* } *@
+            @* @if (coinjoined.Any()) *@
+            @* { *@
+            @*     var count = @coins.CoinJoinInProcess().Count(); *@
+            @*     var totalCount = @coins.Count(); *@
+            @*     var sum = @coinjoined.TotalAmount().ToDecimal(MoneyUnit.BTC); *@
+            @*     var totalSum = @coins.TotalAmount().ToDecimal(MoneyUnit.BTC); *@
+            @*     var sumPercentage = decimal.Divide(sum, totalSum) * 100; *@
+            @*     var countPercentage = decimal.Divide(count, totalCount) * 100; *@
+            @* *@
+            @*     <div> *@
+            @*         <h6 class="mb-2">Coins currently joining</h6> *@
+            @*         <div class="progress mb-2 position-relative" style="height: 2rem;"> *@
+            @*             <div class="w-100 text-center position-absolute bg-transparent progress-bar h-100">@count </div> *@
+            @*             <div class="progress-bar bg-info progress-bar-striped progress-bar-animated w-100" role="progressbar"></div> *@
+            @*         </div> *@
+            @*     </div> *@
+            @*     <div> *@
+            @*         <h6 class="mb-2">Value currently joining</h6> *@
+            @*         <div class="progress mb-2 position-relative" style="height: 2rem;"> *@
+            @*             <div class="w-100 text-center position-absolute bg-transparent progress-bar h-100">@sum BTC</div> *@
+            @*             <div class="progress-bar bg-info progress-bar-striped progress-bar-animated w-100" role="progressbar"></div> *@
+            @* *@
+            @* *@
+            @*         </div> *@
+            @*     </div> *@
+            @* } *@
 
 
             <!-- Modal -->
@@ -272,7 +264,7 @@
                     </div>
                 </div>
             </div>
-            <div class="list-group list-group-flush mb-2">
+            <div class="list-group list-group-flush mt-4 mb-3">
                 <h5 class="list-group-item-heading text-muted">Enabled coordinators</h5>
 
                 @{
@@ -282,42 +274,172 @@
                         {
                             continue;
                         }
-                        <div class="list-group-item">
-                            <h6>@coordinator.CoordinatorDisplayName</h6>
-                            <div class="row ">
-                                <span class="text-muted col-sm-12 col-xxl-9 p-0 text-break">
-                                    @coordinator.Coordinator
-                                </span>
 
-                                @if (!coordinator.WasabiCoordinatorStatusFetcher.Connected)
+                        RoundState currentRound = null;
+                        CoinJoinTracker tracker = null;
+                        if (coordinator.CoinJoinManager.TrackedCoinJoins?.TryGetValue(wallet.WalletName, out tracker) is true &&
+                            tracker?.CoinJoinClient?.CurrentRoundId is { } &&
+                            tracker?.CoinJoinClient?.RoundStatusUpdater?.RoundStates?.TryGetValue(tracker?.CoinJoinClient?.CurrentRoundId, out currentRound) is true)
+                        {
+                        }
+                        var statusMsg = coordinator.WasabiCoordinatorStatusFetcher.Connected ? $"Connected to {(coordinator.Coordinator?.ToString() ?? "local")}" : $"Not connected to {(coordinator.Coordinator?.ToString() ?? "local")}";
+                        <div class="list-group-item">
+                            <div  class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+                                <div class="d-flex flex-wrap align-items-center justify-content-between gap-3" data-bs-toggle="tooltip" title="@statusMsg">
+                                    <span class="btcpay-status btcpay-status--@(coordinator.WasabiCoordinatorStatusFetcher.Connected ? "enabled" : "disabled")"></span>
+                                    <h6>@coordinator.CoordinatorDisplayName</h6>
+                                </div>
+                                @if(currentRound is not null)
                                 {
-                                    <p class="text-danger mb-0 col-sm-12 col-xxl-3 p-0 text-break">Not connected</p>
-                                }
-                                else
+                                    <div class="timer cursor-pointer" data-bs-toggle="collapse" data-bs-target="#cj-@currentRound.Id">
+                                        <span class="spinner-border spinner-border-sm" role="status">
+                                            <span class="visually-hidden"></span>
+                                        </span>
+                                        <span class="h6">Mixing</span>
+                                        <vc:icon symbol="caret-down" />
+                                    </div>
+                                }else if( coordinator.WasabiCoordinatorStatusFetcher.Connected)
                                 {
-                                    <p class="text-success mb-0 col-sm-12 col-xxl-3 p-0 text-break">Connected</p>
+                                   
+                                    <span class="h6">Idle</span>
                                 }
                             </div>
                             @{
-                                
                                 if (coordinator.CoinPrison is not null)
                                 {
-                                   
-                                    var bannedCoins = coins.Where(coin =>  coordinator.CoinPrison.TryGetOrRemoveBannedCoin(coin.Outpoint, out _));
+                                    var bannedCoins = coins.Where(coin => coordinator.CoinPrison.TryGetOrRemoveBannedCoin(coin.Outpoint, out _));
                                     @if (bannedCoins.Any())
                                     {
-                                        <div>
-                                            <h6 class="mb-2">Coins currently banned (for disrupting rounds)</h6>
-                                            <div class="progress mb-2 position-relative" style="height: 2rem;">
-                                                <div class="w-100 text-center position-absolute bg-transparent progress-bar h-100">@bannedCoins.Count() </div>
-                                                <div class="progress-bar bg-danger w-100" role="progressbar"></div>
-                                            </div>
-                                        </div>
+                                        <div class="text-muted">@bannedCoins.Count() banned coins(for disrupting rounds)</div>
                                     }
                                 }
+
+
+                                if (currentRound is not null)
+                                {
+                                    <div class="collapse table-responsive @(enabledSettings.Count() ==1? "show": "")" id="cj-@currentRound.Id">
+                                                <table class="table ">
+                                                    <tr>
+                                                        <th scope="row">Status</th>
+                                                        <td class="text-truncate">@currentRound.Phase.ToString().ToSentenceCase()</td>
+                                                    </tr><tr>
+                                                        <th scope="row">Round id</th>
+                                                        <td class="text-truncate" style="max-width: 200px" title="@currentRound.Id.ToString()">@currentRound.Id.ToString()</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <th scope="row">Mining feerate</th>
+                                                        <td >@currentRound.CoinjoinState.Parameters.MiningFeeRate.ToString()</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <th scope="row">Coinjoin total inputs</th>
+                                                        <td >@currentRound.CoinjoinState.Inputs.Count() inputs (@currentRound.CoinjoinState.Inputs.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)) BTC)</td>
+                                                    </tr>
+                                                    @if (!tracker.CoinJoinClient.CoinsToRegister.IsEmpty)
+                                                    {
+                                                        <tr>
+                                                            <th scope="row">Your inputs</th>
+                                                            <td class="row" >
+                                                                <span class="w-100">Registered @tracker.CoinJoinClient.CoinsInCriticalPhase.Count() inputs (@tracker.CoinJoinClient.CoinsInCriticalPhase.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)) BTC) / @tracker.CoinJoinClient.CoinsToRegister.Count() inputs (@tracker.CoinJoinClient.CoinsToRegister.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)) BTC) </span>
+                                                                @if (tracker.BannedCoins.Any())
+                                                                {
+                                                                    <span class="w-100 text-danger">but got @tracker.BannedCoins.Count() inputs (@tracker.BannedCoins.Sum(coin => coin.Coin.Amount.ToDecimal(MoneyUnit.BTC)) BTC) banned</span>
+                                                                }
+                                                            </td>
+                                                        </tr>
+                                                    }
+
+                                                    @if (currentRound.Phase >= Phase.OutputRegistration)
+                                                    {
+                                                        <tr>
+                                                            <th scope="row">Coinjoin total outputs</th>
+                                                            <td >@currentRound.CoinjoinState.Outputs.Count() outputs (@currentRound.CoinjoinState.Outputs.Sum(coin => coin.Value.ToDecimal(MoneyUnit.BTC)) BTC)</td>
+                                                        </tr>
+                                                        if (tracker.CoinJoinClient.OutputTxOuts is { } outputs)
+                                                        {
+                                                            <tr>
+                                                                <th scope="row">Your outputs</th>
+                                                                <td >@outputs.outputTxOuts.Count() outputs (@outputs.outputTxOuts.Sum(coin => coin.Value.ToDecimal(MoneyUnit.BTC)) BTC, @outputs.batchedPayments.Count() batched payments)</td>
+                                                            </tr>
+                                                        }
+                                                    }
+                                                </table>
+
+                                            </div>
+                                    
+                                    @* <div class="collapse table-responsive" id="cj-@currentRound.Id"> *@
+                                    @* *@
+                                    @*     <dl> *@
+                                    @*         <div class="d-flex flex-wrap align-items-center gap-2"> *@
+                                    @*             <dt class="w-100px"> *@
+                                    @*                 Status *@
+                                    @*             </dt> *@
+                                    @*             <dd> *@
+                                    @*                 @currentRound.Phase.ToString().ToSentenceCase() *@
+                                    @*             </dd> *@
+                                    @*         </div> *@
+                                    @*         <div class="d-flex flex-wrap align-items-center gap-2"> *@
+                                    @*             <dt class="w-100px"> *@
+                                    @*                 Round ID *@
+                                    @*             </dt> *@
+                                    @*             <dd> *@
+                                    @*                 @currentRound.Id.ToString() *@
+                                    @*             </dd> *@
+                                    @*         </div> *@
+                                    @*         <div class="d-flex flex-wrap align-items-center gap-2"> *@
+                                    @*             <dt class="w-100px"> *@
+                                    @*                 Mining feerate *@
+                                    @*             </dt> *@
+                                    @*             <dd> *@
+                                    @*                 @currentRound.CoinjoinState.Parameters.MiningFeeRate.ToString() *@
+                                    @*             </dd> *@
+                                    @*         </div> *@
+                                    @*         <div class="d-flex flex-wrap align-items-center gap-2"> *@
+                                    @*             <dt class="w-100px"> *@
+                                    @*                 Coinjoin total inputs *@
+                                    @*             </dt> *@
+                                    @*             <dd> *@
+                                    @*                 @currentRound.CoinjoinState.Inputs.Count() inputs (@currentRound.CoinjoinState.Inputs.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)) BTC) *@
+                                    @*             </dd> *@
+                                    @*         </div> *@
+                                    @* *@
+                                    @* *@
+                                    @*         @if (!tracker.CoinJoinClient.CoinsToRegister.IsEmpty) *@
+                                    @*         { *@
+                                    @*             <div class="d-flex flex-wrap align-items-center gap-2"> *@
+                                    @*                 <dt class="w-100px">Your inputs</dt> *@
+                                    @*                 <dd> *@
+                                    @*                     <span class="w-100">Registered @tracker.CoinJoinClient.CoinsInCriticalPhase.Count() inputs (@tracker.CoinJoinClient.CoinsInCriticalPhase.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)) BTC) / @tracker.CoinJoinClient.CoinsToRegister.Count() inputs (@tracker.CoinJoinClient.CoinsToRegister.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)) BTC) </span> *@
+                                    @*                     @if (tracker.BannedCoins.Any()) *@
+                                    @*                     { *@
+                                    @*                         <span class="w-100 text-danger">but got @tracker.BannedCoins.Count() inputs (@tracker.BannedCoins.Sum(coin => coin.Coin.Amount.ToDecimal(MoneyUnit.BTC)) BTC) banned</span> *@
+                                    @*                     } *@
+                                    @*                 </dd> *@
+                                    @*             </div> *@
+                                    @*         } *@
+                                    @* *@
+                                    @*         @if (currentRound.Phase >= Phase.OutputRegistration) *@
+                                    @*         { *@
+                                    @*             <div class="d-flex flex-wrap align-items-center gap-2"> *@
+                                    @*                 <dt class="w-100px">Coinjoin total outputs</dt> *@
+                                    @*                 <dd> *@
+                                    @*                     @currentRound.CoinjoinState.Outputs.Count() outputs (@currentRound.CoinjoinState.Outputs.Sum(coin => coin.Value.ToDecimal(MoneyUnit.BTC)) BTC) *@
+                                    @*                 </dd> *@
+                                    @*             </div> *@
+                                    @*             if (tracker.CoinJoinClient.OutputTxOuts is { } outputs) *@
+                                    @*             { *@
+                                    @*                 <div class="d-flex flex-wrap align-items-center gap-2"> *@
+                                    @*                     <dt class="w-100px">>Your outputs</dt> *@
+                                    @*                     <dd> *@
+                                    @*                         @outputs.outputTxOuts.Count() outputs (@outputs.outputTxOuts.Sum(coin => coin.Value.ToDecimal(MoneyUnit.BTC)) BTC, @outputs.batchedPayments.Count() batched payments) *@
+                                    @*                     </dd> *@
+                                    @*                 </div> *@
+                                    @*             } *@
+                                    @*         } *@
+                                    @*     </dl> *@
+                                    @* *@
+                                    @* </div> *@
+                                }
                             }
-
-
                         </div>
                     }
                 }
@@ -326,8 +448,6 @@
             <button type="button" class="btn btn-text p-1" data-bs-toggle="modal" data-bs-target="#coins">
                 View coins
             </button>
-
-
             </div>
             </div>
         }

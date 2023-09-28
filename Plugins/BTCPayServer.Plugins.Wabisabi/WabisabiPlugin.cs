@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
@@ -20,7 +21,7 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
 {
     public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
     {
-        new() { Identifier = nameof(BTCPayServer), Condition = ">=1.11.0" }
+        new() { Identifier = nameof(BTCPayServer), Condition = ">=1.11.5" }
     };
     public override void Execute(IServiceCollection applicationBuilder)
     {
@@ -140,3 +141,4 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
         base.Execute(applicationBuilder, applicationBuilderApplicationServices);
     }
 }
+

@@ -195,9 +195,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
         var coordinatorParameters =
             new CoordinatorParameters(Path.Combine(_dataDirectories.Value.DataDir, "Plugins", "Coinjoin"));
         var coinJoinIdStore =
-            CoinJoinIdStore.Create(
-                Path.Combine(coordinatorParameters.ApplicationDataDir, "CcjCoordinator",
-                    $"CoinJoins{explorerClient.Network}.txt"), coordinatorParameters.CoinJoinIdStoreFilePath);
+            CoinJoinIdStore.Create( coordinatorParameters.CoinJoinIdStoreFilePath);
         var coinJoinScriptStore = CoinJoinScriptStore.LoadFromFile(coordinatorParameters.CoinJoinScriptStoreFilePath);
         var rpc = new BtcPayRpcClient(explorerClient.RPCClient, _memoryCache, explorerClient);
 

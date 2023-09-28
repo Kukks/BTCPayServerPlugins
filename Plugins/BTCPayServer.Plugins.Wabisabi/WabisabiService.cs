@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -33,7 +34,7 @@ namespace BTCPayServer.Plugins.Wabisabi
             _memoryCache = memoryCache;
         }
 
-        private string GetCacheKey(string storeId)
+        public static string GetCacheKey(string storeId)
         {
             return $"{nameof(WabisabiStoreSettings)}-{storeId}";
         }
@@ -76,7 +77,7 @@ namespace BTCPayServer.Plugins.Wabisabi
                 _walletProvider.LoadedWallets.TryGetValue(storeId, out var walletTask);
                 if (walletTask != null)
                 {
-                    var wallet = await walletTask;
+                    var wallet = await walletTask.Value;
                     await _coordinatorClientInstanceManager.StopWallet(wallet, setting.Coordinator);
                 }
             }
@@ -136,15 +137,29 @@ namespace BTCPayServer.Plugins.Wabisabi
         }
         
 
-        public async Task<List<BTCPayWallet.CoinjoinData>> GetCoinjoinHistory(string storeId)
+        public async Task<List<BTCPayWallet.CoinjoinData>> GetCoinjoinHistory(string storeId, bool force = false)
         {
-            return (await _walletRepository.GetWalletObjects(
-                    new GetWalletObjectsQuery(new WalletId(storeId, "BTC"))
-                    {
-                        Type = "coinjoin"
-                    })).Values.Where(data => !string.IsNullOrEmpty(data.Data))
-                .Select(data => JObject.Parse(data.Data).ToObject<BTCPayWallet.CoinjoinData>())
-                .OrderByDescending(tuple => tuple.Timestamp).ToList();
+            var k = GetCacheKey(storeId) + "cjhistory";
+            if (force)
+            {
+                _memoryCache.Remove(k);
+            }
+
+            return await _memoryCache.GetOrCreateAsync(k, async entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(1);
+                var result =  (await _walletRepository.GetWalletObjects(
+                        new GetWalletObjectsQuery(new WalletId(storeId, "BTC"))
+                        {
+                            Type = "coinjoin"
+                        })).Values.Where(data => !string.IsNullOrEmpty(data.Data))
+                    .Select(data => JObject.Parse(data.Data).ToObject<BTCPayWallet.CoinjoinData>())
+                    .OrderByDescending(tuple => tuple.Timestamp).ToList();
+                entry.Value = result;
+                
+                return result;
+            });
+
         }
     }
     

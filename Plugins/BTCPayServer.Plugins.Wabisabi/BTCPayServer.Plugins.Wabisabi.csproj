@@ -2,7 +2,7 @@
 
     <PropertyGroup>
         <TargetFramework>net6.0</TargetFramework>
-        <LangVersion>10</LangVersion>
+        <LangVersion>11</LangVersion>
         <Configurations>Debug;Release</Configurations>
         <Platforms>AnyCPU</Platforms>
     </PropertyGroup>
@@ -13,7 +13,7 @@
     <PropertyGroup>
         <Product>Wabisabi Coinjoin</Product>
         <Description>Allows you to integrate your btcpayserver store with coinjoins.</Description>
-        <Version>1.0.55</Version>
+        <Version>1.0.56</Version>
     </PropertyGroup>
 
     <!-- Plugin development properties -->
@@ -43,7 +43,7 @@
         </ProjectReference>
     </ItemGroup>
     <ItemGroup>
-        <PackageReference Include="NNostr.Client" Version="0.0.34" />
+        <PackageReference Include="NNostr.Client" Version="0.0.37" />
         <PackageReference Include="WabiSabi" Version="1.0.1.2" />
     </ItemGroup>
     <Target Name="DeleteExampleFile" AfterTargets="Publish">

@@ -21,7 +21,6 @@ using WalletWasabi.WabiSabi.Client.RoundStateAwaiters;
 using WalletWasabi.WabiSabi.Client.StatusChangedEvents;
 using WalletWasabi.Wallets;
 using WalletWasabi.WebClients.Wasabi;
-using HttpClientFactory = WalletWasabi.WebClients.Wasabi.HttpClientFactory;
 
 namespace BTCPayServer.Plugins.Wabisabi;
 
@@ -137,7 +136,7 @@ public class WabisabiCoordinatorClientInstance
     public Uri Coordinator { get; set; }
     public WalletProvider WalletProvider { get; }
     public string TermsConditions { get; set; }
-    public HttpClientFactory WasabiHttpClientFactory { get; set; }
+    public WasabiHttpClientFactory WasabiHttpClientFactory { get; set; }
     public RoundStateUpdater RoundStateUpdater { get; set; }
     public CoinPrison CoinPrison { get; private set; }
     public WasabiCoordinatorStatusFetcher WasabiCoordinatorStatusFetcher { get; set; }
@@ -176,7 +175,7 @@ public class WabisabiCoordinatorClientInstance
         }
         else
         {
-            WasabiHttpClientFactory = new HttpClientFactory(torEndpoint, () => Coordinator);
+            WasabiHttpClientFactory = new WasabiHttpClientFactory(torEndpoint, () => Coordinator);
             var roundStateUpdaterCircuit = new PersonCircuit();
             var roundStateUpdaterHttpClient =
                 WasabiHttpClientFactory.NewHttpClient(Mode.SingleCircuitPerLifetime, roundStateUpdaterCircuit);

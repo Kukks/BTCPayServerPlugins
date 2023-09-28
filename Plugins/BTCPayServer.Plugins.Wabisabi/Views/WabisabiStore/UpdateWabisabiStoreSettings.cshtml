@@ -17,9 +17,7 @@
 @inject BTCPayServerOptions BtcPayServerOptions
 @{
     var storeId = _scopeProvider.GetCurrentStoreId();
-    Layout = "../Shared/_NavLayout.cshtml";
-    ViewData["NavPartialName"] = "../UIStores/_Nav";
-    ViewData.SetActivePage("Plugins", "BTCPayServer.Views.Stores.StoreNavPages", "Wabisabi coinjoin support", storeId);
+    ViewData.SetActivePage("CoinjoinSettings", "Coinjoin", "Coinjoin settings", storeId);
     var userid = Context.User.Claims.Single(claim => claim.Type == ClaimTypes.NameIdentifier).Value;
     var anyEnabled = Model.Settings.Any(settings => settings.Enabled);
     ScriptPubKeyType? scriptType;
@@ -34,28 +32,45 @@
             .Select(pair => new SelectListItem(pair.Value.s.StoreName, pair.Key, Model.MixToOtherWallet == pair.Key)).Prepend(new SelectListItem("None", ""));
 }
 
-<div class="row">
-    <div class="d-flex">
-        <h2 class="">Coinjoin configuration</h2>
-        <a href="https://github.com/Kukks/BTCPayServerPlugins/blob/master/Plugins/BTCPayServer.Plugins.Wabisabi/readme.md" class="ms-1" target="_blank" rel="noreferrer noopener">
-            <span class="fa fa-question-circle-o text-secondary" title="More information..."></span>
+
+<form method="post">
+
+
+<partial name="_StatusMessage"/>
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h3 class="mb-0">
+        <span>@ViewData["Title"]</span>
+        <a href="https://docs.btcpayserver.org/Wabisabi" target="_blank" rel="noreferrer noopener" title="More information...">
+            <vc:icon symbol="info"/>
         </a>
+    </h3>
+    <div>
+
+        <button name="command" type="submit" value="save" class="btn btn-primary mt-3 mt-sm-0">Save</button>
+        <a asp-action="ListCoinjoins" asp-route-storeId="@storeId" class="btn btn-secondary mt-3 mt-sm-0" role="button">
+            Coinjoin History
+        </a>
+<button type="button" class="btn btn-secondary mt-3 mt-sm-0" permission="@Policies.CanModifyServerSettings"
+        data-bs-toggle="modal" data-bs-target="#discover-prompt">
+    Add Coordinator
+</button>
+        <a asp-controller="WabisabiCoordinatorConfig" asp-action="UpdateWabisabiSettings" class="btn btn-secondary mt-3 mt-sm-0" permission="@Policies.CanModifyServerSettings">Coordinator</a>
+        @* <a class="btn btn-secondary mt-3 mt-sm-0" href="https://gist.github.com/nopara73/bb17e89d7dc9af536ca41f50f705d329" rel="noreferrer noopener" target="_blank">Enable Discreet payments - Coming soon</a> *@
+
     </div>
 </div>
-<form method="post">
 @{
     if (BtcPayServerOptions.SocksEndpoint is null)
     {
-         <div class="alert alert-danger d-flex align-items-center" role="alert">
-                <vc:icon symbol="warning"/>
-                <span class="ms-3">TOR is not configured on this BTCPay Server instance. All communication will be over clearnet and therefore not private!</span>
-         </div>
+        <div class="alert alert-danger d-flex align-items-center" role="alert">
+            <vc:icon symbol="warning"/>
+            <span class="ms-3">TOR is not configured on this BTCPay Server instance. All communication will be over clearnet and therefore not private!</span>
+        </div>
     }
-    
+
     var wallet = await WalletProvider.GetWalletAsync(storeId);
     if (wallet is BTCPayWallet)
     {
-     
         @if (!((BTCPayKeyChain) wallet.KeyChain).KeysAvailable)
         {
             <div class="alert alert-danger d-flex align-items-center" role="alert">
@@ -217,7 +232,7 @@
 
                 <span class="text-muted">@coordinator.Coordinator</span>
                 <div>
-                    <div>@(!coordinator.WasabiCoordinatorStatusFetcher.Connected? "Coordinator Status: Not connected": "Coordinator Status: Connected")</div>
+                    <div>@(!coordinator.WasabiCoordinatorStatusFetcher.Connected ? "Coordinator Status: Not connected" : "Coordinator Status: Connected")</div>
 
                     @if (!string.IsNullOrEmpty(coordinator.Description))
                     {
@@ -303,7 +318,7 @@
                         By enabling this coordinator, you agree to their terms and conditions.
                     </a>
                 </div>
-                
+
             </div>
             @{
                 var canEnable = coordinator.WasabiCoordinatorStatusFetcher.Connected && coordinator.RoundStateUpdater.AnyRound;
@@ -346,15 +361,10 @@
 }
 
 
-<button name="command" type="submit" value="save" class="btn btn-primary mt-2">Save</button>
-<a asp-controller="WabisabiStore" asp-action="ListCoinjoins" class="btn btn-secondary mt-2" asp-route-storeId="@storeId">Coinjoins</a>
 </form>
 
 
-<a asp-controller="WabisabiCoordinatorConfig" asp-action="UpdateWabisabiSettings" class="btn btn-secondary mt-2" permission="@Policies.CanModifyServerSettings">Coordinator runner</a>
-
 <partial name="Wabisabi/AddCoordinatorPrompt" model="@(new DiscoveredCoordinator())"/>
-<a class="btn btn-secondary mt-2" href="https://gist.github.com/nopara73/bb17e89d7dc9af536ca41f50f705d329" rel="noreferrer noopener" target="_blank">Enable Discreet payments - Coming soon</a>
 
 
 @section PageFootContent {

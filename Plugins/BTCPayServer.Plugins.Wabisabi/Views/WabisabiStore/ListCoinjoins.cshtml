@@ -1,15 +1,25 @@
-﻿
-@using BTCPayServer.Components
-@using BTCPayServer.Abstractions.Extensions
-@using BTCPayServer.Views.Stores
+﻿@using BTCPayServer.Components
+@using BTCPayServer
 @model BTCPayServer.Plugins.Wabisabi.CoinjoinsViewModel
 @{
-    ViewData.SetActivePage(StoreNavPages.Plugins);
+    var storeId = Context.GetCurrentStoreId();
+    ViewData.SetActivePage("CoinjoinHistory", "Coinjoin", "Coinjoin History", storeId);
 }
 
+
 <div class="d-flex align-items-center justify-content-between mb-3">
-    <h3 class="mb-0">Coinjoin History</h3>
+    <h3 class="mb-0">
+        <span>@ViewData["Title"]</span>
+        <a href="https://docs.btcpayserver.org/Wabisabi" target="_blank" rel="noreferrer noopener" title="More information...">
+            <vc:icon symbol="info"/>
+        </a>
+    </h3>
+    <a asp-action="UpdateWabisabiStoreSettings" asp-route-storeId="@storeId" class="btn btn-primary mt-3 mt-sm-0" role="button">
+        <span class="fa fa-settings"></span>
+        Settings
+    </a>
 </div>
 
-<partial name="Wabisabi/CoinjoinHistoryTable" model="Model.Coinjoins.ToList()" />
+
+<partial name="Wabisabi/CoinjoinHistoryTable" model="Model.Coinjoins.ToList()"/>
 <vc:pager view-model="Model"></vc:pager>

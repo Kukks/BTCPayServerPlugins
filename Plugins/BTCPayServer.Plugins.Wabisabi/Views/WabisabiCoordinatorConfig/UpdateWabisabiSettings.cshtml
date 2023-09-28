@@ -1,5 +1,4 @@
 ﻿
-@using WalletWasabi.Backend.Controllers
 @using BTCPayServer.Plugins.Wabisabi
 @model WalletWasabi.Backend.Controllers.WabisabiCoordinatorSettings
 
@@ -8,9 +7,19 @@
     ViewData["NavPartialName"] = "../UIServer/_Nav";
 }
 
-<h2 class="mb-4">Coinjoin coordinator configuration</h2>
 
 <form method="post">
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h3 class="mb-0">
+        <span>Coinjoin coordinator</span>
+        <a href="https://docs.btcpayserver.org/Wabisabi" target="_blank" rel="noreferrer noopener" title="More information...">
+            <vc:icon symbol="info"/>
+        </a>
+    </h3>
+    
+    <button name="command" type="submit" value="save" class="btn btn-primary mt-3 mt-sm-0">Save</button>
+</div>
+
     <div class="row">
         <div class="col-xxl-constrain col-xl-8">
             <div class="form-group form-check">
@@ -36,9 +45,8 @@
         </textarea>
             </div>
         </div>
-    </div>
-    <div class="row ">
-        <div class="col-xxl-constrain col-xl-8">
+ 
+        <div class="col-xxl-constrain col-xl-4">
             <h3 class="mb-3">Publish to Nostr </h3>
             <div class="form-group ">
                 <label asp-for="NostrRelay" class="form-label">Nostr Relay</label>
@@ -68,7 +76,6 @@
     <p class=" alert alert-warning" style="white-space: pre-line">
         @WabisabiCoordinatorConfigController.OurDisclaimer
     </p>
-    <button name="command" type="submit" value="save" class="btn btn-primary mt-2">Save</button>
 
 
 </form>

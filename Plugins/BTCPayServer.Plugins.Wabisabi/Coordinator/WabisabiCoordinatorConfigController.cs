@@ -97,7 +97,7 @@ Reputation risks: as the coordinator, the user may be associated with illegal ac
                     else
                     {
                         vm.UriToAdvertise = Request.GetAbsoluteRootUri();
-                        TempData["SuccessMessage"] = $"Will create nostr events that point to ${ vm.UriToAdvertise }";
+                        TempData["SuccessMessage"] = $"Will create nostr events that point to { vm.UriToAdvertise }";
                         await _wabisabiCoordinatorService.UpdateSettings( vm);
                         return RedirectToAction(nameof(UpdateWabisabiSettings));
                     }

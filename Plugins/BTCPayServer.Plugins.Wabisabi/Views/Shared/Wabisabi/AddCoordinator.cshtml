@@ -3,7 +3,7 @@
 @using BTCPayServer.Abstractions.Contracts
 @model WalletWasabi.Backend.Controllers.DiscoveredCoordinator
 @inject IScopeProvider ScopeProvider
-<form asp-action="AddCoordinator" method="post" class="card  mt-3" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()" permission="@Policies.CanModifyServerSettings">
+<form asp-action="AddCoordinator" asp-controller="WabisabiStore" method="post" class="card  mt-3" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()" permission="@Policies.CanModifyServerSettings">
     <input type="hidden" asp-for="Description"/>
     <input type="hidden" asp-for="Name"/>
     <input type="hidden" asp-for="Uri"/>
@@ -19,7 +19,7 @@
             <p>@Model.Description</p>
         </div>
         <div class="form-group form-check">
-            <button name="command" type="submit"  class="btn btn-primary btn-lg">Add</button>
+            <button name="command" type="submit" class="btn btn-primary btn-lg">Add</button>
         </div>
     </div>
 

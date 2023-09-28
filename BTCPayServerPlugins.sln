@@ -27,8 +27,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.FixedF
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.LiquidPlus", "Plugins\BTCPayServer.Plugins.LiquidPlus\BTCPayServer.Plugins.LiquidPlus.csproj", "{B4E2ED08-4AD3-4648-8BDB-3107200460B9}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.NFC", "Plugins\BTCPayServer.Plugins.NFC\BTCPayServer.Plugins.NFC.csproj", "{71885A5E-1B00-4676-9566-D81AAE37406C}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.SideShift", "Plugins\BTCPayServer.Plugins.SideShift\BTCPayServer.Plugins.SideShift.csproj", "{5E1BAA06-7828-47BC-89D6-19C2A78EA427}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.TicketTailor", "Plugins\BTCPayServer.Plugins.TicketTailor\BTCPayServer.Plugins.TicketTailor.csproj", "{7AFC20EB-1696-47D7-8E57-822B05DD18F2}"
@@ -151,14 +149,6 @@ Global
 		{B4E2ED08-4AD3-4648-8BDB-3107200460B9}.Altcoins-Debug|Any CPU.Build.0 = Altcoins-Debug|Any CPU
 		{B4E2ED08-4AD3-4648-8BDB-3107200460B9}.Altcoins-Release|Any CPU.ActiveCfg = Altcoins-Release|Any CPU
 		{B4E2ED08-4AD3-4648-8BDB-3107200460B9}.Altcoins-Release|Any CPU.Build.0 = Altcoins-Release|Any CPU
-		{71885A5E-1B00-4676-9566-D81AAE37406C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{71885A5E-1B00-4676-9566-D81AAE37406C}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{71885A5E-1B00-4676-9566-D81AAE37406C}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{71885A5E-1B00-4676-9566-D81AAE37406C}.Release|Any CPU.Build.0 = Release|Any CPU
-		{71885A5E-1B00-4676-9566-D81AAE37406C}.Altcoins-Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{71885A5E-1B00-4676-9566-D81AAE37406C}.Altcoins-Debug|Any CPU.Build.0 = Debug|Any CPU
-		{71885A5E-1B00-4676-9566-D81AAE37406C}.Altcoins-Release|Any CPU.ActiveCfg = Release|Any CPU
-		{71885A5E-1B00-4676-9566-D81AAE37406C}.Altcoins-Release|Any CPU.Build.0 = Release|Any CPU
 		{5E1BAA06-7828-47BC-89D6-19C2A78EA427}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{5E1BAA06-7828-47BC-89D6-19C2A78EA427}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5E1BAA06-7828-47BC-89D6-19C2A78EA427}.Release|Any CPU.ActiveCfg = Release|Any CPU

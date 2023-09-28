@@ -10,10 +10,10 @@
 
 
 
-<button type="button" class="btn btn-secondary mt-2" permission="@Policies.CanModifyServerSettings"
-        data-bs-toggle="modal" data-bs-target="#discover-prompt">
-    Add Coordinator
-</button>
+@* <button type="button" class="btn btn-secondary mt-2" permission="@Policies.CanModifyServerSettings" *@
+@*         data-bs-toggle="modal" data-bs-target="#discover-prompt"> *@
+@*     Add Coordinator *@
+@* </button> *@
 <div class="modal fade" id="discover-prompt" permission="@Policies.CanModifyServerSettings">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -30,7 +30,7 @@
                 </li>
             </ul>
             <div class="tab-content ">
-                <form asp-action="AddCoordinator" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()"
+                <form asp-action="AddCoordinator" asp-controller="WabisabiStore" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()"
                       class="tab-pane fade show active " id="nostr-tab-pane" role="tabpanel" aria-labelledby="home-tab" tabindex="0">
 
                     <div class="modal-body">
@@ -45,7 +45,7 @@
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                     </div>
                 </form>
-                <form asp-action="AddCoordinator" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()"
+                <form asp-action="AddCoordinator" asp-controller="WabisabiStore"  asp-route-storeId="@ScopeProvider.GetCurrentStoreId()"
                       class="tab-pane fade" id="manual-tab-pane" role="tabpanel" tabindex="0">
 
                     <div class="modal-body">
