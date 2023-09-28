@@ -11,7 +11,7 @@
     <PropertyGroup>
         <Product>Nostr </Product>
         <Description>Allows you to verify your nostr account with NIP5 and zap like the rest of the crazies</Description>
-        <Version>1.1.1</Version>
+        <Version>1.1.2</Version>
     </PropertyGroup>
     <!-- Plugin development properties -->
     <PropertyGroup>
@@ -35,7 +35,7 @@
         <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
     </ItemGroup>
     <ItemGroup>
-      <PackageReference Include="NNostr.Client" Version="0.0.34" />
+      <PackageReference Include="NNostr.Client" Version="0.0.37" />
     </ItemGroup>
     <ItemGroup>
       <Folder Include="Resources" />
