@@ -65,12 +65,8 @@
                 }
                 else
                 {
-                    <div class="table-responsive-sm my-0">
-
-
+                    
                         <partial name="Wabisabi/CoinjoinHistoryTable" model="cjHistory"/>
-
-                    </div>
                 }
             </div>
 
@@ -252,6 +248,16 @@
                                             @coin.Amount.ToDecimal(MoneyUnit.BTC) BTC
                                         </td>
                                         <td>
+                                            <ul class="list-group list-group-flush">
+                                                
+                                                @for (var index = 0; index < coin.HdPubKey.Labels.Count; index++)
+                                                {
+                                                    var label = coin.HdPubKey.Labels.ElementAt(index);
+                                                    <li class="list-group-item">
+                                                        <vc:truncate-center text="@label" classes="truncate-center-id"></vc:truncate-center>
+                                                    </li>
+                                                }
+                                            </ul>
                                             @coin.HdPubKey.Labels.ToString()
                                         </td>
                                     </tr>

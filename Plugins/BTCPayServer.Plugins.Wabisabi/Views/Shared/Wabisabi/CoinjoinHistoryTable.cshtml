@@ -11,37 +11,8 @@
     var mainnet = BtcPayNetworkProvider.NetworkType == ChainName.Mainnet;
 }
 
-@functions
-{
-    void PrintCoin(BTCPayWallet.CoinjoinData.CoinjoinDataCoin coin)
-    {
-        var op = OutPoint.Parse(coin.Outpoint);
-        <tr>
-            <td>
-                <a href="@BitcoinPaymentType.Instance.GetTransactionLink(BtcPayNetworkProvider.BTC, op.Hash.ToString())" target="_blank" class="text-break">
-                    @coin.Outpoint
-                </a>
-
-            </td>
-            <td>
-                @coin.Amount
-            </td>
-            <td>
-                @if (string.IsNullOrEmpty(coin.PayoutId))
-                {
-                    @coin.AnonymitySet.ToString("0.##")
-                }
-                else
-                {
-                    @($"Payment ({coin.PayoutId})")
-                }
-            </td>
-        </tr>
-    }
-}
-
-<div class="table-responsive">
-    <table class="table table-hover  w-100">
+<div class="table-responsive" style="  transform: rotateX(180deg);">
+    <table class="table table-hover  w-100" style="  transform: rotateX(180deg);">
         <thead>
         <tr>
             <th class="w-125px">Round</th>
@@ -59,7 +30,12 @@
             var cjOutWeightedAverage = @CoinjoinAnalyzer.WeightedAverage.Invoke(@cjData.CoinsOut.Where(coin => coin.PayoutId is null).Select(coin => new CoinjoinAnalyzer.AmountWithAnonymity(coin.AnonymitySet, new Money(coin.Amount, MoneyUnit.BTC))));
             <tr>
                 <td>
-                    <a class="text-break" data-bs-toggle="collapse" data-bs-target="#txcoins-@cjData.Round">@cjData.Round</a>
+                    <a class="d-flex cursor-pointer " data-bs-toggle="collapse" data-bs-target="#txcoins-@cjData.Round">
+
+                        <vc:truncate-center text="@cjData.Round" classes="truncate-center-id"/>
+                        <vc:icon symbol="caret-down"/>
+                    </a>
+
                 </td>
                 <td>
                     <span class="text-break">@cjData.Timestamp.ToTimeAgo()</span>
@@ -68,59 +44,50 @@
                     <span class="text-break">@cjData.CoordinatorName</span>
                 </td>
                 <td>
-                    <a href="@BitcoinPaymentType.Instance.GetTransactionLink(network, cjData.Transaction)" target="_blank" class="text-break">
-                        @cjData.Transaction
-                    </a>
+                    <vc:truncate-center text="@cjData.Transaction" link="@BitcoinPaymentType.Instance.GetTransactionLink(network, cjData.Transaction)" classes="truncate-center-id"/>
                 </td>
                 <td>
-                    <span class="">@cjData.CoinsIn.Length (@cjData.CoinsIn.Sum(coin => coin.Amount) BTC) (@cjInWeightedAverage.ToString("0.##") anonset wavg)</span>
+                    <div class="card truncate-center-id">
+                        <span class="text-nowrap">@cjData.CoinsIn.Length coins</span>
+                        <span class="text-nowrap">@cjData.CoinsIn.Sum(coin => coin.Amount) BTC</span>
+                        <span class="text-nowrap">@cjInWeightedAverage.ToString("0.##") anonset wavg</span>
+                    </div>
                 </td>
                 <td>
-                    <span class="">@cjData.CoinsOut.Length (@cjData.CoinsOut.Sum(coin => coin.Amount) BTC) (@cjOutWeightedAverage.ToString("0.##") anonset wavg)</span>
+
+                    <div class="card truncate-center-id">
+                        <span class="text-nowrap">@cjData.CoinsOut.Length coins</span>
+                        <span class="text-nowrap">@cjData.CoinsOut.Sum(coin => coin.Amount) BTC</span>
+                        <span class="text-nowrap">@cjOutWeightedAverage.ToString("0.##") anonset wavg</span>
+                    </div>
                 </td>
 
             </tr>
 
-            <tr id="txcoins-@cjData.Round" class="collapse">
-                <td colspan="6">
-                    <table class="table mb-0">
-
-                        <thead>
-                        <tr>
-                            <th colspan="3">Inputs</th>
-                        </tr>
-                        <tr>
-                            <th class="w-125px">utxo</th>
-                            <th >Amount</th>
-                            <th >Anonset</th>
-                        </tr>
-                        </thead>
+            <tr id="txcoins-@cjData.Round" class="collapse  overflow-y-auto " style="    max-height: 30vh;">
+                <td colspan="6" >
+                    <div class="d-flex justify-content-start">
+                        
+                    <ul class="list-group list-group-flush" style="--btcpay-list-group-bg: transparent;">
+                        <li class="list-group-item list-group-item-heading h5">Inputs</li>
                         @foreach (var c in cjData.CoinsIn)
                         {
-                            PrintCoin(c);
+                            <partial name="Wabisabi/CoinView" model="@c"/>
                         }
+                    </ul>
 
 
-                    </table>
-                    <table class="table mb-0">
+                    <ul class="list-group list-group-flush" style="--btcpay-list-group-bg: transparent;">
 
-                        <thead>
-                        <tr>
-                            <th colspan="3">Outputs</th>
-                        </tr>
-                        <tr>
-                            <th class="w-125px">utxo</th>
-                            <th >Amount</th>
-                            <th >Anonset</th>
-                        </tr>
-                        </thead>
+                        <li class="list-group-item list-group-item-heading h5">Outputs</li>
                         @foreach (var c in cjData.CoinsOut)
                         {
-                            PrintCoin(c);
+                            <partial name="Wabisabi/CoinView" model="@c"/>
                         }
+                    </ul>
 
 
-                    </table>
+                    </div>
                 </td>
             </tr>
         }
