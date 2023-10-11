@@ -9,7 +9,7 @@
     <PropertyGroup>
         <Product>File Seller</Product>
         <Description>Allows you to sell files through the point of sale/crowdfund apps.</Description>
-        <Version>1.0.2</Version>
+        <Version>1.0.3</Version>
     </PropertyGroup>
     <!-- Plugin development properties -->
     <PropertyGroup>
