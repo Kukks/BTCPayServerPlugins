@@ -1,7 +1,5 @@
-﻿@using System.Net.Http
-@using BTCPayServer.Plugins.SideShift
+﻿@using BTCPayServer.Plugins.SideShift
 @model BTCPayServer.Models.ViewPullPaymentModel
-@inject IHttpClientFactory HttpClientFactory
 @inject SideShiftService SideShiftService
 @{
     var ss = await SideShiftService.GetSideShiftForStore(Model.StoreId);

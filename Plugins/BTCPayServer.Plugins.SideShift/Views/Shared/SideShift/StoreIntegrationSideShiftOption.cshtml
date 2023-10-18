@@ -1,23 +1,10 @@
 @using BTCPayServer.Abstractions.Contracts
 @using BTCPayServer.Plugins.SideShift
-@using Microsoft.AspNetCore.Mvc.TagHelpers
-@using Microsoft.AspNetCore.Routing
 @inject SideShiftService SideShiftService
 @inject IScopeProvider ScopeProvider
 @{
     var storeId = ScopeProvider.GetCurrentStoreId();
-
-    SideShiftSettings settings = null;
-    if (!string.IsNullOrEmpty(storeId))
-    {
-        try
-        {
-            settings = await SideShiftService.GetSideShiftForStore(storeId);
-        }
-        catch (Exception)
-        {
-        }
-    }
+    var settings = await SideShiftService.GetSideShiftForStore(storeId);
 }
 @if (!string.IsNullOrEmpty(storeId))
 {

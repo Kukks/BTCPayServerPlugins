@@ -1,12 +1,9 @@
 @using BTCPayServer.Plugins.SideShift
-@using Newtonsoft.Json
-@using Newtonsoft.Json.Linq
 @inject BTCPayServer.Security.ContentSecurityPolicies csp
 @inject SideShiftService SideShiftService
 @model BTCPayServer.Models.InvoicingModels.PaymentModel 
 @{
-    var storeId = Model.StoreId;
-    var settings = await SideShiftService.GetSideShiftForStore(storeId);
+    var settings = await SideShiftService.GetSideShiftForInvoice(Model.InvoiceId, Model.StoreId);
     var preferredTargetPaymentMethodId = string.IsNullOrEmpty(settings?.PreferredTargetPaymentMethodId) ? null : Model.AvailableCryptos.Any(crypto => crypto.PaymentMethodId == settings.PreferredTargetPaymentMethodId) ? settings.PreferredTargetPaymentMethodId : null;
 
 }

@@ -3,8 +3,7 @@
 @model BTCPayServer.Models.InvoicingModels.PaymentModel
 @{
     const string id = "SideShift";
-    var storeId = Model.StoreId;
-    var settings = await SideShiftService.GetSideShiftForStore(storeId);
+    var settings = await SideShiftService.GetSideShiftForInvoice(Model.InvoiceId, Model.StoreId);
     if (settings?.Enabled is true)
     {
         

@@ -1,10 +1,8 @@
 @using BTCPayServer.Plugins.SideShift
-@using Newtonsoft.Json
-@using Newtonsoft.Json.Linq
 @inject SideShiftService SideShiftService
+@model BTCPayServer.Models.InvoicingModels.PaymentModel
 @{
-    var storeId = ((JObject)JObject.Parse(JsonConvert.SerializeObject(Model)))["StoreId"].Value<string>();
-    var settings = await SideShiftService.GetSideShiftForStore(storeId);
+    var settings = await SideShiftService.GetSideShiftForInvoice(Model.InvoiceId, Model.StoreId);
     if (settings?.Enabled is true)
     {
         <div class="payment-tabs__tab py-0" id="sideshift-tab" v-on:click="switchTab('sideshift')" v-bind:class="{ 'active': currentTab == 'sideshift'}" v-if="!srvModel.paymentMethodId.endsWith('LNURLPAY')">

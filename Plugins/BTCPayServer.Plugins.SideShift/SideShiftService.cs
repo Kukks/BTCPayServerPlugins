@@ -2,32 +2,110 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client;
+using BTCPayServer.Events;
+using BTCPayServer.HostedServices;
+using BTCPayServer.Services.Invoices;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace BTCPayServer.Plugins.SideShift
 {
-    public class SideShiftService
+    public class SideShiftService:EventHostedServiceBase
     {
+        private readonly InvoiceRepository _invoiceRepository;
         private readonly ISettingsRepository _settingsRepository;
         private readonly IMemoryCache _memoryCache;
         private readonly IStoreRepository _storeRepository;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly JsonSerializerSettings _serializerSettings;
 
-        public SideShiftService(ISettingsRepository settingsRepository, IMemoryCache memoryCache, IStoreRepository storeRepository, IHttpClientFactory httpClientFactory)
+        public SideShiftService(
+            InvoiceRepository invoiceRepository,
+            ISettingsRepository settingsRepository, 
+            IMemoryCache memoryCache, 
+            IStoreRepository storeRepository, 
+            IHttpClientFactory httpClientFactory,
+            ILogger<SideShiftService> logger,
+            EventAggregator eventAggregator,
+            JsonSerializerSettings serializerSettings) : base(eventAggregator, logger)
         {
+            _invoiceRepository = invoiceRepository;
             _settingsRepository = settingsRepository;
             _memoryCache = memoryCache;
             _storeRepository = storeRepository;
             _httpClientFactory = httpClientFactory;
+            _serializerSettings = serializerSettings;
         }
+
+
+        protected override void SubscribeToEvents()
+        {
+            Subscribe<InvoiceEvent>();
+            base.SubscribeToEvents();
+        }
+
+
+        protected override Task ProcessEvent(object evt, CancellationToken cancellationToken)
+        {
+            if (evt is InvoiceEvent invoiceEvent && invoiceEvent.EventCode == InvoiceEventCode.Created)
+            {
+                var invoiceSettings = GetSideShiftSettingsFromInvoice(invoiceEvent.Invoice);
+                if (invoiceSettings is not null)
+                {
+                    var cacheKey = CreateCacheKeyForInvoice(invoiceEvent.InvoiceId);
+                    var entry = _memoryCache.CreateEntry(cacheKey);
+                    entry.AbsoluteExpiration = invoiceEvent.Invoice.ExpirationTime;
+                    entry.Value = invoiceSettings;
+                }
+            }
+            return base.ProcessEvent(evt, cancellationToken);
+        }
+
+        public async Task<SideShiftSettings> GetSideShiftForInvoice(string invoiceId, string storeId)
+        {
+            var cacheKey = CreateCacheKeyForInvoice(invoiceId);
+            var invoiceSettings = await _memoryCache.GetOrCreateAsync(cacheKey, async entry =>
+            {
+                var invoice = await _invoiceRepository.GetInvoice(invoiceId);
+                entry.AbsoluteExpiration = invoice?.ExpirationTime;
+                return GetSideShiftSettingsFromInvoice(invoice);
+            });
+
+            var storeSettings = await GetSideShiftForStore(storeId);
+            if (invoiceSettings is null)
+            {
+                return storeSettings;
+            }
+            if (storeSettings is null)
+            {
+                return invoiceSettings.ToObject<SideShiftSettings>();;
+            }
+
+            var storeSettingsJObject = JObject.FromObject(storeSettings, JsonSerializer.Create(_serializerSettings));
+            storeSettingsJObject.Merge(invoiceSettings);
+            return storeSettingsJObject.ToObject<SideShiftSettings>();
+        }
+
+        private string CreateCacheKeyForInvoice(string invoiceId) => $"{nameof(SideShiftSettings)}_{invoiceId}";
+
+        private JObject? GetSideShiftSettingsFromInvoice(InvoiceEntity invoice)
+        {
+            return invoice?.Metadata.GetAdditionalData<JObject>("sideshift");
+        }
+
         
         public async Task<SideShiftSettings> GetSideShiftForStore(string storeId)
         {
+            if (storeId is null)
+            {
+                return null;
+            }
             var k = $"{nameof(SideShiftSettings)}_{storeId}";
             return await _memoryCache.GetOrCreateAsync(k, async _ =>
             {

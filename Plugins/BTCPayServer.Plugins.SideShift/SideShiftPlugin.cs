@@ -15,6 +15,7 @@ namespace BTCPayServer.Plugins.SideShift
         public override void Execute(IServiceCollection applicationBuilder)
         {
             applicationBuilder.AddSingleton<SideShiftService>();
+            applicationBuilder.AddHostedService(provider => provider.GetService<SideShiftService>());
             applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/SideShiftNav",
                 "store-integrations-nav"));
             applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/PullPaymentViewInsert",
