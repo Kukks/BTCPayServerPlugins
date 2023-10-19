@@ -93,10 +93,21 @@ public class WabisabiCoordinatorService : PeriodicRunner
                     break;
             }
         }
-        else if (existing.Enabled &&
-                 _instanceManager.HostedServices.TryGetValue("local", out var instance))
+        else if (existing.Enabled)
         {
-            instance.TermsConditions = wabisabiCoordinatorSettings.TermsConditions;
+            if (_instanceManager.HostedServices.TryGetValue("local", out var instance))
+            {
+                instance.TermsConditions = wabisabiCoordinatorSettings.TermsConditions;
+            }
+            if(wabisabiCoordinatorSettings.Enabled &&
+               (existing.NostrIdentity != wabisabiCoordinatorSettings.NostrIdentity || existing.NostrRelay != wabisabiCoordinatorSettings.NostrRelay))
+            {
+                var nostr = HostedServices.Get<NostrWabisabiApiServer>();
+                nostr.UpdateSettings(wabisabiCoordinatorSettings);
+                await nostr.StopAsync(CancellationToken.None);
+                await nostr.StartAsync(CancellationToken.None);
+            }
+
         }
 
         
@@ -202,8 +213,11 @@ public class WabisabiCoordinatorService : PeriodicRunner
         WabiSabiCoordinator = new WabiSabiCoordinator(coordinatorParameters, rpc, coinJoinIdStore, coinJoinScriptStore,
             _httpClientFactory);
         HostedServices.Register<WabiSabiCoordinator>(() => WabiSabiCoordinator, "WabiSabi Coordinator");
-        var settings = await GetSettings();
         
+        var settings = await GetSettings();
+        WabisabiApiServer = new NostrWabisabiApiServer(WabiSabiCoordinator.Arena, settings, _logger);
+        HostedServices.Register<NostrWabisabiApiServer>(() => WabisabiApiServer, "WabiSabi Coordinator Nostr");
+
         if (settings.Enabled)
         {
             _ = StartCoordinator(cancellationToken);
@@ -217,6 +231,8 @@ public class WabisabiCoordinatorService : PeriodicRunner
         }
         await base.StartAsync(cancellationToken);
     }
+
+    public NostrWabisabiApiServer WabisabiApiServer { get; set; }
 
     public async Task StartCoordinator(CancellationToken cancellationToken)
     {

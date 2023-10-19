@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
+using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -10,6 +12,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using NNostr.Client;
 using WalletWasabi.Logging;
+using WalletWasabi.Tor.Socks5.Pool.Circuits;
 using WalletWasabi.WabiSabi;
 using WalletWasabi.WabiSabi.Backend.Models;
 using WalletWasabi.WabiSabi.Backend.PostRequests;
@@ -18,36 +21,65 @@ using WalletWasabi.WabiSabi.Models.Serialization;
 
 namespace BTCPayServer.Plugins.Wabisabi;
 
-public class NostrWabiSabiApiClient : IWabiSabiApiRequestHandler, IHostedService
+public class NostrWabiSabiApiClient : IWabiSabiApiRequestHandler, IHostedService, IDisposable
 {
     public static int RoundStateKind = 15750;
     public static int CommunicationKind = 25750;
-    private readonly NostrClient _client;
+    private NostrClient _client;
+    private readonly Uri _relay;
+    private readonly WebProxy _webProxy;
     private readonly ECXOnlyPubKey _coordinatorKey;
+    private readonly INamedCircuit _circuit;
     private string _coordinatorKeyHex => _coordinatorKey.ToHex();
     private readonly string _coordinatorFilterId;
 
-    public NostrWabiSabiApiClient(NostrClient client, ECXOnlyPubKey coordinatorKey)
+    public NostrWabiSabiApiClient(Uri relay, WebProxy webProxy , ECXOnlyPubKey coordinatorKey, INamedCircuit? circuit)
     {
-        _client = client;
+        _relay = relay;
+        _webProxy = webProxy;
         _coordinatorKey = coordinatorKey;
+        _circuit = circuit;
         _coordinatorFilterId = new Guid().ToString();
     }
 
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        if (!_circuit.IsActive)
+        {
+            Dispose();
+        }
+
+        if (_circuit is OneOffCircuit)
+        {
+            return;
+            // we dont bootstrap, we do it on demand for a request instead
+        }
+        
+        await Init(cancellationToken, _circuit);
+    }
+
+    private async Task Init(CancellationToken cancellationToken, INamedCircuit circuit)
+    {
+        _client = CreateClient(_relay, _webProxy, circuit);
+
         _ = _client.ListenForMessages();
         var filter = new NostrSubscriptionFilter()
         {
             Authors = new[] {_coordinatorKey.ToHex()},
             Kinds = new[] {RoundStateKind, CommunicationKind},
-            Since = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromHours(1))
+            Since = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromHours(1)),
+            Limit = 0
         };
         await _client.CreateSubscription(_coordinatorFilterId, new[] {filter}, cancellationToken);
         _client.EventsReceived += EventsReceived;
 
         await _client.ConnectAndWaitUntilConnected(cancellationToken);
+        _circuit.IsolationIdChanged += (_, _) =>
+        {
+            _client.Dispose();
+            _ = StartAsync(CancellationToken.None);
+        };
     }
 
     private RoundStateResponse _lastRoundState { get; set; }
@@ -77,6 +109,16 @@ public class NostrWabiSabiApiClient : IWabiSabiApiRequestHandler, IHostedService
     private async Task<TResponse> SendAndWaitForReply<TRequest, TResponse>(RemoteAction action, TRequest request,
         CancellationToken cancellationToken)
     {
+        
+        if(_circuit is OneOffCircuit)
+        {
+                using var subClient =
+                    new NostrWabiSabiApiClient(_relay, _webProxy, _coordinatorKey, new PersonCircuit());
+                await subClient.StartAsync(cancellationToken);
+                return await subClient.SendAndWaitForReply<TRequest, TResponse>(action, request, cancellationToken);
+        }
+        
+        
         var newKey = ECPrivKey.Create(RandomUtils.GetBytes(32));
         var pubkey = newKey.CreateXOnlyPubKey();
         var evt = new NostrEvent()
@@ -164,14 +206,14 @@ public class NostrWabiSabiApiClient : IWabiSabiApiRequestHandler, IHostedService
         catch (OperationCanceledException e)
         {
             _client.EventsReceived -= OnClientEventsReceived;
+            _circuit.IncrementIsolationId();
             throw;
         }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        await _client.CloseSubscription(_coordinatorFilterId, cancellationToken);
-        _client.EventsReceived -= EventsReceived;
+        Dispose();
     }
 
     public async Task<RoundStateResponse> GetStatusAsync(RoundStateRequest request, CancellationToken cancellationToken)
@@ -236,5 +278,24 @@ public class NostrWabiSabiApiClient : IWabiSabiApiRequestHandler, IHostedService
         SignTransaction,
         GetStatus,
         ReadyToSign
+    }
+
+    public void Dispose()
+    {
+        _client?.Dispose();
+    }
+
+    public static NostrClient CreateClient(Uri relay, WebProxy webProxy,  INamedCircuit namedCircuit )
+    {
+        return new NostrClient(relay, socket =>
+        {
+            if (socket is ClientWebSocket clientWebSocket && webProxy is { })
+            {
+                var proxy = new WebProxy(webProxy.Address, true, null,
+                    new NetworkCredential(namedCircuit.Name,
+                        namedCircuit.IsolationId.ToString()));
+                clientWebSocket.Options.Proxy = proxy;
+            }
+        });
     }
 }

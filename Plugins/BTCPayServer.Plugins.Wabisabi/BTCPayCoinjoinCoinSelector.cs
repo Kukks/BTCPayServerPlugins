@@ -206,7 +206,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                 //if we're less than the max output registration, we should be more aggressive in adding coins
                 var chance = consolidationMode ? (isLessThanMaxOutputRegistration? 100: 90 ): 100m - Math.Min(maxCoinCapacityPercentage,  isLessThanMaxOutputRegistration ? 10m : maxCoinCapacityPercentage);
                 _logger.LogDebug(
-                    $"coin selection: no payms left but at {solution.Coins.Count()} coins. random chance to add another coin if: {chance} <= {rand} (random 0-100) ");
+                    $"coin selection: no payms left but at {solution.Coins.Count()} coins. random chance to add another coin if: {chance} <= {rand} (random 0-100) {chance <= rand} ");
                 if (chance <= rand)
                 {
                     break;

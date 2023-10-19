@@ -1,7 +1,10 @@
 ﻿
 @using BTCPayServer.Plugins.Wabisabi
+@using NNostr.Client
+@using NNostr.Client.Protocols
+@using WalletWasabi.Backend.Controllers
 @model WalletWasabi.Backend.Controllers.WabisabiCoordinatorSettings
-
+@inject WabisabiCoordinatorService WabisabiCoordinatorService
 @{
     Layout = "../Shared/_NavLayout.cshtml";
     ViewData["NavPartialName"] = "../UIServer/_Nav";
@@ -59,6 +62,28 @@
                     <button name="command" value="generate-nostr-key" type="submit" class="btn btn-secondary btn-sm">Generate</button>
                 </div>
             </div>
+            @if(WabisabiCoordinatorService.Started && WabisabiCoordinatorService.WabisabiApiServer != null && Model.NostrRelay is not null && Model.NostrIdentity is not null)
+            {
+                var nprofile = new NIP19.NosteProfileNote()
+                {
+                    PubKey = Model.GetPubKey().ToHex(),
+                    Relays = new[] {Model.NostrRelay.ToString()}
+                }.ToNIP19();
+                
+                <div class="form-group mt-4" >
+                    <label class="form-label">EXPERIMENTAL: NOSTR COORDINATOR ENDPOINT ACTIVE</label>
+                    <div class="input-group">
+                        <input type="text" id="ss-result-txt" class="form-control" readonly="readonly" value="nostr:@nprofile"/>
+                        <button type="button" class="btn btn-secondary" data-clipboard-target="#ss-result-txt">
+                            <vc:icon symbol="copy"/>
+                        </button> <button type="button" class="btn btn-secondary"  id="advertise-nostr" onclick="document.getElementById('UriToAdvertise').value='nostr:@nprofile'">
+                           Set as url to advertise
+                        </button>
+                        
+                    </div>
+                    <p id="ss-result-additional-info"></p>
+                </div>
+            }
             <div class="form-group">
                 <label asp-for="CoordinatorDescription" class="form-label">Description</label>
                 <textarea asp-for="CoordinatorDescription"  class="form-control"></textarea>

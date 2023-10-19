@@ -5,12 +5,14 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using NBitcoin;
 using NBitcoin.Secp256k1;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using NNostr.Client;
 using WabiSabi.Crypto;
+using WalletWasabi.Backend.Controllers;
 using WalletWasabi.Logging;
 using WalletWasabi.WabiSabi;
 using WalletWasabi.WabiSabi.Backend.Models;
@@ -26,17 +28,18 @@ public class NostrWabisabiApiServer: IHostedService
     public static int RoundStateKind = 15750;
     public static int CommunicationKind = 25750;
     private readonly Arena _arena;
-    private readonly NostrClient _client;
-    private readonly ECPrivKey _coordinatorKey;
-    private string _coordinatorKeyHex => _coordinatorKey.CreateXOnlyPubKey().ToHex();
+    private WabisabiCoordinatorSettings _coordinatorSettings;
+    private  NostrClient _client;
+    private readonly ILogger _logger;
     private readonly string _coordinatorFilterId;
 
     private Channel<NostrEvent> PendingEvents { get; } = Channel.CreateUnbounded<NostrEvent>();
-    public NostrWabisabiApiServer(Arena arena,NostrClient client, ECPrivKey coordinatorKey)
+    public NostrWabisabiApiServer(Arena arena, WabisabiCoordinatorSettings coordinatorSettings,
+        ILogger logger)
     {
         _arena = arena;
-        _client = client;
-        _coordinatorKey = coordinatorKey;
+        _coordinatorSettings = coordinatorSettings;
+        _logger = logger;
         _coordinatorFilterId = new Guid().ToString();
         _serializer = JsonSerializer.Create(JsonSerializationOptions.Default.Settings);
     }
@@ -44,12 +47,20 @@ public class NostrWabisabiApiServer: IHostedService
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        _ = _client.ListenForMessages();
+        if (_coordinatorSettings.NostrRelay is null || string.IsNullOrEmpty(_coordinatorSettings.NostrIdentity))
+        {
+            _logger.LogInformation("NOSTR SERVER: No Nostr relay/identity configured, skipping");
+            return;
+        }
+        
+        _client = new NostrClient(_coordinatorSettings.NostrRelay);
+        await _client.Connect(cancellationToken);
+        _logger.LogInformation($"NOSTR SERVER: CONNECTED TO {_coordinatorSettings.NostrRelay}");
         var filter = new NostrSubscriptionFilter()
         {
-            ReferencedPublicKeys = new[] {_coordinatorKey.ToHex()},
+            ReferencedPublicKeys = new[] {_coordinatorSettings.GetPubKey().ToHex()},
             Kinds = new[] { CommunicationKind},
-            Since = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromHours(1))
+            Limit = 0
         };
         await _client.CreateSubscription(_coordinatorFilterId, new[] {filter}, cancellationToken);
         _client.EventsReceived += EventsReceived;
@@ -65,7 +76,7 @@ public class NostrWabisabiApiServer: IHostedService
             if (e.subscriptionId != _coordinatorFilterId) return;
             var requests = e.events.Where(evt =>
                 evt.Kind == CommunicationKind &&
-                evt.GetTaggedData("p").Any(s => s == _coordinatorKeyHex) && evt.Verify());
+                evt.GetTaggedData("p").Any(s => s == _coordinatorSettings.GetPubKey().ToHex()) && evt.Verify());
             foreach (var request in requests)
                 PendingEvents.Writer.TryWrite(request); 
     }
@@ -79,11 +90,12 @@ public class NostrWabisabiApiServer: IHostedService
             var nostrEvent = new NostrEvent()
             {
                 Kind = RoundStateKind,
-                PublicKey = _coordinatorKeyHex,
+                PublicKey = _coordinatorSettings.GetPubKey().ToHex(),
                 CreatedAt = DateTimeOffset.Now,
                 Content = Serialize(response)
             };
             await _client.PublishEvent(nostrEvent, cancellationToken);
+            _logger.LogInformation($"NOSTR SERVER: PUBLISHED ROUND STATE {nostrEvent.Id}");
             await Task.Delay(1000, cancellationToken);
         }
     }
@@ -95,7 +107,7 @@ public class NostrWabisabiApiServer: IHostedService
                PendingEvents.Reader.TryRead(out var evt))
         {
             evt.Kind = 4;
-            var content = JObject.Parse(await evt.DecryptNip04EventAsync(_coordinatorKey));
+            var content = JObject.Parse(await evt.DecryptNip04EventAsync(_coordinatorSettings.GetKey()));
             if (content.TryGetValue("action", out var actionJson) &&
                 actionJson.Value<string>(actionJson) is { } actionString &&
                 Enum.TryParse<RemoteAction>(actionString, out var action) &&
@@ -103,6 +115,7 @@ public class NostrWabisabiApiServer: IHostedService
             {
                 try
                 {
+                    _logger.LogInformation($"NOSTR SERVER: Received request {evt.Id} {action}");
                     switch (action)
                     {
                         case RemoteAction.GetStatus:
@@ -191,26 +204,33 @@ public class NostrWabisabiApiServer: IHostedService
     private async Task Reply<TResponse>(NostrEvent originaltEvent,TResponse response, 
         CancellationToken cancellationToken)
     {
+        
+        _logger.LogInformation($"NOSTR SERVER: REPLYING TO {originaltEvent.Id} WITH {response}");
         var evt = new NostrEvent()
         {
             Content = Serialize(response),
-            PublicKey = _coordinatorKeyHex,
+            PublicKey = _coordinatorSettings.GetPubKey().ToHex(),
             Kind = 4,
             CreatedAt = DateTimeOffset.Now
         };
         evt.SetTag("p", originaltEvent.PublicKey);
         evt.SetTag("e", originaltEvent.Id);
 
-        await evt.EncryptNip04EventAsync(_coordinatorKey);
+        await evt.EncryptNip04EventAsync(_coordinatorSettings.GetKey());
         evt.Kind = CommunicationKind;
-        await evt.ComputeIdAndSignAsync(_coordinatorKey);
+        await evt.ComputeIdAndSignAsync(_coordinatorSettings.GetKey());
         await _client.PublishEvent(evt, cancellationToken);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        await _client.CloseSubscription(_coordinatorFilterId, cancellationToken);
-        _client.EventsReceived -= EventsReceived;
+        if (_client is not null)
+        {
+            
+            await _client.CloseSubscription(_coordinatorFilterId, cancellationToken);
+            _client.EventsReceived -= EventsReceived;
+            _client = null;
+        }
     }
 
     private static string Serialize<T>(T obj)
@@ -225,5 +245,10 @@ public class NostrWabisabiApiServer: IHostedService
         SignTransaction,
         GetStatus,
         ReadyToSign
+    }
+
+    public void UpdateSettings(WabisabiCoordinatorSettings wabisabiCoordinatorSettings)
+    {
+        _coordinatorSettings = wabisabiCoordinatorSettings;
     }
 }
