@@ -93,7 +93,7 @@ document.addEventListener('DOMContentLoaded', (event) => {
         document.getElementById("ss-result-additional-info").value = "";
         if (isValid()){
             shiftButton.setAttribute("disabled", "disabled");
-            const type = "";//"permanent";
+            const type = "permanent";
             
             if (type ==="permanent"){
                 fetch("https://sideshift.ai/api/v2/shifts/variable",{
