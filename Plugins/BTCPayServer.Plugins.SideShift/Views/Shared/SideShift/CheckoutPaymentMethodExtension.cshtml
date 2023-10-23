@@ -7,9 +7,9 @@
     if (settings?.Enabled is true)
     {
         
-        var coins = await SideShiftService.GetDepositOptions();
         if (settings.ExplicitMethods?.Any() is true)
         {
+            var coins = await SideShiftService.GetDepositOptions();
             foreach (var explicitMethod in settings.ExplicitMethods)
             {
                 var s = explicitMethod.Split("_");

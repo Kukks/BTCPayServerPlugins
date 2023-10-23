@@ -5,25 +5,22 @@ Vue.component("side-shift", {
             if (e && e.preventDefault) {
                 e.preventDefault();
             }
+            const toCurrency = this.toCurrency.toLowerCase();
             let settleMethodId = "";
             let amount = !this.$parent.srvModel.isUnsetTopUp
                 ? this.toCurrencyDue
                 : undefined;
-            if (this.toCurrency.toLowerCase() === "lbtc") {
+            if (toCurrency === "lbtc") {
                 settleMethodId = "liquid";
-            } else if (this.toCurrency.toLowerCase() === "usdt") {
+            } else if (toCurrency=== "usdt") {
                 settleMethodId = "usdtla";
             } else if (
-                this.toCurrency.endsWith("LightningLike") ||
-                this.toCurrency.endsWith("LNURLPay")
+                toCurrency.endsWith("lightninglike") ||
+                toCurrency.endsWith("lnurlpay")
             ) {
                 settleMethodId = "ln";
             } else {
-                settleMethodId = this.toCurrency
-                    .replace("_BTCLike", "")
-                    .replace("_MoneroLike", "")
-                    .replace("_ZcashLike", "")
-                    .toLowerCase();
+                settleMethodId = toCurrency.replace('_btclike', '').replace('_monerolike', '').replace('_zcashlike', '').toLowerCase();
             }
             window.__SIDESHIFT__ = {
                 parentAffiliateId: "qg0OrfHJV",

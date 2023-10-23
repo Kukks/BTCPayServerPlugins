@@ -1,11 +1,21 @@
 @using BTCPayServer.Plugins.SideShift
+@using BTCPayServer.Payments
 @inject BTCPayServer.Security.ContentSecurityPolicies csp
 @inject SideShiftService SideShiftService
 @model BTCPayServer.Models.InvoicingModels.PaymentModel 
 @{
     var settings = await SideShiftService.GetSideShiftForInvoice(Model.InvoiceId, Model.StoreId);
-    var preferredTargetPaymentMethodId = string.IsNullOrEmpty(settings?.PreferredTargetPaymentMethodId) ? null : Model.AvailableCryptos.Any(crypto => crypto.PaymentMethodId == settings.PreferredTargetPaymentMethodId) ? settings.PreferredTargetPaymentMethodId : null;
-
+    var preferredTargetPaymentMethodId = "";
+    if(!PaymentMethodId.TryParse(settings?.PreferredTargetPaymentMethodId, out var preferredPMI))
+    {
+        preferredTargetPaymentMethodId = null;
+    }
+    else
+    {
+        preferredTargetPaymentMethodId = Model.AvailableCryptos.FirstOrDefault(crypto =>
+            crypto.PaymentMethodId == settings.PreferredTargetPaymentMethodId ||
+            (crypto.CryptoCode == preferredPMI.CryptoCode && crypto.PaymentMethodId.EndsWith(LNURLPayPaymentType.Instance.GetId()) || crypto.PaymentMethodId.EndsWith(LightningPaymentType.Instance.GetId())))?.PaymentMethodId;
+    }
 }
 @if (settings?.Enabled is true)
 {
@@ -28,7 +38,7 @@
                     preferredToCurrency: @Json.Serialize(preferredTargetPaymentMethodId),
                 }
             },
-            created () {
+            async created () {
                 const self = this;
             	setInterval(function() {
             	    if ( self.explicitId === window.ssExplicitId) {
@@ -36,6 +46,12 @@
             	    }
             	    self.explicitId = window.ssExplicitId;            	 
                 },200)
+                if(this.preferredToCurrency && this.model.paymentMethodId !== this.preferredToCurrency){
+                    this.$parent.paymentMethodId = this.preferredToCurrency;
+                    await this.$parent.fetchData();
+                    this.$parent.paymentMethodId = "SideShift";
+                }
+                
             },
             computed: {
                 content () {
@@ -45,14 +61,17 @@
                     return this.model.paymentMethodId;
                 },
                 settleMethodId () {
-                    if (this.currency.toLowerCase() === "lbtc") {
+                    
+                    const toCurrency = this.currency.toLowerCase();
+                    
+                    if (toCurrency === "lbtc") {
                         return 'liquid';
-                    } else if (this.currency.toLowerCase() === "usdt") {
+                    } else if (toCurrency === "usdt") {
                         return "usdtla";
-                    } else if (this.currency.endsWith('LightningLike') || this.currency.endsWith('LNURLPay')) {
+                    } else if (toCurrency.endsWith('lightninglike') || toCurrency.endsWith('lnurlpay')) {
                         return "ln";
                     } else {
-                        return this.currency.replace('_BTCLike', '').replace('_MoneroLike', '').replace('_ZcashLike', '').toLowerCase();
+                        return toCurrency.replace('_btclike', '').replace('_monerolike', '').replace('_zcashlike', '').toLowerCase();
                     }
                 },
                 type () {
