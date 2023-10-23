@@ -37,7 +37,9 @@
                     const result =  this.$parent.paymentMethodId === "FixedFloat";
                     
                     if(this.preferredToCurrency && this.model.paymentMethodId !== this.preferredToCurrency){
-                    
+                        if (this.model.onChainWithLnInvoiceFallback && this.model.paymentMethodId === "BTC"){
+                            return result;
+                        }
                         this.$parent.paymentMethodId = this.preferredToCurrency;
                         this.$parent.fetchData().then(()=> {
                             this.$parent.paymentMethodId = "FixedFloat";
@@ -46,11 +48,23 @@
                     }
                     return result;
                 },
+                lightning () {
+                    if (!this.model.onChainWithLnInvoiceFallback || this.model.paymentMethodId !== "BTC"){
+                        return null;
+                    }
+                    const index = this.model.invoiceBitcoinUrl.indexOf("lightning=");
+                    if (index === -1){
+                        return null;
+                    }
+                    return this.model.invoiceBitcoinUrl.slice(index + "lightning=".length);
+                },
                 url () {
+                    
+                    const address=  this.lightning || this.model.btcAddress;
                     return "https://widget.fixedfloat.com/?" +
                         `to=${this.settleMethodId}` + 
                         "&lockReceive=true&ref=fkbyt39c" +
-                        `&address=${this.model.btcAddress}` +
+                        `&address=${address}` +
                         this.amountQuery +
                         this.explicitQuery;
                 },
@@ -58,7 +72,7 @@
                     return this.model.paymentMethodId;
                 },
                 settleMethodId () {
-                    return this.currency.endsWith('LightningLike') || this.currency.endsWith('LNURLPay')
+                    return this.currency.endsWith('LightningLike') || this.currency.endsWith('LNURLPay') || this.lightning
                         ? 'BTCLN'
                         : this.currency.replace('_BTCLike', '').replace('_MoneroLike', '').replace('_ZcashLike', '').toUpperCase();
                 },

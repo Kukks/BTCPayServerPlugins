@@ -46,7 +46,11 @@
             	    }
             	    self.explicitId = window.ssExplicitId;            	 
                 },200)
+                
                 if(this.preferredToCurrency && this.model.paymentMethodId !== this.preferredToCurrency){
+                    if (this.model.onChainWithLnInvoiceFallback && this.model.paymentMethodId === "BTC"){
+                       return;
+                    }
                     this.$parent.paymentMethodId = this.preferredToCurrency;
                     await this.$parent.fetchData();
                     this.$parent.paymentMethodId = "SideShift";
@@ -54,6 +58,16 @@
                 
             },
             computed: {
+                lightning () {
+                    if (!this.model.onChainWithLnInvoiceFallback || this.model.paymentMethodId !== "BTC"){
+                        return null;
+                    }
+                    const index = this.model.invoiceBitcoinUrl.indexOf("lightning=");
+                    if (index === -1){
+                        return null;
+                    }
+                    return this.model.invoiceBitcoinUrl.slice(index + "lightning=".length);
+                },
                 content () {
                     return this.$i18n.i18next.t("conversion_body", this.model).replace(/\n/ig, '<br>');
                 },
@@ -68,7 +82,7 @@
                         return 'liquid';
                     } else if (toCurrency === "usdt") {
                         return "usdtla";
-                    } else if (toCurrency.endsWith('lightninglike') || toCurrency.endsWith('lnurlpay')) {
+                    } else if (toCurrency.endsWith('lightninglike') || toCurrency.endsWith('lnurlpay') || this.lightning) {
                         return "ln";
                     } else {
                         return toCurrency.replace('_btclike', '').replace('_monerolike', '').replace('_zcashlike', '').toLowerCase();
@@ -91,7 +105,7 @@
                         parentAffiliateId: "qg0OrfHJV",
                         defaultDepositMethodId: this.explicitId || undefined,
                         defaultSettleMethodId: this.settleMethodId,
-                        settleAddress: this.model.btcAddress,
+                        settleAddress: this.lightning || this.model.btcAddress,
                         settleAmount: this.amountDue,
                         type: this.type
                     };
