@@ -9,7 +9,11 @@
 @if (settings?.Enabled is true)
 {
     <template id="fixed-float-checkout-template">
-        <iframe v-if="shown" :src="url" style="min-height:600px;width:100%;border:none" allowtransparency="true" ref="iframe"></iframe>
+        <iframe v-if="shown" :src="url" style="
+        min-height:600px;
+        border:none;
+        width: calc(var(--wrap-max-width) - var(--btcpay-space-m) - var(--btcpay-space-m));
+        margin-left: calc(var(--section-padding) * -1);" allowtransparency="true" ref="iframe"></iframe>
     </template>
     <script>
         const markupPercentage = @settings.AmountMarkupPercentage;
