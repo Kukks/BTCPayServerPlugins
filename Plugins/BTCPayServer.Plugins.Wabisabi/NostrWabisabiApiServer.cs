@@ -95,7 +95,7 @@ public class NostrWabisabiApiServer: IHostedService
                 Content = Serialize(response)
             };
             await _client.PublishEvent(nostrEvent, cancellationToken);
-            _logger.LogInformation($"NOSTR SERVER: PUBLISHED ROUND STATE {nostrEvent.Id}");
+            _logger.LogDebug($"NOSTR SERVER: PUBLISHED ROUND STATE {nostrEvent.Id}");
             await Task.Delay(1000, cancellationToken);
         }
     }
@@ -115,7 +115,7 @@ public class NostrWabisabiApiServer: IHostedService
             {
                 try
                 {
-                    _logger.LogInformation($"NOSTR SERVER: Received request {evt.Id} {action}");
+                    _logger.LogDebug($"NOSTR SERVER: Received request {evt.Id} {action}");
                     switch (action)
                     {
                         case RemoteAction.GetStatus:
@@ -205,7 +205,7 @@ public class NostrWabisabiApiServer: IHostedService
         CancellationToken cancellationToken)
     {
         
-        _logger.LogInformation($"NOSTR SERVER: REPLYING TO {originaltEvent.Id} WITH {response}");
+        _logger.LogDebug($"NOSTR SERVER: REPLYING TO {originaltEvent.Id} WITH {response}");
         var evt = new NostrEvent()
         {
             Content = Serialize(response),

@@ -195,22 +195,32 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                 {
                     continue;
                 }
-                
                 //if we have less than the max suggested output registration, we should add more coins to reach that number to avoid breaking up into too many coins?
-                var isLessThanMaxOutputRegistration = solution.Coins.Count < 8;
+                var isLessThanMaxOutputRegistration = solution.Coins.Count < Math.Max(solution.HandledPayments.Count +1, 8);
                 var rand = Random.Shared.Next(1, 101);
                 //let's check how many coins we are allowed to add max and how many we added, and use that percentage as the random chance of not adding it.
                 // if max coins = 20, and current coins  = 5 then 5/20 = 0.25 * 100 = 25
                 var maxCoinCapacityPercentage = Math.Floor((solution.Coins.Count / (decimal)maxCoins) * 100);
                 //aggressively attempt to reach max coin target if consolidation mode is on
                 //if we're less than the max output registration, we should be more aggressive in adding coins
-                var chance = consolidationMode ? (isLessThanMaxOutputRegistration? 100: 90 ): 100m - Math.Min(maxCoinCapacityPercentage,  isLessThanMaxOutputRegistration ? 10m : maxCoinCapacityPercentage);
-                _logger.LogDebug(
-                    $"coin selection: no payms left but at {solution.Coins.Count()} coins. random chance to add another coin if: {chance} <= {rand} (random 0-100) {chance <= rand} ");
+
+                decimal chance = 100;
+                if (consolidationMode && !isLessThanMaxOutputRegistration)
+                {
+                    chance -= maxCoinCapacityPercentage / random.GetInt(2, 8);
+                }
+                else if (!isLessThanMaxOutputRegistration)
+                {
+                    chance -= maxCoinCapacityPercentage;
+                }
+
+                _logger.LogDebug($"coin selection: no payments left but at {solution.Coins.Count()} coins. random chance to add another coin if: {chance} > {rand} (random 0-100) continue: {chance > rand}");
+
                 if (chance <= rand)
                 {
                     break;
                 }
+                
             }
         }
 

@@ -25,7 +25,7 @@ public class PrismClaimCreate : IPluginHookFilter
         var network = _networkProvider.GetNetwork<BTCPayNetwork>("BTC");
         if (args is not ClaimRequest claimRequest || network is null)
         {
-            return Task.FromResult(args);
+            return args;
         }
         
         if (claimRequest.Destination?.ToString() is not { } args1 || !args1.StartsWith("sideshift:")) return args;
