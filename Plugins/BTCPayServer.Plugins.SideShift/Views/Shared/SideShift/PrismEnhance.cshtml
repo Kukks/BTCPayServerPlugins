@@ -49,6 +49,7 @@ document.addEventListener('DOMContentLoaded', (event) => {
     // sideshiftDestinationButton.addEventListener("click", ev => modal.show());
     const selectedSideShiftCoin = document.getElementById("sscoin");
     const specifiedSideShiftDestination = document.getElementById("ssdest");
+    const specifiedSideShiftDepositNetwork = document.getElementById("ssdepositNetwork");
     const specifiedSideShiftMemo= document.getElementById("ssmemo");
     const shiftButton = document.getElementById("ssshift");
     let selectedCoin = null;
@@ -106,7 +107,7 @@ document.addEventListener('DOMContentLoaded', (event) => {
                         settleMemo: specifiedSideShiftMemo.value,
                         affiliateId: "qg0OrfHJV",
                         depositCoin : "BTC",
-                        depositNetwork : "lightning",
+                        depositNetwork : specifiedSideShiftDepositNetwork.value,
                         settleCoin: selectedCoin.code,
                         settleNetwork: selectedCoin.network,
                         permanent: true
@@ -135,7 +136,8 @@ document.addEventListener('DOMContentLoaded', (event) => {
                         shiftCoin:selectedCoin.code,
                         shiftNetwork: selectedCoin.network,
                         shiftDestination: specifiedSideShiftDestination.value,
-                        shiftMemo: specifiedSideShiftMemo.value
+                        shiftMemo: specifiedSideShiftMemo.value,
+                        shiftDepositNetwork: specifiedSideShiftDepositNetwork.value
                 });
                 shiftButton.removeAttribute("disabled");
             }
@@ -164,6 +166,12 @@ document.addEventListener('DOMContentLoaded', (event) => {
                         <div id="ss-server-errors" class="text-danger"></div>
                         <p>This will generate a piece of code based on Sideshift configuration that can work as a valid destination in prism. Prism will then generate a "shift" on Sideshift and send the funds through LN to it, and Sideshift will send you the conversion. </p>
                         <div class="form-group">
+                            <label class="form-label">How do you want to send BTC to SideShift?</label>
+                            <select id="ssdepositNetwork" class="form-select">
+                                <option value="lightning">Lightning</option>
+                                <option value="bitcoin">On-Chain</option>
+                            </select>
+                        </div><div class="form-group">
                             <label class="form-label">Which coin should Sideshift send you</label>
                             <select id="sscoin" class="form-select">
                                 @foreach (var opt in coins)

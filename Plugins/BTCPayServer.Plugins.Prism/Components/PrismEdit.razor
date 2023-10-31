@@ -29,24 +29,19 @@ else
 @if (NoPayoutProcessors)
 {
     <div class="alert alert-warning mb-5" role="alert">
-        An automated payout processor for Lightning is required in order to automate prism payouts.
+        An automated payout processor is required in order to automate prism payouts.
         <a class="alert-link p-0" href="@PayoutProcessorLink">Configure now</a>
-    </div>
-}
-@if (Users?.Any() is not true)
-{
-    <div class="alert alert-warning mb-5" role="alert">
-        Prisms can currently mostly work on lightning addresses that are owned by the store. Please create a lightning address for the store.
-        <a class="alert-link p-0" href="@LNAddressLink">Configure now</a>. <br/><br/>Alternatively, you can use * as the source, which will match any settled invoice as long as it was paid through Lightning.
     </div>
 }
 
     <datalist id="users">
         <option value="*">Catch-all lightning payments made against invoices in your store (excluding when other prisms are configured that capture those payments.)</option>
+        <option value="*@BitcoinPaymentType.Instance.ToStringNormalized()">Catch-all on-chain payments made against invoices in your store</option>
+        <option value="*All">Catch-all any payments made against invoices in your store</option>
 
         @foreach (var user in Users)
         {
-            <option value="@user.Username">A lightning address configured on your store</option>
+            <option value="@user.Username">@user.Username: (lightning address)</option>
         }
     </datalist>
     <datalist id="destinations">
@@ -63,7 +58,7 @@ else
         </a>
     </h2>
     <p class="text-muted">
-        The prism plugin allows automated value splits for your lightning payments. You can set up multiple prisms, each with their own source (which is a <a href="@LNAddressLink">lightning address username</a>, or use * as a catch-all for all invoices settled through Lightning, excluding ones which Prism can handle explicitly) and destinations (which are other lightning addresses or lnurls). The plugin will automatically credit the configured percentage of the payment to the destination (while also making sure there is 2% reserved to cater for fees, don't worry, once the lightning node tells us the exact fee amount, we credit/debit the balance after the payment), and once the configured threshold is reached, a <a href="@PayoutsLink">payout</a> will be created. Then, a <a href="@PayoutProcessorLink">payout processor</a> will run at intervals and process the payout.
+        The prism plugin allows automated value splits for your lightning and onchain payments. You can set up multiple prisms, each with their own source (which is a <a href="@LNAddressLink">lightning address username</a>, or use *, *Onchain or *All as catch-all for all payments made against invoices, excluding ones which Prism can handle explicitly) and destinations (which are other lightning addresses,, lnurls, bitcoin addresses, an xpub, or a custom formaty provided by other plugins). The plugin will automatically credit the configured percentage of the payment to the destination (while also making sure there is 2% reserved to cater for fees, don't worry, once the lightning node tells us the exact fee amount, we credit/debit the balance after the payment), and once the configured threshold is reached, a <a href="@PayoutsLink">payout</a> will be created. Then, a <a href="@PayoutProcessorLink">payout processor</a> will run at intervals and process the payout.
     </p>
 
 
@@ -150,7 +145,7 @@ else
                 @StatusMessageModel.Message
             </div>
         }
-        <div class="row">
+        <div class="row pt-2">
             <div class="d-flex">
                 @if (SelectedDestinationId is null or "null")
                 {
@@ -203,6 +198,7 @@ else
     public bool Loading { get; set; } = true;
     public List<LightningAddressData> Users { get; set; } = new();
     public PaymentMethodId pmi { get; set; } = new("BTC", LightningPaymentType.Instance);
+    public PaymentMethodId pmichain { get; set; } = new("BTC", PaymentTypes.BTCLike);
     public bool NoPayoutProcessors { get; set; }
 
     private string PrismEditButtonsFilter { get; set; }
@@ -224,7 +220,7 @@ else
             var fetchProcessors = PayoutProcessorService.GetProcessors(new PayoutProcessorService.PayoutProcessorQuery()
             {
                 Stores = new[] {StoreId},
-                PaymentMethods = new[] {pmi.ToString()}
+                PaymentMethods = new[] {pmi.ToString(), pmichain.ToString()}
             });
 
             var tasks = new Task[]
@@ -241,7 +237,10 @@ else
             EditContext.OnValidationRequested += Validate;
             EditContext.OnFieldChanged += FieldChanged;
             SatBreaker.PrismUpdated += SatBreakerOnPrismUpdated;
-            NoPayoutProcessors = PayoutProcessorFactories.Any(factory => factory.GetSupportedPaymentMethods().Contains(pmi)) && !(await fetchProcessors).Any();
+    //set NoPayoutProcessors to true if there are no configured payout processores for pmi and pmichain 
+            NoPayoutProcessors = PayoutProcessorFactories.Any(factory => factory.GetSupportedPaymentMethods().Contains(pmi)) && (await fetchProcessors).All(data =>
+                !new[] {pmi, pmichain}.Contains(data.GetPaymentMethodId()));
+
             Loading = false;
             await InvokeAsync(StateHasChanged);
         }
@@ -300,7 +299,6 @@ else
                     MessageStore.Add(() => destination.Destination, "Destination is required");
                     continue;
                 }
-
                 if (!ValidateDestination(dest, true))
                 {
                     MessageStore.Add(() => destination.Destination, "Destination is not valid");
@@ -317,26 +315,8 @@ else
         {
             return true;
         }
-        try
-        {
-            LNURL.LNURL.ExtractUriFromInternetIdentifier(dest);
-            return true;
-        }
-        catch (Exception e)
-        {
-            try
-            {
-                LNURL.LNURL.Parse(dest, out var tag);
-                return true;
-            }
-            catch (Exception exception)
-            {
-                var result = PluginHookService.ApplyFilter("prism-destination-validate", dest).Result;
-                if (result is true)
-                    return true;
-            }
-        }
-        return false;
+        var result = PluginHookService.ApplyFilter("prism-destination-validate", dest).Result;
+        return result is true or PrismDestinationValidationResult {Success: true };
     }
 
     public ValidationMessageStore MessageStore { get; set; }

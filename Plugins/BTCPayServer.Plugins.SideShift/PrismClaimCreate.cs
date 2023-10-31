@@ -43,7 +43,7 @@ public class PrismClaimCreate : IPluginHookFilter
                 affiliateId = "qg0OrfHJV",
                 settleMemo = request.ShiftMemo,
                 depositCoin = "BTC",
-                depositNetwork = "lightning",
+                depositNetwork = request.SourceNetwork?? "lightning",
                 settleCoin = request.ShiftCoin,
                 settleNetwork = request.ShiftNetwork,
             }

@@ -14,6 +14,7 @@ using BTCPayServer.Lightning;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Lightning;
 using BTCPayServer.Services;
+using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -23,6 +24,17 @@ using LightningAddressData = BTCPayServer.Data.LightningAddressData;
 
 namespace BTCPayServer.Plugins.Prism
 {
+    internal class PrismPlaceholderClaimDestination:IClaimDestination
+    {
+        public PrismPlaceholderClaimDestination(string id)
+        {
+            Id = id;
+        }
+
+        public string Id { get; }
+        public decimal? Amount { get; } = null;
+    }
+    
     /// <summary>
     /// monitors stores that have prism enabled and detects incoming payments based on the lightning address splits the funds to the destinations once the threshold is reached
     /// </summary>
@@ -293,6 +305,102 @@ namespace BTCPayServer.Plugins.Prism
             return true; // Indicate that the update succeeded
         }
 
+
+        private (Split, LightMoney)[] DetermineMatches(PrismSettings prismSettings, InvoiceEntity entity)
+        {
+            //first check the primary thing - ln address
+            var explicitPMI = new PaymentMethodId("BTC", LNURLPayPaymentType.Instance);
+            var pm = entity.GetPaymentMethod(explicitPMI);
+            var pmd = pm?.GetPaymentMethodDetails() as LNURLPayPaymentMethodDetails;
+            List<(Split, LightMoney)> result = new();
+            
+            var payments = entity.GetPayments(true).GroupBy(paymentEntity => paymentEntity.GetPaymentMethodId()).ToArray();
+            if (pmd?.ConsumedLightningAddress is not null)
+            {
+                var address = pmd.ConsumedLightningAddress.Split("@")[0];
+                var matchedExplicit = prismSettings.Splits.FirstOrDefault(s =>
+                    s.Source.Equals(address, StringComparison.InvariantCultureIgnoreCase));
+
+                if (matchedExplicit is not null)
+                {
+                   var explicitPayments = payments.FirstOrDefault(grouping =>
+                        grouping.Key == explicitPMI)?.Sum(paymentEntity => paymentEntity.PaidAmount.Net);
+                   payments = payments.Where(grouping => grouping.Key != explicitPMI).ToArray();
+
+                   if (explicitPayments > 0)
+                   {
+                       result.Add((matchedExplicit, LightMoney.FromUnit(explicitPayments.Value, LightMoneyUnit.BTC)));
+                   }
+                }
+            }
+            
+            var catchAlls = prismSettings.Splits.Where(split => split.Source.StartsWith("*")).Select(split =>
+            {
+                PaymentMethodId pmi = null;
+                var valid = true;
+
+                switch (split.Source)
+                {
+                    case "*":
+                        pmi = new PaymentMethodId("BTC", PaymentTypes.LightningLike);
+                        break;
+                    case "*All":
+                        break;
+                    case var s when PaymentTypes.TryParse(s.Substring(1), out var pType):
+                        
+                        pmi = new PaymentMethodId("BTC", pType);
+                        break;
+                    case var s when !PaymentMethodId.TryParse(s.Substring(1), out pmi):
+                        valid = false;
+                        break;
+                }
+
+                if (pmi is not null && pmi.CryptoCode != "BTC")
+                {
+                    valid = false;
+                }
+
+                return (pmi, valid, split);
+            }).Where(tuple => tuple.valid).ToDictionary(split => split.pmi, split => split.split);
+
+            while(payments.Any() || catchAlls.Any())
+            {
+                decimal paymentSum;
+                Split catchAllSplit;
+                //check if all catachalls do not match to all payments.key and then check if there is a catch all with a null key, that will take all the payments
+                if(catchAlls.All(catchAll => payments.All(payment => payment.Key != catchAll.Key)) && catchAlls.TryGetValue(null, out catchAllSplit))
+                {
+
+                    paymentSum = payments.Sum(paymentEntity =>
+                        paymentEntity.Sum(paymentEntity => paymentEntity.PaidAmount.Net));
+                    
+                    payments = Array.Empty<IGrouping<PaymentMethodId, PaymentEntity>>();
+                }
+                else
+                {
+                    
+                    var paymentGroup = payments.First();
+                    if (!catchAlls.Remove(paymentGroup.Key, out catchAllSplit))
+                    {
+                        //shift the paymentgroup to bottom of the list
+                        payments = payments.Where(grouping => grouping.Key != paymentGroup.Key).Append(paymentGroup).ToArray();
+                        continue;
+                    }
+                
+                    paymentSum = paymentGroup.Sum(paymentEntity => paymentEntity.PaidAmount.Net);
+                    payments = payments.Where(grouping => grouping.Key != paymentGroup.Key).ToArray();
+                }
+                
+                
+                if (paymentSum > 0)
+                {
+                    result.Add((catchAllSplit, LightMoney.FromUnit(paymentSum, LightMoneyUnit.BTC)));
+                }
+            }
+
+            return result.ToArray();
+        }
+
         /// <summary>
         /// if an invoice is completed, check if it was created through a lightning address, and if the store has prism enabled and one of the splits' source is the same lightning address, grab the paid amount, split it based on the destination percentages, and credit it inside the prism destbalances.
         /// When the threshold is reached (plus a 2% reserve fee to account for fees), create a payout and deduct the balance. 
@@ -320,71 +428,30 @@ namespace BTCPayServer.Plugins.Prism
                             return;
                         }
 
-                        var onChainCatchAllIdentifier = "*" + PaymentTypes.BTCLike.ToStringNormalized();
-                        var catchAllPrism = prismSettings.Splits.FirstOrDefault(split =>
-                            split.Source == "*" || split.Source == onChainCatchAllIdentifier);
-                        Split prism = null;
-                        LightningAddressData address = null;
+                        var prisms = DetermineMatches(prismSettings, invoiceEvent.Invoice);
+                        foreach (var prism in prisms)
+                        {
+                            if (prism.Item2 is not { } msats || msats<= 0)
+                                continue;
+                            var splits = prism.Item1?.Destinations;
+                            if (splits?.Any() is not true)
+                                continue;
 
-                        var pm = invoiceEvent.Invoice.GetPaymentMethod(new PaymentMethodId("BTC",
-                            LNURLPayPaymentType.Instance));
-                        var pmd = pm?.GetPaymentMethodDetails() as LNURLPayPaymentMethodDetails;
-                        if (string.IsNullOrEmpty(pmd?.ConsumedLightningAddress) && catchAllPrism is null)
-                        {
-                            return;
-                        }
-                        else if (!string.IsNullOrEmpty(pmd?.ConsumedLightningAddress))
-                        {
-                            address = await _lightningAddressService.ResolveByAddress(
-                                pmd.ConsumedLightningAddress.Split("@")[0]);
-                            if (address is null)
+                            //compute the sats for each destination  based on splits percentage
+                            var msatsPerDestination =
+                                splits.ToDictionary(s => s.Destination, s => (long) (msats.MilliSatoshi * (s.Percentage / 100)));
+
+                            prismSettings.DestinationBalance ??= new Dictionary<string, long>();
+                            foreach (var (destination, splitMSats) in msatsPerDestination)
                             {
-                                return;
-                            }
-
-                            prism = prismSettings.Splits.FirstOrDefault(s =>
-                                s.Source.Equals(address.Username, StringComparison.InvariantCultureIgnoreCase));
-                        }
-                        else if (catchAllPrism?.Source == onChainCatchAllIdentifier)
-                        {
-                            pm = invoiceEvent.Invoice.GetPaymentMethod(new PaymentMethodId("BTC", PaymentTypes.BTCLike));
-                            prism = catchAllPrism;
-                        }
-                        else
-                        {
-                            pm = invoiceEvent.Invoice.GetPaymentMethod(invoiceEvent.Invoice.GetPayments(true)
-                                .FirstOrDefault()?.GetPaymentMethodId());
-                            prism = catchAllPrism;
-                        }
-
-                        var splits = prism?.Destinations;
-                        if (splits?.Any() is not true || pm is null)
-                        {
-                            return;
-                        }
-
-
-                        var msats = LightMoney.FromUnit(pm.Calculate().CryptoPaid, LightMoneyUnit.BTC)
-                            .ToUnit(LightMoneyUnit.MilliSatoshi);
-                        if (msats <= 0)
-                        {
-                            return;
-                        }
-
-                        //compute the sats for each destination  based on splits percentage
-                        var msatsPerDestination =
-                            splits.ToDictionary(s => s.Destination, s => (long) (msats * (s.Percentage / 100)));
-
-                        prismSettings.DestinationBalance ??= new Dictionary<string, long>();
-                        foreach (var (destination, splitMSats) in msatsPerDestination)
-                        {
-                            if (prismSettings.DestinationBalance.TryGetValue(destination, out var currentBalance))
-                            {
-                                prismSettings.DestinationBalance[destination] = currentBalance + splitMSats;
-                            }
-                            else if (splitMSats > 0)
-                            {
-                                prismSettings.DestinationBalance.Add(destination, splitMSats);
+                                if (prismSettings.DestinationBalance.TryGetValue(destination, out var currentBalance))
+                                {
+                                    prismSettings.DestinationBalance[destination] = currentBalance + splitMSats;
+                                }
+                                else if (splitMSats > 0)
+                                {
+                                    prismSettings.DestinationBalance.Add(destination, splitMSats);
+                                }
                             }
                         }
 
@@ -393,7 +460,6 @@ namespace BTCPayServer.Plugins.Prism
                         {
                             await UpdatePrismSettingsForStore(invoiceEvent.Invoice.StoreId, prismSettings, true);
                         }
-
                         break;
                     }
                     case CheckPayoutsEvt:
@@ -415,7 +481,6 @@ namespace BTCPayServer.Plugins.Prism
                 Unlock();
             }
         }
-
 
         private async Task<bool> CreatePayouts(string storeId, PrismSettings prismSettings)
         {
@@ -454,7 +519,7 @@ namespace BTCPayServer.Plugins.Prism
                 }
                 var claimRequest = new ClaimRequest()
                 {
-                    Destination = new LNURLPayClaimDestinaton(destinationSettings?.Destination ?? destination),
+                    Destination = new PrismPlaceholderClaimDestination(destinationSettings?.Destination ?? destination),
                     PreApprove = true,
                     StoreId = storeId,
                     PaymentMethodId = pmi,
