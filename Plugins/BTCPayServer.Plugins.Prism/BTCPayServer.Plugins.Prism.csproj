@@ -9,8 +9,8 @@
 
     <!-- Plugin specific properties -->
     <PropertyGroup>
-        <Product>LN Prism</Product>
-        <Description>Automated value splits for lightning.</Description>
+        <Product>Prism</Product>
+        <Description>Automated value splits for Bitcoin.</Description>
         <Version>1.2.0</Version>
     </PropertyGroup>
     <!-- Plugin development properties -->

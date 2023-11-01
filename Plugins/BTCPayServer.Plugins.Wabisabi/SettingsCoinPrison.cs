@@ -3,9 +3,12 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using BTCPayServer.Services;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
-using WalletWasabi.Logging;
+using NLog;
 using WalletWasabi.WabiSabi.Client.Banning;
+using ILogger = Microsoft.Extensions.Logging.ILogger;
+using Logger = WalletWasabi.Logging.Logger;
 
 namespace BTCPayServer.Plugins.Wabisabi;
 
@@ -27,7 +30,7 @@ public class SettingsCoinPrison : CoinPrison
     }
 
     public static async Task<SettingsCoinPrison> CreateFromCoordinatorName(SettingsRepository settingsRepository,
-        string coordinatorName)
+        string coordinatorName, ILogger logger)
     {
         HashSet<PrisonedCoinRecord> prisonedCoinRecords = new();
         try
@@ -35,7 +38,7 @@ public class SettingsCoinPrison : CoinPrison
             var data = await settingsRepository.GetSettingAsync<string>("wabisabi_" + coordinatorName + "_bannedcoins");
             if (string.IsNullOrWhiteSpace(data))
             {
-                Logger.LogDebug("Prisoned coins file is empty.");
+                logger.LogDebug("Prisoned coins file is empty.");
                 return new(settingsRepository, coordinatorName);
             }
             prisonedCoinRecords = JsonConvert.DeserializeObject<HashSet<PrisonedCoinRecord>>(data)
@@ -43,7 +46,7 @@ public class SettingsCoinPrison : CoinPrison
         }
         catch (Exception exc)
         {
-            Logger.LogError($"There was an error during loading {nameof(SettingsCoinPrison)}. Ignoring corrupt data.", exc);
+            logger.LogError($"There was an error during loading {nameof(SettingsCoinPrison)}. Ignoring corrupt data.", exc);
         }
         return new(settingsRepository, coordinatorName){ BannedCoins = prisonedCoinRecords };
     }

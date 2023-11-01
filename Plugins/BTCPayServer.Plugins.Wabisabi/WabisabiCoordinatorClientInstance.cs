@@ -298,7 +298,7 @@ public class WabisabiCoordinatorClientInstance:IHostedService
 
         CoinPrison = SettingsCoinPrison.CreateFromCoordinatorName(
             serviceProvider.GetRequiredService<SettingsRepository>(),
-            CoordinatorName).GetAwaiter().GetResult();
+            CoordinatorName, _logger).GetAwaiter().GetResult();
         
         CoinJoinManager = new CoinJoinManager(coordinatorName, WalletProvider, RoundStateUpdater,
             WasabiHttpClientFactory,

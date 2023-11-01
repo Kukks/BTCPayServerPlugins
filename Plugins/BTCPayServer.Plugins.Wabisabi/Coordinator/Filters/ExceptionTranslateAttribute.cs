@@ -1,6 +1,9 @@
 using System.Net;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using NLog;
 using WabiSabi.Crypto;
 using WalletWasabi.Affiliation;
 using WalletWasabi.WabiSabi;
@@ -13,8 +16,9 @@ public class ExceptionTranslateAttribute : ExceptionFilterAttribute
 {
     public override void OnException(ExceptionContext context)
     {
+        var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<WabiSabiCoordinator>>();
         var exception = context.Exception.InnerException ?? context.Exception;
-
+        logger.LogError(exception, "Exception occured in WabiSabiCoordinator  API, ");
         context.Result = exception switch
         {
             WabiSabiProtocolException e => new JsonResult(new Error(

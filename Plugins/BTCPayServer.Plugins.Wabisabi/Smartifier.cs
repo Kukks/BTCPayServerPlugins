@@ -50,13 +50,14 @@ public class Smartifier
 
     public static async Task<T?> GetOrCreate<T, Y>(ConcurrentDictionary<Y, Lazy<Task<T?>>> collection, Y key, Func<Task<T?>> create, ILogger logger = null)
     {
-        var lazyTask = new Lazy<Task<T?>>(() => FetchFromServer(create, logger, key));
-
-        // Even if multiple threads provide their own new Lazy instances, only one will be stored.
-        var task = collection.GetOrAdd(key, lazyTask).Value;
-
+        
         try
         {
+            var lazyTask = new Lazy<Task<T?>>(() => FetchFromServer(create, logger, key));
+
+            // Even if multiple threads provide their own new Lazy instances, only one will be stored.
+            var task = collection.GetOrAdd(key, lazyTask).Value;
+
             return await task;
         }
         catch (Exception)

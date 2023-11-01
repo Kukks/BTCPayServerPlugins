@@ -203,6 +203,10 @@
                                             <tr>
                                                 <td>
                                                     @coin.AnonymitySet.ToString("0.##")
+                                                    @if (!coin.IsSufficientlyDistancedFromExternalKeys)
+                                                    {
+                                                        <span>(too close to entry)</span>
+                                                    }
                                                 </td>
                                                 <td>
                                                     @coin.Amount.ToDecimal(MoneyUnit.BTC) BTC
