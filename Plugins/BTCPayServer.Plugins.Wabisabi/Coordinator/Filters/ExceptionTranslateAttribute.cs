@@ -3,12 +3,14 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 using NLog;
 using WabiSabi.Crypto;
 using WalletWasabi.Affiliation;
 using WalletWasabi.WabiSabi;
 using WalletWasabi.WabiSabi.Backend.Models;
 using WalletWasabi.WabiSabi.Models;
+using WalletWasabi.WabiSabi.Models.Serialization;
 
 namespace WalletWasabi.Backend.Filters;
 
@@ -16,6 +18,10 @@ public class ExceptionTranslateAttribute : ExceptionFilterAttribute
 {
     public override void OnException(ExceptionContext context)
     {
+        var serializerSettings = new JsonSerializerSettings()
+        {
+            Converters = JsonSerializationOptions.Default.Settings.Converters
+        };
         var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<WabiSabiCoordinator>>();
         var exception = context.Exception.InnerException ?? context.Exception;
         logger.LogError(exception, "Exception occured in WabiSabiCoordinator  API, ");
@@ -25,7 +31,7 @@ public class ExceptionTranslateAttribute : ExceptionFilterAttribute
                 Type: ProtocolConstants.ProtocolViolationType,
                 ErrorCode: e.ErrorCode.ToString(),
                 Description: e.Message,
-                ExceptionData: e.ExceptionData ?? EmptyExceptionData.Instance))
+                ExceptionData: e.ExceptionData ?? EmptyExceptionData.Instance), serializerSettings )
             {
                 StatusCode = (int) HttpStatusCode.InternalServerError
             },
@@ -33,7 +39,7 @@ public class ExceptionTranslateAttribute : ExceptionFilterAttribute
                 Type: ProtocolConstants.ProtocolViolationType,
                 ErrorCode: WabiSabiProtocolErrorCode.CryptoException.ToString(),
                 Description: e.Message,
-                ExceptionData: EmptyExceptionData.Instance))
+                ExceptionData: EmptyExceptionData.Instance), serializerSettings)
             {
                 StatusCode = (int) HttpStatusCode.InternalServerError
             },
@@ -41,7 +47,7 @@ public class ExceptionTranslateAttribute : ExceptionFilterAttribute
                 Type: AffiliationConstants.RequestSecrecyViolationType,
                 ErrorCode: "undefined",
                 Description: e.Message,
-                ExceptionData: EmptyExceptionData.Instance))
+                ExceptionData: EmptyExceptionData.Instance), serializerSettings)
             {
                 StatusCode = (int) HttpStatusCode.InternalServerError
             },
