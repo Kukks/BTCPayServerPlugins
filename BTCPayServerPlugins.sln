@@ -49,6 +49,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.Prism"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.FileSeller", "Plugins\BTCPayServer.Plugins.FileSeller\BTCPayServer.Plugins.FileSeller.csproj", "{F2D81B6A-E1EA-4900-BF9A-924D2CA951DD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.Breez", "Plugins\BTCPayServer.Plugins.Breez\BTCPayServer.Plugins.Breez.csproj", "{5934F898-00B1-4781-BD18-04DF8685BC76}"
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.DynamicReports", "Plugins\BTCPayServer.Plugins.DynamicReports\BTCPayServer.Plugins.DynamicReports.csproj", "{BCB4E68D-089F-481E-A3AE-FC9CED6AA34D}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.Bringin", "Plugins\BTCPayServer.Plugins.Bringin\BTCPayServer.Plugins.Bringin.csproj", "{D4AFEC95-64D4-4FC4-9AE4-B82F4C6D6E29}"
@@ -253,6 +254,14 @@ Global
 		{D4AFEC95-64D4-4FC4-9AE4-B82F4C6D6E29}.Altcoins-Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D4AFEC95-64D4-4FC4-9AE4-B82F4C6D6E29}.Altcoins-Release|Any CPU.ActiveCfg = Debug|Any CPU
 		{D4AFEC95-64D4-4FC4-9AE4-B82F4C6D6E29}.Altcoins-Release|Any CPU.Build.0 = Debug|Any CPU
+		{5934F898-00B1-4781-BD18-04DF8685BC76}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5934F898-00B1-4781-BD18-04DF8685BC76}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5934F898-00B1-4781-BD18-04DF8685BC76}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5934F898-00B1-4781-BD18-04DF8685BC76}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5934F898-00B1-4781-BD18-04DF8685BC76}.Altcoins-Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5934F898-00B1-4781-BD18-04DF8685BC76}.Altcoins-Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5934F898-00B1-4781-BD18-04DF8685BC76}.Altcoins-Release|Any CPU.ActiveCfg = Debug|Any CPU
+		{5934F898-00B1-4781-BD18-04DF8685BC76}.Altcoins-Release|Any CPU.Build.0 = Debug|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{B19C9F52-DC47-466D-8B5C-2D202B7B003F} = {9E04ECE9-E304-4FF2-9CBC-83256E6C6962}

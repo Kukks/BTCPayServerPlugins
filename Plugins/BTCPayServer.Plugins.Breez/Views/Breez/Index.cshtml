@@ -1,0 +1,53 @@
+﻿@using BTCPayServer
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Plugins.FixedFloat
+@model BreezSettings? 
+@inject BreezService BreezService
+@{
+    ViewData.SetActivePage("Breez", "Breez", "Breez");
+    var storeId = Context.GetCurrentStoreId();
+}
+
+<partial name="_StatusMessage"/>
+
+<h2 class="mb-4">@ViewData["Title"]</h2>
+
+
+<div class="row">
+    <div class="col-md-10">
+        <form method="post">
+            <div class="form-group">
+                <label asp-for="Mnemonic" class="form-label">Mnemonic</label>
+                <input asp-for="Mnemonic" class="form-control"/>
+                <span asp-validation-for="Mnemonic" class="text-danger"></span>
+
+            </div>
+            <div class="form-group">
+                <label asp-for="ApiKey" class="form-label">ApiKey</label>
+                <input asp-for="ApiKey" class="form-control"/>
+                <span asp-validation-for="ApiKey" class="text-danger"></span>
+
+            </div>
+            <div class="form-group">
+                <label asp-for="InviteCode" class="form-label">InviteCode</label>
+                <input asp-for="InviteCode" class="form-control"/>
+                <span asp-validation-for="InviteCode" class="text-danger"></span>
+
+            </div>
+            <button name="command" type="submit" value="save" class="btn btn-primary">Submit</button>
+            @if (await BreezService.Get(storeId) is not null)
+            {
+                <button name="command" type="submit" value="clear" class="btn btn-danger">Clear</button>
+
+               var client =  BreezService.GetClient(storeId);
+                if (client is not null)
+                {
+                    <pre>
+                        @Json.Serialize(client.Sdk.NodeInfo())
+                        
+                    </pre>
+                }
+            }
+        </form>
+    </div>
+</div>
