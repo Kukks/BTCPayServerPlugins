@@ -1,0 +1,13 @@
+﻿@inject BreezService BreezService;
+@using BTCPayServer.Plugins.Breez
+@model BTCPayServer.Models.StoreViewModels.LightningNodeViewModel
+
+@if (Model.CryptoCode != "BTC")
+{
+    return;
+}
+@{
+    var client = BreezService.GetClient(Model.StoreId); 
+}
+<input value="Custom" type="radio" id="LightningNodeType-Breez" data-bs-toggle="pill" data-bs-target="#BreezSetup" role="tab" aria-controls="BreezSetup" aria-selected="false" name="LightningNodeType" disabled="@(client is null)">
+<label for="LightningNodeType-Breez">Use Breez wallet</label>

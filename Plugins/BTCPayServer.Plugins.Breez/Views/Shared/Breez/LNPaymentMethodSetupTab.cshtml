@@ -1,0 +1,74 @@
+﻿
+@inject BreezService BreezService;
+@using BTCPayServer.Plugins.Breez
+@model BTCPayServer.Models.StoreViewModels.LightningNodeViewModel
+@{
+    var storeId = Model.StoreId;
+    if(Model.CryptoCode != "BTC")
+    {
+        return;
+    }
+    var client = BreezService.GetClient(storeId);
+}
+
+<div id="BreezSetup" class="pt-3 tab-pane fade" role="tabpanel" aria-labelledby="LightningNodeType-Breez">
+    @if (client is not null)
+    {
+        
+    }
+    else
+    {
+        <a asp-action="Index" asp-controller="Breez" asp-route-storeId="@storeId">Breez needs to be configured beforehand.</a>
+    }
+</div>
+
+<script>
+    const typePrefix = 'type=breez;store=@Model.StoreId';
+    const triggerEl = document.getElementById('LightningNodeType-Breez')
+    const connStringEl = document.getElementById('ConnectionString')
+    const isBreez = connString.startsWith(typePrefix);
+    const setWallet = accessKey => connStringEl.value = accessKey.length 
+        ? `${typePrefix};`
+        : ''
+    
+    if (isBreez) {
+        if (apiToken) {
+            walletEl.value = apiToken
+        } else if (walletId) {
+            const optionEl = document.querySelector(`option[data-wallet-id="${walletId}"]`)
+            if (optionEl) {
+                const accessKey = optionEl.getAttribute('value')
+                walletEl.value = accessKey
+                setWallet(accessKey)
+            }
+        }
+        
+        // deactivate currently active tab and activate Breez tab
+        const activeEl = document.querySelector('input[name="LightningNodeType"]:checked')
+        if (activeEl) {
+            activeEl.removeAttribute('checked')
+            activeEl.setAttribute('aria-selected', 'false')
+            document.querySelector('#LightningNodeTypeTabs .tab-pane.active').classList.remove('active', 'show')
+            triggerEl.setAttribute('checked', 'checked')
+            triggerEl.setAttribute('aria-selected', 'true')
+            document.getElementById('BreezSetup').classList.add('active', 'show')
+        }
+    }
+    
+    document.addEventListener('DOMContentLoaded', () => {
+        if (isBreez) {
+            const tabTrigger = new bootstrap.Tab(triggerEl)
+            triggerEl.checked = true
+            tabTrigger.show()
+        }
+        
+        delegate('change', '#BreezWallet', e => {
+            const { value } = e.target
+            setWallet(value)
+            const tabTrigger = new bootstrap.Tab(triggerEl)
+            triggerEl.checked = true
+            tabTrigger.show()
+        })
+    })
+</script>
+

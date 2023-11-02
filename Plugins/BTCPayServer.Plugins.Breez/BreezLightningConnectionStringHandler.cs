@@ -1,10 +1,7 @@
-﻿using System;
-using System.Linq;
-using System.Net.Http;
-using BTCPayServer.Plugins.FixedFloat;
+﻿using BTCPayServer.Lightning;
 using NBitcoin;
 
-namespace BTCPayServer.Lightning.Breez;
+namespace BTCPayServer.Plugins.Breez;
 
 public class BreezLightningConnectionStringHandler : ILightningConnectionStringHandler
 {

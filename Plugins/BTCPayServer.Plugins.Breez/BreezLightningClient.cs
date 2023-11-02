@@ -4,10 +4,11 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Breez.Sdk;
+using BTCPayServer.Lightning;
 using NBitcoin;
 using Network = Breez.Sdk.Network;
 
-namespace BTCPayServer.Lightning.Breez;
+namespace BTCPayServer.Plugins.Breez;
 
 
 public class BreezLightningClient: ILightningClient, IDisposable, EventListener
@@ -22,7 +23,7 @@ public class BreezLightningClient: ILightningClient, IDisposable, EventListener
             new GreenlightNodeConfig(null, inviteCode)
         );
         var config = BreezSdkMethods.DefaultConfig(
-            EnvironmentType.PRODUCTION, 
+            network ==NBitcoin.Network.Main ? EnvironmentType.PRODUCTION: EnvironmentType.STAGING, 
             apiKey, 
             nodeConfig
         ) with {
