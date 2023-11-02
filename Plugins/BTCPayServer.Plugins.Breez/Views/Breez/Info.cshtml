@@ -1,0 +1,15 @@
+﻿@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Models.StoreViewModels
+@using BTCPayServer.Security
+@model object
+@{
+    var storeId = Model switch
+    {
+        string s => s,
+        StoreDashboardViewModel dashboardModel => dashboardModel.StoreId,
+        _ => Context.GetImplicitStoreId()
+        };
+    ViewData.SetActivePage("Breez", "Create Swapin Refund", "Info");
+
+}
+<partial name="Breez/BreezNodeInfo" model="@storeId"/>

@@ -1,0 +1,67 @@
+﻿@using BTCPayServer
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Plugins.Breez
+@using BTCPayServer.Security
+@model string
+@inject BreezService BreezService
+@inject BTCPayNetworkProvider BtcPayNetworkProvider
+@{
+    var storeId = Context.GetImplicitStoreId();
+    Layout = "_Layout";
+    ViewData.SetActivePage("Breez", "Sweep", "Sweep");
+
+    var sdk = BreezService.GetClient(storeId)?.Sdk;
+    var f = sdk.RecommendedFees();
+    var info = sdk.NodeInfo();
+
+
+    var deriv = Context.GetStoreData().GetDerivationSchemeSettings(BtcPayNetworkProvider, "BTC");
+
+}
+<datalist list="addresses">
+    @if (deriv is not null)
+    {
+        <option value="store"> Store wallet</option>
+    }
+</datalist>
+<datalist id="fees">
+    <option value="@f.fastestFee">Fastest fee</option>
+    <option value="@f.halfHourFee">Half hour fee</option>
+    <option value="@f.hourFee">Hour fee</option>
+    <option value="@f.economyFee">Economic fee</option>
+    <option value="@f.minimumFee">Minimum fee</option>
+</datalist>
+
+<form method="post" asp-action="Sweep" asp-route-storeId="@storeId">
+
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <h3 class="mb-0">
+                    <span>@ViewData["Title"]</span>
+                </h3>
+                <div class="d-flex gap-3 mt-3 mt-sm-0">
+
+                    <button type="submit" class="btn btn-primary">Create</button>
+                </div>
+            </div>
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+
+            <div class="form-group">
+                <label for="address" class="form-label" data-required>address</label>
+                <input type="text" list="addresses" id="address" name="address" class="form-control" required/>
+            </div>
+            <div class="form-group">
+                <label for="satPerByte" class="form-label" data-required>Fees</label>
+                <input type="number" min="@f.minimumFee" list="satPerByte" id="satPerByte" name="satPerByte" class="form-control" required/>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Create</button>
+
+        </div>
+    </div>
+</form>
+
+@section PageFootContent {
+    <partial name="_ValidationScriptsPartial"/>
+}

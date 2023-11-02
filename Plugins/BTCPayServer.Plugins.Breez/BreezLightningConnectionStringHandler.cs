@@ -20,13 +20,13 @@ public class BreezLightningConnectionStringHandler : ILightningConnectionStringH
             return null;
         }
 
-        if (!kv.TryGetValue("store", out var storeId))
+        if (!kv.TryGetValue("key", out var key))
         {
-            error = $"The key 'store' is mandatory for breez connection strings";
+            error = $"The key 'key' is mandatory for breez connection strings";
             return null;
         }
         
         error = null;
-        return _breezService.GetClient(storeId);
+        return _breezService.GetClientByPaymentKey(key);
     }
 }

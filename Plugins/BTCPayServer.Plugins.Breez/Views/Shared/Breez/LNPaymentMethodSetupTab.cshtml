@@ -18,7 +18,7 @@
     }
     else
     {
-        <a asp-action="Index" asp-controller="Breez" asp-route-storeId="@storeId">Breez needs to be configured beforehand.</a>
+        <a asp-action="Configure" asp-controller="Breez" asp-route-storeId="@storeId">Breez needs to be configured beforehand.</a>
     }
 </div>
 
@@ -26,22 +26,11 @@
     const typePrefix = 'type=breez;store=@Model.StoreId';
     const triggerEl = document.getElementById('LightningNodeType-Breez')
     const connStringEl = document.getElementById('ConnectionString')
+    const connString = connStringEl.value;
     const isBreez = connString.startsWith(typePrefix);
-    const setWallet = accessKey => connStringEl.value = accessKey.length 
-        ? `${typePrefix};`
-        : ''
+
     
     if (isBreez) {
-        if (apiToken) {
-            walletEl.value = apiToken
-        } else if (walletId) {
-            const optionEl = document.querySelector(`option[data-wallet-id="${walletId}"]`)
-            if (optionEl) {
-                const accessKey = optionEl.getAttribute('value')
-                walletEl.value = accessKey
-                setWallet(accessKey)
-            }
-        }
         
         // deactivate currently active tab and activate Breez tab
         const activeEl = document.querySelector('input[name="LightningNodeType"]:checked')
@@ -52,6 +41,7 @@
             triggerEl.setAttribute('checked', 'checked')
             triggerEl.setAttribute('aria-selected', 'true')
             document.getElementById('BreezSetup').classList.add('active', 'show')
+           
         }
     }
     
@@ -62,12 +52,13 @@
             tabTrigger.show()
         }
         
-        delegate('change', '#BreezWallet', e => {
-            const { value } = e.target
-            setWallet(value)
-            const tabTrigger = new bootstrap.Tab(triggerEl)
-            triggerEl.checked = true
-            tabTrigger.show()
+        delegate('change', 'input[name="LightningNodeType"]', e => {
+           
+            const activeEl = document.querySelector('input[name="LightningNodeType"]:checked')
+            if (activeEl.id === "LightningNodeType-Breez"){
+                connStringEl.value =typePrefix;
+            }
+             
         })
     })
 </script>

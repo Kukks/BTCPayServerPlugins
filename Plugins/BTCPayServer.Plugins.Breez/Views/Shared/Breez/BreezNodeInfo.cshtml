@@ -1,0 +1,99 @@
+﻿@using BTCPayServer.Lightning
+@using BTCPayServer.Models.StoreViewModels
+@using BTCPayServer.Plugins.Breez
+@using BTCPayServer.Security
+@inject BreezService BreezService
+@{
+    string storeId = null;
+    if (Model is string s)
+    {
+        storeId = s;
+    }
+    else if (Model is StoreDashboardViewModel dashboardModel)
+    {
+        storeId = dashboardModel.StoreId;
+    }
+    else
+    {
+        storeId = Context.GetImplicitStoreId();
+    }
+    var sdk = BreezService.GetClient(storeId)?.Sdk;
+    if (sdk is null)
+        return;
+    var nodeState = sdk.NodeInfo();
+    var lspInfo = sdk.LspInfo();
+}
+<div class="widget store-numbers" id="Breez-Info" style="grid-column-start: 1; grid-column-end: 4;">
+    @if (Model is StoreDashboardViewModel)
+    {
+        <header>
+            <h4>Breez Node</h4>
+            <a asp-action="Info" asp-controller="Breez" asp-route-storeId="@storeId">
+                Manage
+            </a>
+
+        </header>
+    }
+    <div class="d-flex w-100 align-items-center justify-content-start gap-3">
+        <span class="btcpay-status btcpay-status--enabled"></span>
+        <h6 class="text-truncate">@nodeState.id</h6>
+    </div>
+    @if (lspInfo is not null)
+    {
+        <div class="d-flex w-100 align-items-center justify-content-start gap-3">
+            <span class="btcpay-status btcpay-status--enabled"></span>
+            <h6 class="text-truncate">@lspInfo.name connected</h6>
+        </div>
+    }
+    <div class="store-number">
+        <header>
+            <h6>On-Chain Balance</h6>
+            @if (Model is StoreDashboardViewModel && nodeState.onchainBalanceMsat > 0)
+            {
+                <div>
+                    <a asp-action="Sweep" asp-controller="Breez" asp-route-storeId="@storeId">Sweep</a>
+                </div>
+            }
+
+        </header>
+        <div class="balance d-flex align-items-baseline gap-1">
+            <h3 class="d-inline-block me-1" data-balance="@LightMoney.MilliSatoshis(nodeState.onchainBalanceMsat)" data-sensitive>@LightMoney.MilliSatoshis(nodeState.onchainBalanceMsat)</h3>
+            <span class="text-secondary fw-semibold currency">BTC</span>
+        </div>
+    </div>
+    <div class="store-number">
+        <header>
+            <h6>Lightning Balance</h6>
+            @if (Model is StoreDashboardViewModel)
+            {
+                <div>
+                    <a asp-action="SwapIn" asp-controller="Breez" asp-route-storeId="@storeId">Swap in</a>
+                    @if (nodeState.channelsBalanceMsat > 0)
+                    {
+                        <span> - </span>
+                        <a asp-action="SwapOut" asp-controller="Breez" asp-route-storeId="@storeId">Swap out</a>
+                    }
+                </div>
+            }
+
+        </header>
+        <div class="balance d-flex align-items-baseline gap-1">
+            <h3 class="d-inline-block me-1" data-balance="@LightMoney.MilliSatoshis(nodeState.channelsBalanceMsat)" data-sensitive>@LightMoney.MilliSatoshis(nodeState.channelsBalanceMsat)</h3>
+            <span class="text-secondary fw-semibold currency">BTC</span>
+        </div>
+    </div>
+
+    <div class="store-number">
+        <header>
+            <h6>Lightning insight</h6>
+        </header>
+        <div class="balance d-flex align-items-baseline gap-1">
+            <h3 class="d-inline-block me-1" data-balance="@LightMoney.MilliSatoshis(nodeState.maxReceivableMsat)" data-sensitive>@LightMoney.MilliSatoshis(nodeState.maxReceivableMsat)</h3>
+            <span class="text-secondary fw-semibold currency">BTC receivable</span>
+        </div>
+        <div class="balance d-flex align-items-baseline gap-1">
+            <h3 class="d-inline-block me-1" data-balance="@LightMoney.MilliSatoshis(nodeState.maxPayableMsat)" data-sensitive>@LightMoney.MilliSatoshis(nodeState.maxPayableMsat)</h3>
+            <span class="text-secondary fw-semibold currency">BTC spendable</span>
+        </div>
+    </div>
+</div>

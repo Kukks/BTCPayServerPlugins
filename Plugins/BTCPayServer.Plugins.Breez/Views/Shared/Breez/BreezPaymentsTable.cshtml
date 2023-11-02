@@ -1,0 +1,90 @@
+﻿@using Breez.Sdk
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Lightning
+@using BTCPayServer.Models.StoreViewModels
+@using BTCPayServer.Plugins.Breez
+@using BTCPayServer.Security
+@model object
+@inject BreezService BreezService
+@{
+    var data = Model as List<Payment>;
+    var storeId = Context.GetImplicitStoreId();
+    if (data is null)
+    {
+        var sdk = BreezService.GetClient(storeId)?.Sdk;
+        if (sdk is null)
+            return;
+
+        data = sdk.ListPayments(new ListPaymentsRequest(PaymentTypeFilter.ALL, null, null, null, 0, 10));
+    }
+
+    var isDashboard = Model is StoreDashboardViewModel;
+}
+
+<div class="@(isDashboard ? "widget store-wallet-balance" : "")" style="@(isDashboard ? "grid-column-start: 4;grid-column-end: 13;" : "")">
+    @if (isDashboard)
+    {
+        <header>
+            <h3>Breez Payments</h3>
+            @if (data.Any())
+            {
+                <a asp-controller="Breez" asp-action="Payments" asp-route-storeId="@storeId">View All</a>
+            }
+        </header>
+    }
+    @if (!data.Any())
+    {
+        <p class="text-secondary mt-3 mb-0">
+            There are no recent payments.
+        </p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover  w-100">
+                <thead>
+                <tr>
+                    <th class="w-125px">Id</th>
+                    <th class="w-125px">Timestamp</th>
+                    <th class="w-125px">Type</th>
+                    <th class="w-125px">Amount</th>
+                    <th class="text-nowrap">Fee</th>
+                    <th class="text-nowrap">Status</th>
+                    <th class="text-nowrap">Description</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var payment in data)
+                {
+                    <tr>
+                        <td>
+
+                            <span class="text-break">@payment.id</span>
+
+                        </td>
+                        <td>
+                            <span class="text-break">@DateTimeOffset.FromUnixTimeSeconds(payment.paymentTime).ToTimeAgo()</span>
+                        </td>
+                        <td>
+                            <span class="text-break">>@payment.paymentType.ToString().ToLowerInvariant().Replace("_", " ")</span>
+                        </td>
+                        <td>
+                            <span class="text-break">>@LightMoney.MilliSatoshis(payment.amountMsat).ToDecimal(LightMoneyUnit.BTC) BTC</span>
+                        </td>
+                        <td>
+                            <span class="text-break">>@LightMoney.MilliSatoshis(payment.feeMsat).ToDecimal(LightMoneyUnit.BTC) BTC</span>
+                        </td>
+                        <td>
+                            <span class="text-break">@payment.status.ToString().ToLowerInvariant()</span>
+                        </td>
+                        <td>
+                            <span class="text-break">@payment.description</span>
+                        </td>
+
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>

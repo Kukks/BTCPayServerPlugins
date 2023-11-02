@@ -6,6 +6,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Configuration;
+using BTCPayServer.Data;
+using BTCPayServer.Payments;
+using BTCPayServer.Payments.Lightning;
 using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -106,8 +109,18 @@ public class BreezService:IHostedService
         await _storeRepository.UpdateSetting(storeId, "Breez", settings!);
         if (settings is null)
         {
-            _settings.Remove(storeId);
-                
+            _settings.Remove(storeId, out var oldSettings );
+            var data = await _storeRepository.FindStore(storeId);
+            var existing = data?.GetSupportedPaymentMethods(_btcPayNetworkProvider)
+                .OfType<LightningSupportedPaymentMethod>().FirstOrDefault(method =>
+                    method.CryptoCode == "BTC" && method.PaymentId.PaymentType == LightningPaymentType.Instance);
+            var isBreez = existing?.GetExternalLightningUrl() == $"type=breez;key={oldSettings.PaymentKey}";
+            if (isBreez)
+            {
+                data.SetSupportedPaymentMethod(new PaymentMethodId("BTC", LightningPaymentType.Instance), null );
+                await _storeRepository.UpdateStore(data);
+            }
+
         }
         else if(result is not null )
         {
@@ -122,9 +135,18 @@ public class BreezService:IHostedService
         _clients.Values.ToList().ForEach(c => c.Dispose());
     }
 
-    public BreezLightningClient? GetClient(string storeId)
+    public BreezLightningClient? GetClient(string? storeId)
     {
+        if(storeId is null)
+            return null;
         _clients.TryGetValue(storeId, out var client);
         return client;
+    }  
+    public BreezLightningClient? GetClientByPaymentKey(string? paymentKey)
+    {
+        if(paymentKey is null)
+            return null;
+        var match = _settings.FirstOrDefault(pair => pair.Value.PaymentKey == paymentKey).Key;
+        return GetClient(match);
     }
 }

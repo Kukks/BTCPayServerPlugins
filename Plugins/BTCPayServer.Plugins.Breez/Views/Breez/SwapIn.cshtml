@@ -1,0 +1,193 @@
+﻿@using Breez.Sdk
+@using BTCPayServer
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Components.QRCode
+@using BTCPayServer.Components.TruncateCenter
+@using BTCPayServer.Models.StoreViewModels
+@using BTCPayServer.Payments
+@using BTCPayServer.Plugins.Breez
+@using BTCPayServer.Security
+@using NBitcoin
+@inject BreezService BreezService
+@inject BTCPayNetworkProvider BtcPayNetworkProvider
+@{
+    ViewData.SetActivePage("Breez", "Swap In", "SwapIn");
+    string storeId = Model switch
+    {
+        string s => s,
+        StoreDashboardViewModel dashboardModel => dashboardModel.StoreId,
+        _ => Context.GetImplicitStoreId()
+        };
+    var sdk = BreezService.GetClient(storeId)?.Sdk;
+    if (sdk is null)
+        return;
+
+    var inProgressSwap = sdk.InProgressSwap();
+    var refundables = sdk.ListRefundables();
+    var deriv = Context.GetStoreData().GetDerivationSchemeSettings(BtcPayNetworkProvider, "BTC");
+    var ni = sdk.NodeInfo();
+    var f = sdk.RecommendedFees();
+
+
+}
+
+<datalist id="fees">
+    <option value="@f.fastestFee">Fastest fee</option>
+    <option value="@f.halfHourFee">Half hour fee</option>
+    <option value="@f.hourFee">Hour fee</option>
+    <option value="@f.economyFee">Economic fee</option>
+    <option value="@f.minimumFee">Minimum fee</option>
+</datalist>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+            <h3 class="mb-0">
+                <span>@ViewData["Title"]</span>
+            </h3>
+            <div class="d-flex gap-3 mt-3 mt-sm-0">
+                @if (inProgressSwap is null)
+                {
+                    <a class="btn btn-primary" asp-action="SwapInCreate" asp-controller="Breez" asp-route-storeId="@storeId">Create</a>
+                }
+            </div>
+        </div>
+
+        @if (inProgressSwap is not null)
+        {
+            <div class="payment-box">
+                <div class="qr-container" data-clipboard="@inProgressSwap.bitcoinAddress">
+                    <vc:qr-code data="@inProgressSwap.bitcoinAddress"/>
+                </div>
+                <div class="input-group mt-3">
+                    <div class="form-floating">
+                        <vc:truncate-center text="@inProgressSwap.bitcoinAddress" padding="15" elastic="true" classes="form-control-plaintext" id="Address"/>
+                        <label for="Address">Address</label>
+                    </div>
+                    <span class="">Please send an amount between @Money.Satoshis(inProgressSwap.minAllowedDeposit).ToDecimal(MoneyUnit.BTC) BTC and @Money.Satoshis(inProgressSwap.maxAllowedDeposit).ToDecimal(MoneyUnit.BTC) </span>
+                    @if (deriv is not null)
+                    {
+                        <a class="btn btn-primary" asp-controller="UIWallets" asp-action="WalletSend" asp-route-walletId="@Model.WalletId" asp-route-defaultDestination="@inProgressSwap.bitcoinAddress">Send using BTCPay Wallet</a>
+                    }
+                    @{
+                        var onChainSats = ni.onchainBalanceMsat / 1000;
+                        if (inProgressSwap.minAllowedDeposit <= (long) onChainSats)
+                        {
+                            <div>
+                                <form asp-action="Sweep" asp-route-storeId="@storeId">
+                                    <input type="hidden" value="@inProgressSwap.bitcoinAddress" name="address"/>
+                                    <button type="submit"> Sweep onchain funds to swap in</button>
+                                </form>
+                            </div>
+                        }
+
+                    }
+
+                </div>
+
+                @if (inProgressSwap.unconfirmedSats + inProgressSwap.confirmedSats + inProgressSwap.paidSats > 0)
+                {
+                    <div class="card truncate-center-id">
+                        <span class="text-nowrap">@inProgressSwap.unconfirmedSats sats unconfirmed</span>
+                        <span class="text-nowrap">@inProgressSwap.confirmedSats sats confirmed</span>
+                        <span class="text-nowrap">@inProgressSwap.paidSats sats paid</span>
+                    </div>
+                }
+                @if (inProgressSwap.unconfirmedTxIds.Any())
+                {
+                    <div class="card truncate-center-id">
+
+                        <span class="text-nowrap">Unconfirmed transactions</span>
+                        @foreach (var txId in inProgressSwap.unconfirmedTxIds)
+                        {
+                            <vc:truncate-center text="@txId" link="@BitcoinPaymentType.Instance.GetTransactionLink(BtcPayNetworkProvider.BTC, txId)" classes="truncate-center-id"/>
+                        }
+                    </div>
+                }
+                @if (inProgressSwap.confirmedTxIds.Any())
+                {
+                    <div class="card truncate-center-id">
+
+                        <span class="text-nowrap">Confirmed transactions</span>
+                        @foreach (var txId in inProgressSwap.confirmedTxIds)
+                        {
+                            <vc:truncate-center text="@txId" link="@BitcoinPaymentType.Instance.GetTransactionLink(BtcPayNetworkProvider.BTC, txId)" classes="truncate-center-id"/>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        @if (refundables?.Any() is true)
+        {
+            <table class="table">
+                <thead>
+                <tr>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th>Deposit Address</th>
+                    <th>Payment</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var refund in refundables)
+                {
+                    <tr>
+                        <td>@refund.status</td>
+                        <td>@DateTimeOffset.FromUnixTimeSeconds(refund.createdAt)</td>
+                        <td>@refund.bitcoinAddress</td>
+                        <td>
+                            @if (refund.unconfirmedSats + refund.confirmedSats + refund.paidSats > 0)
+                            {
+                                <div class="card truncate-center-id">
+                                    <span class="text-nowrap">@refund.unconfirmedSats sats unconfirmed</span>
+                                    <span class="text-nowrap">@refund.confirmedSats sats confirmed</span>
+                                    <span class="text-nowrap">@refund.paidSats sats paid</span>
+                                </div>
+                            }
+                            @if (refund.unconfirmedTxIds.Any())
+                            {
+                                <div class="card truncate-center-id">
+
+                                    <span class="text-nowrap">Unconfirmed transactions</span>
+                                    @foreach (var txId in refund.unconfirmedTxIds)
+                                    {
+                                        <vc:truncate-center text="@txId" link="@BitcoinPaymentType.Instance.GetTransactionLink(BtcPayNetworkProvider.BTC, txId)" classes="truncate-center-id"/>
+                                    }
+                                </div>
+                            }
+                            @if (refund.confirmedTxIds.Any())
+                            {
+                                <div class="card truncate-center-id">
+
+                                    <span class="text-nowrap">Confirmed transactions</span>
+                                    @foreach (var txId in refund.confirmedTxIds)
+                                    {
+                                        <vc:truncate-center text="@txId" link="@BitcoinPaymentType.Instance.GetTransactionLink(BtcPayNetworkProvider.BTC, txId)" classes="truncate-center-id"/>
+                                    }
+                                </div>
+                            }
+                            @if (refund.refundTxIds.Any())
+                            {
+                                <div class="card truncate-center-id">
+
+                                    <span class="text-nowrap">Refund transactions</span>
+                                    @foreach (var txId in refund.refundTxIds)
+                                    {
+                                        <vc:truncate-center text="@txId" link="@BitcoinPaymentType.Instance.GetTransactionLink(BtcPayNetworkProvider.BTC, txId)" classes="truncate-center-id"/>
+                                    }
+                                </div>
+                            }
+
+                        </td>
+                        <td>
+                            <a class="btn btn-link" asp-controller="Breez" asp-action="SwapInRefund" asp-route-storeId="@storeId" asp-route-address="@refund.bitcoinAddress">Start Refund</a>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>

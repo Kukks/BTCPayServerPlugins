@@ -1,0 +1,103 @@
+﻿@using Breez.Sdk
+@using BTCPayServer
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Models.StoreViewModels
+@using BTCPayServer.Plugins.Breez
+@using BTCPayServer.Security
+@inject BreezService BreezService
+@inject BTCPayNetworkProvider BtcPayNetworkProvider
+
+
+@{
+    Layout = "_Layout";
+    ViewData.SetActivePage("Breez", "Swap Out", "SwapOut");
+    string storeId = null;
+    if (Model is string s)
+    {
+        storeId = s;
+    }
+    else if (Model is StoreDashboardViewModel dashboardModel)
+    {
+        storeId = dashboardModel.StoreId;
+    }
+    else
+    {
+        storeId = Context.GetImplicitStoreId();
+    }
+    var sdk = BreezService.GetClient(storeId)?.Sdk;
+    if (sdk is null)
+        return;
+
+    var inProgressSwaps = sdk.InProgressReverseSwaps();
+    var deriv = Context.GetStoreData().GetDerivationSchemeSettings(BtcPayNetworkProvider, "BTC");
+    var f = sdk.RecommendedFees();
+    var swapOutRec = sdk.FetchReverseSwapFees(new ReverseSwapFeesRequest());
+}
+
+<datalist id="fees">
+    <option value="@f.fastestFee">Fastest fee</option>
+    <option value="@f.halfHourFee">Half hour fee</option>
+    <option value="@f.hourFee">Hour fee</option>
+    <option value="@f.economyFee">Economic fee</option>
+    <option value="@f.minimumFee">Minimum fee</option>
+</datalist>
+<datalist list="addresses">
+    @if (deriv is not null)
+    {
+        <option value="store"> Store wallet</option>
+    }
+</datalist>
+
+<form method="post" asp-action="SwapOut" asp-route-storeId="@storeId">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <h3 class="mb-0">
+                    <span>@ViewData["Title"]</span>
+                </h3>
+                <div class="d-flex gap-3 mt-3 mt-sm-0">
+
+                    <button type="submit" class="btn btn-primary">Create</button>
+                </div>
+            </div>
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+            <div class="form-group">
+                <label for="address" class="form-label" data-required>Address</label>
+                <input type="text" id="address" name="address" class="form-control" required/>
+            </div>
+            <div class="form-group">
+                <label for="satPerByte" class="form-label" data-required>Refund address</label>
+                <input type="number" min="@f.minimumFee" list="satPerByte" id="satPerByte" name="satPerByte" class="form-control" required/>
+            </div>
+            <div class="form-group">
+                <label for="amount" class="form-label" data-required>Amount (sats)</label>
+                <input type="number" min="@swapOutRec.min" max="@swapOutRec.max" id="amount" name="amount" class="form-control" required/>
+            </div>
+            <input type="hidden" name="feesHash" value="@swapOutRec.feesHash"/>
+
+
+            @if (inProgressSwaps?.Any() is true)
+            {
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Id</th>
+                        <th>Status</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var swap in inProgressSwaps)
+                    {
+                        <tr>
+                            <td>@swap.id</td>
+                            <td>@swap.status</td>
+
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+
+        </div>
+    </div>
+</form>

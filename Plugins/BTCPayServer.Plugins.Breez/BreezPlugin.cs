@@ -27,6 +27,10 @@ namespace BTCPayServer.Plugins.Breez
             applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Breez/LNPaymentMethodSetupTabhead", "ln-payment-method-setup-tabhead"));
             applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Breez/LNPaymentMethodSetupTab", "ln-payment-method-setup-tab"));
 
+            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Breez/BreezNodeInfo",
+                "dashboard"));
+            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Breez/BreezPaymentsTable",
+                "dashboard"));
             base.Execute(applicationBuilder);
         }
     }

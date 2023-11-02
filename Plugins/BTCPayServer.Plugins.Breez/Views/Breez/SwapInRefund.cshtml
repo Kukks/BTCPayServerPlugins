@@ -1,0 +1,52 @@
+﻿@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Plugins.Breez
+@using BTCPayServer.Security
+@using Microsoft.AspNetCore.Routing
+@model string
+@inject BreezService BreezService
+@{
+    var storeId = Context.GetImplicitStoreId();
+    var address = Context.GetRouteValue("address").ToString();
+    ViewData.SetActivePage("Breez", "Create Swapin Refund", "SwapIn");
+
+    var sdk = BreezService.GetClient(storeId)?.Sdk;
+    var f = sdk.RecommendedFees();
+}
+
+<datalist id="fees">
+    <option value="@f.fastestFee">Fastest fee</option>
+    <option value="@f.halfHourFee">Half hour fee</option>
+    <option value="@f.hourFee">Hour fee</option>
+    <option value="@f.economyFee">Economic fee</option>
+    <option value="@f.minimumFee">Minimum fee</option>
+</datalist>
+
+
+<form method="post" asp-action="SwapInRefund" asp-route-storeId="@storeId" asp-route-address="@address">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <h3 class="mb-0">
+                    <span>@ViewData["Title"]</span>
+                    <a href="https://docs.btcpayserver.org/Forms" target="_blank" rel="noreferrer noopener" title="More information...">
+                        <vc:icon symbol="info"/>
+                    </a>
+                </h3>
+                <div class="d-flex gap-3 mt-3 mt-sm-0">
+
+                    <button type="submit" class="btn btn-primary">Create</button>
+                </div>
+            </div>
+            <div asp-validation-summary="All" class="text-danger"></div>
+            <div class="form-group">
+                <label for="refundAddress" class="form-label" data-required>Refund address</label>
+                <input type="text" id="refundAddress" name="refundAddress" class="form-control" required/>
+            </div>
+            <div class="form-group">
+                <label for="satPerByte" class="form-label" data-required>Fees</label>
+                <input type="number" min="@f.minimumFee" list="satPerByte" id="satPerByte" name="satPerByte" class="form-control" required/>
+            </div>
+        </div>
+    </div>
+
+</form>
