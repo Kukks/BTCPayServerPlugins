@@ -7,17 +7,18 @@ using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Configuration;
 using BTCPayServer.Data;
+using BTCPayServer.Events;
+using BTCPayServer.HostedServices;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Lightning;
 using BTCPayServer.Services.Stores;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NBitcoin;
 
 namespace BTCPayServer.Plugins.Breez;
 
-public class BreezService:IHostedService
+public class BreezService:EventHostedServiceBase
 {
     private readonly StoreRepository _storeRepository;
     private readonly IOptions<DataDirectories> _dataDirectories;
@@ -26,15 +27,33 @@ public class BreezService:IHostedService
     private Dictionary<string, BreezSettings> _settings;
     private Dictionary<string, BreezLightningClient> _clients = new();
 
-    public BreezService(StoreRepository storeRepository,
+    public BreezService(
+        EventAggregator eventAggregator,
+        StoreRepository storeRepository,
         IOptions<DataDirectories> dataDirectories, 
         BTCPayNetworkProvider btcPayNetworkProvider, 
-        ILogger<BreezService> logger)
+        ILogger<BreezService> logger) : base(eventAggregator, logger)
     {
         _storeRepository = storeRepository;
         _dataDirectories = dataDirectories;
         _btcPayNetworkProvider = btcPayNetworkProvider;
         _logger = logger;
+    }
+
+    protected override void SubscribeToEvents()
+    {
+        Subscribe<StoreRemovedEvent>();
+        base.SubscribeToEvents();
+    }
+
+    protected override async Task ProcessEvent(object evt, CancellationToken cancellationToken)
+    {
+        if (evt is StoreRemovedEvent storeRemovedEvent)
+        {
+            await Handle(storeRemovedEvent.StoreId, null);
+            _settings.Remove(storeRemovedEvent.StoreId);
+        }
+        await base.ProcessEvent(evt, cancellationToken);
     }
 
     private string GetWorkDir()
@@ -44,7 +63,7 @@ public class BreezService:IHostedService
     }
 
     TaskCompletionSource tcs = new();
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public override async Task StartAsync(CancellationToken cancellationToken)
     {
         _settings = (await _storeRepository.GetSettingsAsync<BreezSettings>("Breez")).Where(pair => pair.Value is not null).ToDictionary(pair => pair.Key, pair => pair.Value!);
         foreach (var keyValuePair in _settings)
@@ -59,6 +78,7 @@ public class BreezService:IHostedService
             }
         }
         tcs.TrySetResult();
+        await base.StartAsync(cancellationToken);
     }
 
     public async Task<BreezSettings?> Get(string storeId)
@@ -85,7 +105,7 @@ public class BreezService:IHostedService
                 var network = Network.Main; // _btcPayNetworkProvider.BTC.NBitcoinNetwork;
                 Directory.CreateDirectory(GetWorkDir());
                 var client = new BreezLightningClient(settings.InviteCode, settings.ApiKey, GetWorkDir(),
-                    network, settings.Mnemonic);
+                    network, settings.Mnemonic, settings.PaymentKey);
                 if (storeId is not null)
                 {
                     _clients.AddOrReplace(storeId, client);

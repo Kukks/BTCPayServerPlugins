@@ -27,7 +27,6 @@
     var sdk = BreezService.GetClient(storeId)?.Sdk;
     if (sdk is null)
         return;
-
     var inProgressSwaps = sdk.InProgressReverseSwaps();
     var deriv = Context.GetStoreData().GetDerivationSchemeSettings(BtcPayNetworkProvider, "BTC");
     var f = sdk.RecommendedFees();
@@ -63,11 +62,11 @@
             <div asp-validation-summary="ModelOnly" class="text-danger"></div>
             <div class="form-group">
                 <label for="address" class="form-label" data-required>Address</label>
-                <input type="text" id="address" name="address" class="form-control" required/>
+                <input type="text" id="address" list="addresses" name="address" class="form-control" required/>
             </div>
             <div class="form-group">
-                <label for="satPerByte" class="form-label" data-required>Refund address</label>
-                <input type="number" min="@f.minimumFee" list="satPerByte" id="satPerByte" name="satPerByte" class="form-control" required/>
+                <label for="satPerByte" class="form-label" data-required>Feerate</label>
+                <input type="number" min="@f.minimumFee" list="fees" id="satPerByte" name="satPerByte" class="form-control" required/>
             </div>
             <div class="form-group">
                 <label for="amount" class="form-label" data-required>Amount (sats)</label>

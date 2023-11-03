@@ -1,10 +1,9 @@
-﻿
-@inject BreezService BreezService;
+﻿@inject BreezService BreezService;
 @using BTCPayServer.Plugins.Breez
 @model BTCPayServer.Models.StoreViewModels.LightningNodeViewModel
 @{
     var storeId = Model.StoreId;
-    if(Model.CryptoCode != "BTC")
+    if (Model.CryptoCode != "BTC")
     {
         return;
     }
@@ -14,16 +13,16 @@
 <div id="BreezSetup" class="pt-3 tab-pane fade" role="tabpanel" aria-labelledby="LightningNodeType-Breez">
     @if (client is not null)
     {
-        
     }
     else
     {
         <a asp-action="Configure" asp-controller="Breez" asp-route-storeId="@storeId">Breez needs to be configured beforehand.</a>
     }
 </div>
-
-<script>
-    const typePrefix = 'type=breez;store=@Model.StoreId';
+@if (client is not null)
+{
+    <script>
+    const typePrefix = 'type=breez;key=@client.PaymentKey';
     const triggerEl = document.getElementById('LightningNodeType-Breez')
     const connStringEl = document.getElementById('ConnectionString')
     const connString = connStringEl.value;
@@ -62,4 +61,4 @@
         })
     })
 </script>
-
+}

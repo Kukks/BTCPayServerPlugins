@@ -5,10 +5,13 @@ using System.Threading.Tasks;
 using Breez.Sdk;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Client;
+using BTCPayServer.Lightning;
 using BTCPayServer.Models;
 using BTCPayServer.Services.Wallets;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NBitcoin;
+using NBitcoin.DataEncoders;
 using NBXplorer.DerivationStrategy;
 
 namespace BTCPayServer.Plugins.Breez;
@@ -108,8 +111,8 @@ public class BreezController : Controller
         return View((object) storeId);
     }
 
-    [HttpGet("swapin/create")]
-    public async Task<IActionResult> SwapInCreate(string storeId)
+    [HttpGet("send")]
+    public async Task<IActionResult> Send(string storeId)
     {
         var client = _breezService.GetClient(storeId);
         if (client is null)
@@ -117,9 +120,85 @@ public class BreezController : Controller
             return RedirectToAction(nameof(Configure), new {storeId});
         }
 
-        client.Sdk.ReceiveOnchain(new ReceiveOnchainRequest());
-        TempData[WellKnownTempData.SuccessMessage] = "Swapin created successfully";
-        return RedirectToAction(nameof(SwapIn), new {storeId});
+        return View((object) storeId);
+    }   
+    [Route("receive")]
+    public async Task<IActionResult> Receive(string storeId, ulong? amount)
+    {
+        var client = _breezService.GetClient(storeId);
+        if (client is null)
+        {
+            return RedirectToAction(nameof(Configure), new {storeId});
+        }
+        if (amount is not null)
+        {
+           var invoice  = await  client.CreateInvoice(LightMoney.FromUnit(amount.Value, LightMoneyUnit.Satoshi).MilliSatoshi, null, TimeSpan.Zero);
+           TempData["bolt11"] = invoice.BOLT11;
+           return RedirectToAction("Payments", "Breez", new {storeId });
+        }
+      
+
+        return View((object) storeId);
+    }
+
+    [HttpPost("send")]
+    public async Task<IActionResult> Send(string storeId, string address, ulong? amount)
+    {
+        var client = _breezService.GetClient(storeId);
+        if (client is null)
+        {
+            return RedirectToAction(nameof(Configure), new {storeId});
+        }
+
+        var payParams = new PayInvoiceParams();
+        string bolt11 = null;
+        if (HexEncoder.IsWellFormed(address))
+        {
+            if (PubKey.TryCreatePubKey(ConvertHelper.FromHexString(address), out var pubKey))
+            {
+                if (amount is null)
+                {
+                    TempData[WellKnownTempData.ErrorMessage] =
+                        $"Cannot do keysend payment without specifying an amount";
+                    return RedirectToAction(nameof(Send), new {storeId});
+                }
+
+                payParams.Amount = amount.Value * 1000;
+                payParams.Destination = pubKey;
+            }
+            else
+            {
+                TempData[WellKnownTempData.ErrorMessage] = $"invalid nodeid";
+                return RedirectToAction(nameof(Send), new {storeId});
+            }
+        }
+        else
+        {
+            bolt11 = address;
+            if (amount is not null)
+            {
+                payParams.Amount = amount.Value * 1000;
+            }
+        }
+
+        var result = await client.Pay(bolt11, payParams);
+
+        switch (result.Result)
+        {
+            case PayResult.Ok:
+
+                TempData[WellKnownTempData.SuccessMessage] = $"Sending successful";
+                break;
+            case PayResult.Unknown:
+            case PayResult.CouldNotFindRoute:
+            case PayResult.Error:
+            default:
+
+                TempData[WellKnownTempData.ErrorMessage] = $"Sending did not indicate success";
+                break;
+        }
+
+        return RedirectToAction(nameof(Payments), new {storeId});
     }
 
 
@@ -207,7 +286,7 @@ public class BreezController : Controller
         return View(await _breezService.Get(storeId));
     }
 
-    [HttpPost("")]
+    [HttpPost("configure")]
     public async Task<IActionResult> Configure(string storeId, string command, BreezSettings settings)
     {
         if (command == "clear")
@@ -244,9 +323,10 @@ public class BreezController : Controller
         {
             return RedirectToAction(nameof(Configure), new {storeId});
         }
+
         viewModel ??= new PaymentsViewModel();
 
-        viewModel.Payments = client.Sdk.ListPayments(new ListPaymentsRequest(PaymentTypeFilter.ALL, null, null, null,
+        viewModel.Payments = client.Sdk.ListPayments(new ListPaymentsRequest(PaymentTypeFilter.ALL, null, null, true,
             (uint?) viewModel.Skip, (uint?) viewModel.Count));
 
         return View(viewModel);

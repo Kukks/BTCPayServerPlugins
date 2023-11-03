@@ -1,0 +1,48 @@
+﻿@using BTCPayServer.Models.StoreViewModels
+@using BTCPayServer.Plugins.Breez
+@using BTCPayServer.Security
+@inject BreezService BreezService
+
+@{
+    ViewData.SetActivePage("Breez", "Send", "Send");
+    var storeId = Model switch
+    {
+        string s => s,
+        StoreDashboardViewModel dashboardModel => dashboardModel.StoreId,
+        _ => Context.GetImplicitStoreId()
+        };
+    var sdk = BreezService.GetClient(storeId)?.Sdk;
+    if (sdk is null)
+        return;
+
+    var nodeState = sdk.NodeInfo();
+    var max = nodeState.maxPayableMsat / 1000;
+
+}
+
+
+<form method="post" asp-action="Send" asp-route-storeId="@storeId">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <h3 class="mb-0">
+                    <span>@ViewData["Title"]</span>
+                </h3>
+                <div class="d-flex gap-3 mt-3 mt-sm-0">
+
+                    <button type="submit" class="btn btn-primary">Send</button>
+                </div>
+            </div>
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+            <div class="form-group">
+                <label for="address" class="form-label" data-required>Bolt11 or node Id</label>
+                <input type="text" id="address" name="address" class="form-control" required/>
+            </div>
+            <div class="form-group">
+                <label for="amount" class="form-label">Amount (sats) (required for 0 amount bolt11 or nodeid payments)</label>
+                <input type="number"id="amount" max="@max" name="amount" class="form-control"/>
+            </div>
+
+        </div>
+    </div>
+</form>

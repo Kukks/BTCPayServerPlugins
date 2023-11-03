@@ -23,7 +23,15 @@
     if (sdk is null)
         return;
 
-    var inProgressSwap = sdk.InProgressSwap();
+    SwapInfo inProgressSwap = null;
+    try
+    {
+        inProgressSwap = sdk.InProgressSwap();
+        inProgressSwap ??= sdk.ReceiveOnchain(new ReceiveOnchainRequest());
+    }
+    catch (Exception e)
+    {
+    }
     var refundables = sdk.ListRefundables();
     var deriv = Context.GetStoreData().GetDerivationSchemeSettings(BtcPayNetworkProvider, "BTC");
     var ni = sdk.NodeInfo();
@@ -46,12 +54,6 @@
             <h3 class="mb-0">
                 <span>@ViewData["Title"]</span>
             </h3>
-            <div class="d-flex gap-3 mt-3 mt-sm-0">
-                @if (inProgressSwap is null)
-                {
-                    <a class="btn btn-primary" asp-action="SwapInCreate" asp-controller="Breez" asp-route-storeId="@storeId">Create</a>
-                }
-            </div>
         </div>
 
         @if (inProgressSwap is not null)
@@ -65,19 +67,20 @@
                         <vc:truncate-center text="@inProgressSwap.bitcoinAddress" padding="15" elastic="true" classes="form-control-plaintext" id="Address"/>
                         <label for="Address">Address</label>
                     </div>
-                    <span class="">Please send an amount between @Money.Satoshis(inProgressSwap.minAllowedDeposit).ToDecimal(MoneyUnit.BTC) BTC and @Money.Satoshis(inProgressSwap.maxAllowedDeposit).ToDecimal(MoneyUnit.BTC) </span>
+                    <span class="text-muted">Please send an amount between <br/> @Money.Satoshis(inProgressSwap.minAllowedDeposit).ToDecimal(MoneyUnit.BTC) and @Money.Satoshis(inProgressSwap.maxAllowedDeposit).ToDecimal(MoneyUnit.BTC)BTC </span>
                     @if (deriv is not null)
                     {
-                        <a class="btn btn-primary" asp-controller="UIWallets" asp-action="WalletSend" asp-route-walletId="@Model.WalletId" asp-route-defaultDestination="@inProgressSwap.bitcoinAddress">Send using BTCPay Wallet</a>
+                        var wallet = new WalletId(storeId, "BTC");
+                        <a class="btn btn-link w-100" asp-controller="UIWallets" asp-action="WalletSend" asp-route-walletId="@wallet" asp-route-defaultDestination="@inProgressSwap.bitcoinAddress">Send using BTCPay Wallet</a>
                     }
                     @{
                         var onChainSats = ni.onchainBalanceMsat / 1000;
                         if (inProgressSwap.minAllowedDeposit <= (long) onChainSats)
                         {
-                            <div>
+                            <div class="w-100">
                                 <form asp-action="Sweep" asp-route-storeId="@storeId">
                                     <input type="hidden" value="@inProgressSwap.bitcoinAddress" name="address"/>
-                                    <button type="submit"> Sweep onchain funds to swap in</button>
+                                    <button class="btn btn-link w-100" type="submit"> Sweep onchain funds to swap in</button>
                                 </form>
                             </div>
                         }

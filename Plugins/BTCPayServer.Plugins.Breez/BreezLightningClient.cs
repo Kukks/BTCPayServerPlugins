@@ -10,38 +10,47 @@ using Network = Breez.Sdk.Network;
 
 namespace BTCPayServer.Plugins.Breez;
 
-
-public class BreezLightningClient: ILightningClient, IDisposable, EventListener
+public class BreezLightningClient : ILightningClient, IDisposable, EventListener
 {
+    public override string ToString()
+    {
+        return $"type=breez;key={PaymentKey}";
+    }
+
     private readonly NBitcoin.Network _network;
+    public readonly string PaymentKey;
 
     public BreezLightningClient(string inviteCode, string apiKey, string workingDir, NBitcoin.Network network,
-        string mnemonic)
+        string mnemonic, string paymentKey)
     {
         _network = network;
+        PaymentKey = paymentKey;
         var nodeConfig = new NodeConfig.Greenlight(
             new GreenlightNodeConfig(null, inviteCode)
         );
         var config = BreezSdkMethods.DefaultConfig(
-            network ==NBitcoin.Network.Main ? EnvironmentType.PRODUCTION: EnvironmentType.STAGING, 
-            apiKey, 
-            nodeConfig
-        ) with {
-            workingDir= workingDir,
-            network = network == NBitcoin.Network.Main ? Network.BITCOIN : network == NBitcoin.Network.TestNet ? Network.TESTNET: network == NBitcoin.Network.RegTest? Network.REGTEST: Network.SIGNET
-        };
+                network == NBitcoin.Network.Main ? EnvironmentType.PRODUCTION : EnvironmentType.STAGING,
+                apiKey,
+                nodeConfig
+            ) with
+            {
+                workingDir = workingDir,
+                network = network == NBitcoin.Network.Main ? Network.BITCOIN :
+                network == NBitcoin.Network.TestNet ? Network.TESTNET :
+                network == NBitcoin.Network.RegTest ? Network.REGTEST : Network.SIGNET
+            };
         var seed = BreezSdkMethods.MnemonicToSeed(mnemonic);
-        Sdk = BreezSdkMethods.Connect(config, seed, this);  
-        
+        Sdk = BreezSdkMethods.Connect(config, seed, this);
     }
 
-     public BlockingBreezServices Sdk { get; }
+    public BlockingBreezServices Sdk { get; }
 
-     public event EventHandler<BreezEvent> EventReceived;
-     public void OnEvent(BreezEvent e)
-     {
-         EventReceived?.Invoke(this, e);
-     }
+    public event EventHandler<BreezEvent> EventReceived;
+
+    public void OnEvent(BreezEvent e)
+    {
+        EventReceived?.Invoke(this, e);
+    }
 
     public Task<LightningInvoice> GetInvoice(string invoiceId, CancellationToken cancellation = default)
     {
@@ -54,7 +63,7 @@ public class BreezLightningClient: ILightningClient, IDisposable, EventListener
         {
             return null;
         }
-        
+
         return new LightningPayment()
         {
             Amount = LightMoney.MilliSatoshis(payment.amountMsat),
@@ -69,21 +78,22 @@ public class BreezLightningClient: ILightningClient, IDisposable, EventListener
                 PaymentStatus.PENDING => LightningPaymentStatus.Pending,
                 _ => throw new ArgumentOutOfRangeException()
             },
-            CreatedAt =  DateTimeOffset.FromUnixTimeMilliseconds(payment.paymentTime),
+            CreatedAt = DateTimeOffset.FromUnixTimeMilliseconds(payment.paymentTime),
             Fee = LightMoney.MilliSatoshis(payment.feeMsat),
             AmountSent = LightMoney.MilliSatoshis(payment.amountMsat)
         };
-        
-        
     }
+
     private LightningInvoice FromPayment(Payment p)
     {
+       
         if (p?.details is not PaymentDetails.Ln lnPaymentDetails)
         {
             return null;
         }
+
         var bolt11 = BOLT11PaymentRequest.Parse(lnPaymentDetails.data.bolt11, _network);
-        
+
         return new LightningInvoice()
         {
             Amount = LightMoney.MilliSatoshis(p.amountMsat),
@@ -97,7 +107,7 @@ public class BreezLightningClient: ILightningClient, IDisposable, EventListener
                 PaymentStatus.COMPLETE => LightningInvoiceStatus.Paid,
                 _ => LightningInvoiceStatus.Unpaid
             },
-            PaidAt = DateTimeOffset.FromUnixTimeMilliseconds(p.paymentTime),
+            PaidAt = DateTimeOffset.FromUnixTimeSeconds(p.paymentTime),
             ExpiresAt = bolt11.ExpiryDate
         };
     }
@@ -105,18 +115,28 @@ public class BreezLightningClient: ILightningClient, IDisposable, EventListener
     public async Task<LightningInvoice> GetInvoice(uint256 paymentHash, CancellationToken cancellation = default)
     {
         var p = Sdk.PaymentByHash(paymentHash.ToString()!);
+
+        if(p is null)
+            return new LightningInvoice()
+            {
+                Id = paymentHash.ToString(),
+                PaymentHash = paymentHash.ToString(),
+                Status = LightningInvoiceStatus.Expired,
+            };
+    
         return FromPayment(p);
     }
 
     public async Task<LightningInvoice[]> ListInvoices(CancellationToken cancellation = default)
     {
-
         return await ListInvoices(null, cancellation);
     }
 
-    public async Task<LightningInvoice[]> ListInvoices(ListInvoicesParams request, CancellationToken cancellation = default)
+    public async Task<LightningInvoice[]> ListInvoices(ListInvoicesParams request,
+        CancellationToken cancellation = default)
     {
-        return Sdk.ListPayments(new ListPaymentsRequest(PaymentTypeFilter.RECEIVED, null, null, request?.PendingOnly is not true, (uint?) request?.OffsetIndex, null))
+        return Sdk.ListPayments(new ListPaymentsRequest(PaymentTypeFilter.RECEIVED, null, null,
+                request?.PendingOnly is not true, (uint?) request?.OffsetIndex, null))
             .Select(FromPayment).ToArray();
     }
 
@@ -130,26 +150,48 @@ public class BreezLightningClient: ILightningClient, IDisposable, EventListener
         return await ListPayments(null, cancellation);
     }
 
-    public async Task<LightningPayment[]> ListPayments(ListPaymentsParams request, CancellationToken cancellation = default)
+    public async Task<LightningPayment[]> ListPayments(ListPaymentsParams request,
+        CancellationToken cancellation = default)
     {
-        return Sdk.ListPayments(new ListPaymentsRequest(PaymentTypeFilter.RECEIVED, null, null, null, (uint?) request?.OffsetIndex, null))
+        return Sdk.ListPayments(new ListPaymentsRequest(PaymentTypeFilter.RECEIVED, null, null, null,
+                (uint?) request?.OffsetIndex, null))
             .Select(ToLightningPayment).ToArray();
     }
 
 
-    public async Task<LightningInvoice> CreateInvoice(LightMoney amount, string description, TimeSpan expiry, CancellationToken cancellation = default)
+    public async Task<LightningInvoice> CreateInvoice(LightMoney amount, string description, TimeSpan expiry,
+        CancellationToken cancellation = default)
     {
-
-        var expiryS =expiry == TimeSpan.Zero? (uint?) null: Math.Max(0, (uint)expiry.TotalSeconds);
-       var p =  Sdk.ReceivePayment(new ReceivePaymentRequest((ulong)amount.MilliSatoshi, description, null, null, false,expiryS ));
-       return await GetInvoice(p.lnInvoice.paymentHash, cancellation);
+        var expiryS = expiry == TimeSpan.Zero ? (uint?) null : Math.Max(0, (uint) expiry.TotalSeconds);
+        var p = Sdk.ReceivePayment(new ReceivePaymentRequest((ulong) amount.MilliSatoshi, description, null, null,
+            false, expiryS));
+        return FromPR(p);
     }
 
-    public async Task<LightningInvoice> CreateInvoice(CreateInvoiceParams createInvoiceRequest, CancellationToken cancellation = default)
+    public LightningInvoice FromPR(ReceivePaymentResponse response)
     {
-        var expiryS =createInvoiceRequest.Expiry == TimeSpan.Zero? (uint?) null: Math.Max(0, (uint)createInvoiceRequest.Expiry.TotalSeconds);
-        var p =  Sdk.ReceivePayment(new ReceivePaymentRequest((ulong)createInvoiceRequest.Amount.MilliSatoshi, (createInvoiceRequest.Description??createInvoiceRequest.DescriptionHash.ToString())!, null, null, createInvoiceRequest.DescriptionHashOnly,expiryS ));
-        return await GetInvoice(p.lnInvoice.paymentHash, cancellation);
+        return new LightningInvoice()
+        {
+            Amount = LightMoney.MilliSatoshis(response.lnInvoice.amountMsat ?? 0),
+            Id = response.lnInvoice.paymentHash,
+            Preimage = ConvertHelper.ToHexString(response.lnInvoice.paymentSecret.ToArray()),
+            PaymentHash = response.lnInvoice.paymentHash,
+            BOLT11 = response.lnInvoice.bolt11,
+            Status = LightningInvoiceStatus.Unpaid,
+            ExpiresAt = DateTimeOffset.FromUnixTimeSeconds((long) response.lnInvoice.expiry)
+        };
+    }
+
+    public async Task<LightningInvoice> CreateInvoice(CreateInvoiceParams createInvoiceRequest,
+        CancellationToken cancellation = default)
+    {
+        var expiryS = createInvoiceRequest.Expiry == TimeSpan.Zero
+            ? (uint?) null
+            : Math.Max(0, (uint) createInvoiceRequest.Expiry.TotalSeconds);
+        var p = Sdk.ReceivePayment(new ReceivePaymentRequest((ulong) createInvoiceRequest.Amount.MilliSatoshi,
+            (createInvoiceRequest.Description ?? createInvoiceRequest.DescriptionHash.ToString())!, null, null,
+            createInvoiceRequest.DescriptionHashOnly, expiryS));
+        return FromPR(p);
     }
 
     public async Task<ILightningInvoiceListener> Listen(CancellationToken cancellation = default)
@@ -159,14 +201,16 @@ public class BreezLightningClient: ILightningClient, IDisposable, EventListener
 
     public async Task<LightningNodeInformation> GetInfo(CancellationToken cancellation = default)
     {
-        
         var ni = Sdk.NodeInfo();
         return new LightningNodeInformation()
         {
             PeersCount = ni.connectedPeers.Count,
             Alias = $"greenlight {ni.id}",
-            NodeInfoList = {new NodeInfo(new PubKey(ni.id), "blockstrean.com", 69)},//we have to fake this as btcpay currently requires this to enable the payment method
-            BlockHeight = (int)ni.blockHeight
+            NodeInfoList =
+            {
+                new NodeInfo(new PubKey(ni.id), "blockstrean.com", 69)
+            }, //we have to fake this as btcpay currently requires this to enable the payment method
+            BlockHeight = (int) ni.blockHeight
         };
     }
 
@@ -194,9 +238,53 @@ public class BreezLightningClient: ILightningClient, IDisposable, EventListener
         return await Pay(null, payParams, cancellation);
     }
 
-    public async Task<PayResponse> Pay(string bolt11, PayInvoiceParams payParams, CancellationToken cancellation = default)
+    public async Task<PayResponse> Pay(string bolt11, PayInvoiceParams payParams,
+        CancellationToken cancellation = default)
     {
-        throw new NotImplementedException();
+        SendPaymentResponse result;
+        try
+        {
+            if (bolt11 is null)
+            {
+                result = Sdk.SendSpontaneousPayment(new SendSpontaneousPaymentRequest(payParams.Destination.ToString(),
+                    (ulong) payParams.Amount.MilliSatoshi));
+            }
+            else
+            {
+                result = Sdk.SendPayment(new SendPaymentRequest(bolt11, (ulong?) payParams.Amount?.MilliSatoshi));
+            }
+
+            var details = result.payment.details as PaymentDetails.Ln;
+            return new PayResponse()
+            {
+                Result = result.payment.status switch
+                {
+                    PaymentStatus.FAILED => PayResult.Error,
+                    PaymentStatus.COMPLETE => PayResult.Ok,
+                    PaymentStatus.PENDING => PayResult.Unknown,
+                    _ => throw new ArgumentOutOfRangeException()
+                },
+                Details = new PayDetails()
+                {
+                    Status = result.payment.status switch
+                    {
+                        PaymentStatus.FAILED => LightningPaymentStatus.Failed,
+                        PaymentStatus.COMPLETE => LightningPaymentStatus.Complete,
+                        PaymentStatus.PENDING => LightningPaymentStatus.Pending,
+                        _ => LightningPaymentStatus.Unknown
+                    },
+                    Preimage =
+                        details.data.paymentPreimage is null ? null : uint256.Parse(details.data.paymentPreimage),
+                    PaymentHash = details.data.paymentHash is null ? null : uint256.Parse(details.data.paymentHash),
+                    FeeAmount = result.payment.feeMsat,
+                    TotalAmount = LightMoney.MilliSatoshis(result.payment.amountMsat + result.payment.feeMsat),
+                }
+            };
+        }
+        catch (Exception e)
+        {
+            return new PayResponse(PayResult.Error, e.Message);
+        }
     }
 
     public async Task<PayResponse> Pay(string bolt11, CancellationToken cancellation = default)
@@ -204,7 +292,8 @@ public class BreezLightningClient: ILightningClient, IDisposable, EventListener
         return await Pay(bolt11, null, cancellation);
     }
 
-    public async Task<OpenChannelResponse> OpenChannel(OpenChannelRequest openChannelRequest, CancellationToken cancellation = default)
+    public async Task<OpenChannelResponse> OpenChannel(OpenChannelRequest openChannelRequest,
+        CancellationToken cancellation = default)
     {
         throw new NotImplementedException();
     }
@@ -221,7 +310,6 @@ public class BreezLightningClient: ILightningClient, IDisposable, EventListener
 
     public async Task CancelInvoice(string invoiceId, CancellationToken cancellation = default)
     {
-        
         throw new NotImplementedException();
     }
 
@@ -235,8 +323,8 @@ public class BreezLightningClient: ILightningClient, IDisposable, EventListener
         Sdk.Dispose();
         Sdk.Dispose();
     }
-    
-    public class BreezInvoiceListener: ILightningInvoiceListener
+
+    public class BreezInvoiceListener : ILightningInvoiceListener
     {
         private readonly BreezLightningClient _breezLightningClient;
         private readonly CancellationToken _cancellationToken;
@@ -245,7 +333,7 @@ public class BreezLightningClient: ILightningClient, IDisposable, EventListener
         {
             _breezLightningClient = breezLightningClient;
             _cancellationToken = cancellationToken;
-            
+
             breezLightningClient.EventReceived += BreezLightningClientOnEventReceived;
         }
 
@@ -266,17 +354,18 @@ public class BreezLightningClient: ILightningClient, IDisposable, EventListener
 
         public async Task<LightningInvoice> WaitInvoice(CancellationToken cancellation)
         {
-            while(cancellation.IsCancellationRequested is not true)
+            while (cancellation.IsCancellationRequested is not true)
             {
                 if (_invoices.TryDequeue(out var task))
                 {
                     return await task.WithCancellation(cancellation);
                 }
+
                 await Task.Delay(100, cancellation);
             }
+
             cancellation.ThrowIfCancellationRequested();
             return null;
         }
     }
 }
-

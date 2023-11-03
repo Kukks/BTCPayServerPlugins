@@ -6,6 +6,7 @@
     var storeId = Context.GetCurrentStoreId();
 
     ViewData.SetActivePage("Breez", "Payments", "Payments");
+    TempData.TryGetValue("bolt11", out var bolt11);
 }
 
 <div class="row mb-4">
@@ -16,10 +17,27 @@
             </h3>
             <div class="d-flex gap-3 mt-3 mt-sm-0">
 
-                <button type="submit" class="btn btn-primary">Send</button>
-                <button type="submit" class="btn btn-primary">Receive</button>
+                <a asp-action="Send" asp-controller="Breez" asp-route-storeId="@storeId" type="submit" class="btn btn-primary">Send</a>
+                <a asp-action="Receive" asp-controller="Breez" asp-route-storeId="@storeId" type="submit" class="btn btn-primary">Receive</a>
             </div>
         </div>
+
+        @if (bolt11 is string bolt11s)
+        {
+            <div class="payment-box">
+                <div class="qr-container" data-clipboard="@bolt11s">
+                    <vc:qr-code data="@bolt11s"/>
+                </div>
+                <div class="input-group mt-3">
+                    <div class="form-floating">
+                        <vc:truncate-center text="@bolt11s" padding="15" elastic="true" classes="form-control-plaintext" id="Address"/>
+                        <label for="Address">BOLT11 Invoice</label>
+                    </div>
+
+
+                </div>
+            </div>
+        }
 
         <partial name="Breez/BreezPaymentsTable" model="Model.Payments"/>
         <vc:pager view-model="Model"></vc:pager>
