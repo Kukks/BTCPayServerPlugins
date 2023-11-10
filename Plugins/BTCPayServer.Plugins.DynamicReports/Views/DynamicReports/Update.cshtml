@@ -1,0 +1,131 @@
+﻿@using Newtonsoft.Json
+@using BTCPayServer.Services
+@using BTCPayServer.Services.Reporting
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Plugins.DynamicReports
+@model BTCPayServer.Plugins.DynamicReports.DynamicReportViewModel 
+@inject IScopeProvider ScopeProvider
+@inject ReportService ReportService
+@inject DynamicReportService DynamicReportService
+
+@{
+    Layout = "../Shared/_NavLayout.cshtml";
+    ViewData["NavPartialName"] = "../UIServer/_Nav";
+    var storeId = ScopeProvider.GetCurrentStoreId();
+    var reportName = Context.Request.Query["reportName"].ToString();
+    reportName = string.IsNullOrEmpty(reportName) ? null : reportName;
+    var existingReports = ReportService.ReportProviders.Where(pair => pair.Value is PostgresReportProvider).Select(pair => pair.Key).ToList();
+    ViewData.SetActivePage("DynamicReports", reportName is null ? "Create dynamic report" : $"Edit {reportName} dynamic report", reportName);
+    var legacyEnabled = await DynamicReportService.IsLegacyEnabled();
+}
+
+
+<form method="post" asp-action="Update" asp-controller="DynamicReports" asp-route-reportName="@reportName">
+
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h2 class="mb-0">
+            <span>@ViewData["Title"]</span>
+        </h2>
+        <div class="d-flex gap-3 mt-3 mt-sm-0">
+            @if (reportName is null)
+            {
+                <button type="submit" class="btn btn-primary" id="SaveButton">Create</button>
+            }
+            else
+            {
+                <button type="submit" class="btn btn-primary order-sm-1" id="SaveButton">Save</button>
+                <button name="command" value="remove" type="submit" class="btn btn-danger order-sm-1">Remove</button>
+                @if (storeId is not null)
+                {
+                    <a class="btn btn-secondary" asp-controller="UIReports" asp-action="StoreReports" asp-route-storeId="@storeId" asp-route-viewName="@reportName">View</a>
+                }
+            }
+            @if (storeId is not null)
+            {
+                <button name="command" value="test" type="submit" class="btn btn-outline-secondary order-sm-1">Test</button>
+            }
+            @if (existingReports.Count > 0)
+            {
+                <select onChange="window.location.href=this.value" class="form-select" name="selectedReport">
+                    <option selected="@(reportName is null)" value="@Url.Action("Update", "DynamicReports")">Create new report</option>
+                    @foreach (var rep in existingReports)
+                    {
+                        <option selected="@(rep == reportName)" value="@Url.Action("Update", "DynamicReports", new {reportName = rep})">Edit @rep</option>
+                    }
+                </select>
+            }
+            <a class="btn btn-outline-secondary text-nowrap" asp-controller="DynamicReports" asp-action="ToggleLegacy" >
+                @(legacyEnabled ? "Disable legacy report" : "Enable legacy report")
+            </a>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-xl-8 col-xxl-constrain">
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+            @if (reportName is null)
+            {
+                <div class="form-group">
+                    <label asp-for="Name" class="form-label" data-required></label>
+                    <input asp-for="Name" class="form-control" required/>
+                    <span asp-validation-for="Name" class="text-danger"></span>
+                </div>
+            }
+            else
+            {
+                <input type="hidden" asp-for="Name"/>
+            }
+            <div class="form-group form-check">
+                <input type="checkbox" class="form-check-input" asp-for="AllowForNonAdmins"/>
+                <label asp-for="AllowForNonAdmins" class="form-check-label">Allow report to be used by non-admins</label>
+                <small class="form-text text-muted d-block">If unchecked, only admins will be able to use this report. Executing raw SQL is very powerful. Executing queries without proper filtering may expose sensitive data to unrelated users. </small>
+                <span asp-validation-for="AllowForNonAdmins" class="text-danger"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-xl-10 col-xxl-constrain">
+            <div class="form-group">
+                <label asp-for="Sql" class="form-label" data-required>SQL</label>
+                <textarea asp-for="Sql"  rows="10" cols="40" class="form-control" required></textarea>
+                <small class="form-text text-muted">You can use @@StoreId to reference the current store id, @@From and @@To for the specified date range filters. The queries are sandboxed inside a SQL transaction, which never gets committed, ensuring reports are read-only.</small>
+                <span asp-validation-for="Sql" class="text-danger"></span>
+            </div>
+        </div>
+    </div>
+    @if (TempData.TryGetValue("Data", out var dataV) && dataV is string dataS)
+    {
+        var queryContext = JsonConvert.DeserializeObject<QueryContext>(dataS);
+        <div class="row">
+
+            <div class="col-12 col-xxl-constrain">
+
+                <div class="table-responsive" style="  transform: rotateX(180deg);">
+                    <table class="table table-hover  w-100" style="  transform: rotateX(180deg);">
+                        <thead>
+                        <tr>
+                            @foreach (var column in queryContext.ViewDefinition.Fields)
+                            {
+                                <th>@column.Name</th>
+                            }
+                        </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var row in queryContext.Data)
+                        {
+                            <tr>
+
+                                @foreach (var column in row)
+                                {
+                                    <td>@column</td>
+                                }
+                            </tr>
+                        }
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+
+</form>
