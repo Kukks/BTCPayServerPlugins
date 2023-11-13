@@ -112,6 +112,7 @@ function prepareDatasets(data) {
         {
             id: "coins",
             label: "Coins",
+            coins: confirmedCoins,
             data: confirmedCoins.map(coin => coin.value),
             backgroundColor: confirmedCoins.map(coin => getColor(coin.private, coin.score, data.targetScore)),
             borderColor: "transparent",
@@ -124,7 +125,8 @@ function prepareDatasets(data) {
             backgroundColor: inProgressCoins.map(() => "rgba(81, 177, 62,1)"),
             alternativeBackgroundColor: inProgressCoins.map(() => "rgba(30, 122, 68,1)"),
             borderColor: "transparent",
-            borderWidth: 1
+            borderWidth: 1,
+            coins: inProgressCoins
         }
     ];
 }
@@ -136,6 +138,9 @@ const chartDataset = {
     datasets: prepareDatasets(data)
 };
 
+
+
+
 const config = {
     type: "doughnut",
     data: chartDataset,
@@ -143,7 +148,29 @@ const config = {
         cutout: "70%",
         plugins: {
             legend: { display: false },
-            tooltip: {}
+            tooltip: {
+                callbacks: {
+                    labelColor: ()=>{ return undefined },
+                    label: function (context) {
+                        const coin = context.dataset.coins[context.dataIndex];
+                        return [
+                            `${coin.value.toFixed(8)} BTC`,
+                            `${coin.score.toFixed(2)} anonset`,
+                            `${coin.confirmed ? "confirmed" : "unconfirmed"}`,
+                            coin.isPrivate ? "private" : "not private",
+                            ...(coin.coinjoinInProgress ? ["mixing"] : [])
+                        ];
+                       },
+                     title: function (context) {
+                         const coin = context[0].dataset.coins[context[0].dataIndex];
+                         //truncated shoudl have first few chars and then ... and then last few chars
+                         
+                         const truncatedId = coin.id.substring(0, 8) + "..." + coin.id.substring(coin.id.length - 8);
+                         return truncatedId;
+                     },
+                    footer: function (context) {}
+                }
+            }
         }
     },
     plugins: [{
