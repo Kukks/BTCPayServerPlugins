@@ -199,6 +199,7 @@ public class Smartifier
 
                 hdPubKey.SetAnonymitySet(labels.anonset);
                 var c = new SmartCoin(tx, coin.OutPoint.N, hdPubKey);
+                c.IsSufficientlyDistancedFromExternalKeys = labels.coinjoinData is not null;
                 c.PropertyChanged += CoinPropertyChanged;
                 return c;
             });
