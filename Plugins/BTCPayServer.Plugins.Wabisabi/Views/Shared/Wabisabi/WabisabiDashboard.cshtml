@@ -433,8 +433,10 @@ updateInProgressAnimation(myChart);
                         </div>
                     </div>
                     <div class="list-group list-group-flush mb-3">
-                        <h5 class="list-group-item-heading text-muted">Enabled coordinators</h5>
-
+                        @if (enabledSettings.Count() > 1)
+                        {
+                            <h5 class="list-group-item-heading text-muted">Enabled coordinators</h5>
+                        }
                         @{
                             foreach (var setting in enabledSettings)
                             {
