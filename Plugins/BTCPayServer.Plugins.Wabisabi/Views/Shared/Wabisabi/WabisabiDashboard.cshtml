@@ -12,6 +12,7 @@
 @inject WalletProvider WalletProvider;
 @inject WabisabiCoordinatorClientInstanceManager WabisabiCoordinatorClientInstanceManager
 
+<script src="~/Resources/chart.js" type="text/javascript"> </script>
 @inject IExplorerClientProvider ExplorerClientProvider
 
 @{
@@ -75,7 +76,174 @@
             var privacy = wallet.GetPrivacyPercentage(coins, wallet.AnonScoreTarget);
 
             var privacyPercentage = Math.Round(privacy * 100);
-            var colorCoins = coins.GroupBy(coin => coin.CoinColor(wallet.AnonScoreTarget)).ToDictionary(grouping => grouping.Key, grouping => grouping);
+           var data = new
+            {
+                privacyProgress = privacyPercentage,
+                targetScore = wallet.AnonScoreTarget,
+                coins = coins.Select(coin => new
+                {
+                    value = coin.Amount.ToDecimal(MoneyUnit.BTC),
+                    score = coin.AnonymitySet,
+                    isPrivate = coin.CoinColor(wallet.AnonScoreTarget) == AnonsetType.Green,
+                    confirmed = coin.Confirmed,
+                    id = coin.Outpoint.ToString(),
+                    coinjoinInProgress = coin.CoinJoinInProgress
+                }).OrderBy(coin => coin.isPrivate).ThenBy(coin => coin.score),
+
+            };
+            @if(coins.Any())
+            {
+        
+                <script>
+            
+            document.addEventListener("DOMContentLoaded", function () {
+        
+function getColor(isPrivate, score, maxScore) {
+    let normalizedScore = Math.min(Math.max(score, 0), maxScore) / maxScore;
+    return isPrivate ? `rgb(0, ${Math.floor(255 * normalizedScore)}, 0)` : `rgb(255, ${Math.floor(128 * normalizedScore)}, 0)`;
+}
+
+function prepareDatasets(data) {
+    const coins = data.coins;
+    const confirmedCoins = coins;
+    const inProgressCoins = coins.filter(coin => coin.coinjoinInProgress);
+
+    return [
+        {
+            id: "coins",
+            label: "Coins",
+            data: confirmedCoins.map(coin => coin.value),
+            backgroundColor: confirmedCoins.map(coin => getColor(coin.private, coin.score, data.targetScore)),
+            borderColor: "transparent",
+            borderWidth: 1
+        },
+        {
+            id: "inprogresscoins",
+            label: "In Progress Coins",
+            data: inProgressCoins.map(coin => coin.value),
+            backgroundColor: inProgressCoins.map(() => "rgba(81, 177, 62,1)"),
+            alternativeBackgroundColor: inProgressCoins.map(() => "rgba(30, 122, 68,1)"),
+            borderColor: "transparent",
+            borderWidth: 1
+        }
+    ];
+}
+
+
+            const data = @Json.Serialize(data);
+const chartDataset = {
+    labels: data.coins.map(coin => coin.id),
+    datasets: prepareDatasets(data)
+};
+
+const config = {
+    type: "doughnut",
+    data: chartDataset,
+    options: {
+        cutout: "70%",
+        plugins: {
+            legend: { display: false },
+            tooltip: {}
+        }
+    },
+    plugins: [{
+        beforeDraw: function (chart) {
+            let ctx = chart.ctx;
+            ctx.save();
+            let width = chart.width;
+            let height = chart.height;
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('color');
+
+            function calculateFontSize(text, maxWidth, initialFontSize) {
+                let fontSize = initialFontSize;
+                ctx.font = fontSize + "em sans-serif";
+                while (ctx.measureText(text).width > maxWidth && fontSize > 0) {
+                    fontSize -= 0.1;
+                    ctx.font = fontSize + "em sans-serif";
+                }
+                return fontSize;
+            }
+
+            function getTextHeight(text, fontSize) {
+                ctx.font = fontSize + "em sans-serif";
+                let metrics = ctx.measureText(text);
+                return metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent +5;
+            }
+
+            function drawCenteredText(text, posY, maxWidth, fontSize) {
+                ctx.font = fontSize + "em sans-serif";
+                let textX = (width - ctx.measureText(text).width) / 2;
+                ctx.fillText(text, textX, posY);
+                return getTextHeight(text, fontSize);
+            }
+
+            let pfs = height / 114;
+            let textY = height / 4;
+            let maxWidth = width * 0.6;
+
+
+            let lineTexts = [];
+            const totalPrivateSum = data.coins.filter(coin => coin.isPrivate).length;
+            const totalPrivateValueSum = data.coins.filter(coin => coin.isPrivate).reduce((sum, coin) => sum + coin.value, 0);
+            if (totalPrivateSum > 0)
+                lineTexts.push(`${totalPrivateSum} coins(${totalPrivateValueSum.toFixed(8)}BTC) private`);
+            const totalNonPrivateSum = data.coins.filter(coin => !coin.isPrivate && !coin.coinjoinInProgress).length;
+            const totalNonPrivateValueSum = data.coins.filter(coin => !coin.isPrivate && !coin.coinjoinInProgress).reduce((sum, coin) => sum + coin.value, 0);
+            if (totalNonPrivateSum > 0)
+                lineTexts.push(`${totalNonPrivateSum} coins(${totalNonPrivateValueSum.toFixed(8)}BTC) semi/not private`);
+            const totalInProgressSum = data.coins.filter(coin => coin.coinjoinInProgress).length;
+            const totalInProgressValueSum = data.coins.filter(coin => coin.coinjoinInProgress).reduce((sum, coin) => sum + coin.value, 0);
+            if (totalInProgressSum > 0)
+                lineTexts.push(`${totalInProgressSum} coins(${totalInProgressValueSum.toFixed(8)}BTC) mixing`);
+
+             let commonFontSize = lineTexts.reduce(
+                (size, text) => Math.min(size, calculateFontSize(text, maxWidth, pfs * 0.7)),
+                pfs * 0.7
+            );
+
+            let totalTextHeight = getTextHeight(`${data.privacyProgress}%`, pfs)  +
+                                  getTextHeight("Private",pfs) + 10 +
+                                  lineTexts.reduce((totalHeight, text) => totalHeight + getTextHeight(text, commonFontSize), 0);
+
+            // Adjust initial Y position for vertical centering
+            textY = (height - totalTextHeight) / 2;
+
+            // Draw the main text (privacy progress) and additional summary text
+            textY += drawCenteredText(`${data.privacyProgress}%`, textY, maxWidth, pfs);
+            textY += drawCenteredText("Private",textY, maxWidth, pfs) +10;
+            lineTexts.forEach(text => {
+                textY += drawCenteredText(text, textY, maxWidth, commonFontSize);
+            });
+
+            ctx.restore();
+        }
+    }]
+};
+
+const ctx = document.getElementById("cjchart").getContext("2d");
+const myChart = new Chart(ctx, config);
+
+function updateInProgressAnimation(chart) {
+    chart.data.datasets.forEach(dataset => {
+        if (dataset.id === "inprogresscoins") {
+            dataset.backgroundColor = dataset.backgroundColor.map((c, i) => {
+                const alt = dataset.alternativeBackgroundColor[i];
+                const current = dataset.backgroundColor[i];
+                dataset.alternativeBackgroundColor[i] = current;
+                return alt;
+            });
+        }
+    });
+    chart.update();
+    setTimeout(() => updateInProgressAnimation(chart), 1000);
+}
+
+updateInProgressAnimation(myChart);
+                  
+            });
+            </script>
+            }
             <div class="widget store-numbers">
 
                 @if (wallet is { })
@@ -97,47 +265,54 @@
                 </header>
                 <div class="w-100">
 
-                    <div>
-                        <h6 class="mb-2">Privacy progress</h6>
-                        <div class="progress mb-2 position-relative" style="height: 2rem;">
-                            <div class="w-100 text-center position-absolute bg-transparent progress-bar h-100"> @privacyPercentage%</div>
-                            <div class="progress-bar bg-success" role="progressbar" style="width: @privacyPercentage%"></div>
-                        </div>
-                    </div>
-                    <div>
-                        <h6 class="mb-2">Coins per privacy</h6>
-                        <div class="progress mb-2" style="height: 2rem;">
-                            @foreach (var cc in colorCoins)
-                            {
-                                var cssClass = cc.Key == AnonsetType.Green ? "bg-success" : cc.Key == AnonsetType.Orange ? "bg-warning" :
-                                    "bg-danger";
-                                var text = cc.Key == AnonsetType.Green ? "private" : cc.Key == AnonsetType.Orange ? "semi-private" :
-                                    "non-private";
-
-                                var tooltiptext = $"{cc.Value.Count()} {text} coins";
-                                text = cc.Value.Count().ToString();
-                                var percentage = decimal.Divide(cc.Value.Count(), coins.Count()) * 100;
-                                <div class="progress-bar @cssClass" role="progressbar" style="width: @percentage%" data-bs-toggle="tooltip" title="@tooltiptext">@text</div>
-                            }
-                        </div>
-                    </div>
-                    <div>
-                        <h6 class="mb-2">Value per privacy</h6>
-                        <div class="progress mb-2" style="height: 2rem;">
-                            @foreach (var cc in colorCoins)
-                            {
-                                var cssClass = cc.Key == AnonsetType.Green ? "bg-success" : cc.Key == AnonsetType.Orange ? "bg-warning" :
-                                    "bg-danger";
-                                var text = cc.Key == AnonsetType.Green ? "private" : cc.Key == AnonsetType.Orange ? "semi-private" :
-                                    "non-private";
-                                var percentage = decimal.Divide(cc.Value.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)), coins.TotalAmount().ToDecimal(MoneyUnit.BTC)) * 100;
-                                var tooltiptext = $"{cc.Value.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC))} {text} BTC";
-
-                                text = cc.Value.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)).ToString();
-                                <div class="progress-bar @cssClass" role="progressbar" style="width: @percentage%" data-bs-toggle="tooltip" title="@tooltiptext">@text</div>
-                            }
-                        </div>
-                    </div>
+                    @if (coins.Any())
+                    {
+                        <canvas id="cjchart" class="mb-4"></canvas>
+                    }                  
+                    @* <div> *@
+                    @*     <h6 class="mb-2">Privacy progress</h6> *@
+                    @*     <div class="progress mb-2 position-relative" style="height: 2rem;"> *@
+                    @*         <div class="w-100 text-center position-absolute bg-transparent progress-bar h-100"> @privacyPercentage%</div> *@
+                    @*         <div class="progress-bar bg-success" role="progressbar" style="width: @privacyPercentage%"></div> *@
+                    @*     </div> *@
+                    @* </div> *@
+                    @* <div> *@
+                    @*     <h6 class="mb-2">Coins per privacy</h6> *@
+                    @*     <div class="progress mb-2" style="height: 2rem;"> *@
+                    @*         @foreach (var cc in colorCoins) *@
+                    @*         { *@
+                    @*             var cssClass = cc.Key == AnonsetType.Green ? "bg-success" : cc.Key == AnonsetType.Orange ? "bg-warning" : *@
+                    @*                 "bg-danger"; *@
+                    @*             var text = cc.Key == AnonsetType.Green ? "private" : cc.Key == AnonsetType.Orange ? "semi-private" : *@
+                    @*                 "non-private"; *@
+                    @* *@
+                    @*             var tooltiptext = $"{cc.Value.Count()} {text} coins"; *@
+                    @*             text = cc.Value.Count().ToString(); *@
+                    @*             var percentage = decimal.Divide(cc.Value.Count(), coins.Count()) * 100; *@
+                    @*             <div class="progress-bar @cssClass" role="progressbar" style="width: @percentage%" data-bs-toggle="tooltip" title="@tooltiptext">@text</div> *@
+                    @*         } *@
+                    @*     </div> *@
+                    @* </div> *@
+                    @* <div> *@
+                    @*     <h6 class="mb-2">Value per privacy</h6> *@
+                    @*     <div class="progress mb-2" style="height: 2rem;"> *@
+                    @*         @foreach (var cc in colorCoins) *@
+                    @*         { *@
+                    @*             var cssClass = cc.Key == AnonsetType.Green ? "bg-success" : cc.Key == AnonsetType.Orange ? "bg-warning" : *@
+                    @*                 "bg-danger"; *@
+                    @*             var text = cc.Key == AnonsetType.Green ? "private" : cc.Key == AnonsetType.Orange ? "semi-private" : *@
+                    @*                 "non-private"; *@
+                    @*             var percentage = decimal.Divide(cc.Value.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)), coins.TotalAmount().ToDecimal(MoneyUnit.BTC)) * 100; *@
+                    @*             var tooltiptext = $"{cc.Value.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC))} {text} BTC"; *@
+                    @* *@
+                    @*             text = cc.Value.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)).ToString(); *@
+                    @*             <div class="progress-bar @cssClass" role="progressbar" style="width: @percentage%" data-bs-toggle="tooltip" title="@tooltiptext">@text</div> *@
+                    @*         } *@
+                    @*     </div> *@
+                    @* </div> *@
+                    
+                    
+                    
                     @* @{ *@
                     @*     var coinjoined = @coins.CoinJoinInProcess(); *@
                     @* } *@
@@ -229,7 +404,7 @@
                             </div>
                         </div>
                     </div>
-                    <div class="list-group list-group-flush mt-4 mb-3">
+                    <div class="list-group list-group-flush mb-3">
                         <h5 class="list-group-item-heading text-muted">Enabled coordinators</h5>
 
                         @{
@@ -411,9 +586,13 @@
                         }
                     </div>
 
-                    <button type="button" class="btn btn-text p-1" data-bs-toggle="modal" data-bs-target="#coins">
-                        View coins
-                    </button>
+                    @if (coins.Any())
+                    {
+                        
+                        <button type="button" class="btn btn-text p-1" data-bs-toggle="modal" data-bs-target="#coins">
+                            View coins
+                        </button>
+                    }
                 </div>
             </div>
         }
