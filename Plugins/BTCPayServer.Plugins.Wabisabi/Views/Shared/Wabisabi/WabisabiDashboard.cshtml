@@ -114,9 +114,9 @@ function prepareDatasets(data) {
             label: "Coins",
             coins: confirmedCoins,
             data: confirmedCoins.map(coin => coin.value),
-            backgroundColor: confirmedCoins.map(coin => getColor(coin.private, coin.score, data.targetScore)),
+            backgroundColor: confirmedCoins.map(coin => getColor(coin.isPrivate, coin.score, data.targetScore)),
             borderColor: "transparent",
-            borderWidth: 1
+            borderWidth: 3
         },
         {
             id: "inprogresscoins",
@@ -125,7 +125,7 @@ function prepareDatasets(data) {
             backgroundColor: inProgressCoins.map(() => "rgba(81, 177, 62,1)"),
             alternativeBackgroundColor: inProgressCoins.map(() => "rgba(30, 122, 68,1)"),
             borderColor: "transparent",
-            borderWidth: 1,
+            borderWidth: 3,
             coins: inProgressCoins
         }
     ];
