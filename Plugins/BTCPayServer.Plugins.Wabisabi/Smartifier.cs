@@ -13,6 +13,7 @@ using NBitcoin;
 using NBXplorer;
 using NBXplorer.DerivationStrategy;
 using NBXplorer.Models;
+using WalletWasabi.Blockchain.Analysis;
 using WalletWasabi.Blockchain.Analysis.Clustering;
 using WalletWasabi.Blockchain.Keys;
 using WalletWasabi.Blockchain.TransactionOutputs;
@@ -85,6 +86,7 @@ public class Smartifier
     
     public async Task<TransactionInformation?> GetTransactionInfo(uint256 hash)
     {
+        
         return await GetOrCreate(TransactionInformations , hash, () => _explorerClient.GetTransactionAsync(DerivationScheme, hash), _logger);
     }
     
@@ -199,20 +201,32 @@ public class Smartifier
 
                 hdPubKey.SetAnonymitySet(labels.anonset);
                 var c = new SmartCoin(tx, coin.OutPoint.N, hdPubKey);
-                c.IsSufficientlyDistancedFromExternalKeys = labels.coinjoinData is not null;
+                if (labels.coinjoinData is not null)
+                {
+                    
+                    SetIsSufficientlyDistancedFromExternalKeys(c, labels.coinjoinData);
+                }
                 c.PropertyChanged += CoinPropertyChanged;
                 return c;
             });
-            
             utxoLabels.TryGetValue(coin.OutPoint, out var labels);
             smartCoin.HdPubKey.SetLabel(new LabelsArray(labels.labels ?? new HashSet<string>()));
             smartCoin.HdPubKey.SetKeyState(current == 1 ? KeyState.Clean : KeyState.Used);
             smartCoin.HdPubKey.SetAnonymitySet(labels.anonset);
+            if (labels.coinjoinData is not null)
+            {
+                SetIsSufficientlyDistancedFromExternalKeys(smartCoin, labels.coinjoinData);
+            }
             tx.TryAddWalletOutput(smartCoin);
             
         }
     }
 
+    public static void SetIsSufficientlyDistancedFromExternalKeys(SmartCoin c, BTCPayWallet.CoinjoinData coinjoinData)
+    {
+        c.IsSufficientlyDistancedFromExternalKeys = coinjoinData.CoinsIn.All(dataCoin => dataCoin.AnonymitySet >1);
+    }
+    
     private void CoinPropertyChanged(object sender, PropertyChangedEventArgs e)
     {
         if (sender is SmartCoin smartCoin && e.PropertyName == nameof(SmartCoin.CoinJoinInProgress))

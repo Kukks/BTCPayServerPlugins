@@ -104,7 +104,9 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             utxoSelectionParameters);
         var fullyPrivate = remainingCoins.All(coin => coin.CoinColor(_wallet.AnonScoreTarget) == AnonsetType.Green);
         var coinjoiningOnlyForPayments = fullyPrivate && remainingPendingPayments.Any();
-        if (fullyPrivate && !coinjoiningOnlyForPayments)
+        var isMixingToOther = !_wallet.WabisabiStoreSettings.PlebMode &&
+                              !string.IsNullOrEmpty(_wallet.WabisabiStoreSettings.MixToOtherWallet);
+        if (fullyPrivate && !coinjoiningOnlyForPayments && !isMixingToOther)
         {
             var rand = Random.Shared.Next(1, 1001);
             if (rand > _wallet.WabisabiStoreSettings.ExtraJoinProbability)

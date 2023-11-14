@@ -1,17 +1,13 @@
-﻿@using BTCPayServer.Security
+﻿
 @using NBitcoin
 @using BTCPayServer.Abstractions.Contracts
 @using BTCPayServer.Plugins.Wabisabi
 @using WalletWasabi.Blockchain.Analysis
 @model BTCPayServer.Models.WalletViewModels.WalletSendModel
 
-@inject ContentSecurityPolicies contentSecurityPolicies
 @inject WalletProvider  _walletProvider
 @inject IScopeProvider ScopeProvider
 @{
-    var nonce = RandomUtils.GetUInt256().ToString().Substring(0, 32);
-    contentSecurityPolicies.Add("script-src", $"'nonce-{nonce}'");
-    contentSecurityPolicies.AllowUnsafeHashes();
     var storeId = ScopeProvider.GetCurrentStoreId();
     var w = await _walletProvider.GetWalletAsync(storeId);
 }
@@ -40,7 +36,7 @@
     </datalist>
     
 
-<script type="text/javascript" nonce="@nonce">
+<script type="text/javascript">
  document.addEventListener("DOMContentLoaded", function () {
      
                 const amountElements = document.querySelectorAll("[name^='Outputs'][name$='Amount']");

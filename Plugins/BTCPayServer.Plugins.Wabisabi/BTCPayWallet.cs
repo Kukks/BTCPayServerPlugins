@@ -378,7 +378,8 @@ public class BTCPayWallet : IWallet, IDestinationProvider
                    continue;
                 }
 
-                scriptInfos.Add((txout, ExplorerClient.GetKeyInformationAsync(BlockchainAnalyzer.StdDenoms.Contains(txout.TxOut.Value)?utxoDerivationScheme:DerivationScheme, script.ScriptPubKey)));
+                var privateEnough = result.Coins.All(c => c.AnonymitySet >= WabisabiStoreSettings.AnonymitySetTarget );
+                scriptInfos.Add((txout, ExplorerClient.GetKeyInformationAsync(BlockchainAnalyzer.StdDenoms.Contains(txout.TxOut.Value)&& privateEnough?utxoDerivationScheme:DerivationScheme, script.ScriptPubKey)));
             }
 
             await Task.WhenAll(scriptInfos.Select(t => t.Item2));
@@ -441,6 +442,10 @@ public class BTCPayWallet : IWallet, IDestinationProvider
                     Outpoint = new OutPoint(result.UnsignedCoinJoin, pair.Key.N).ToString()
                 })).ToArray()
             };
+            foreach (var smartTxWalletOutput in smartTx.WalletOutputs)
+            {
+                Smartifier.SetIsSufficientlyDistancedFromExternalKeys(smartTxWalletOutput, cjData);
+            }
             
             var attachments = new List<Attachment>()
             {
@@ -585,9 +590,9 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     //     Logger.LogTrace($"unlocked utxos: {string.Join(',', unlocked)}");
     // }
 
-public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count, bool mixedOutputs)
+public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count, bool mixedOutputs, bool privateEnough)
     {
-        if (!WabisabiStoreSettings.PlebMode && !string.IsNullOrEmpty(WabisabiStoreSettings.MixToOtherWallet) && mixedOutputs)
+        if (!WabisabiStoreSettings.PlebMode && !string.IsNullOrEmpty(WabisabiStoreSettings.MixToOtherWallet) && mixedOutputs && privateEnough)
         {
             try
             {

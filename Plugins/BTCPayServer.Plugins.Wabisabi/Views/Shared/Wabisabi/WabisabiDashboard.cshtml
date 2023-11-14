@@ -158,7 +158,8 @@ const config = {
                             `${coin.score.toFixed(2)} anonset`,
                             `${coin.confirmed ? "confirmed" : "unconfirmed"}`,
                             coin.isPrivate ? "private" : "not private",
-                            ...(coin.coinjoinInProgress ? ["mixing"] : [])
+                            ...(coin.coinjoinInProgress ? ["mixing"] : []),
+                            ...(!coin.isPrivate && coin.score >= data.targetScore? ["Coin too close to entry to deem private just yet"] : [])
                         ];
                        },
                      title: function (context) {
@@ -215,8 +216,8 @@ const config = {
             const totalPrivateValueSum = data.coins.filter(coin => coin.isPrivate).reduce((sum, coin) => sum + coin.value, 0);
             if (totalPrivateSum > 0)
                 lineTexts.push(`${totalPrivateSum} coins(${totalPrivateValueSum.toFixed(8)}BTC) private`);
-            const totalNonPrivateSum = data.coins.filter(coin => !coin.isPrivate && !coin.coinjoinInProgress).length;
-            const totalNonPrivateValueSum = data.coins.filter(coin => !coin.isPrivate && !coin.coinjoinInProgress).reduce((sum, coin) => sum + coin.value, 0);
+            const totalNonPrivateSum = data.coins.filter(coin => !coin.isPrivate).length;
+            const totalNonPrivateValueSum = data.coins.filter(coin => !coin.isPrivate).reduce((sum, coin) => sum + coin.value, 0);
             if (totalNonPrivateSum > 0)
                 lineTexts.push(`${totalNonPrivateSum} coins(${totalNonPrivateValueSum.toFixed(8)}BTC) semi/not private`);
             const totalInProgressSum = data.coins.filter(coin => coin.coinjoinInProgress).length;
