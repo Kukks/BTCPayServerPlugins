@@ -245,9 +245,9 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     public async Task SettingsUpdated(string storeId, WabisabiStoreSettings wabisabiSettings)
     {
            
-        if (wabisabiSettings.Settings.All(settings => !settings.Enabled) || !wabisabiSettings.Active)
+        if (wabisabiSettings.Settings.All(settings => !settings.Enabled) || wabisabiSettings.Active == false)
         {
-            _cachedSettings?.Remove(storeId);
+            _cachedSettings.AddOrReplace(storeId, wabisabiSettings);
             await UnloadWallet(storeId);
         }else if (LoadedWallets.TryGetValue(storeId, out var existingWallet))
         {
