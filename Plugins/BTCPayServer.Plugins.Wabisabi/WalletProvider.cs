@@ -37,6 +37,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     private readonly EventAggregator _eventAggregator;
     private readonly ILogger<WalletProvider> _logger;
     private readonly BTCPayNetworkProvider _networkProvider;
+    private readonly IMemoryCache _memoryCache;
 
     public WalletProvider(
         IServiceProvider serviceProvider,
@@ -46,7 +47,8 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
         IUTXOLocker utxoLocker, 
         EventAggregator eventAggregator,
         ILogger<WalletProvider> logger,
-        BTCPayNetworkProvider networkProvider) : base(TimeSpan.FromMinutes(5))
+        BTCPayNetworkProvider networkProvider,
+        IMemoryCache memoryCache) : base(TimeSpan.FromMinutes(5))
     {
         UtxoLocker = utxoLocker;
         _serviceProvider = serviceProvider;
@@ -56,6 +58,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
         _eventAggregator = eventAggregator;
         _logger = logger;
         _networkProvider = networkProvider;
+        _memoryCache = memoryCache;
     }
 
     public readonly  ConcurrentDictionary<string, Lazy<Task<IWallet>>> LoadedWallets = new();
@@ -102,7 +105,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
                     var accountKeyPath2 = await explorerClient.GetMetadataAsync<RootedKeyPath>(derivationStrategy,
                     WellknownMetadataKeys.AccountKeyPath);
                     accountKeyPath = accountKeyPath2 ?? accountKeyPath;
-                    var smartifier = new Smartifier(_logger,_serviceProvider.GetRequiredService<WalletRepository>(),
+                    var smartifier = new Smartifier(_memoryCache,_logger,_serviceProvider.GetRequiredService<WalletRepository>(),
                         explorerClient, derivationStrategy, name, UtxoLocker, accountKeyPath);
                 if (masterKey is null || accountKey is null || accountKeyPath is null)
                 {
@@ -113,7 +116,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
             }
             else
             {
-                var smartifier = new Smartifier(_logger,_serviceProvider.GetRequiredService<WalletRepository>(), explorerClient,
+                var smartifier = new Smartifier(_memoryCache, _logger,_serviceProvider.GetRequiredService<WalletRepository>(), explorerClient,
                     derivationStrategy, name, UtxoLocker, accountKeyPath);
                 keychain = new BTCPayKeyChain(explorerClient, derivationStrategy, null, null, smartifier);
             }
@@ -242,7 +245,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     public async Task SettingsUpdated(string storeId, WabisabiStoreSettings wabisabiSettings)
     {
            
-        if (wabisabiSettings.Settings.All(settings => !settings.Enabled))
+        if (wabisabiSettings.Settings.All(settings => !settings.Enabled) || !wabisabiSettings.Active)
         {
             _cachedSettings?.Remove(storeId);
             await UnloadWallet(storeId);

@@ -2,6 +2,7 @@
 @using BTCPayServer.Common
 @using BTCPayServer.Plugins.Wabisabi
 @using NBitcoin
+@using Org.BouncyCastle.Asn1.Ocsp
 @using WalletWasabi.Extensions
 @using WalletWasabi.WabiSabi.Backend.Rounds
 @using WalletWasabi.WabiSabi.Client
@@ -100,7 +101,7 @@
         
 function getColor(isPrivate, score, maxScore) {
     let normalizedScore = Math.min(Math.max(score, 0), maxScore) / maxScore;
-    return isPrivate ? `rgb(0, ${Math.floor(255 * normalizedScore)}, 0)` : `rgb(255, ${Math.floor(128 * normalizedScore)}, 0)`;
+    return isPrivate ? `rgb(81, 177, 62)` : `rgb(255, ${Math.floor(128 * normalizedScore)}, 0)`;
 }
 
 function prepareDatasets(data) {
@@ -122,8 +123,8 @@ function prepareDatasets(data) {
             id: "inprogresscoins",
             label: "In Progress Coins",
             data: inProgressCoins.map(coin => coin.value),
-            backgroundColor: inProgressCoins.map(() => "rgba(81, 177, 62,1)"),
-            alternativeBackgroundColor: inProgressCoins.map(() => "rgba(30, 122, 68,1)"),
+            backgroundColor: inProgressCoins.map(() => "rgb(56, 151, 37)"),
+            alternativeBackgroundColor: inProgressCoins.map(() => "rgb(28, 113, 11)"),
             borderColor: "transparent",
             borderWidth: 3,
             coins: inProgressCoins
@@ -286,16 +287,21 @@ updateInProgressAnimation(myChart);
                 }
                 <header>
                     <h4>Coinjoin stats</h4>
-                    <a asp-controller="WabisabiStore" asp-action="UpdateWabisabiStoreSettings" asp-route-storeId="@storeId" class="fw-semibold">
-                        Configure coinjoin settings
-                    </a>
-
+                    <div class="d-flex gap-1">
+                        <a asp-controller="WabisabiStore" asp-action="ToggleActive" asp-route-storeId="@storeId" asp-route-returnUrl="@Context.Request.GetCurrentUrl()" class="fw-semibold">
+                            @(settings.Active ? "Deactivate" : "Activate")
+                        </a>
+                        -
+                        <a asp-controller="WabisabiStore" asp-action="UpdateWabisabiStoreSettings" asp-route-storeId="@storeId" class="fw-semibold">
+                            Configure
+                        </a>
+                    </div>
                 </header>
                 <div class="w-100">
 
                     @if (coins.Any())
                     {
-                        <div class="d-flex justify-content-center" style="max-height: 400px; "> <canvas id="cjchart" class="mb-4"></canvas></div>
+                        <div class="d-flex justify-content-center mb-4" style="max-height: 400px; "> <canvas id="cjchart"></canvas></div>
                        
                     }                  
                     @* <div> *@
@@ -508,10 +514,15 @@ updateInProgressAnimation(myChart);
                                                     </tr>
                                                     @if (!tracker.CoinJoinClient.CoinsToRegister.IsEmpty)
                                                     {
+                                                        var statement = $"Registered {tracker.CoinJoinClient.CoinsInCriticalPhase.Count()} inputs ({tracker.CoinJoinClient.CoinsInCriticalPhase.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC))} BTC)";
+                                                        if (tracker.CoinJoinClient.CoinsInCriticalPhase.Count() != tracker.CoinJoinClient.CoinsToRegister.Count())
+                                                        {
+                                                            statement += $" / {tracker.CoinJoinClient.CoinsToRegister.Count()} inputs ({tracker.CoinJoinClient.CoinsToRegister.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC))} BTC)";
+                                                        }
                                                         <tr>
                                                             <th scope="">Your inputs</th>
                                                             <td class="">
-                                                                <span class="w-100">Registered @tracker.CoinJoinClient.CoinsInCriticalPhase.Count() inputs (@tracker.CoinJoinClient.CoinsInCriticalPhase.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)) BTC) / @tracker.CoinJoinClient.CoinsToRegister.Count() inputs (@tracker.CoinJoinClient.CoinsToRegister.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)) BTC) </span>
+                                                                <span class="w-100">@statement</span>
                                                                 @if (tracker.BannedCoins.Any())
                                                                 {
                                                                     <span class="w-100 text-danger">but got @tracker.BannedCoins.Count() inputs (@tracker.BannedCoins.Sum(coin => coin.Coin.Amount.ToDecimal(MoneyUnit.BTC)) BTC) banned</span>
@@ -528,9 +539,11 @@ updateInProgressAnimation(myChart);
                                                         </tr>
                                                         if (tracker.CoinJoinClient.OutputTxOuts is { } outputs)
                                                         {
+                                                            var statement = $"{outputs.outputTxOuts.Count()} outputs ({outputs.outputTxOuts.Sum(coin => coin.Value.ToDecimal(MoneyUnit.BTC))} BTC {(outputs.batchedPayments.Any()? $"{outputs.batchedPayments.Count()} batched payments": "")}";
+                                                            
                                                             <tr>
                                                                 <th scope="">Your outputs</th>
-                                                                <td >@outputs.outputTxOuts.Count() outputs (@outputs.outputTxOuts.Sum(coin => coin.Value.ToDecimal(MoneyUnit.BTC)) BTC, @outputs.batchedPayments.Count() batched payments)</td>
+                                                                <td >@statement</td>
                                                             </tr>
                                                         }
                                                     }

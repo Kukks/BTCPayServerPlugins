@@ -8,6 +8,7 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Payments.PayJoin;
 using BTCPayServer.Services;
 using BTCPayServer.Services.Wallets;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
 using NBXplorer;
@@ -24,6 +25,7 @@ namespace BTCPayServer.Plugins.Wabisabi;
 
 public class Smartifier
 {
+    private readonly IMemoryCache _memoryCache;
     private readonly ILogger _logger;
     private readonly WalletRepository _walletRepository;
     private readonly ExplorerClient _explorerClient;
@@ -32,11 +34,13 @@ public class Smartifier
     private readonly IUTXOLocker _utxoLocker;
 
     public Smartifier(
+        IMemoryCache  memoryCache,
         ILogger logger, 
         WalletRepository walletRepository,
         ExplorerClient explorerClient, DerivationStrategyBase derivationStrategyBase, string storeId,
         IUTXOLocker utxoLocker, RootedKeyPath accountKeyPath)
     {
+        _memoryCache = memoryCache;
         _logger = logger;
         _walletRepository = walletRepository;
         _explorerClient = explorerClient;
@@ -44,7 +48,32 @@ public class Smartifier
         _storeId = storeId;
         _utxoLocker = utxoLocker;
         _accountKeyPath = accountKeyPath;
+
+        _ = LoadInitialTxs();
     }
+    
+    private async Task LoadInitialTxs()
+    {
+        try
+        {
+            var txsBulk = await _explorerClient.GetTransactionsAsync(DerivationScheme);
+            foreach (var transactionInformation in txsBulk.ConfirmedTransactions.Transactions.Concat(txsBulk.UnconfirmedTransactions.Transactions))
+            {
+                TransactionInformations.AddOrReplace(transactionInformation.TransactionId,
+                    new Lazy<Task<TransactionInformation>>(() => Task.FromResult(transactionInformation)));
+            }
+        }
+        finally
+        {
+            
+            _loadInitialTxs.TrySetResult();
+        }
+        
+
+    }
+    
+    private TaskCompletionSource _loadInitialTxs = new();
+    
      public readonly  ConcurrentDictionary<uint256, Lazy<Task<TransactionInformation>>> TransactionInformations = new();
      public readonly ConcurrentDictionary<uint256, Task<SmartTransaction>> SmartTransactions = new();
     public readonly  ConcurrentDictionary<OutPoint, Task<SmartCoin>> Coins = new();
@@ -95,6 +124,8 @@ public class Smartifier
     public async Task LoadCoins(List<ReceivedCoin> coins, int current ,
         Dictionary<OutPoint, (HashSet<string> labels, double anonset, BTCPayWallet.CoinjoinData coinjoinData)> utxoLabels)
     {
+        
+        await _loadInitialTxs.Task;
         coins = coins.Where(data => data is not null).ToList();
         if (current > 3)
         {
@@ -168,7 +199,7 @@ public class Smartifier
                     };
                 }).Where(receivedCoin => receivedCoin is not null).ToList();
                 
-                await LoadCoins(inputsToLoad,current+1,  await BTCPayWallet.GetUtxoLabels(_walletRepository, _storeId, inputsToLoad.ToArray()));
+                await LoadCoins(inputsToLoad,current+1,  await BTCPayWallet.GetUtxoLabels( _memoryCache ,_walletRepository, _storeId, inputsToLoad.ToArray(), true ));
                 foreach (MatchedOutput input in unsmartTx.Inputs)
                 {
                     if (!ourSpentUtxos.TryGetValue(input, out var outputtxin))

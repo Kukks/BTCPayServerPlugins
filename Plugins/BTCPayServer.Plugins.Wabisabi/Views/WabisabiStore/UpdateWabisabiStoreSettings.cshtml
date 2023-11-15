@@ -44,19 +44,22 @@
             <vc:icon symbol="info"/>
         </a>
     </h3>
-    <div>
-
+    <div class="d-flex align-items-center gap-1 ">
+        <div class="d-flex align-items-center">
+            <input asp-for="Active" type="checkbox" class="btcpay-toggle me-2"/>
+            <label asp-for="Active" class="form-label mb-0 me-1"></label>
+        </div>
         <button name="command" type="submit" value="save" class="btn btn-primary mt-3 mt-sm-0">Save</button>
         <a asp-action="ListCoinjoins" asp-route-storeId="@storeId" class="btn btn-secondary mt-3 mt-sm-0" role="button">
             Coinjoin History
         </a>
-<button type="button" class="btn btn-secondary mt-3 mt-sm-0" permission="@Policies.CanModifyServerSettings"
-        data-bs-toggle="modal" data-bs-target="#discover-prompt">
-    Add Coordinator
-</button>
+        <button type="button" class="btn btn-secondary mt-3 mt-sm-0" permission="@Policies.CanModifyServerSettings"
+                data-bs-toggle="modal" data-bs-target="#discover-prompt">
+            Add Coordinator
+        </button>
         <a asp-controller="WabisabiCoordinatorConfig" asp-action="UpdateWabisabiSettings" class="btn btn-secondary mt-3 mt-sm-0" permission="@Policies.CanModifyServerSettings">Coordinator</a>
-        @* <a class="btn btn-secondary mt-3 mt-sm-0" href="https://gist.github.com/nopara73/bb17e89d7dc9af536ca41f50f705d329" rel="noreferrer noopener" target="_blank">Enable Discreet payments - Coming soon</a> *@
 
+        @* <a class="btn btn-secondary mt-3 mt-sm-0" href="https://gist.github.com/nopara73/bb17e89d7dc9af536ca41f50f705d329" rel="noreferrer noopener" target="_blank">Enable Discreet payments - Coming soon</a> *@
     </div>
 </div>
 @{
@@ -80,9 +83,26 @@
         }
     }
 }
-
+<style>
+    #blocker:hover{
+        background-color: rgba(128,128,128, 0.5);
+    }
+     #blocker:hover h4{
+     display: block !important;
+         left: 0;
+         position: fixed;
+         width: 100%
+     }
+</style>
 
 <div class="@(anyEnabled ? "" : "d-none") card card-body coordinator-settings">
+    @if (Model.Active && anyEnabled)
+    {
+        <div class="position-absolute w-100 h-100 text-center rounded" id="blocker" style=" left: 0; top: 0; z-index: 1">
+            <h4 class="d-none pt-4">Settings cannot be changed while active</h4>
+
+        </div>
+    }
     <div class="row">
         <div class="col-sm-12 col-md-6">
             <div class="form-check">
@@ -139,6 +159,11 @@
             <label asp-for="BatchPayments" class="form-check-label">Batch payments</label>
             <input asp-for="BatchPayments" type="checkbox" class="form-check-input"/>
             <p class="text-muted">Batch your pending payments (on-chain payouts awaiting payment) inside coinjoins.</p>
+        </div>
+        <div class="form-group form-check">
+            <label asp-for="ParanoidPayments" class="form-check-label">Paranoid payments</label>
+            <input asp-for="ParanoidPayments" type="checkbox" class="form-check-input"/>
+            <p class="text-muted">Only batch payments with fully private coins.</p>
         </div>
         <div class="form-group">
             <label asp-for="CrossMixBetweenCoordinatorsMode" class="form-label">Mix funds between different coordinators</label>

@@ -324,32 +324,6 @@ public class WabisabiCoordinatorClientInstance:IHostedService
                 _logger.LogTrace(coinJoinStatusEventArgs.CoinJoinProgressEventArgs.GetType() + "   :" +
                                        e.Wallet.WalletName);
                 break;
-            case CompletedEventArgs completedEventArgs:
-                
-                var result = completedEventArgs.CoinJoinResult;
-                
-                if (completedEventArgs.CompletionStatus == CompletionStatus.Success && result is SuccessfulCoinJoinResult successfulCoinJoinResult)
-                {
-                    Task.Run(async () =>
-                    {
-                        
-                        var wallet = (BTCPayWallet) e.Wallet;
-                        await wallet.RegisterCoinjoinTransaction(successfulCoinJoinResult, CoordinatorName);
-                                    
-                    });
-                }
-                else if(result is DisruptedCoinJoinResult disruptedCoinJoinResult )
-                {
-                    Task.Run(async () =>
-                    {
-                        // _logger.LogInformation("unlocking coins because round failed");
-                        await _utxoLocker.TryUnlock(
-                            disruptedCoinJoinResult.SignedCoins.Select(coin => coin.Outpoint).ToArray());
-                    });
-                    break;
-                }
-                _logger.LogTrace("Coinjoin complete!   :" + e.Wallet.WalletName);
-                break;
             case LoadedEventArgs loadedEventArgs:
                 stopWhenAllMixed = !((BTCPayWallet)loadedEventArgs.Wallet).BatchPayments;
                _ = CoinJoinManager.StartAsync(loadedEventArgs.Wallet, stopWhenAllMixed, false, CancellationToken.None);

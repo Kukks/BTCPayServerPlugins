@@ -7,6 +7,7 @@ using BTCPayServer.Abstractions.Services;
 using BTCPayServer.Common;
 using BTCPayServer.Services.Stores;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
@@ -60,7 +61,8 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
             utxoLocker,
             provider.GetRequiredService<EventAggregator>(),
             provider.GetRequiredService<ILogger<WalletProvider>>(),
-            provider.GetRequiredService<BTCPayNetworkProvider>()
+            provider.GetRequiredService<BTCPayNetworkProvider>(),
+            provider.GetRequiredService<IMemoryCache>()
         ));
         applicationBuilder.AddWabisabiCoordinator();
         applicationBuilder.AddSingleton<IWalletProvider>(provider => provider.GetRequiredService<WalletProvider>());

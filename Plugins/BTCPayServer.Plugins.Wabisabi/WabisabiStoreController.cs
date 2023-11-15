@@ -56,6 +56,24 @@ namespace BTCPayServer.Plugins.Wabisabi
             _instanceManager = instanceManager;
             _socks5HttpClientHandler = serviceProvider.GetRequiredService<Socks5HttpClientHandler>();
         }
+        
+        [HttpGet("toggle-active")]
+        public async Task<IActionResult> ToggleActive(string storeId, string returnUrl)
+        {
+            var settings = await _WabisabiService.GetWabisabiForStore(storeId);
+            if (settings is null)
+            {
+                return NotFound();
+            }
+            settings.Active = !settings.Active;
+            
+            await _WabisabiService.SetWabisabiForStore(storeId, settings);
+            TempData["SuccessMessage"] = $"Coinjoin is now {(settings.Active ? "active" : "inactive")}";
+            returnUrl = Url.EnsureLocal(returnUrl, HttpContext.Request);
+            if(returnUrl is null)
+                return RedirectToAction(nameof(UpdateWabisabiStoreSettings), new {storeId});
+            return Redirect(returnUrl);
+        }
 
         [HttpGet("")]
         public async Task<IActionResult> UpdateWabisabiStoreSettings(string storeId)

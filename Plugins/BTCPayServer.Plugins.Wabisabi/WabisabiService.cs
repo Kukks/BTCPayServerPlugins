@@ -82,13 +82,6 @@ namespace BTCPayServer.Plugins.Wabisabi
                 }
             }
    
-            if (wabisabiSettings.Settings.All(settings => !settings.Enabled))
-            {
-                
-                await _storeRepository.UpdateSetting<WabisabiStoreSettings>(storeId, nameof(WabisabiStoreSettings), null!);
-            }
-            else
-            {
                 var res = await GetWabisabiForStore(storeId);
                 foreach (var wabisabiStoreCoordinatorSettings in wabisabiSettings.Settings)
                 {
@@ -114,7 +107,7 @@ namespace BTCPayServer.Plugins.Wabisabi
                     
                 }
                 await _storeRepository.UpdateSetting(storeId, nameof(WabisabiStoreSettings), wabisabiSettings!);
-            }
+            
             _memoryCache.Remove(GetCacheKey(storeId));
             await _walletProvider.SettingsUpdated(storeId, wabisabiSettings);
            // var existingProcessor = (await  _payoutProcessorService.GetProcessors(new PayoutProcessorService.PayoutProcessorQuery()

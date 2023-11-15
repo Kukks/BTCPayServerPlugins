@@ -71,17 +71,43 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             _wallet.BatchPayments
                 ? await _wallet.DestinationProvider.GetPendingPaymentsAsync(utxoSelectionParameters)
                 : Array.Empty<PendingPayment>();
-        var minCoins = new Dictionary<AnonsetType, int>();
+        
+        var maxPerType = new Dictionary<AnonsetType, int>();
+
+        var attemptingTobeParanoid = payments.Any() && _wallet.WabisabiStoreSettings.ParanoidPayments;
+        var attemptingToMixToOtherWallet = string.IsNullOrEmpty(_wallet.WabisabiStoreSettings.MixToOtherWallet);
+        selectCoins:
+        maxPerType.Clear();
+        if (attemptingTobeParanoid || attemptingToMixToOtherWallet)
+        {
+            maxPerType.Add(AnonsetType.Red,0);
+            maxPerType.Add(AnonsetType.Orange,0);
+        }
+        
         if (_wallet.RedCoinIsolation)
         {
-            minCoins.Add(AnonsetType.Red, 1);
+            maxPerType.TryAdd(AnonsetType.Red, 1);
         }
 
         var solution = SelectCoinsInternal(utxoSelectionParameters, coinCandidates, payments,
             Random.Shared.Next(10, 31),
-            minCoins,
+            maxPerType,
             new Dictionary<AnonsetType, int>() {{AnonsetType.Red, 1}, {AnonsetType.Orange, 1}, {AnonsetType.Green, 1}},
             _wallet.ConsolidationMode, liquidityClue, secureRandom);
+
+        if (attemptingTobeParanoid && !solution.HandledPayments.Any())
+        {
+            attemptingTobeParanoid = false;
+            payments = Array.Empty<PendingPayment>();
+            goto selectCoins;
+        }
+
+        if (attemptingToMixToOtherWallet && !solution.Coins.Any())
+        {
+            // check that we have enough coins to mix to other wallet
+            attemptingToMixToOtherWallet = false;
+            goto selectCoins;
+        }
         _logger.LogTrace(solution.ToString());
         return solution.Coins.ToImmutableList();
     }

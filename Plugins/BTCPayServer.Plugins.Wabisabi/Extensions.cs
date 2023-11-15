@@ -3,11 +3,14 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
+using WalletWasabi.Blockchain.TransactionOutputs;
 
 namespace BTCPayServer.Plugins.Wabisabi;
 
 public static class Extensions
 {
+    
     public static string ToSentenceCase(this string str)
     {
         return Regex.Replace(str, "[a-z][A-Z]", m => m.Value[0] + " " + char.ToLower(m.Value[1]));

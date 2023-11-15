@@ -17,7 +17,7 @@ public static class CoordinatorExtensions
         services.AddTransient(provider =>
         {
             var s = provider.GetRequiredService<WabisabiCoordinatorService>();
-            if (!s.Started)
+            if (!s.Started )
             {
                 return null;
             }

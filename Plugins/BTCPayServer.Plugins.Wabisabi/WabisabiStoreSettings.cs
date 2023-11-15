@@ -1,6 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Linq;
-using BTCPayServer.Client.JsonConverters;
 using NBitcoin;
 using Newtonsoft.Json;
 
@@ -9,7 +7,7 @@ namespace BTCPayServer.Plugins.Wabisabi;
 public class WabisabiStoreSettings
 {
     public List<WabisabiStoreCoordinatorSettings> Settings { get; set; } = new();
-
+    public bool Active { get; set; } = true;
 
     public string MixToOtherWallet { get; set; }
     
@@ -22,6 +20,7 @@ public class WabisabiStoreSettings
     public int AnonymitySetTarget { get; set; } = 5;
 
     public bool BatchPayments { get; set; } = true;
+    public bool ParanoidPayments { get; set; } = false;
     public int ExtraJoinProbability { get; set; } = 0;
     public CrossMixMode CrossMixBetweenCoordinatorsMode { get; set; } = CrossMixMode.WhenFree;
     public int FeeRateMedianTimeFrameHours { get; set; }

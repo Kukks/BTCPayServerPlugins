@@ -35,7 +35,7 @@
 
                 @if (ViewData.ModelState.TryGetValue("config", out var error) && error.Errors.Any())
                 {
-                    <span class="text-danger">@string.Join("\n", error.Errors)</span>
+                    <span class="text-danger">@string.Join("\n", error.Errors.Select(modelError => modelError.ErrorMessage))</span>
                 }
                 <textarea rows="10" cols="40" class="form-control" id="config" name="config" >
         @Html.Raw(ViewBag.Config)
