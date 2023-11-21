@@ -1,0 +1,140 @@
+﻿@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.Client
+@using BTCPayServer.Services
+@inject IScopeProvider ScopeProvider
+@inject DisplayFormatter DisplayFormatter
+@model List<BTCPayServer.Plugins.Vouchers.VoucherController.VoucherViewModel>
+@{
+    ViewData.SetActivePage("Voucher", "Voucher", "Voucher");
+
+    var storeId = ScopeProvider.GetCurrentStoreId();
+}
+
+<form method="post">
+
+    <div class="sticky-header-setup"></div>
+    <div class="sticky-header d-sm-flex align-items-center justify-content-between">
+        <h2 class="mb-0">@ViewData["Title"]</h2>
+        <div class="d-flex gap-3 mt-3 mt-sm-0">
+            <a asp-controller="Voucher" asp-action="CreateVoucher" asp-route-storeId="@storeId" class="btn btn-primary">Create</a>
+
+        </div>
+    </div>
+
+
+    <partial name="_StatusMessage"/>
+
+
+    @if (Model.Any())
+    {
+        @foreach (var pp in Model)
+        {
+            <script id="tooptip_template_@pp.Id" type="text/template">
+            <span>Awaiting:&nbsp;<span class="float-end">@pp.Progress.AwaitingFormatted</span></span>
+            <br />
+            <span>Completed:&nbsp;<span class="float-end">@pp.Progress.CompletedFormatted</span></span>
+            <br />
+            <span>Limit:&nbsp;<span class="float-end">@pp.Progress.LimitFormatted</span></span>
+            @if (pp.Progress.ResetIn != null)
+            {
+                <br />
+                <span>Resets in:&nbsp;<span class="float-end">@pp.Progress.ResetIn</span></span>
+            }
+            @if (pp.Progress.EndIn != null)
+            {
+                <br />
+                <span>Expires in:&nbsp;<span class="float-end">@pp.Progress.EndIn</span></span>
+            }
+        </script>
+        }
+
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                <tr>
+                    <th scope="col">Name</th>
+                    <th scope="col">Amount</th>
+                    <th scope="col">Progress</th>
+                    <th scope="col" class="text-end">Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var pp in Model)
+                {
+                    <tr>
+                        <td>
+                            <a asp-action="EditPullPayment"
+                               asp-controller="UIPullPayment"
+                               asp-route-storeId="@storeId"
+                               asp-route-pullPaymentId="@pp.Id">
+                                @pp.Name
+                            </a>
+                        </td>
+                        <td>@DisplayFormatter.Currency(pp.Amount, pp.Currency)</td>
+                        <td>@string.Join(", ", pp.PaymentMethods.Select(id => id.ToPrettyString()))</td>
+                        <td class="align-middle">
+                            <div class="progress ppProgress" data-pp="@pp.Id" data-bs-toggle="tooltip" data-bs-html="true">
+                                <div class="progress-bar" role="progressbar" aria-valuenow="@pp.Progress.CompletedPercent"
+                                     aria-valuemin="0" aria-valuemax="100" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width:@(pp.Progress.CompletedPercent)%;">
+                                </div>
+                                <div class="progress-bar" role="progressbar" aria-valuenow="@pp.Progress.AwaitingPercent"
+                                     aria-valuemin="0" aria-valuemax="100" style="background-color:orange; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width:@(pp.Progress.AwaitingPercent)%;">
+                                </div>
+                            </div>
+                        </td>
+                        <td class="text-end">
+                            <a asp-action="ArchivePullPayment"
+                               asp-controller="UIStorePullPayments"
+                               permission="@Policies.CanArchivePullPayments"
+                               asp-route-storeId="@storeId"
+                               asp-route-pullPaymentId="@pp.Id"
+                               data-bs-toggle="modal"
+                               data-bs-target="#ConfirmModal"
+                               data-description="Do you really want to archive the pull payment <strong>@Html.Encode(pp.Name)</strong>?">
+                                Archive
+                            </a>
+                            }
+                            <span> - </span>
+                            <a asp-action="ViewPullPayment"
+                               asp-controller="UIPullPayment"
+                               asp-route-pullPaymentId="@pp.Id">
+                                Full view
+                            </a>
+                            <span> - </span>
+                            <a asp-action="View"
+                               asp-controller="Voucher"
+                               asp-route-id="@pp.Id">
+                                Print view
+                            </a>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+
+        <partial name="_Confirm" model="@(new ConfirmModel("Archive pull payment", "Do you really want to archive the pull payment?", "Archive"))"/>
+
+        @section PageFootContent {
+            <script>
+            const ppProgresses = document.getElementsByClassName("ppProgress");
+            for (var i = 0; i < ppProgresses.length; i++) {
+                var pp = ppProgresses[i];
+                var ppId = pp.getAttribute("data-pp");
+                var template = document.getElementById("tooptip_template_" + ppId);
+                pp.setAttribute("title", template.innerHTML);
+            }
+        </script>
+        }
+    }
+    else
+    {
+        <p class="text-secondary mt-4">
+            There are no active vouchers.
+        </p>
+    }
+
+
+</form>

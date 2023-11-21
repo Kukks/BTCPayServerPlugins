@@ -1,0 +1,87 @@
+﻿@model  BTCPayServer.Plugins.Vouchers.VoucherController.VoucherViewModel 
+@using BTCPayServer.Components.QRCode
+@using BTCPayServer.Services
+@inject BTCPayServerEnvironment Env
+@inject DisplayFormatter DisplayFormatter
+@{
+    Layout = null;
+    ViewData["Title"] = Model.Name;
+
+    string lnurl = null;
+    if (Model.SupportsLNURL)
+    {
+        lnurl = LNURL.LNURL.EncodeBech32(new Uri(Url.Action("GetLNURLForPullPayment", "UILNURL", new {cryptoCode = "BTC", pullPaymentId = Model.Id}, Context.Request.Scheme, Context.Request.Host.ToString())));
+    }
+
+    var fullView = Url.Action("ViewPullPayment", "UIPullPayment", new {pullPaymentId = Model.Id}, Context.Request.Scheme, Context.Request.Host.ToString());
+}
+<!DOCTYPE html>
+<html lang="en" @(Env.IsDeveloping ? " data-devenv" : "")>
+
+<head>
+    <partial name="LayoutHead"/>
+    <partial name="LayoutHeadStoreBranding" model="@(Model.BrandColor, Model.CssFileId, "", "")"/>
+    <meta name="robots" content="noindex,nofollow">
+    <style>
+        #InvoiceSummary { gap: var(--btcpay-space-l); }
+        #PaymentDetails table tbody tr:first-child td { padding-top: 1rem; }
+        #PaymentDetails table tbody:not(:last-child) tr:last-child > th,td { padding-bottom: 1rem; }
+        #posData td > table:last-child { margin-bottom: 0 !important; }
+        #posData table > tbody > tr:first-child > td > h4 { margin-top: 0 !important; }
+    </style>
+</head>
+<body class="min-vh-100">
+<div class="public-page-wrap">
+    <main class="flex-grow-1">
+        <div class="container" style="max-width:720px;">
+            <partial name="_StatusMessage" model="@(new ViewDataDictionary(ViewData) {{"Margin", "mb-4"}})"/>
+
+            <div class="d-flex flex-column justify-content-center gap-4">
+                <partial name="_StoreHeader" model="(Model.StoreName, Model.LogoFileId)"/>
+                <h2 class="w-100 text-center">Voucher</h2>
+                <div id="InvoiceSummary" class="bg-tile p-3 p-sm-4 rounded d-flex flex-wrap align-items-center justify-content-center">
+
+                    @if (lnurl != null)
+                    {
+                        <vc:qr-code data="@lnurl"></vc:qr-code>
+                        <p>Scan with a Bitcoin Lightning wallet to redeem your voucher </p>
+                    }
+                    <a href="@fullView">
+                        <vc:qr-code data="@fullView"></vc:qr-code>
+                    </a>
+
+                    <p>Scan or open this link in your browser for the full option list for redemption</p>
+
+                    <dl class="d-flex flex-column gap-4 mb-0 flex-fill">
+                        <div class="d-flex flex-column">
+                            <div class="d-flex align-items-center justify-content-between">
+
+                                <dd class="text-muted mb-0 fw-semibold">Amount</dd>
+                            </div>
+                            <dt class="fs-2 mb-0 text-nowrap fw-semibold">@DisplayFormatter.Currency(Model.Amount, Model.Currency, DisplayFormatter.CurrencyFormat.Symbol)</dt>
+                        </div>
+                        @if (!string.IsNullOrEmpty(Model.Description))
+                        {
+                            <div class="d-flex flex-column">
+                                @Model.Description
+                            </div>
+                        }
+                    </dl>
+
+                </div>
+            </div>
+        </div>
+    </main>
+    <footer class="store-footer">
+        <a class="store-powered-by" href="https://btcpayserver.org" target="_blank" rel="noreferrer noopener">
+            Powered by <partial name="_StoreFooterLogo"/>
+        </a>
+    </footer>
+</div>
+<partial name="LayoutFoot"/>
+</body>
+
+<script>
+    window.print();
+</script>
+</html>
