@@ -8,15 +8,28 @@
     ViewData.SetActivePage("Nostr", "Nostr", "Nostr");
 }
 
-<partial name="_StatusMessage"/>
+<form method="post">
 
-<h2 class="mb-4">@ViewData["Title"]</h2>
+    <div class="sticky-header-setup"></div>
+    <div class="sticky-header d-sm-flex align-items-center justify-content-between">
+        <h2 class="mb-0">@ViewData["Title"]</h2>
+        <div class="d-flex gap-3 mt-3 mt-sm-0">
+            <button name="command" type="submit" value="save" class="btn btn-primary">Submit</button>
+            <button name="command" type="button" class="btn btn-primary" style="display: none" id="import">Import wth Nostr extension</button>
+            @if (!string.IsNullOrEmpty(Model.Name))
+            {
+                <button name="command" type="submit" value="remove" class="btn btn-danger">Clear</button>
+            }
+        </div>
+    </div>
 
-<p class="alert alert-info">For Zaps, just <a class="alert-link" asp-action="EditLightningAddress" asp-controller="UILNURL" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()">enable a lightning address</a>. None of the nostr settings on this page are needed for zaps anymore.</p>
 
-<div class="row">
-    <div class="col-md-10">
-        <form method="post">
+    <partial name="_StatusMessage"/>
+
+    <p class="alert alert-info">For Zaps, just <a class="alert-link" asp-action="EditLightningAddress" asp-controller="UILNURL" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()">enable a lightning address</a>. None of the nostr settings on this page are needed for zaps anymore.</p>
+
+    <div class="row">
+        <div class="col-xl-8 col-xxl-constrain">
             <div class="form-group">
                 <div class="form-group pt-2">
                     <label asp-for="Name" class="form-label"></label>
@@ -32,7 +45,7 @@
                 <input asp-for="PubKey" class="form-control"/>
                 <span asp-validation-for="PubKey" class="text-danger"></span>
                 <p class="text-muted pt-2">Supports hex, npub or nprofile. Will be converted to hex once saved. If nprofile is provided, the relays will be added as well.</p>
-                                                                                       
+
             </div>
             <div class="form-group">
                 <label asp-for="PrivateKey" class="form-label">Private key for zaps</label>
@@ -67,20 +80,19 @@
                     }
                 }
                 </tbody>
+                <tfoot>
+                <tr>
+                    <td colspan="2">
+                        
+            <button type="button" id="add-relay" class="btn btn-link w-100">Add Relay</button>
+                    </td>
+                </tr>
+                </tfoot>
             </table>
-            <div class="d-flex flex-wrap align-items-center gap-3">
-                <button type="button" id="add-relay" class="btn btn-outline-secondary">Add Relay</button>
-                <button name="command" type="submit" value="save" class="btn btn-primary">Submit</button>
-                <button name="command" type="button" class="btn btn-primary" style="display: none" id="import">Import wth Nostr extension</button>
-                @if (!string.IsNullOrEmpty(Model.Name))
-                {
-                    <button name="command" type="submit" value="remove" class="btn btn-danger">Clear</button>
-                }
-            </div>
-        </form>
+        </div>
     </div>
-</div>
 
+</form>
 <template id="row">
     <tr data-index="-1">
         <td>

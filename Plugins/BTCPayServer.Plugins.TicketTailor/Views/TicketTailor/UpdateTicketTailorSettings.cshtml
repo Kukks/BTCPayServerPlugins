@@ -1,31 +1,43 @@
-﻿@using BTCPayServer.Abstractions.Extensions
-@using BTCPayServer.Client
-@using BTCPayServer.Plugins.TicketTailor
+﻿@using BTCPayServer.Plugins.TicketTailor
 @using Microsoft.AspNetCore.Mvc.TagHelpers
-@using Microsoft.AspNetCore.Routing
 @using BTCPayServer.Abstractions.Contracts
 @model BTCPayServer.Plugins.TicketTailor.UpdateTicketTailorSettingsViewModel
 @inject IScopeProvider ScopeProvider
 @{
     var storeId = ScopeProvider.GetCurrentStoreId();
-    Layout = "../Shared/_NavLayout.cshtml";
-    ViewData["NavPartialName"] = "../UIStores/_Nav";
     ViewData.SetActivePage("TicketTailor", "Update Store TicketTailor Settings", null);
     Model.SpecificTickets ??= new List<SpecificTicket>();
-
 }
 
-<h2 class="mt-1 mb-4">@ViewData["Title"]</h2>
-@if (ViewContext.ModelState.IsValid && Model.EventId is not null)
-{
-    <div class="alert alert-warning">
-        Please ensure that emails in your store are configured if you wish to send the tickets via email to customers as TicketTailor does not handle it for tickets issued via its API.
-        
+
+<form method="post">
+
+    <div class="sticky-header-setup"></div>
+    <div class="sticky-header d-sm-flex align-items-center justify-content-between">
+        <h2 class="mb-0">@ViewData["Title"]</h2>
+        <div class="d-flex gap-3 mt-3 mt-sm-0">
+            <input type="submit" value="Save" name="command" class="btn btn-primary"/>
+            @if (this.ViewContext.ModelState.IsValid && Model.EventId is not null)
+            {
+                <a class="btn btn-secondary" href=" @Url.Action("View", "TicketTailor", new {storeId})">
+                    Ticket purchase page
+                </a>
+            }
+        </div>
     </div>
-}
-<div class="row">
-    <div class="col-xl-8 col-xxl-constrain">
-        <form method="post">
+
+
+    <partial name="_StatusMessage"/>
+
+    @if (ViewContext.ModelState.IsValid && Model.EventId is not null)
+    {
+        <div class="alert alert-warning">
+            Please ensure that emails in your store are configured if you wish to send the tickets via email to customers as TicketTailor does not handle it for tickets issued via its API.
+
+        </div>
+    }
+    <div class="row">
+        <div class="col-xl-8 col-xxl-constrain">
             <div asp-validation-summary="ModelOnly" class="text-danger"></div>
 
             <div class="form-group">
@@ -97,6 +109,7 @@
                             {
                                 continue;
                             }
+
                             <div class="card">
                                 <div class="card-header h5">
                                     @ticketType.Name
@@ -120,24 +133,15 @@
                                     </div>
                                 </div>
                                 <div class="card-footer">
-                                    <button type="submit" value="remove-specific-ticket:@index" name="command" class="btn btn-outline-danger">Remove</button>     
+                                    <button type="submit" value="remove-specific-ticket:@index" name="command" class="btn btn-outline-danger">Remove</button>
                                 </div>
                             </div>
                         }
                     </div>
                 }
             }
-            <div class="form-group mt-4">
-                <input type="submit" value="Save" name="command" class="btn btn-primary"/>
-                @if (this.ViewContext.ModelState.IsValid && Model.EventId is not null)
-                {
-                    <a class="btn btn-secondary" href=" @Url.Action("View", "TicketTailor", new {storeId})">
-                        Ticket purchase page
-                    </a>
-                }
-            </div>
-        </form>
+        </div>
     </div>
-</div>
 
+</form>
 <partial name="_ValidationScriptsPartial"/>

@@ -5,18 +5,26 @@
     ViewData.SetActivePage("DataErasure", "Data Erasure", "DataErasure");
 }
 
-<partial name="_StatusMessage"/>
+<form method="post">
 
-<h2 class="mb-4">@ViewData["Title"]</h2>
+    <div class="sticky-header-setup"></div>
+    <div class="sticky-header d-sm-flex align-items-center justify-content-between">
+        <h2 class="mb-0">@ViewData["Title"]</h2>
+        <div class="d-flex gap-3 mt-3 mt-sm-0">
 
-<div class="alert alert-warning">
-    <p>
-        This plugin erases buyer information on your store's invoices based on when they were created. THERE IS NO UNDOING THIS ACTION ONCE IT HAS EXECUTED.
-    </p>
-</div>
-<div class="row">
-    <div class="col-md-10">
-        <form method="post">
+            <button name="command" type="submit" value="save" class="btn btn-primary">Submit</button>
+        </div>
+    </div>
+
+
+    <partial name="_StatusMessage"/>
+    <div class="alert alert-warning">
+        <p>
+            This plugin erases buyer information on your store's invoices based on when they were created. THERE IS NO UNDOING THIS ACTION ONCE IT HAS EXECUTED.
+        </p>
+    </div>
+    <div class="row">
+        <div class="col-xl-8 col-xxl-constrain">
             <div class="form-group">
                 <div class="d-flex align-items-center">
                     <input asp-for="Enabled" type="checkbox" class="btcpay-toggle me-2"/>
@@ -32,7 +40,7 @@
             {
                 <div>Cleared data up to @Model.LastRunCutoff.Value.ToString("g")</div>
             }
-            <button name="command" type="submit" value="save" class="btn btn-primary">Submit</button>
-        </form>
+
+        </div>
     </div>
-</div>
+</form>
