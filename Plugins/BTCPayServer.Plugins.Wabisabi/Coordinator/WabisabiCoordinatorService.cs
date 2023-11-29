@@ -27,6 +27,7 @@ using WalletWasabi.BitcoinCore.Rpc;
 using WalletWasabi.Cache;
 using WalletWasabi.Services;
 using WalletWasabi.WabiSabi;
+using WalletWasabi.WabiSabi.Backend;
 using WalletWasabi.WabiSabi.Backend.Rounds.CoinJoinStorage;
 using WalletWasabi.WabiSabi.Backend.Statistics;
 
@@ -53,7 +54,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
         WabisabiCoordinatorClientInstanceManager instanceManager,
         IHttpClientFactory httpClientFactory,
         IServiceProvider serviceProvider,
-        ILogger<WabisabiCoordinatorService> logger ) : base(TimeSpan.FromMinutes(15))
+        ILogger<WabisabiCoordinatorService> logger, WabiSabiConfig.CoordinatorScriptResolver coordinatorScriptResolver) : base(TimeSpan.FromMinutes(15))
     {
         _settingsRepository = settingsRepository;
         _dataDirectories = dataDirectories;
@@ -62,6 +63,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
         _instanceManager = instanceManager;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _coordinatorScriptResolver = coordinatorScriptResolver;
         _socks5HttpClientHandler = serviceProvider.GetRequiredService<Socks5HttpClientHandler>();
         IdempotencyRequestCache = new(memoryCache);
     }
@@ -69,6 +71,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
 
     private WabisabiCoordinatorSettings cachedSettings;
     private readonly Socks5HttpClientHandler _socks5HttpClientHandler;
+    private readonly WabiSabiConfig.CoordinatorScriptResolver _coordinatorScriptResolver;
 
     public async Task<WabisabiCoordinatorSettings> GetSettings()
     {
@@ -211,7 +214,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
         var rpc = new BtcPayRpcClient(explorerClient.RPCClient, _memoryCache, explorerClient);
 
         WabiSabiCoordinator = new WabiSabiCoordinator(coordinatorParameters, rpc, coinJoinIdStore, coinJoinScriptStore,
-            _httpClientFactory);
+            _httpClientFactory, _coordinatorScriptResolver);
         HostedServices.Register<WabiSabiCoordinator>(() => WabiSabiCoordinator, "WabiSabi Coordinator");
         
         var settings = await GetSettings();

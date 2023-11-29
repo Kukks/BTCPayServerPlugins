@@ -10,6 +10,8 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Common;
+using BTCPayServer.Data;
+using BTCPayServer.Filters;
 using BTCPayServer.Security;
 using BTCPayServer.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -20,12 +22,15 @@ using NBitcoin.Payment;
 using NBitcoin.Secp256k1;
 using Newtonsoft.Json;
 using NNostr.Client;
+using WabiSabi.Crypto.Randomness;
 using WalletWasabi.Backend.Controllers;
 using WalletWasabi.Blockchain.TransactionBuilding;
 using WalletWasabi.Blockchain.TransactionOutputs;
+using WalletWasabi.Extensions;
 
 namespace BTCPayServer.Plugins.Wabisabi
 {
+    
     [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     [Route("plugins/{storeId}/Wabisabi")]
@@ -106,6 +111,12 @@ namespace BTCPayServer.Plugins.Wabisabi
             WabisabiCoordinatorSettings coordSettings;
             switch (actualCommand)
             {
+                case "reset":
+                    var newS = new WabisabiStoreSettings();
+                    newS.Settings = vm.Settings;
+                    await _WabisabiService.SetWabisabiForStore(storeId, vm, commandIndex);
+                    TempData["SuccessMessage"] = $"Advanced settings reset to default";
+                    return RedirectToAction(nameof(UpdateWabisabiStoreSettings), new {storeId});
                 case "accept-terms":
                     
                     var coord = vm.Settings.SingleOrDefault(settings => settings.Coordinator == commandIndex);
@@ -395,7 +406,7 @@ namespace BTCPayServer.Plugins.Wabisabi
         }
 
         [HttpGet("select-coins")]
-        public async Task<IActionResult> ComputeCoinSelection(string storeId, decimal amount)
+        public async Task<IActionResult> ComputeCoinSelection(string storeId, decimal amount, string[] labels)
         {
             if ((await _walletProvider.GetWalletAsync(storeId)) is not BTCPayWallet wallet)
             {
@@ -404,15 +415,50 @@ namespace BTCPayServer.Plugins.Wabisabi
 
             
             var coins = await wallet.GetAllCoins();
+
+            var selectedCoins = new List<ICoin>();
+            if (labels?.Any() is true)
+            {
+
+                var directLinkCoins = coins.FilterBy(coin => coin.HdPubKey.Labels.Any(labels.Contains)).Available();
+                
+                selectedCoins.AddRange(directLinkCoins.Select(coin => coin.Coin));
+                
+                if (directLinkCoins.TotalAmount().ToDecimal(MoneyUnit.BTC) > amount)
+                {
+                    
+              
+                
+                    //select enough to be able to spend the amount requested
+                    var result = directLinkCoins.ToShuffled(new InsecureRandom()).Aggregate(
+                        (Money.Zero, new List<SmartCoin>()), (acc, coin) =>
+                        {
+                            var (sum, list) = acc;
+                            if (sum.ToDecimal(MoneyUnit.BTC) <= amount)
+                            {
+                                list.Add(coin);
+                                return (sum + coin.Amount, list);
+                            }
+
+                            return acc;
+                        });
+                
+                    return Ok(result.Item2.Select(coin => coin.Outpoint.ToString()).ToArray());
+                }
+              
+            }
+
+            var selectedCoinSum = selectedCoins.Sum(coin => ((Money)coin.Amount).ToDecimal(MoneyUnit.BTC));
+            var remaining = amount - selectedCoinSum;
+            var remainingCoins = coins.FilterBy(coin => !selectedCoins.Contains(coin.Coin)).Available().ToList();
             var defaultCoinSelector = new DefaultCoinSelector();
             var defaultSelection =
                 (defaultCoinSelector.Select(coins.Select(coin => coin.Coin).ToArray(),
                     new Money(amount, MoneyUnit.BTC)) ?? Array.Empty<ICoin>())
                 .ToArray();
-            var selector = new SmartCoinSelector(coins.ToList());
-            var smartSelection = selector.Select(defaultSelection,
-                new Money((decimal) amount, MoneyUnit.BTC));
-            return Ok(smartSelection.Select(coin => coin.Outpoint.ToString()).ToArray());
+            var selector = new SmartCoinSelector(remainingCoins);
+            selectedCoins.AddRange(selector.Select(defaultSelection, new Money(remaining, MoneyUnit.BTC)).ToList());
+            return Ok(selectedCoins.Select(coin => coin.Outpoint.ToString()).ToArray());
         }
         
         public class SpendViewModel

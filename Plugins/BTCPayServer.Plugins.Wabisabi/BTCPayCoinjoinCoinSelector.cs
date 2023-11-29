@@ -89,11 +89,22 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             maxPerType.TryAdd(AnonsetType.Red, 1);
         }
 
-        var solution = SelectCoinsInternal(utxoSelectionParameters, coinCandidates, payments,
+        var isLowFee = utxoSelectionParameters.MiningFeeRate.SatoshiPerByte <= _wallet.LowFeeTarget;
+        var consolidationMode = _wallet.ConsolidationMode switch
+        {
+            ConsolidationModeType.Always => true,
+            ConsolidationModeType.Never => false,
+            ConsolidationModeType.WhenLowFee => isLowFee,
+            ConsolidationModeType.WhenLowFeeAndManyUTXO => isLowFee && coinCandidates.Count() > BTCPayWallet.HighAmountOfCoins,
+            _ => throw new ArgumentOutOfRangeException()
+        };
+        
+
+        var solution = await SelectCoinsInternal(utxoSelectionParameters, coinCandidates, payments,
             Random.Shared.Next(10, 31),
             maxPerType,
             new Dictionary<AnonsetType, int>() {{AnonsetType.Red, 1}, {AnonsetType.Orange, 1}, {AnonsetType.Green, 1}},
-            _wallet.ConsolidationMode, liquidityClue, secureRandom);
+            consolidationMode, liquidityClue, secureRandom);
 
         if (attemptingTobeParanoid && !solution.HandledPayments.Any())
         {
@@ -112,7 +123,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
         return solution.Coins.ToImmutableList();
     }
 
-    private SubsetSolution SelectCoinsInternal(UtxoSelectionParameters utxoSelectionParameters,
+    private async Task<SubsetSolution> SelectCoinsInternal(UtxoSelectionParameters utxoSelectionParameters,
         IEnumerable<SmartCoin> coins, IEnumerable<PendingPayment> pendingPayments,
         int maxCoins,
         Dictionary<AnonsetType, int> maxPerType, Dictionary<AnonsetType, int> idealMinimumPerType,
@@ -128,11 +139,11 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
         var remainingPendingPayments = new List<PendingPayment>(pendingPayments);
         var solution = new SubsetSolution(remainingPendingPayments.Count, _wallet.AnonScoreTarget,
             utxoSelectionParameters);
-        var fullyPrivate = remainingCoins.All(coin => coin.CoinColor(_wallet.AnonScoreTarget) == AnonsetType.Green);
+
+
+        var fullyPrivate = await _wallet.IsWalletPrivateAsync(new CoinsView(remainingCoins));
         var coinjoiningOnlyForPayments = fullyPrivate && remainingPendingPayments.Any();
-        var isMixingToOther = !_wallet.WabisabiStoreSettings.PlebMode &&
-                              !string.IsNullOrEmpty(_wallet.WabisabiStoreSettings.MixToOtherWallet);
-        if (fullyPrivate && !coinjoiningOnlyForPayments && !isMixingToOther)
+        if (fullyPrivate && !coinjoiningOnlyForPayments )
         {
             var rand = Random.Shared.Next(1, 1001);
             if (rand > _wallet.WabisabiStoreSettings.ExtraJoinProbability)

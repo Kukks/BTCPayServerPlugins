@@ -39,14 +39,19 @@ public class WabisabiCoordinatorClientInstanceManager:IHostedService
     {
         _provider = provider;
         _walletProvider = walletProvider;
-        _walletProvider.WalletUnloaded += WalletProviderOnWalletUnloaded;
-        
+        // _walletProvider.WalletUnloaded += WalletProviderOnWalletUnloaded;
+        // _walletProvider.Walleloaded += WalletProviderOnWalletloaded;
+        //
     }
 
-    private void WalletProviderOnWalletUnloaded(object sender, WalletProvider.WalletUnloadEventArgs e)
-    {
-        _ =StopWallet(e.Wallet);
-    }
+    // private void WalletProviderOnWalletUnloaded(object sender, WalletProvider.WalletUnloadEventArgs e)
+    // {
+    //     _ =StopWallet(e.Wallet);
+    // }
+    // private void WalletProviderOnWalletloaded(object sender, WalletProvider.WalletUnloadEventArgs e)
+    // {
+    //     _ =StartWallet(e.Wallet as BTCPayWallet);
+    // }
 
     private bool started = false;
     public LocalisedUTXOLocker UTXOLocker;
@@ -62,26 +67,40 @@ public class WabisabiCoordinatorClientInstanceManager:IHostedService
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        foreach (KeyValuePair<string,WabisabiCoordinatorClientInstance> coordinatorManager in HostedServices)
+        foreach (var coordinatorManager in HostedServices)
         {
             await coordinatorManager.Value.StopAsync(cancellationToken);
         }
     }
 
-    public async Task StopWallet(IWallet wallet, string coordinator = null)
-    {
-        if (coordinator is not null && HostedServices.TryGetValue(coordinator, out var instance))
-        {
-            await instance.StopWallet(wallet);
-        }
-        else if (coordinator is null)
-        {
-            foreach (var servicesValue in HostedServices.Values)
-            {
-                await servicesValue.StopWallet(wallet);
-            }
-        }
-    }
+    // public async Task StopWallet(IWallet wallet, string coordinator = null)
+    // {
+    //     if (coordinator is not null && HostedServices.TryGetValue(coordinator, out var instance))
+    //     {
+    //         await instance.StopWallet(wallet);
+    //     }
+    //     else if (coordinator is null)
+    //     {
+    //         foreach (var servicesValue in HostedServices.Values)
+    //         {
+    //             await servicesValue.StopWallet(wallet);
+    //         }
+    //     }
+    // }
+    // public async Task StartWallet(BTCPayWallet wallet, string coordinator = null)
+    // {
+    //     if (coordinator is not null && HostedServices.TryGetValue(coordinator, out var instance))
+    //     {
+    //         await instance.StartWallet(wallet);
+    //     }
+    //     else if (coordinator is null)
+    //     {
+    //         foreach (var servicesValue in HostedServices.Values)
+    //         {
+    //             await servicesValue.StartWallet(wallet);
+    //         }
+    //     }
+    // }
 
     
     public  void AddCoordinator(string displayName, string name,
@@ -309,12 +328,6 @@ public class WabisabiCoordinatorClientInstance:IHostedService
         _hostedServices.Register<WasabiCoordinatorStatusFetcher>(() => WasabiCoordinatorStatusFetcher, "WasabiCoordinatorStatusFetcher");
         _hostedServices.Register<CoinJoinManager>(() => CoinJoinManager, "WasabiCoordinatorStatusFetcher");
     }
-
-    public async Task StopWallet(IWallet wallet)
-    {
-        await CoinJoinManager.StopAsync(wallet, CancellationToken.None);
-    }
-
     private void OnStatusChanged(object sender, StatusChangedEventArgs e)
     {
         bool stopWhenAllMixed;
@@ -324,10 +337,10 @@ public class WabisabiCoordinatorClientInstance:IHostedService
                 _logger.LogTrace(coinJoinStatusEventArgs.CoinJoinProgressEventArgs.GetType() + "   :" +
                                        e.Wallet.WalletName);
                 break;
-            case LoadedEventArgs loadedEventArgs:
-                stopWhenAllMixed = !((BTCPayWallet)loadedEventArgs.Wallet).BatchPayments;
-               _ = CoinJoinManager.StartAsync(loadedEventArgs.Wallet, stopWhenAllMixed, false, CancellationToken.None);
-                break;
+            // case LoadedEventArgs loadedEventArgs:
+            //     stopWhenAllMixed = !((BTCPayWallet)loadedEventArgs.Wallet).BatchPayments;
+            //    _ = CoinJoinManager.StartAsync(loadedEventArgs.Wallet, stopWhenAllMixed, false, CancellationToken.None);
+            //     break;
             case StartErrorEventArgs errorArgs:
                 _logger.LogTrace("Could not start wallet for coinjoin:" + errorArgs.Error.ToString() + "   :" + e.Wallet.WalletName);
                 break;

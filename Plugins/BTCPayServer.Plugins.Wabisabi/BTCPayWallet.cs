@@ -1,12 +1,9 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using BTCPayServer.Abstractions.Contracts;
-using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Data;
 using BTCPayServer.HostedServices;
@@ -31,9 +28,11 @@ using WalletWasabi.Blockchain.TransactionOutputs;
 using WalletWasabi.Blockchain.Transactions;
 using WalletWasabi.Extensions;
 using WalletWasabi.Models;
+using WalletWasabi.WabiSabi;
 using WalletWasabi.WabiSabi.Backend.Rounds;
 using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.Wallets;
+using LogLevel = WalletWasabi.Logging.LogLevel;
 
 namespace BTCPayServer.Plugins.Wabisabi;
 
@@ -91,13 +90,34 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     }
 
     public string StoreId { get; set; }
+    public List<(Microsoft.Extensions.Logging.LogLevel, string)> LastLogs { get; private set; } = new();
+    public void Log(LogLevel logLevel, string logMessage, string callerFilePath = "", string callerMemberName = "",
+        int callerLineNumber = -1)
+    {
+        var ll = logLevel switch
+        {
+            LogLevel.Trace => Microsoft.Extensions.Logging.LogLevel.Trace,
+            LogLevel.Debug => Microsoft.Extensions.Logging.LogLevel.Debug,
+            LogLevel.Info => Microsoft.Extensions.Logging.LogLevel.Information,
+            LogLevel.Warning => Microsoft.Extensions.Logging.LogLevel.Warning,
+            LogLevel.Error => Microsoft.Extensions.Logging.LogLevel.Error,
+            LogLevel.Critical => Microsoft.Extensions.Logging.LogLevel.Critical,
+            _ => throw new ArgumentOutOfRangeException(nameof(logLevel))
+        };
+        if(LastLogs.FirstOrDefault().Item2 != logMessage)
+            LastLogs.Insert(0, (ll, logMessage) );
+        if (LastLogs.Count >= 100)
+            LastLogs.RemoveLast();
+        
+        Logger.Log(ll, logMessage, callerFilePath, callerMemberName, callerLineNumber);
+    }
 
     public string WalletName => StoreId;
     public bool IsUnderPlebStop => !WabisabiStoreSettings.Active;
 
     bool IWallet.IsMixable(string coordinator)
     {
-        return KeyChain is BTCPayKeyChain {KeysAvailable: true} && WabisabiStoreSettings.Settings.SingleOrDefault(
+        return  WabisabiStoreSettings.Active &&  KeyChain is BTCPayKeyChain {KeysAvailable: true} && WabisabiStoreSettings.Settings.SingleOrDefault(
             settings =>
                 settings.Coordinator.Equals(coordinator))?.Enabled is true;
     }
@@ -106,20 +126,34 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     public IDestinationProvider DestinationProvider => this;
 
     public int AnonScoreTarget => WabisabiStoreSettings.PlebMode? 5:  WabisabiStoreSettings.AnonymitySetTarget;
-    public bool ConsolidationMode => !WabisabiStoreSettings.PlebMode && WabisabiStoreSettings.ConsolidationMode;
+    public ConsolidationModeType ConsolidationMode => 
+    WabisabiStoreSettings.PlebMode? ConsolidationModeType.WhenLowFeeAndManyUTXO: WabisabiStoreSettings.ConsolidationMode;
     public TimeSpan FeeRateMedianTimeFrame => TimeSpan.FromHours(WabisabiStoreSettings.PlebMode?
         KeyManager.DefaultFeeRateMedianTimeFrameHours: WabisabiStoreSettings.FeeRateMedianTimeFrameHours);
+
+    public const int DefaultExplicitHighestFeeTarget = 75;
+    public const int DefaultLowFeeTarget = 10;
+    public const int HighAmountOfCoins = 30;
+    public int ExplicitHighestFeeTarget => WabisabiStoreSettings.PlebMode? DefaultExplicitHighestFeeTarget: WabisabiStoreSettings.ExplicitHighestFeeTarget;
+    public int LowFeeTarget => WabisabiStoreSettings.PlebMode? DefaultLowFeeTarget: WabisabiStoreSettings.LowFeeTarget;
     public bool RedCoinIsolation => !WabisabiStoreSettings.PlebMode &&WabisabiStoreSettings.RedCoinIsolation;
     public bool BatchPayments => WabisabiStoreSettings.PlebMode || WabisabiStoreSettings.BatchPayments;
     public long? MinimumDenominationAmount => WabisabiStoreSettings.PlebMode? 10000 : WabisabiStoreSettings.MinimumDenominationAmount;
 
     public async Task<bool> IsWalletPrivateAsync()
     {
-        return !BatchPayments && await GetPrivacyPercentageAsync() >= 1 && (WabisabiStoreSettings.PlebMode ||
-                                                                            string.IsNullOrEmpty(WabisabiStoreSettings
-                                                                                .MixToOtherWallet));
+        return await IsWalletPrivateAsync(await GetAllCoins());
     }
-
+    
+    public async Task<bool> IsWalletPrivateAsync(CoinsView coins)
+    {
+        var privacy=  GetPrivacyPercentage(coins, AnonScoreTarget);
+        var mixToOtherWallet = !WabisabiStoreSettings.PlebMode && !string.IsNullOrEmpty(WabisabiStoreSettings
+            .MixToOtherWallet);
+        var forceConsolidate = ConsolidationMode == ConsolidationModeType.WhenLowFeeAndManyUTXO && coins.Available().Confirmed().Count() > HighAmountOfCoins;
+        return !BatchPayments &&  privacy >= 1 && !mixToOtherWallet && !forceConsolidate;
+    }
+    
     public async Task<double> GetPrivacyPercentageAsync()
     {
         return GetPrivacyPercentage(await GetAllCoins(), AnonScoreTarget);
@@ -270,7 +304,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         }
         catch (Exception e)
         {
-            Logger.LogError(e, "Could not compute coin candidate");
+            this.LogError($"Could not compute coin candidate: {e.Message}");
             return Array.Empty<SmartCoin>();
         }
     }
@@ -356,9 +390,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     public async Task<IEnumerable<SmartTransaction>> GetTransactionsAsync()
     {
         return Array.Empty<SmartTransaction>();
-
     }
-
 
     public class CoinjoinData
     {

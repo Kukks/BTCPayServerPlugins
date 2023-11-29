@@ -1,9 +1,8 @@
 ﻿@using BTCPayServer.Abstractions.Contracts
 @using BTCPayServer.Common
 @using BTCPayServer.Plugins.Wabisabi
+@using Microsoft.Extensions.Logging
 @using NBitcoin
-@using Org.BouncyCastle.Asn1.Ocsp
-@using WalletWasabi.Extensions
 @using WalletWasabi.WabiSabi.Backend.Rounds
 @using WalletWasabi.WabiSabi.Client
 @using WalletWasabi.WabiSabi.Models
@@ -23,7 +22,7 @@
         return;
     }
     var storeId = ScopeProvider.GetCurrentStoreId();
-
+    Context.Items["cjlite"] = true;
 }
 @if (available)
 {
@@ -35,18 +34,7 @@
         @if (!enabledSettings.Any())
         {
             <div class="widget">
-                <header>
-                    <h3>Coinjoin</h3>
-                    <a asp-controller="WabisabiStore" asp-action="UpdateWabisabiStoreSettings" asp-route-storeId="@storeId" class="fw-semibold">
-                        Manage
-                    </a>
-                </header>
-                <p class="text-secondary my-3">
-                    There are no configured coinjoin coordinators
-                </p>
-                <a asp-controller="WabisabiStore" asp-action="UpdateWabisabiStoreSettings" asp-route-storeId="@storeId" class="fw-semibold">
-                    Configure coinjoin settings
-                </a>
+               <partial name="../WabisabiStore/UpdateWabisabiStoreSettings" model="@settings"/>
             </div>
         }
         else
@@ -304,82 +292,7 @@ updateInProgressAnimation(myChart);
                         <div class="d-flex justify-content-center mb-4" style="max-height: 400px; "> <canvas id="cjchart"></canvas></div>
                        
                     }                  
-                    @* <div> *@
-                    @*     <h6 class="mb-2">Privacy progress</h6> *@
-                    @*     <div class="progress mb-2 position-relative" style="height: 2rem;"> *@
-                    @*         <div class="w-100 text-center position-absolute bg-transparent progress-bar h-100"> @privacyPercentage%</div> *@
-                    @*         <div class="progress-bar bg-success" role="progressbar" style="width: @privacyPercentage%"></div> *@
-                    @*     </div> *@
-                    @* </div> *@
-                    @* <div> *@
-                    @*     <h6 class="mb-2">Coins per privacy</h6> *@
-                    @*     <div class="progress mb-2" style="height: 2rem;"> *@
-                    @*         @foreach (var cc in colorCoins) *@
-                    @*         { *@
-                    @*             var cssClass = cc.Key == AnonsetType.Green ? "bg-success" : cc.Key == AnonsetType.Orange ? "bg-warning" : *@
-                    @*                 "bg-danger"; *@
-                    @*             var text = cc.Key == AnonsetType.Green ? "private" : cc.Key == AnonsetType.Orange ? "semi-private" : *@
-                    @*                 "non-private"; *@
-                    @* *@
-                    @*             var tooltiptext = $"{cc.Value.Count()} {text} coins"; *@
-                    @*             text = cc.Value.Count().ToString(); *@
-                    @*             var percentage = decimal.Divide(cc.Value.Count(), coins.Count()) * 100; *@
-                    @*             <div class="progress-bar @cssClass" role="progressbar" style="width: @percentage%" data-bs-toggle="tooltip" title="@tooltiptext">@text</div> *@
-                    @*         } *@
-                    @*     </div> *@
-                    @* </div> *@
-                    @* <div> *@
-                    @*     <h6 class="mb-2">Value per privacy</h6> *@
-                    @*     <div class="progress mb-2" style="height: 2rem;"> *@
-                    @*         @foreach (var cc in colorCoins) *@
-                    @*         { *@
-                    @*             var cssClass = cc.Key == AnonsetType.Green ? "bg-success" : cc.Key == AnonsetType.Orange ? "bg-warning" : *@
-                    @*                 "bg-danger"; *@
-                    @*             var text = cc.Key == AnonsetType.Green ? "private" : cc.Key == AnonsetType.Orange ? "semi-private" : *@
-                    @*                 "non-private"; *@
-                    @*             var percentage = decimal.Divide(cc.Value.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)), coins.TotalAmount().ToDecimal(MoneyUnit.BTC)) * 100; *@
-                    @*             var tooltiptext = $"{cc.Value.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC))} {text} BTC"; *@
-                    @* *@
-                    @*             text = cc.Value.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)).ToString(); *@
-                    @*             <div class="progress-bar @cssClass" role="progressbar" style="width: @percentage%" data-bs-toggle="tooltip" title="@tooltiptext">@text</div> *@
-                    @*         } *@
-                    @*     </div> *@
-                    @* </div> *@
                     
-                    
-                    
-                    @* @{ *@
-                    @*     var coinjoined = @coins.CoinJoinInProcess(); *@
-                    @* } *@
-                    @* @if (coinjoined.Any()) *@
-                    @* { *@
-                    @*     var count = @coins.CoinJoinInProcess().Count(); *@
-                    @*     var totalCount = @coins.Count(); *@
-                    @*     var sum = @coinjoined.TotalAmount().ToDecimal(MoneyUnit.BTC); *@
-                    @*     var totalSum = @coins.TotalAmount().ToDecimal(MoneyUnit.BTC); *@
-                    @*     var sumPercentage = decimal.Divide(sum, totalSum) * 100; *@
-                    @*     var countPercentage = decimal.Divide(count, totalCount) * 100; *@
-                    @* *@
-                    @*     <div> *@
-                    @*         <h6 class="mb-2">Coins currently joining</h6> *@
-                    @*         <div class="progress mb-2 position-relative" style="height: 2rem;"> *@
-                    @*             <div class="w-100 text-center position-absolute bg-transparent progress-bar h-100">@count </div> *@
-                    @*             <div class="progress-bar bg-info progress-bar-striped progress-bar-animated w-100" role="progressbar"></div> *@
-                    @*         </div> *@
-                    @*     </div> *@
-                    @*     <div> *@
-                    @*         <h6 class="mb-2">Value currently joining</h6> *@
-                    @*         <div class="progress mb-2 position-relative" style="height: 2rem;"> *@
-                    @*             <div class="w-100 text-center position-absolute bg-transparent progress-bar h-100">@sum BTC</div> *@
-                    @*             <div class="progress-bar bg-info progress-bar-striped progress-bar-animated w-100" role="progressbar"></div> *@
-                    @* *@
-                    @* *@
-                    @*         </div> *@
-                    @*     </div> *@
-                    @* } *@
-
-
-                    <!-- Modal -->
                     <div class="modal modal-lg fade" id="coins" data-bs-keyboard="false" tabindex="-1">
                         <div class="modal-dialog">
                             <div class="modal-content">
@@ -478,7 +391,14 @@ updateInProgressAnimation(myChart);
                                         }
                                         else if (coordinator.WasabiCoordinatorStatusFetcher.Connected)
                                         {
-                                            <span class="h6">Idle</span>
+                                            if (coordinator.CoinJoinManager.TrackedWallets.TryGetValue(wallet.WalletName, out _))
+                                            {
+                                                <span class="h6">Idle</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="h6">Inactive</span>
+                                            }
                                         }
                                     </div>
                                     @{
@@ -551,78 +471,7 @@ updateInProgressAnimation(myChart);
 
                                             </div>
 
-                                    @* <div class="collapse table-responsive" id="cj-@currentRound.Id"> *@
-                                    @* *@
-                                    @*     <dl> *@
-                                    @*         <div class="d-flex flex-wrap align-items-center gap-2"> *@
-                                    @*             <dt class="w-100px"> *@
-                                    @*                 Status *@
-                                    @*             </dt> *@
-                                    @*             <dd> *@
-                                    @*                 @currentRound.Phase.ToString().ToSentenceCase() *@
-                                    @*             </dd> *@
-                                    @*         </div> *@
-                                    @*         <div class="d-flex flex-wrap align-items-center gap-2"> *@
-                                    @*             <dt class="w-100px"> *@
-                                    @*                 Round ID *@
-                                    @*             </dt> *@
-                                    @*             <dd> *@
-                                    @*                 @currentRound.Id.ToString() *@
-                                    @*             </dd> *@
-                                    @*         </div> *@
-                                    @*         <div class="d-flex flex-wrap align-items-center gap-2"> *@
-                                    @*             <dt class="w-100px"> *@
-                                    @*                 Mining feerate *@
-                                    @*             </dt> *@
-                                    @*             <dd> *@
-                                    @*                 @currentRound.CoinjoinState.Parameters.MiningFeeRate.ToString() *@
-                                    @*             </dd> *@
-                                    @*         </div> *@
-                                    @*         <div class="d-flex flex-wrap align-items-center gap-2"> *@
-                                    @*             <dt class="w-100px"> *@
-                                    @*                 Coinjoin total inputs *@
-                                    @*             </dt> *@
-                                    @*             <dd> *@
-                                    @*                 @currentRound.CoinjoinState.Inputs.Count() inputs (@currentRound.CoinjoinState.Inputs.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)) BTC) *@
-                                    @*             </dd> *@
-                                    @*         </div> *@
-                                    @* *@
-                                    @* *@
-                                    @*         @if (!tracker.CoinJoinClient.CoinsToRegister.IsEmpty) *@
-                                    @*         { *@
-                                    @*             <div class="d-flex flex-wrap align-items-center gap-2"> *@
-                                    @*                 <dt class="w-100px">Your inputs</dt> *@
-                                    @*                 <dd> *@
-                                    @*                     <span class="w-100">Registered @tracker.CoinJoinClient.CoinsInCriticalPhase.Count() inputs (@tracker.CoinJoinClient.CoinsInCriticalPhase.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)) BTC) / @tracker.CoinJoinClient.CoinsToRegister.Count() inputs (@tracker.CoinJoinClient.CoinsToRegister.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)) BTC) </span> *@
-                                    @*                     @if (tracker.BannedCoins.Any()) *@
-                                    @*                     { *@
-                                    @*                         <span class="w-100 text-danger">but got @tracker.BannedCoins.Count() inputs (@tracker.BannedCoins.Sum(coin => coin.Coin.Amount.ToDecimal(MoneyUnit.BTC)) BTC) banned</span> *@
-                                    @*                     } *@
-                                    @*                 </dd> *@
-                                    @*             </div> *@
-                                    @*         } *@
-                                    @* *@
-                                    @*         @if (currentRound.Phase >= Phase.OutputRegistration) *@
-                                    @*         { *@
-                                    @*             <div class="d-flex flex-wrap align-items-center gap-2"> *@
-                                    @*                 <dt class="w-100px">Coinjoin total outputs</dt> *@
-                                    @*                 <dd> *@
-                                    @*                     @currentRound.CoinjoinState.Outputs.Count() outputs (@currentRound.CoinjoinState.Outputs.Sum(coin => coin.Value.ToDecimal(MoneyUnit.BTC)) BTC) *@
-                                    @*                 </dd> *@
-                                    @*             </div> *@
-                                    @*             if (tracker.CoinJoinClient.OutputTxOuts is { } outputs) *@
-                                    @*             { *@
-                                    @*                 <div class="d-flex flex-wrap align-items-center gap-2"> *@
-                                    @*                     <dt class="w-100px">>Your outputs</dt> *@
-                                    @*                     <dd> *@
-                                    @*                         @outputs.outputTxOuts.Count() outputs (@outputs.outputTxOuts.Sum(coin => coin.Value.ToDecimal(MoneyUnit.BTC)) BTC, @outputs.batchedPayments.Count() batched payments) *@
-                                    @*                     </dd> *@
-                                    @*                 </div> *@
-                                    @*             } *@
-                                    @*         } *@
-                                    @*     </dl> *@
-                                    @* *@
-                                    @* </div> *@
+                                   
                                         }
                                     }
                                 </div>
@@ -637,6 +486,45 @@ updateInProgressAnimation(myChart);
                             View coins
                         </button>
                     }
+                    @if (wallet.LastLogs.Any())
+                    {
+                        
+                        <button type="button" class="btn btn-text p-1" data-bs-toggle="modal" data-bs-target="#logs">
+                           Recent logs
+                        </button>
+                        <div class="modal modal-lg fade" id="logs" data-bs-keyboard="false" tabindex="-1">
+                            <div class="modal-dialog">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h3 class="mb-0">Coinjoin logs</h3>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                    </div>
+                                    <div class="modal-body table-responsive mt-0">
+                                        <table class="table">
+                                            <thead>
+                                            <tr>
+                                                <th>Message</th>
+                                            </tr>
+                                            </thead>
+                                            <tbody>
+                                            @foreach (var evt in wallet.LastLogs)
+                                            {
+                                                string cssClass = evt.Item1 <= (LogLevel) 2 ? "info" : evt.Item1 == (LogLevel) 4 ? "warning" : "danger";
+                                                <tr class="text-@cssClass">
+                                                    <td>@evt.Item2</td>
+                                                </tr>
+                                            }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                    </div>
+                                </div>
+                            </div>
+                    </div>
+                    }
+                    
                 </div>
             </div>
         }

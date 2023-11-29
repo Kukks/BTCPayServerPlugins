@@ -48,6 +48,7 @@
      document.getElementById("privatesend").addEventListener("click", async ev => {
          document.getElementById("InputSelection").value = "True";
                 const amountElements = document.querySelectorAll("[name^='Outputs'][name$='Amount']");
+                const labelElements = document.querySelectorAll("[name^='Outputs'][name$='Labels'] option:checked");
                 let amount = 0;
                 amountElements.forEach(value => {
                     try {
@@ -58,8 +59,14 @@
                 if (!amount){
                     return;
                 }
-                const url =@Safe.Json(@Url.Action("ComputeCoinSelection", "WabisabiStore", new { storeId }));
-                const response = await fetch(`${url}?amount=${amount}`);
+                let labels = [];
+                labelElements.forEach(value => {
+                    labels.push(value.value);
+                });
+                let url =@Safe.Json(@Url.Action("ComputeCoinSelection", "WabisabiStore", new { storeId }));
+                url += "?amount=${amount}";
+                url += labels.length >0?  "&" + labels.map(x => "labels=" + encodeURIComponent(x)).join("&"): "";
+                const response = await fetch(url);
                 const coins = await response.json();
                let selectedInputsElement =  document.getElementById("SelectedInputs");
                if (!selectedInputsElement){

@@ -88,7 +88,11 @@ namespace BTCPayServer.Plugins.Wabisabi
                     Processors = new[] {"Wabisabi"},
 
                 })).FirstOrDefault();
-                
+            if (!paybatching && existingProcessor is null)
+            {
+                return;
+            }    
+            
             _eventAggregator.Publish(new PayoutProcessorUpdated()
             {
                 Id = existingProcessor?.Id,
@@ -105,16 +109,6 @@ namespace BTCPayServer.Plugins.Wabisabi
         public async Task SetWabisabiForStore(string storeId, WabisabiStoreSettings wabisabiSettings,
             string termsCoord = null)
         {
-            foreach (var setting in wabisabiSettings.Settings.Where(setting => !setting.Enabled))
-            {
-                _walletProvider.LoadedWallets.TryGetValue(storeId, out var walletTask);
-                if (walletTask != null)
-                {
-                    var wallet = await walletTask.Value;
-                    await _coordinatorClientInstanceManager.StopWallet(wallet, setting.Coordinator);
-                }
-            }
-
             var res = await GetWabisabiForStore(storeId);
             foreach (var wabisabiStoreCoordinatorSettings in wabisabiSettings.Settings)
             {

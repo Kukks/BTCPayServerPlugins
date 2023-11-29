@@ -1,6 +1,10 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NBitcoin;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
+using WalletWasabi.Wallets;
 
 namespace BTCPayServer.Plugins.Wabisabi;
 
@@ -15,7 +19,9 @@ public class WabisabiStoreSettings
     
     public List<string> InputLabelsAllowed { get; set; } = new();
     public List<string> InputLabelsExcluded { get; set; } = new();
-    public bool ConsolidationMode { get; set; } = false;
+    
+    [JsonConverter(typeof(ConsolidationModeTypeJsonConverter))]
+    public ConsolidationModeType ConsolidationMode { get; set; } = ConsolidationModeType.WhenLowFeeAndManyUTXO;
     public bool RedCoinIsolation { get; set; } = false;
     public int AnonymitySetTarget { get; set; } = 5;
 
@@ -25,12 +31,41 @@ public class WabisabiStoreSettings
     public CrossMixMode CrossMixBetweenCoordinatorsMode { get; set; } = CrossMixMode.WhenFree;
     public int FeeRateMedianTimeFrameHours { get; set; }
     public long MinimumDenominationAmount { get; set; } = 10000;
+    public int ExplicitHighestFeeTarget { get; set; } = BTCPayWallet.DefaultExplicitHighestFeeTarget;
+    public int LowFeeTarget { get; set; } = BTCPayWallet.DefaultLowFeeTarget;
 
     public enum CrossMixMode
     {
         WhenFree,
         Never,
         Always,
+    }
+}
+
+
+public class ConsolidationModeTypeJsonConverter: JsonConverter<ConsolidationModeType>
+{
+    private readonly StringEnumConverter _converter;
+
+    public ConsolidationModeTypeJsonConverter()
+    {
+        _converter = new StringEnumConverter();
+    }
+
+    public override void WriteJson(JsonWriter writer, ConsolidationModeType value, JsonSerializer serializer)
+    {
+        _converter.WriteJson(writer, value, serializer);
+    }
+
+    public override ConsolidationModeType ReadJson(JsonReader reader, Type objectType, ConsolidationModeType existingValue,
+        bool hasExistingValue, JsonSerializer serializer)
+    {
+        return reader switch
+        {
+            {TokenType: JsonToken.Boolean, Value: true} => ConsolidationModeType.Always,
+            {TokenType: JsonToken.Boolean} => ConsolidationModeType.Never,
+            _ => (ConsolidationModeType) _converter.ReadJson(reader, objectType, existingValue, serializer)!
+        };
     }
 }
 

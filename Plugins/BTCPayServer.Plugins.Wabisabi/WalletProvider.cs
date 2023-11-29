@@ -38,6 +38,11 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     private readonly ILogger<WalletProvider> _logger;
     private readonly BTCPayNetworkProvider _networkProvider;
     private readonly IMemoryCache _memoryCache;
+    
+    public readonly  ConcurrentDictionary<string, Lazy<Task<BTCPayWallet>>> LoadedWallets = new();
+    
+    private readonly TaskCompletionSource _initialLoad = new();
+    private readonly CompositeDisposable _disposables = new();
 
     public WalletProvider(
         IServiceProvider serviceProvider,
@@ -60,23 +65,9 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
         _networkProvider = networkProvider;
         _memoryCache = memoryCache;
     }
-
-    public readonly  ConcurrentDictionary<string, Lazy<Task<IWallet>>> LoadedWallets = new();
-
-    public class WalletUnloadEventArgs : EventArgs
+    public async Task<BTCPayWallet?> GetWalletAsync(string name)
     {
-        public IWallet Wallet { get; }
-
-        public WalletUnloadEventArgs(IWallet wallet)
-        {
-            Wallet = wallet;
-        }
-    }
-
-    public event EventHandler<WalletUnloadEventArgs>? WalletUnloaded;
-    public async Task<IWallet?> GetWalletAsync(string name)
-    {
-        await initialLoad.Task;
+        await _initialLoad.Task;
         return await Smartifier.GetOrCreate(LoadedWallets, name, async () =>
         {
             if (!_cachedSettings.TryGetValue(name, out var wabisabiStoreSettings))
@@ -122,7 +113,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
             }
 
 
-            return (IWallet)new BTCPayWallet(
+            return new BTCPayWallet(
                 _serviceProvider.GetRequiredService<WalletRepository>(),
                 _serviceProvider.GetRequiredService<BTCPayNetworkProvider>(),
                 _serviceProvider.GetRequiredService<BitcoinLikePayoutHandler>(),
@@ -138,10 +129,6 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
         }, _logger);
         
     }
-
-    private TaskCompletionSource initialLoad = new();
-    private CompositeDisposable _disposables = new();
-
     public async Task<IEnumerable<IWallet>> GetWalletsAsync()
     {
         var explorerClient = _explorerClientProvider.GetExplorerClient("BTC");
@@ -151,7 +138,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
             return Array.Empty<IWallet>();
         }
 
-        await initialLoad.Task; 
+        await _initialLoad.Task; 
         return (await Task.WhenAll(_cachedSettings
                 .Select(pair => GetWalletAsync(pair.Key))))
             .Where(wallet => wallet is not null);
@@ -162,7 +149,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     public async Task ResetWabisabiStuckPayouts(string[] storeIds)
     {
 
-        await initialLoad.Task;
+        await _initialLoad.Task;
         
         
         storeIds??= _cachedSettings?.Keys.ToArray() ?? Array.Empty<string>();
@@ -233,47 +220,35 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
 
     private async Task UnloadWallet(string name)
     {
-        
         LoadedWallets.TryRemove(name, out var walletTask);
-        if (walletTask != null)
-        {
-            var wallet = await walletTask.Value;
-            WalletUnloaded?.Invoke(this, new WalletUnloadEventArgs(wallet));
-        }
     }
 
     public async Task SettingsUpdated(string storeId, WabisabiStoreSettings wabisabiSettings)
     {
-           
-        if (wabisabiSettings.Settings.All(settings => !settings.Enabled) || wabisabiSettings.Active == false)
+        
+        _cachedSettings.AddOrReplace(storeId, wabisabiSettings);
+
+        if (!wabisabiSettings.Active || wabisabiSettings.Settings.All(settings => !settings.Enabled) )
         {
-            _cachedSettings.AddOrReplace(storeId, wabisabiSettings);
             await UnloadWallet(storeId);
-        }else if (LoadedWallets.TryGetValue(storeId, out var existingWallet))
+        }
+        if (LoadedWallets.TryGetValue(storeId, out var existingWallet))
         {
-            
-            _cachedSettings.AddOrReplace(storeId, wabisabiSettings);
-            var btcpayWalet = (BTCPayWallet) await existingWallet.Value;
-            if (btcpayWalet is null)
+            var btcpayWallet =  await existingWallet.Value;
+            if (btcpayWallet is null)
             {
-                
                 LoadedWallets.TryRemove(storeId, out _);
-                var w = await GetWalletAsync(storeId);
-                if (w is null)
-                {
-                    await UnloadWallet(storeId);
-                }
             }
             else
             {
-                
-                btcpayWalet.WabisabiStoreSettings = wabisabiSettings;
+                btcpayWallet.WabisabiStoreSettings = wabisabiSettings;
             }
         }
-        else
+        
+        var w = await GetWalletAsync(storeId);
+        if (w is null)
         {
-            _cachedSettings.AddOrReplace(storeId, wabisabiSettings);
-            await GetWalletAsync(storeId);
+            await UnloadWallet(storeId);
         }
     }
     public override Task StartAsync(CancellationToken cancellationToken)
@@ -282,11 +257,11 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
         {
             _cachedSettings =
                 await _storeRepository.GetSettingsAsync<WabisabiStoreSettings>(nameof(WabisabiStoreSettings));
-            initialLoad.SetResult();
+            _initialLoad.SetResult();
         }, cancellationToken);
         _disposables.Add(_eventAggregator.SubscribeAsync<StoreRemovedEvent>(async @event =>
         {
-            await initialLoad.Task;
+            await _initialLoad.Task;
             await UnloadWallet(@event.StoreId);
 
         }));
@@ -294,7 +269,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
         {
             if (@event.WalletId.CryptoCode == "BTC")
             {
-                await initialLoad.Task;
+                await _initialLoad.Task;
                 await Check(@event.WalletId.StoreId, cancellationToken);
             }
 
