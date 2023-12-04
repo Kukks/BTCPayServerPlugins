@@ -1,21 +1,16 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+<Project Sdk="Microsoft.NET.Sdk.Razor">
 
     <PropertyGroup>
         <TargetFramework>net6.0</TargetFramework>
         <LangVersion>10</LangVersion>
-        <Configurations>Debug;Release</Configurations>
-        <Platforms>AnyCPU</Platforms>
     </PropertyGroup>
-
-
-
+    <!-- -->
     <!-- Plugin specific properties -->
     <PropertyGroup>
-        <Product>Wabisabi Coinjoin</Product>
-        <Description>Allows you to integrate your btcpayserver store with coinjoins.</Description>
-        <Version>1.0.66</Version>
+        <Product>Dynamic Reports</Product>
+        <Description>Allows you to create custom reports using SQL.</Description>
+        <Version>1.0.0</Version>
     </PropertyGroup>
-
     <!-- Plugin development properties -->
     <PropertyGroup>
         <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
@@ -36,17 +31,5 @@
     <ItemGroup>
         <EmbeddedResource Include="Resources\**" />
         <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
-        <ProjectReference Include="..\..\submodules\walletwasabi\WalletWasabi\WalletWasabi.csproj">
-            <Properties>StaticWebAssetsEnabled=false</Properties>
-            <Private>true</Private>
-            <ExcludeAssets>runtime;contentFiles</ExcludeAssets>
-        </ProjectReference>
     </ItemGroup>
-    <ItemGroup>
-        <PackageReference Include="NNostr.Client" Version="0.0.37" />
-        <PackageReference Include="WabiSabi" Version="1.0.1.2" />
-    </ItemGroup>
-    <Target Name="DeleteExampleFile" AfterTargets="Publish">
-        <RemoveDir Directories="$(PublishDir)\Microservices" />
-    </Target>
 </Project>
