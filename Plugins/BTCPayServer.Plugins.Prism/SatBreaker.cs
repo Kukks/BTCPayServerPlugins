@@ -177,8 +177,7 @@ namespace BTCPayServer.Plugins.Prism
                                                      .TryGetValue(network.CryptoCode,
                                                          out var internalLightningNode))
                                         {
-                                            lnClient = _lightningClientFactoryService.Create(internalLightningNode,
-                                                network);
+                                            lnClient = internalLightningNode;
                                         }
 
 

@@ -9,7 +9,7 @@ namespace BTCPayServer.Plugins.TicketTailor
     {
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
         {
-            new() { Identifier = nameof(BTCPayServer), Condition = ">=1.7.10" }
+            new() { Identifier = nameof(BTCPayServer), Condition = ">=1.12.0" }
         };
         public override void Execute(IServiceCollection applicationBuilder)
         {

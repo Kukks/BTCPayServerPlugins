@@ -33,8 +33,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.Ticket
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.Wabisabi", "Plugins\BTCPayServer.Plugins.Wabisabi\BTCPayServer.Plugins.Wabisabi.csproj", "{0D438B7D-F996-4BF3-8F54-02CB9DF120D8}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.LSP", "Plugins\BTCPayServer.Plugins.LSP\BTCPayServer.Plugins.LSP.csproj", "{304E4860-8420-4D71-B95A-3E2F75BEE9F6}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.PluginPacker", "submodules\btcpayserver\BTCPayServer.PluginPacker\BTCPayServer.PluginPacker.csproj", "{2FDF2D41-8E75-49F6-9F4D-9E9AECE7922F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.NIP05", "Plugins\BTCPayServer.Plugins.NIP05\BTCPayServer.Plugins.NIP05.csproj", "{362D2175-9632-418E-95B1-5D638C52ECA6}"
@@ -175,14 +173,6 @@ Global
 		{0D438B7D-F996-4BF3-8F54-02CB9DF120D8}.Altcoins-Debug|Any CPU.Build.0 = Debug|Any CPU
 		{0D438B7D-F996-4BF3-8F54-02CB9DF120D8}.Altcoins-Release|Any CPU.ActiveCfg = Release|Any CPU
 		{0D438B7D-F996-4BF3-8F54-02CB9DF120D8}.Altcoins-Release|Any CPU.Build.0 = Release|Any CPU
-		{304E4860-8420-4D71-B95A-3E2F75BEE9F6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{304E4860-8420-4D71-B95A-3E2F75BEE9F6}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{304E4860-8420-4D71-B95A-3E2F75BEE9F6}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{304E4860-8420-4D71-B95A-3E2F75BEE9F6}.Release|Any CPU.Build.0 = Release|Any CPU
-		{304E4860-8420-4D71-B95A-3E2F75BEE9F6}.Altcoins-Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{304E4860-8420-4D71-B95A-3E2F75BEE9F6}.Altcoins-Debug|Any CPU.Build.0 = Debug|Any CPU
-		{304E4860-8420-4D71-B95A-3E2F75BEE9F6}.Altcoins-Release|Any CPU.ActiveCfg = Release|Any CPU
-		{304E4860-8420-4D71-B95A-3E2F75BEE9F6}.Altcoins-Release|Any CPU.Build.0 = Release|Any CPU
 		{2FDF2D41-8E75-49F6-9F4D-9E9AECE7922F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{2FDF2D41-8E75-49F6-9F4D-9E9AECE7922F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2FDF2D41-8E75-49F6-9F4D-9E9AECE7922F}.Release|Any CPU.ActiveCfg = Release|Any CPU

@@ -2,15 +2,17 @@
 @using BTCPayServer.Components.TruncateCenter
 @using BTCPayServer.Payments
 @using BTCPayServer
+@using BTCPayServer.Services
 @model BTCPayServer.Plugins.Wabisabi.BTCPayWallet.CoinjoinData.CoinjoinDataCoin
 @inject BTCPayNetworkProvider BtcPayNetworkProvider
+@inject TransactionLinkProviders TransactionLinkProviders
 @{
     var op = OutPoint.Parse(Model.Outpoint);
     var text = Model.Outpoint;
 }
 <li class="bg-none list-group-item d-flex border-0 d-flex px-1  ">
     <div class="truncate-center-id border-0 p-0 d-flex ">
-        <vc:truncate-center text="@text" link="@BitcoinPaymentType.Instance.GetTransactionLink(BtcPayNetworkProvider.BTC, op.Hash.ToString())" classes="truncate-center-id h-100 border-end-0"/>
+        <vc:truncate-center text="@text" link="@TransactionLinkProviders.GetTransactionLink(new PaymentMethodId("BTC", BitcoinPaymentType.Instance), op.Hash.ToString())" classes="truncate-center-id h-100 border-end-0"/>
         <div class="card truncate-center-id " style="border-left-style: dashed; min-width: 110px;">
             <span class="text-nowrap">@Model.Amount BTC</span>
             <span class="text-nowrap">

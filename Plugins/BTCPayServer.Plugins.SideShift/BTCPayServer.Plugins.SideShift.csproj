@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <LangVersion>10</LangVersion>
   </PropertyGroup>
   <!-- -->
@@ -9,7 +9,7 @@
   <PropertyGroup>
     <Product>SideShift</Product>
     <Description>Allows you to embed a SideShift conversion screen to allow customers to pay with altcoins.</Description>
-    <Version>1.1.12</Version>
+    <Version>1.1.13</Version>
   </PropertyGroup>
   <!-- Plugin development properties -->
   <PropertyGroup>

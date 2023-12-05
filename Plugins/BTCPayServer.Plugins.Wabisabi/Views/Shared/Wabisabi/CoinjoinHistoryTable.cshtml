@@ -2,13 +2,16 @@
 @using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Payments
 @using BTCPayServer.Plugins.Wabisabi
+@using BTCPayServer.Services
 @using NBitcoin
 @using WalletWasabi.Blockchain.Analysis
 @model List<BTCPayServer.Plugins.Wabisabi.BTCPayWallet.CoinjoinData>
 @inject BTCPayNetworkProvider BtcPayNetworkProvider
+@inject TransactionLinkProviders TransactionLinkProviders
 @{
     var network = BtcPayNetworkProvider.BTC;
-    var mainnet = BtcPayNetworkProvider.NetworkType == ChainName.Mainnet;
+    var pmi = new PaymentMethodId( network.CryptoCode, PaymentTypes.BTCLike);
+   
 }
 
 <div class="table-responsive" style="  transform: rotateX(180deg);">
@@ -44,7 +47,7 @@
                     <span class="text-break">@cjData.CoordinatorName</span>
                 </td>
                 <td>
-                    <vc:truncate-center text="@cjData.Transaction" link="@BitcoinPaymentType.Instance.GetTransactionLink(network, cjData.Transaction)" classes="truncate-center-id"/>
+                    <vc:truncate-center text="@cjData.Transaction" link="@TransactionLinkProviders.GetTransactionLink(pmi, cjData.Transaction)" classes="truncate-center-id"/>
                 </td>
                 <td>
                     <div class="card truncate-center-id">

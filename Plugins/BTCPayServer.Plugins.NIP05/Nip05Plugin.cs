@@ -10,7 +10,7 @@ namespace BTCPayServer.Plugins.NIP05
     {
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
         {
-            new() {Identifier = nameof(BTCPayServer), Condition = ">=1.11.0"}
+            new() {Identifier = nameof(BTCPayServer), Condition = ">=1.12.0"}
         };
 
         public override void Execute(IServiceCollection applicationBuilder)

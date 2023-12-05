@@ -9,7 +9,7 @@ public class FileSellerPlugin : BaseBTCPayServerPlugin
 {
     public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
     {
-        new() { Identifier = nameof(BTCPayServer), Condition = ">=1.11.5" }
+        new() { Identifier = nameof(BTCPayServer), Condition = ">=1.12.0" }
     };
     public override void Execute(IServiceCollection applicationBuilder)
     {

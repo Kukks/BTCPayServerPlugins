@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
@@ -30,7 +29,7 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
 {
     public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
     {
-        new() { Identifier = nameof(BTCPayServer), Condition = ">=1.11.5" }
+        new() { Identifier = nameof(BTCPayServer), Condition = ">=1.12.0" }
     };
     public override void Execute(IServiceCollection applicationBuilder)
     {

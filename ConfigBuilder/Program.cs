@@ -11,10 +11,10 @@ foreach (var plugin in plugins)
         var buildConfigurationName = assemblyConfigurationAttribute?.Configuration;
         var x = Directory.GetDirectories(Path.Combine(plugin, "bin"));
         
-        p += $"{Path.GetFullPath(plugin)}/bin/{buildConfigurationName}/net6.0/{Path.GetFileName(plugin)}.dll;";
+        p += $"{Path.GetFullPath(plugin)}/bin/{buildConfigurationName}/net8.0/{Path.GetFileName(plugin)}.dll;";
         // if (x.Any(s => s.EndsWith("Altcoins-Debug")))
         // {
-        //     p += $"{Path.GetFullPath(plugin)}/bin/Altcoins-Debug/net6.0/{Path.GetFileName(plugin)}.dll;";
+        //     p += $"{Path.GetFullPath(plugin)}/bin/Altcoins-Debug/net8.0/{Path.GetFileName(plugin)}.dll;";
         // }
         // else
         // {
