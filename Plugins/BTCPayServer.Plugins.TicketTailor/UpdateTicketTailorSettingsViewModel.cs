@@ -5,6 +5,8 @@ namespace BTCPayServer.Plugins.TicketTailor;
 
 public class UpdateTicketTailorSettingsViewModel
 {
+    public string AppName { get; set; }
+    public bool Archived { get; set; }
     public string NewSpecificTicket { get; set; }
     public string ApiKey { get; set; }
     public SelectList Events { get; set; }

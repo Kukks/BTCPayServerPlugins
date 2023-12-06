@@ -10,6 +10,7 @@ using BTCPayServer.Data;
 using BTCPayServer.Events;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Logging;
+using BTCPayServer.Services.Apps;
 using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Mails;
 using Microsoft.AspNetCore.Http;
@@ -24,62 +25,32 @@ namespace BTCPayServer.Plugins.TicketTailor;
 
 public class TicketTailorService : EventHostedServiceBase
 {
-    private readonly ISettingsRepository _settingsRepository;
     private readonly IMemoryCache _memoryCache;
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IStoreRepository _storeRepository;
     private readonly ILogger<TicketTailorService> _logger;
 
     private readonly EmailSenderFactory _emailSenderFactory;
 
     private readonly LinkGenerator _linkGenerator;
     private readonly InvoiceRepository _invoiceRepository;
+    private readonly AppService _appService;
 
-    public TicketTailorService(ISettingsRepository settingsRepository, IMemoryCache memoryCache,
+    public TicketTailorService(IMemoryCache memoryCache,
         IHttpClientFactory httpClientFactory,
-        IStoreRepository storeRepository, ILogger<TicketTailorService> logger,
+         ILogger<TicketTailorService> logger,
         EmailSenderFactory emailSenderFactory ,
         LinkGenerator linkGenerator,
-        EventAggregator eventAggregator, InvoiceRepository invoiceRepository) : base(eventAggregator, logger)
+        EventAggregator eventAggregator, InvoiceRepository invoiceRepository,
+        AppService appService) : base(eventAggregator, logger)
     {
-        _settingsRepository = settingsRepository;
         _memoryCache = memoryCache;
         _httpClientFactory = httpClientFactory;
-        _storeRepository = storeRepository;
         _logger = logger;
         _emailSenderFactory = emailSenderFactory;
         _linkGenerator = linkGenerator;
         _invoiceRepository = invoiceRepository;
+        _appService = appService;
     }
-
-
-    public async Task<TicketTailorSettings> GetTicketTailorForStore(string storeId)
-    {
-        var k = $"{nameof(TicketTailorSettings)}_{storeId}";
-        return await _memoryCache.GetOrCreateAsync(k, async _ =>
-        {
-            var res = await _storeRepository.GetSettingAsync<TicketTailorSettings>(storeId,
-                nameof(TicketTailorSettings));
-            if (res is not null) return res;
-            res = await _settingsRepository.GetSettingAsync<TicketTailorSettings>(k);
-
-            if (res is not null)
-            {
-                await SetTicketTailorForStore(storeId, res);
-            }
-
-            await _settingsRepository.UpdateSetting<TicketTailorSettings>(null, k);
-            return res;
-        });
-    }
-
-    public async Task SetTicketTailorForStore(string storeId, TicketTailorSettings TicketTailorSettings)
-    {
-        var k = $"{nameof(TicketTailorSettings)}_{storeId}";
-        await _storeRepository.UpdateSetting(storeId, nameof(TicketTailorSettings), TicketTailorSettings);
-        _memoryCache.Set(k, TicketTailorSettings);
-    }
-
 
     private class IssueTicket
     {
@@ -153,7 +124,9 @@ public class TicketTailorService : EventHostedServiceBase
         {
             
             var invLogs = new InvoiceLogs();
-            var settings = await GetTicketTailorForStore(issueTicket.Invoice.StoreId);
+            var appId = AppService.GetAppInternalTags(issueTicket.Invoice).First();
+            var app = await _appService.GetApp(appId, TicketTailorApp.AppType);
+            var settings = app.GetSettings<TicketTailorSettings>(); 
             var invoice = issueTicket.Invoice;
             if (settings?.ApiKey is null)
             {
@@ -269,7 +242,7 @@ public class TicketTailorService : EventHostedServiceBase
                 var url =
                     _linkGenerator.GetUriByAction("Receipt",
                         "TicketTailor",
-                        new {issueTicket.Invoice.StoreId, invoiceId = invoice.Id},
+                        new {invoiceId = invoice.Id},
                         uri.Scheme,
                         new HostString(uri.Host),
                         uri.AbsolutePath);

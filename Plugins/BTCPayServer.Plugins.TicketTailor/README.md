@@ -8,7 +8,7 @@ It allows you to sell tickets for your events and accept payments in Bitcoin.
 1. Install the plugin from Plugins=>Add New=> TicketTailor
 2. Restart BTCPay Server
 3. Go to your Ticket Tailor account and add a [new API key](https://app.tickettailor.com/box-office/api#dpop=/box-office/api-key/add) with `Admin` role and "hide personal data from responses" unchecked. 
-4. Go back to your BTCPay Server, choose the store to integrate with and click on Ticket Tailor in the navigation. 
+4. Go back to your BTCPay Server, choose the store to integrate with and click on Ticket Tailor in the navigation. This will create a ticket tailor app in your current store. 
 5. Enter the API Key and save.
 6. Now you should be able to select your Ticket tailor events in the dropdown. One selected, click save.
 7. You should now have a "ticket purchase" button on your store's page. Clicking it will take you to the btcpayserver event purchase page.

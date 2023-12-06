@@ -2,33 +2,78 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
-using BTCPayServer.Abstractions.Contracts;
+using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Extensions;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
+using BTCPayServer.Controllers;
+using BTCPayServer.Data;
+using BTCPayServer.Services.Apps;
+using BTCPayServer.Services.Invoices;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json.Linq;
-using AuthenticationSchemes = BTCPayServer.Abstractions.Constants.AuthenticationSchemes;
 
 namespace BTCPayServer.Plugins.TicketTailor
 {
     [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    [Route("plugins/{storeId}/TicketTailor")]
     public class TicketTailorController : Controller
     {
-        [AllowAnonymous]
-        [HttpGet("")]
-        public async Task<IActionResult> View(string storeId)
+        private readonly IHttpClientFactory _httpClientFactory;
+        private readonly TicketTailorService _ticketTailorService;
+        private readonly AppService _appService;
+        private readonly ApplicationDbContextFactory _contextFactory;
+        private readonly InvoiceRepository _invoiceRepository;
+        private readonly UIInvoiceController _uiInvoiceController;
+
+        public TicketTailorController(IHttpClientFactory httpClientFactory,
+            TicketTailorService ticketTailorService,
+            AppService appService,
+            ApplicationDbContextFactory contextFactory,
+            InvoiceRepository invoiceRepository,
+            UIInvoiceController uiInvoiceController )
         {
-            var config = await _ticketTailorService.GetTicketTailorForStore(storeId);
+            _httpClientFactory = httpClientFactory;
+            _ticketTailorService = ticketTailorService;
+            _appService = appService;
+            _contextFactory = contextFactory;
+            _invoiceRepository = invoiceRepository;
+            _uiInvoiceController = uiInvoiceController;
+        }
+
+
+        [AllowAnonymous]
+        [HttpGet("plugins/{storeId}/TicketTailor")]
+        public async Task<IActionResult> ViewLegacy(string storeId)
+        {
+            await using var ctx = _contextFactory.CreateContext();
+            var app = await ctx.Apps
+                .Where(data => data.StoreDataId == storeId && data.AppType == TicketTailorApp.AppType)
+                .FirstOrDefaultAsync();
+
+            if (app is null)
+                return NotFound();
+
+            return RedirectToAction(nameof(View), new {storeId, appId = app.Id});
+        }
+
+
+        [AllowAnonymous]
+        [HttpGet("plugins/TicketTailor/{appId}")]
+        public async Task<IActionResult> View(string appId)
+        {
+            var app = await _appService.GetApp(appId, TicketTailorApp.AppType);
+            if (app is null)
+                return NotFound();
             try
             {
+                var config = app.GetSettings<TicketTailorSettings>();
                 if (config?.ApiKey is not null && config?.EventId is not null)
                 {
                     var client = new TicketTailorClient(_httpClientFactory, config.ApiKey);
@@ -47,20 +92,25 @@ namespace BTCPayServer.Plugins.TicketTailor
 
             return NotFound();
         }
-        
+
         [AllowAnonymous]
-        [HttpPost("")]
-        public async Task<IActionResult> Purchase(string storeId, TicketTailorViewModel request, bool preview = false)
+        [HttpPost("plugins/TicketTailor/{appId}")]
+        public async Task<IActionResult> Purchase(string appId, TicketTailorViewModel request, bool preview = false)
         {
-            var config = await _ticketTailorService.GetTicketTailorForStore(storeId);
+            var app = await _appService.GetApp(appId, TicketTailorApp.AppType, true);
+            if (app is null)
+                return NotFound();
+
             (TicketTailorClient.Hold, string error)? hold = null;
+            var config = app.GetSettings<TicketTailorSettings>();
             try
             {
                 if (config?.ApiKey is not null && config?.EventId is not null)
                 {
                     var client = new TicketTailorClient(_httpClientFactory, config.ApiKey);
                     var evt = await client.GetEvent(config.EventId);
-                    if (evt is null || (!config.BypassAvailabilityCheck && (evt.Unavailable == "true" || evt.TicketsAvailable == "false")))
+                    if (evt is null || (!config.BypassAvailabilityCheck &&
+                                        (evt.Unavailable == "true" || evt.TicketsAvailable == "false")))
                     {
                         return NotFound();
                     }
@@ -70,7 +120,8 @@ namespace BTCPayServer.Plugins.TicketTailor
                     if (!string.IsNullOrEmpty(request.DiscountCode) && config.AllowDiscountCodes)
                     {
                         discountCode = await client.GetDiscountCode(request.DiscountCode);
-                        if (discountCode?.expires?.unix is not null && DateTimeOffset.FromUnixTimeSeconds(discountCode.expires.unix) < DateTimeOffset.Now)
+                        if (discountCode?.expires?.unix is not null &&
+                            DateTimeOffset.FromUnixTimeSeconds(discountCode.expires.unix) < DateTimeOffset.Now)
                         {
                             discountCode = null;
                         }
@@ -83,39 +134,42 @@ namespace BTCPayServer.Plugins.TicketTailor
                         {
                             continue;
                         }
-                        var ticketType = evt.TicketTypes.FirstOrDefault(type => type.Id == purchaseRequestItem.TicketTypeId);
-                       
+
+                        var ticketType =
+                            evt.TicketTypes.FirstOrDefault(type => type.Id == purchaseRequestItem.TicketTypeId);
+
                         var specificTicket =
                             config.SpecificTickets?.SingleOrDefault(ticket => ticketType?.Id == ticket.TicketTypeId);
                         if ((config.SpecificTickets?.Any() is true && specificTicket is null) || ticketType is null ||
-                            (!string.IsNullOrEmpty(ticketType.AccessCode) && 
-                             !ticketType.AccessCode.Equals(request.AccessCode, StringComparison.InvariantCultureIgnoreCase)) ||
-                           !new []{"on_sale" , "locked"}.Contains(ticketType.Status.ToLowerInvariant())
-                              || specificTicket?.Hidden is true)
+                            (!string.IsNullOrEmpty(ticketType.AccessCode) &&
+                             !ticketType.AccessCode.Equals(request.AccessCode,
+                                 StringComparison.InvariantCultureIgnoreCase)) ||
+                            !new[] {"on_sale", "locked"}.Contains(ticketType.Status.ToLowerInvariant())
+                            || specificTicket?.Hidden is true)
                         {
                             TempData.SetStatusMessageModel(new StatusMessageModel
                             {
                                 Severity = StatusMessageModel.StatusSeverity.Error,
                                 Html = "The ticket was not found."
                             });
-                            return RedirectToAction("View", new {storeId});
+                            return RedirectToAction("View", new {appId});
                         }
 
                         if (purchaseRequestItem.Quantity > ticketType.MaxPerOrder ||
-                            purchaseRequestItem.Quantity < ticketType.MinPerOrder )
+                            purchaseRequestItem.Quantity < ticketType.MinPerOrder)
                         {
                             TempData.SetStatusMessageModel(new StatusMessageModel
                             {
                                 Severity = StatusMessageModel.StatusSeverity.Error,
                                 Html = "The amount of tickets was not allowed."
                             });
-                            return RedirectToAction("View", new {storeId});
+                            return RedirectToAction("View", new {appId});
                         }
 
                         var ticketCost = ticketType.Price;
                         if (specificTicket is not null)
                         {
-                            ticketCost =specificTicket.Price.GetValueOrDefault(ticketType.Price);
+                            ticketCost = specificTicket.Price.GetValueOrDefault(ticketType.Price);
                         }
 
                         var originalTicketCost = ticketCost;
@@ -129,15 +183,15 @@ namespace BTCPayServer.Plugins.TicketTailor
                                 case "percentage" when discountCode.face_value_percentage is not null:
 
                                     var percentageOff = (discountCode.face_value_percentage.Value / 100m);
-                                    
+
                                     ticketCost -= (ticketCost * percentageOff);
                                     break;
                             }
                         }
-        
+
                         var thisTicketBatchCost = ticketCost * purchaseRequestItem.Quantity;
                         discountedAmount += (originalTicketCost * purchaseRequestItem.Quantity) - thisTicketBatchCost;
-                        
+
                         price += thisTicketBatchCost;
                     }
 
@@ -163,15 +217,14 @@ namespace BTCPayServer.Plugins.TicketTailor
                             Severity = StatusMessageModel.StatusSeverity.Error,
                             Html = $"Could not reserve tickets because {hold.Value.error}"
                         });
-                        return RedirectToAction("View", new {storeId});
+                        return RedirectToAction("View", new {appId});
                     }
-                    
-                    
-                    var btcpayClient = await CreateClient(storeId);
+
+
                     var redirectUrl = Request.GetAbsoluteUri(Url.Action("Receipt",
-                        "TicketTailor", new {storeId, invoiceId = "kukkskukkskukks"}));
+                        "TicketTailor", new {storeId = app.StoreDataId, invoiceId = "kukkskukkskukks"}));
                     redirectUrl = redirectUrl.Replace("kukkskukkskukks", "{InvoiceId}");
-                    request.Name??=string.Empty;
+                    request.Name ??= string.Empty;
                     var nameSplit = request.Name.Split(" ", StringSplitOptions.RemoveEmptyEntries);
                     if (config.RequireFullName && nameSplit.Length < 2)
                     {
@@ -180,7 +233,7 @@ namespace BTCPayServer.Plugins.TicketTailor
                             Severity = StatusMessageModel.StatusSeverity.Error,
                             Html = "Please enter your full name."
                         });
-                        return RedirectToAction("View", new {storeId});
+                        return RedirectToAction("View", new {appId});
                     }
 
                     request.Name = nameSplit.Length switch
@@ -189,13 +242,12 @@ namespace BTCPayServer.Plugins.TicketTailor
                         < 2 => $"{nameSplit} Nakamoto",
                         _ => request.Name
                     };
-                    var inv = await btcpayClient.CreateInvoice(storeId,
-                        new CreateInvoiceRequest()
+                    var inv = await _uiInvoiceController.CreateInvoiceCoreRaw( new CreateInvoiceRequest()
                         {
                             Amount = price,
                             Currency = evt.Currency,
                             Type = InvoiceType.Standard,
-                            AdditionalSearchTerms = new[] {"tickettailor", hold.Value.Item1.Id, evt.Id},
+                            AdditionalSearchTerms = new[] {"tickettailor", hold.Value.Item1.Id, evt.Id, AppService.GetAppSearchTerm(app)},
                             Checkout =
                             {
                                 RequiresRefundEmail = true,
@@ -209,23 +261,25 @@ namespace BTCPayServer.Plugins.TicketTailor
                             Metadata = JObject.FromObject(new
                             {
                                 btcpayUrl = Request.GetAbsoluteRoot(),
-                                buyerName = request.Name, 
-                                buyerEmail = request.Email, 
+                                buyerName = request.Name,
+                                buyerEmail = request.Email,
                                 holdId = hold.Value.Item1.Id,
-                                orderId="tickettailor",
+                                orderId = "tickettailor",
+                                appId,
                                 discountCode,
                                 discountedAmount
-                            })
-                        });
+                            }),
+                            
+                        }, app.StoreData, HttpContext.Request.GetAbsoluteRoot(),new List<string> { AppService.GetAppInternalTag(appId) }, CancellationToken.None);
 
-                    while (inv.Amount == 0 && inv.Status == InvoiceStatus.New)
+                    while (inv.Price == 0 && inv.Status == InvoiceStatusLegacy.New)
                     {
-                        if (inv.Status == InvoiceStatus.New)
-                            inv = await btcpayClient.GetInvoice(inv.StoreId, inv.Id);
+                        if (inv.Status == InvoiceStatusLegacy.New)
+                            inv = await _invoiceRepository.GetInvoice(inv.Id);
                     }
 
-                    return inv.Status == InvoiceStatus.Settled
-                        ? RedirectToAction("Receipt", new {storeId, invoiceId = inv.Id})
+                    return inv.Status.ToModernStatus() == InvoiceStatus.Settled
+                        ? RedirectToAction("Receipt", new {invoiceId = inv.Id})
                         : RedirectToAction("Checkout", "UIInvoice", new {invoiceId = inv.Id});
                 }
             }
@@ -238,35 +292,45 @@ namespace BTCPayServer.Plugins.TicketTailor
                 });
                 if (hold?.Item1 is not null)
                 {
-                    
                     var client = new TicketTailorClient(_httpClientFactory, config.ApiKey);
                     await client.DeleteHold(hold?.Item1.Id);
                 }
             }
 
-            return RedirectToAction("View", new {storeId});
+            return RedirectToAction("View", new {appId});
         }
 
 
         [AllowAnonymous]
-        [HttpGet("receipt")]
-        public async Task<IActionResult> Receipt(string storeId, string invoiceId)
+        [HttpGet("plugins/{storeId}/TicketTailor/receipt")]
+        [HttpGet("plugins/TicketTailor/{invoiceId}/receipt")]
+        public async Task<IActionResult> Receipt(string invoiceId)
         {
-            var btcpayClient = await CreateClient(storeId);
             try
             {
+                var inv =await _invoiceRepository.GetInvoice(invoiceId);
+                if (inv is null)
+                {
+                    return NotFound();
+                }
+
+                if (inv.Metadata.OrderId != "tickettailor")
+                {
+                    return NotFound();
+                }
+                
+                var appId = AppService.GetAppInternalTags(inv).First();
+                
                 var result = new TicketReceiptPage() {InvoiceId = invoiceId};
-                var invoice = await btcpayClient.GetInvoice(storeId, invoiceId);
-                result.Status = invoice.Status;
-                if (invoice.Status == InvoiceStatus.Settled && 
-                    invoice.Metadata.TryGetValue("orderId", out var orderId) && orderId.Value<string>() == "tickettailor" &&
-                    invoice.Metadata.TryGetValue("ticketIds", out var ticketIds))
+                result.Status = inv.Status.ToModernStatus();
+                if (result.Status == InvoiceStatus.Settled &&
+                    inv.Metadata.AdditionalData.TryGetValue("ticketIds", out var ticketIds))
                 {
-                        await SetTicketTailorTicketResult(storeId, result, ticketIds.Values<string>());
-                    
-                }else if (invoice.Status == InvoiceStatus.Settled)
+                    await SetTicketTailorTicketResult(appId, result, ticketIds.Values<string>());
+                }
+                else if (inv.Status.ToModernStatus() == InvoiceStatus.Settled)
                 {
-                    await _ticketTailorService.CheckAndIssueTicket(invoice.Id);
+                    await _ticketTailorService.CheckAndIssueTicket(inv.Id);
                 }
 
                 return View(result);
@@ -277,9 +341,12 @@ namespace BTCPayServer.Plugins.TicketTailor
             }
         }
 
-        private async Task SetTicketTailorTicketResult(string storeId, TicketReceiptPage result, IEnumerable<string> ticketIds)
+        private async Task SetTicketTailorTicketResult(string appId, TicketReceiptPage result,
+            IEnumerable<string> ticketIds)
         {
-            var settings = await _ticketTailorService.GetTicketTailorForStore(storeId);
+            var app = await _appService.GetApp(appId, TicketTailorApp.AppType);
+
+            var settings = app.GetSettings<TicketTailorSettings>();
             var client = new TicketTailorClient(_httpClientFactory, settings.ApiKey);
             var tickets = await Task.WhenAll(ticketIds.Select(s => client.GetTicket(s)));
             var evt = await client.GetEvent(settings.EventId);
@@ -288,20 +355,7 @@ namespace BTCPayServer.Plugins.TicketTailor
             result.Settings = settings;
         }
 
-        private async Task<BTCPayServerClient> CreateClient(string storeId)
-        {
-            return await _btcPayServerClientFactory.Create(null, new[] {storeId}, new DefaultHttpContext()
-            {
-                Request =
-                {
-                    Scheme = "https",
-                    Host = Request.Host,
-                    Path = Request.Path,
-                    PathBase = Request.PathBase
-                }
-            });
-        }
-        
+
         public class TicketReceiptPage
         {
             public string InvoiceId { get; set; }
@@ -312,39 +366,28 @@ namespace BTCPayServer.Plugins.TicketTailor
         }
 
 
-        private readonly IHttpClientFactory _httpClientFactory;
-        private readonly TicketTailorService _ticketTailorService;
-        private readonly IBTCPayServerClientFactory _btcPayServerClientFactory;
-
-        public TicketTailorController(IHttpClientFactory httpClientFactory,
-            TicketTailorService ticketTailorService,
-            IBTCPayServerClientFactory btcPayServerClientFactory)
-        {
-            
-            _httpClientFactory = httpClientFactory;
-            _ticketTailorService = ticketTailorService;
-            _btcPayServerClientFactory = btcPayServerClientFactory;
-        }
-
-        [HttpGet("update")]
-        public async Task<IActionResult> UpdateTicketTailorSettings(string storeId)
+        [HttpGet("~/plugins/TicketTailor/{appId}/update")]
+        public async Task<IActionResult> UpdateTicketTailorSettings(string appId)
         {
             UpdateTicketTailorSettingsViewModel vm = new();
-            TicketTailorSettings TicketTailor;
+
             try
             {
-                TicketTailor = await _ticketTailorService.GetTicketTailorForStore(storeId);
-                if (TicketTailor is not null)
+                var app = await _appService.GetApp(appId, TicketTailorApp.AppType, false, true);
+                TicketTailorSettings tt = app.GetSettings<TicketTailorSettings>();
+                if (tt is not null)
                 {
-                    vm.ApiKey = TicketTailor.ApiKey;
-                    vm.EventId = TicketTailor.EventId;
-                    vm.ShowDescription = TicketTailor.ShowDescription;
-                    vm.BypassAvailabilityCheck = TicketTailor.BypassAvailabilityCheck;
-                    vm.CustomCSS = TicketTailor.CustomCSS;
-                    vm.RequireFullName = TicketTailor.RequireFullName;
-                    vm.AllowDiscountCodes = TicketTailor.AllowDiscountCodes;
-                    vm.SpecificTickets = TicketTailor.SpecificTickets;
+                    vm.ApiKey = tt.ApiKey;
+                    vm.EventId = tt.EventId;
+                    vm.ShowDescription = tt.ShowDescription;
+                    vm.BypassAvailabilityCheck = tt.BypassAvailabilityCheck;
+                    vm.CustomCSS = tt.CustomCSS;
+                    vm.RequireFullName = tt.RequireFullName;
+                    vm.AllowDiscountCodes = tt.AllowDiscountCodes;
+                    vm.SpecificTickets = tt.SpecificTickets;
                 }
+                vm.Archived = app.Archived;
+                vm.AppName = app.Name;
             }
             catch (Exception)
             {
@@ -402,8 +445,8 @@ namespace BTCPayServer.Plugins.TicketTailor
         }
 
 
-        [HttpPost("update")]
-        public async Task<IActionResult> UpdateTicketTailorSettings(string storeId,
+        [HttpPost("~/plugins/TicketTailor/{appId}/update")]
+        public async Task<IActionResult> UpdateTicketTailorSettings(string appId,
             UpdateTicketTailorSettingsViewModel vm,
             string command)
         {
@@ -429,6 +472,7 @@ namespace BTCPayServer.Plugins.TicketTailor
             {
                 return View(vm);
             }
+
             ModelState.Clear();
             var settings = new TicketTailorSettings()
             {
@@ -441,20 +485,21 @@ namespace BTCPayServer.Plugins.TicketTailor
                 RequireFullName = vm.RequireFullName,
                 AllowDiscountCodes = vm.AllowDiscountCodes
             };
-            
+
 
             switch (command?.ToLowerInvariant())
             {
                 case "save":
-                    await _ticketTailorService.SetTicketTailorForStore(storeId, settings);
+                    var app = await _appService.GetApp(appId, TicketTailorApp.AppType, false, true);
+                    app.SetSettings(settings);
+                    app.Name = vm.AppName;
+                    await _appService.UpdateOrCreateApp(app);
                     TempData["SuccessMessage"] = "TicketTailor settings modified";
-                    return RedirectToAction(nameof(UpdateTicketTailorSettings), new {storeId});
+                    return RedirectToAction(nameof(UpdateTicketTailorSettings), new {appId});
 
                 default:
                     return View(vm);
             }
         }
-       
-        
     }
 }

@@ -1,12 +1,6 @@
 ﻿@using BTCPayServer.Client.Models
 @model BTCPayServer.Plugins.TicketTailor.TicketTailorController.TicketReceiptPage
-@inject ContentSecurityPolicies contentSecurityPolicies
-@using BTCPayServer.Security
-@using NBitcoin
 @{
-    var nonce = RandomUtils.GetUInt256().ToString().Substring(0, 32);
-    contentSecurityPolicies.Add("script-src", $"'nonce-{nonce}'");
-    contentSecurityPolicies.AllowUnsafeHashes();
     Layout = "_LayoutSimple";
     var reloadPage = false;
 }
@@ -162,14 +156,14 @@
 
 @if (reloadPage)
 {
-    <script type="text/javascript" nonce="@nonce">       
+    <script type="text/javascript" >       
         setTimeout(function(){
             
             window.location.reload();
         }, 3000); 
     </script>
 }
-<script type="text/javascript" nonce="@nonce">
+<script type="text/javascript" >
     
     document.addEventListener("DOMContentLoaded", function () {
         document.getElementById("btnPrint").addEventListener("click", function (){

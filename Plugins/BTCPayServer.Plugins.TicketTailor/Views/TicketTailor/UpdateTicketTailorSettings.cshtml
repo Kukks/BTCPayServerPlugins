@@ -1,11 +1,16 @@
 ﻿@using BTCPayServer.Plugins.TicketTailor
 @using Microsoft.AspNetCore.Mvc.TagHelpers
-@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Views.Apps
+@using Microsoft.AspNetCore.Routing
+@using BTCPayServer
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.Services.Apps
 @model BTCPayServer.Plugins.TicketTailor.UpdateTicketTailorSettingsViewModel
-@inject IScopeProvider ScopeProvider
 @{
-    var storeId = ScopeProvider.GetCurrentStoreId();
-    ViewData.SetActivePage("TicketTailor", "Update Store TicketTailor Settings", null);
+    var appId = Context.GetRouteValue("appId").ToString();
+    var storeId = Context.GetCurrentStoreId();
+    ViewData.SetActivePage(AppsNavPages.Update.ToString(), typeof(AppsNavPages).ToString(), "Update Ticket Tailor app", appId);
     Model.SpecificTickets ??= new List<SpecificTicket>();
 }
 
@@ -17,9 +22,13 @@
         <h2 class="mb-0">@ViewData["Title"]</h2>
         <div class="d-flex gap-3 mt-3 mt-sm-0">
             <input type="submit" value="Save" name="command" class="btn btn-primary"/>
-            @if (this.ViewContext.ModelState.IsValid && Model.EventId is not null)
+            @if (Model.Archived)
             {
-                <a class="btn btn-secondary" href=" @Url.Action("View", "TicketTailor", new {storeId})">
+                <button type="button" class="btn btn-outline-secondary" onclick="document.getElementById('btn-archive-toggle').click()">Unarchive</button>
+            }
+            else if (this.ViewContext.ModelState.IsValid && Model.EventId is not null)
+            {
+                <a class="btn btn-secondary" target="_blank" href=" @Url.Action("View", "TicketTailor", new {appId})">
                     Ticket purchase page
                 </a>
             }
@@ -32,8 +41,7 @@
     @if (ViewContext.ModelState.IsValid && Model.EventId is not null)
     {
         <div class="alert alert-warning">
-            Please ensure that emails in your store are configured if you wish to send the tickets via email to customers as TicketTailor does not handle it for tickets issued via its API.
-
+            Please ensure that emails in your store are configured if you wish to send the tickets via email to customers as TicketTailor does not handle it for tickets issued via its API. <a asp-action="StoreEmails" asp-controller="UIStores" asp-route-storeId="@storeId" class="alert-link">Configure here.</a>
         </div>
     }
     <div class="row">
@@ -41,6 +49,11 @@
             <div asp-validation-summary="ModelOnly" class="text-danger"></div>
 
             <div class="form-group">
+                <label asp-for="AppName" class="form-label" data-required>App name</label>
+                <input asp-for="AppName" class="form-control" required/>
+                <span asp-validation-for="AppName" class="text-danger"></span>
+            </div>
+    <div class="form-group">
                 <label asp-for="ApiKey" class="form-label" data-required>TicketTailor API Key</label>
                 <input asp-for="ApiKey" class="form-control" required/>
                 <span asp-validation-for="ApiKey" class="text-danger"></span>
@@ -144,4 +157,25 @@
     </div>
 
 </form>
+
+
+<div class="d-grid d-sm-flex flex-wrap gap-3 mt-3">
+    <a class="btn btn-secondary" asp-action="ListInvoices" asp-controller="UIInvoice" asp-route-storeId="@storeId" asp-route-searchterm="@AppService.GetAppSearchTerm(TicketTailorApp.AppType, appId)">Invoices</a>
+    <form method="post" asp-controller="UIApps" asp-action="ToggleArchive" asp-route-appId="@appId">
+        <button type="submit" class="w-100 btn btn-outline-secondary" id="btn-archive-toggle" >
+            @if (Model.Archived)
+            {
+                <span class="text-nowrap">Unarchive this app</span>
+            }
+            else
+            {
+                <span class="text-nowrap" data-bs-toggle="tooltip" title="Archive this app so that it does not appear in the apps list by default">Archive this app</span>
+            }
+        </button>
+    </form>
+    <a id="DeleteApp" class="btn btn-outline-danger" asp-controller="UIApps" asp-action="DeleteApp" asp-route-appId="@appId" data-bs-toggle="modal" data-bs-target="#ConfirmModal" data-description="The app and its settings will be permanently deleted." data-confirm-input="DELETE">Delete this app</a>
+</div>
+
+<partial name="_Confirm" model="@(new ConfirmModel("Delete app", "This app will be removed from this store.", "Delete"))" />
+
 <partial name="_ValidationScriptsPartial"/>

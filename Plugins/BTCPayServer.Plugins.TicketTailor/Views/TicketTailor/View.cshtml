@@ -3,7 +3,7 @@
 @using Microsoft.AspNetCore.Mvc.TagHelpers
 @model BTCPayServer.Plugins.TicketTailor.TicketTailorViewModel
 @{
-    var storeId = Context.GetRouteValue("storeId");
+    var appId = Context.GetRouteValue("appId");
     Layout = "_LayoutSimple";
     var available = Model.Settings.BypassAvailabilityCheck || (Model.Event.Unavailable != "true" && Model.Event.TicketsAvailable == "true");
     Model.Settings.SpecificTickets ??= new List<SpecificTicket>();
@@ -70,7 +70,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
                 }
             }
         }
-             xhttp.open("POST", "@Url.Action("Purchase", new {storeId, preview = true})", true);
+             xhttp.open("POST", "@Url.Action("Purchase", new {appId, preview = true})", true);
              xhttp.send(data);
            }
     }))
@@ -92,7 +92,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
                 <div class="overflow-hidden col-12 ">@Safe.Raw(Model.Event.Description)</div>
             </div>
         }
-        <form method="post" asp-controller="TicketTailor" asp-action="Purchase" asp-antiforgery="false" asp-route-storeId="@storeId">
+        <form method="post" asp-controller="TicketTailor" asp-action="Purchase" asp-antiforgery="false" asp-route-appId="@appId">
             <input type="hidden" asp-for="AccessCode" value="@accessCode"/>
             <div class="row g-2 justify-content-center mb-4" id="ticket-form-container">
                 <div class="col-sm-6 col-md-4">
