@@ -150,40 +150,10 @@ public class Smartifier
                     unsmartTx.Height is null ? Height.Mempool : new Height((uint)unsmartTx.Height.Value),
                     unsmartTx.BlockHash, firstSeen: unsmartTx.Timestamp);
 
-
-                var ourSpentUtxos = new Dictionary<MatchedOutput, IndexedTxIn>();
-                var potentialMatches = new Dictionary<MatchedOutput, IndexedTxIn[]>();
-                foreach (MatchedOutput matchedInput in unsmartTx.Inputs)
-                {
-                    var potentialMatchesForInput = unsmartTx.Transaction.Inputs
-                        .AsIndexedInputs()
-                        .Where(txIn => txIn.PrevOut.N == matchedInput.Index);
-                    potentialMatches.TryAdd(matchedInput, potentialMatchesForInput.ToArray());
-                    foreach (IndexedTxIn potentialMatchForInput in potentialMatchesForInput)
-                    {
-                        var ti = await GetTransactionInfo(potentialMatchForInput.PrevOut.Hash);
-                        if (ti is not null)
-                        {
-                            MatchedOutput found = ti.Outputs.Find(output =>
-                                matchedInput.Index == output.Index &&
-                                matchedInput.Value.Equals(output.Value) &&
-                                matchedInput.KeyPath == output.KeyPath &&
-                                matchedInput.ScriptPubKey == output.ScriptPubKey
-                            );
-                            if (found is not null)
-                            {
-                                ourSpentUtxos.Add(matchedInput, potentialMatchForInput);
-                                break;
-                            }
-                        }
-                    }
-                }
                 var inputsToLoad = unsmartTx.Inputs.Select(output =>
                 {
-                    if (!ourSpentUtxos.TryGetValue(output, out var outputtxin))
-                    {
-                        return null;
-                    }
+                     var outputtxin = unsmartTx.Transaction.Inputs
+                        .AsIndexedInputs().First(@in => @in.Index == output.InputIndex);
 
                     var outpoint = outputtxin.PrevOut;
                     return new ReceivedCoin()
@@ -200,18 +170,15 @@ public class Smartifier
                 }).Where(receivedCoin => receivedCoin is not null).ToList();
                 
                 await LoadCoins(inputsToLoad,current+1,  await BTCPayWallet.GetUtxoLabels( _memoryCache ,_walletRepository, _storeId, inputsToLoad.ToArray(), true ));
-                foreach (MatchedOutput input in unsmartTx.Inputs)
+                foreach (var input in unsmartTx.Inputs)
                 {
-                    if (!ourSpentUtxos.TryGetValue(input, out var outputtxin))
-                    {
-                        continue;
-                    }
+                    var outputtxin = unsmartTx.Transaction.Inputs
+                        .AsIndexedInputs().First(@in => @in.Index == input.InputIndex);
                     if (Coins.TryGetValue(outputtxin.PrevOut, out var coinTask))
                     {
                         var c = await coinTask;
                         c.SpenderTransaction = smartTx;
                         smartTx.TryAddWalletInput(c);
-                        
                     }
                 }
                 return smartTx;
