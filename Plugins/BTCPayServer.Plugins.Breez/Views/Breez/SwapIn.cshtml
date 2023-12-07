@@ -8,9 +8,11 @@
 @using BTCPayServer.Payments
 @using BTCPayServer.Plugins.Breez
 @using BTCPayServer.Security
+@using BTCPayServer.Services
 @using NBitcoin
 @inject BreezService BreezService
 @inject BTCPayNetworkProvider BtcPayNetworkProvider
+@inject TransactionLinkProviders TransactionLinkProviders
 @{
     ViewData.SetActivePage("Breez", "Swap In", "SwapIn");
     string storeId = Model switch
@@ -36,6 +38,7 @@
     var deriv = Context.GetStoreData().GetDerivationSchemeSettings(BtcPayNetworkProvider, "BTC");
     var ni = sdk.NodeInfo();
     var f = sdk.RecommendedFees();
+    var pmi = new PaymentMethodId("BTC", PaymentTypes.BTCLike);
 
 
 }
@@ -104,7 +107,7 @@
                         <span class="text-nowrap">Unconfirmed transactions</span>
                         @foreach (var txId in inProgressSwap.unconfirmedTxIds)
                         {
-                            <vc:truncate-center text="@txId" link="@BitcoinPaymentType.Instance.GetTransactionLink(BtcPayNetworkProvider.BTC, txId)" classes="truncate-center-id"/>
+                            <vc:truncate-center text="@txId" link="@TransactionLinkProviders.GetTransactionLink(pmi, txId)" classes="truncate-center-id"/>
                         }
                     </div>
                 }
@@ -115,7 +118,7 @@
                         <span class="text-nowrap">Confirmed transactions</span>
                         @foreach (var txId in inProgressSwap.confirmedTxIds)
                         {
-                            <vc:truncate-center text="@txId" link="@BitcoinPaymentType.Instance.GetTransactionLink(BtcPayNetworkProvider.BTC, txId)" classes="truncate-center-id"/>
+                            <vc:truncate-center text="@txId" link="@TransactionLinkProviders.GetTransactionLink(pmi, txId)" classes="truncate-center-id"/>
                         }
                     </div>
                 }
@@ -156,7 +159,7 @@
                                     <span class="text-nowrap">Unconfirmed transactions</span>
                                     @foreach (var txId in refund.unconfirmedTxIds)
                                     {
-                                        <vc:truncate-center text="@txId" link="@BitcoinPaymentType.Instance.GetTransactionLink(BtcPayNetworkProvider.BTC, txId)" classes="truncate-center-id"/>
+                                        <vc:truncate-center text="@txId" link="@TransactionLinkProviders.GetTransactionLink(pmi, txId)" classes="truncate-center-id"/>
                                     }
                                 </div>
                             }
@@ -167,7 +170,7 @@
                                     <span class="text-nowrap">Confirmed transactions</span>
                                     @foreach (var txId in refund.confirmedTxIds)
                                     {
-                                        <vc:truncate-center text="@txId" link="@BitcoinPaymentType.Instance.GetTransactionLink(BtcPayNetworkProvider.BTC, txId)" classes="truncate-center-id"/>
+                                        <vc:truncate-center text="@txId" link="@TransactionLinkProviders.GetTransactionLink(pmi, txId)" classes="truncate-center-id"/>
                                     }
                                 </div>
                             }
@@ -178,7 +181,7 @@
                                     <span class="text-nowrap">Refund transactions</span>
                                     @foreach (var txId in refund.refundTxIds)
                                     {
-                                        <vc:truncate-center text="@txId" link="@BitcoinPaymentType.Instance.GetTransactionLink(BtcPayNetworkProvider.BTC, txId)" classes="truncate-center-id"/>
+                                        <vc:truncate-center text="@txId" link="@TransactionLinkProviders.GetTransactionLink(pmi, txId)" classes="truncate-center-id"/>
                                     }
                                 </div>
                             }

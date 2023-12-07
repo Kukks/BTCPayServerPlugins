@@ -3,19 +3,15 @@
     <PropertyGroup>
         <TargetFramework>net8.0</TargetFramework>
         <LangVersion>10</LangVersion>
-        <Configurations>Debug;Release</Configurations>
-        <Platforms>AnyCPU</Platforms>
     </PropertyGroup>
-
-
 
     <!-- Plugin specific properties -->
     <PropertyGroup>
-        <Product>Coinjoin</Product>
-        <Description>Allows you to integrate your btcpayserver store with coinjoins.</Description>
-        <Version>1.0.67</Version>
+        <Product>Blink</Product>
+        <Description>Brink Lightning support</Description>
+        <Version>1.0.0</Version>
+        <RootNamespace>BTCPayServer.Plugins.Blink</RootNamespace>
     </PropertyGroup>
-
     <!-- Plugin development properties -->
     <PropertyGroup>
         <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
@@ -36,17 +32,16 @@
     <ItemGroup>
         <EmbeddedResource Include="Resources\**" />
         <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
-        <ProjectReference Include="..\..\submodules\walletwasabi\WalletWasabi\WalletWasabi.csproj">
-            <Properties>StaticWebAssetsEnabled=false</Properties>
-            <Private>true</Private>
-            <ExcludeAssets>runtime;contentFiles</ExcludeAssets>
-        </ProjectReference>
     </ItemGroup>
+
+
     <ItemGroup>
-        <PackageReference Include="NNostr.Client" Version="0.0.38" >        </PackageReference>
-        <PackageReference Include="WabiSabi" Version="1.0.1.2" />
+      <AdditionalFiles Include="Views\Shared\Blink\LNPaymentMethodSetupTab.cshtml" />
     </ItemGroup>
-    <Target Name="DeleteExampleFile" AfterTargets="Publish">
-        <RemoveDir Directories="$(PublishDir)\Microservices" />
-    </Target>
+
+    <ItemGroup>
+      <PackageReference Include="GraphQL.Client" Version="6.0.2" />
+      <PackageReference Include="GraphQL.Client.Serializer.Newtonsoft" Version="6.0.2" />
+    </ItemGroup>
 </Project>
+

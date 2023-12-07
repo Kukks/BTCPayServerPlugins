@@ -1,0 +1,39 @@
+﻿@model BTCPayServer.Models.StoreViewModels.LightningNodeViewModel
+@{
+    var storeId = Model.StoreId;
+    if (Model.CryptoCode != "BTC")
+    {
+        return;
+    }
+}
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+       
+       const customNodeAccordian = document.getElementById("CustomNodeSupport");
+       const template = document.getElementById("blink");
+       customNodeAccordian.appendChild(template.content.cloneNode(true));
+        
+    });
+</script>
+
+<template id="blink">
+    <div class="accordion-item">
+        <h2 class="accordion-header" id="CustomBlinkHeader">
+            <button type="button" class="accordion-button collapsed" data-bs-toggle="collapse" data-bs-target="#CustomBlinkContent" aria-controls="CustomBlinkContent" aria-expanded="false">
+                <span><strong>Blink</strong> via GraphQL</span>
+                <vc:icon symbol="caret-down"/>
+            </button>
+        </h2>
+        <div id="CustomBlinkContent" class="accordion-collapse collapse" aria-labelledby="CustomBlinkHeader" data-bs-parent="#CustomNodeSupport">
+            <div class="accordion-body">
+                <ul class="pb-2">
+                    <li>
+                        <code><b>type=</b>blink;<b>server=</b>https://api.blink.sv/graphql;<b>api-key</b>=blink_...;<b>wallet-id=</b>xyz</code>
+                    </li>
+                </ul>
+                <p class="my-2">Head over to the dashboard for the wallet id and and create an api key.</p>
+            </div>
+        </div>
+    </div>
+</template>

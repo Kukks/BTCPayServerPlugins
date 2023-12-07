@@ -326,7 +326,7 @@ public class BreezController : Controller
 
         viewModel ??= new PaymentsViewModel();
 
-        viewModel.Payments = client.Sdk.ListPayments(new ListPaymentsRequest(PaymentTypeFilter.ALL, null, null, true,
+        viewModel.Payments = client.Sdk.ListPayments(new ListPaymentsRequest(null, null, null, true,
             (uint?) viewModel.Skip, (uint?) viewModel.Count));
 
         return View(viewModel);

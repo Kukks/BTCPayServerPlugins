@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -135,7 +136,7 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
     public async Task<LightningInvoice[]> ListInvoices(ListInvoicesParams request,
         CancellationToken cancellation = default)
     {
-        return Sdk.ListPayments(new ListPaymentsRequest(PaymentTypeFilter.RECEIVED, null, null,
+        return Sdk.ListPayments(new ListPaymentsRequest(new List<PaymentTypeFilter>(){PaymentTypeFilter.RECEIVED}, null, null,
                 request?.PendingOnly is not true, (uint?) request?.OffsetIndex, null))
             .Select(FromPayment).ToArray();
     }
@@ -153,7 +154,7 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
     public async Task<LightningPayment[]> ListPayments(ListPaymentsParams request,
         CancellationToken cancellation = default)
     {
-        return Sdk.ListPayments(new ListPaymentsRequest(PaymentTypeFilter.RECEIVED, null, null, null,
+        return Sdk.ListPayments(new ListPaymentsRequest(new List<PaymentTypeFilter>(){PaymentTypeFilter.RECEIVED}, null, null, null,
                 (uint?) request?.OffsetIndex, null))
             .Select(ToLightningPayment).ToArray();
     }

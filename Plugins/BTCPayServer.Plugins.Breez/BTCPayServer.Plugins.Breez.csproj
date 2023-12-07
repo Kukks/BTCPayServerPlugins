@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
     <PropertyGroup>
-        <TargetFramework>net6.0</TargetFramework>
+        <TargetFramework>net8.0</TargetFramework>
         <LangVersion>10</LangVersion>
     </PropertyGroup>
 
@@ -33,10 +33,7 @@
         <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
     </ItemGroup>
     <ItemGroup>
-        <Folder Include="Resources" />
-    </ItemGroup>
-    <ItemGroup>
-      <PackageReference Include="Breez.Sdk" Version="0.2.7" />
+      <PackageReference Include="Breez.Sdk" Version="0.2.10" />
     </ItemGroup>
 </Project>
 

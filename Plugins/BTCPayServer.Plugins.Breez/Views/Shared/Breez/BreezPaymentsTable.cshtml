@@ -15,7 +15,7 @@
         if (sdk is null)
             return;
 
-        data = sdk.ListPayments(new ListPaymentsRequest(PaymentTypeFilter.ALL, null, null, null, 0, 10));
+        data = sdk.ListPayments(new ListPaymentsRequest(null, null, null, null, 0, 10));
     }
 
     var isDashboard = Model is StoreDashboardViewModel;
