@@ -4,7 +4,8 @@
 @model BTCPayServer.Plugins.TicketTailor.TicketTailorViewModel
 @{
     var appId = Context.GetRouteValue("appId");
-    Layout = "_LayoutSimple";
+    ViewData["StoreBranding"] = Model.StoreBranding;
+    Layout = null;
     var available = Model.Settings.BypassAvailabilityCheck || (Model.Event.Unavailable != "true" && Model.Event.TicketsAvailable == "true");
     Model.Settings.SpecificTickets ??= new List<SpecificTicket>();
     Context.Request.Query.TryGetValue("accessCode", out var accessCode);
@@ -13,85 +14,36 @@
         Model.DiscountCode = discount;
     }
 }
-<style>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <partial name="LayoutHead"/>
+
+
+    <style>
         hr:last-child{
             display: none;
         }
-footer {
-                  display: none;
-               }
-               
                @if (!string.IsNullOrEmpty(Model.Settings.CustomCSS))
                {
                    @Safe.Raw(Model.Settings.CustomCSS)
                }
 
 </style>
-<script>
-document.addEventListener("DOMContentLoaded", ()=>{
-    const form = document.querySelector("form");
-    const btn = document.querySelector("button[type='submit']");
-    const inputs = document.querySelectorAll("input");
-    const discountCode = document.querySelector("#DiscountCode");
-    inputs.forEach(value => value.addEventListener("input", (evt)=>{
-        
-
-        let total = 0;
-        let totalQty = 0;
-        document.querySelectorAll("[data-price]").forEach(value1 => {
-            if (!!value1.value){
-                const qty = parseInt(value1.value);
-                if (qty > 0){
-                    
-                const price = parseFloat(value1.dataset.price).toPrecision(12);
-                total += price * qty;
-                totalQty += qty;
-                }
-            }
-        });
-        if (totalQty > 0){
-            btn.removeAttribute("disabled");
-        }
-        else{
-            btn.setAttribute("disabled", "disabled");
-        }
-        btn.textContent = `Purchase for ${total.toFixed(2)} @Model.Event.Currency.ToUpperInvariant()`
-        
-        if (discountCode && discountCode.value && totalQty > 0){
-            const data = new FormData(form);
-            const xhttp = new XMLHttpRequest();
-            xhttp.onreadystatechange = function() {
-            if (this.readyState == 4 && this.status == 200) {
-                const response = JSON.parse(this.responseText);  
-                if (response.discountedAmount){  
-                    btn.innerHTML = `Purchase for ${response.total.toFixed(2)} @Model.Event.Currency.ToUpperInvariant()<br/><span class="">${response.discountedAmount.toFixed(2)} @Model.Event.Currency.ToUpperInvariant() discount</span>`
-                } else{  
-                    btn.textContent = `Purchase for ${response.total.toFixed(2)} @Model.Event.Currency.ToUpperInvariant()`
-                }
-            }
-        }
-             xhttp.open("POST", "@Url.Action("Purchase", new {appId, preview = true})", true);
-             xhttp.send(data);
-           }
-    }))
-    form.addEventListener("submit", ()=>{
-        btn.setAttribute("disabled", "disabled");
-        inputs.forEach(value => value.setAttribute("readonly", "readonly"));
-    })
-})
-</script>
-<div class="container d-flex h-100">
-    <div class="justify-content-center mx-auto px-2 py-3 w-100 m-auto">
+</head>
+<body class="min-vh-100">
+<div id="TicketTailor" class="public-page-wrap">
+    <partial name="_StoreHeader" model="(Model.Event.Title, Model.StoreBranding)"/>
+    <main>
         <partial name="_StatusMessage"/>
-
-        <h1 class="text-center ">@Model.Event.Title</h1>
-        <h2 class="text-muted mb-4 text-center ">@Model.Event.Start.Formatted - @Model.Event.EventEnd.Formatted</h2>
+        <div class="text-muted mb-4 text-center lead ">@Model.Event.Start.Formatted - @Model.Event.EventEnd.Formatted</div>
         @if (Model.Settings.ShowDescription && !string.IsNullOrEmpty(Model.Event.Description))
         {
-            <div class="row" id="ticket-tailor-description text-center ">
-                <div class="overflow-hidden col-12 ">@Safe.Raw(Model.Event.Description)</div>
-            </div>
+            <div class="ticket-tailor-description lead">@Safe.Raw(Model.Event.Description)</div>
         }
+
+
         <form method="post" asp-controller="TicketTailor" asp-action="Purchase" asp-antiforgery="false" asp-route-appId="@appId">
             <input type="hidden" asp-for="AccessCode" value="@accessCode"/>
             <div class="row g-2 justify-content-center mb-4" id="ticket-form-container">
@@ -108,7 +60,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
                         <label asp-for="Email">Email</label>
                     </div>
                 </div>
-               
+
 
             </div>
             <div class="row g-2 justify-content-center mb-4">
@@ -120,7 +72,6 @@ document.addEventListener("DOMContentLoaded", ()=>{
                         foreach (var groupedTickets in Model.Event.TicketTypes.GroupBy(type => type.GroupId).OrderBy(groupedTickets => Model.Event.TicketGroups.FirstOrDefault(ticketGroup => ticketGroup.Id == groupedTickets.Key)?.SortOrder))
                         {
                             <div class="bg-tile w-100 p-4 mb-2">
-
 
 
                                 @if (!string.IsNullOrEmpty(groupedTickets.Key))
@@ -140,25 +91,31 @@ document.addEventListener("DOMContentLoaded", ()=>{
                                         {
                                             continue;
                                         }
+
                                         if (matched.Price is not null)
                                         {
                                             item.Price = matched.Price.Value;
                                         }
+
                                         if (!string.IsNullOrEmpty(matched.Name))
                                         {
                                             item.Name = matched.Name;
                                         }
+
                                         if (!string.IsNullOrEmpty(matched.Description))
                                         {
                                             item.Description = matched.Description;
                                         }
+
                                         availableToShow = true;
                                         specific = true;
                                     }
+
                                     if (!availableToShow)
                                     {
                                         continue;
                                     }
+
                                     index++;
 
                                     <input type="hidden" asp-for="Items[index].TicketTypeId" value="@item.Id"/>
@@ -200,20 +157,19 @@ document.addEventListener("DOMContentLoaded", ()=>{
 
                             </div>
                         }
-
                     }
 
 
                 </div>
-                 @if (Model.Settings.AllowDiscountCodes)
-                                {
-                                    <div class="col-sm-12 col-md-8 text-center">
-                                        <div class="form-floating">
-                                            <input  type="text" asp-for="DiscountCode" class="form-control"/>
-                                            <label asp-for="DiscountCode">Promo code</label>
-                                        </div>
-                                    </div>
-                                }
+                @if (Model.Settings.AllowDiscountCodes)
+                {
+                    <div class="col-sm-12 col-md-8 text-center">
+                        <div class="form-floating">
+                            <input type="text" asp-for="DiscountCode" class="form-control"/>
+                            <label asp-for="DiscountCode">Promo code</label>
+                        </div>
+                    </div>
+                }
                 <div class="col-sm-12 col-md-8 text-center">
                     <button class="btn btn-primary btn-lg m-auto" type="submit" disabled="disabled">Purchase</button>
 
@@ -221,14 +177,18 @@ document.addEventListener("DOMContentLoaded", ()=>{
             </div>
         </form>
 
+    </main>
 
-        <div class="row text-center">
-            <div class="col-12" id="fiat-page-link">
-                <a href="@Model.Event.Url">Back to fiat ticket page</a>
-            </div>
-            <div class="powered__by__btcpayserver col-12">
-                Powered by <a target="_blank" href="https://github.com/btcpayserver/btcpayserver" rel="noreferrer noopener">BTCPay Server</a>
-            </div>
-        </div>
-    </div>
+    <footer class="store-footer">
+        <p >
+            <a href="@Model.Event.Url">Back to fiat ticket page</a>
+        </p>
+        <a class="store-powered-by" href="https://btcpayserver.org" target="_blank" rel="noreferrer noopener">
+            Powered by <partial name="_StoreFooterLogo"/>
+        </a>
+    </footer>
 </div>
+<partial name="LayoutFoot"/>
+
+</body>
+</html>

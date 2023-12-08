@@ -11,6 +11,7 @@ using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Controllers;
 using BTCPayServer.Data;
+using BTCPayServer.Models;
 using BTCPayServer.Services.Apps;
 using BTCPayServer.Services.Invoices;
 using Microsoft.AspNetCore.Authorization;
@@ -68,7 +69,7 @@ namespace BTCPayServer.Plugins.TicketTailor
         [HttpGet("plugins/TicketTailor/{appId}")]
         public async Task<IActionResult> View(string appId)
         {
-            var app = await _appService.GetApp(appId, TicketTailorApp.AppType);
+            var app = await _appService.GetApp(appId, TicketTailorApp.AppType, true);
             if (app is null)
                 return NotFound();
             try
@@ -83,7 +84,11 @@ namespace BTCPayServer.Plugins.TicketTailor
                         return NotFound();
                     }
 
-                    return View(new TicketTailorViewModel() {Event = evt, Settings = config});
+                    return View(new TicketTailorViewModel()
+                    {
+                        Event = evt, Settings = config,
+                        StoreBranding = new StoreBrandingViewModel(app.StoreData.GetStoreBlob())
+                    });
                 }
             }
             catch (Exception e)
@@ -380,6 +385,7 @@ namespace BTCPayServer.Plugins.TicketTailor
                     vm.ApiKey = tt.ApiKey;
                     vm.EventId = tt.EventId;
                     vm.ShowDescription = tt.ShowDescription;
+                    vm.SendEmail = tt.SendEmail;
                     vm.BypassAvailabilityCheck = tt.BypassAvailabilityCheck;
                     vm.CustomCSS = tt.CustomCSS;
                     vm.RequireFullName = tt.RequireFullName;
@@ -483,7 +489,8 @@ namespace BTCPayServer.Plugins.TicketTailor
                 SpecificTickets = vm.SpecificTickets,
                 BypassAvailabilityCheck = vm.BypassAvailabilityCheck,
                 RequireFullName = vm.RequireFullName,
-                AllowDiscountCodes = vm.AllowDiscountCodes
+                AllowDiscountCodes = vm.AllowDiscountCodes,
+                SendEmail = vm.SendEmail
             };
 
 

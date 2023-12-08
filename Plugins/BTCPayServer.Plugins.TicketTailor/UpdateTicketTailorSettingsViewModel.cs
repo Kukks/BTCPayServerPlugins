@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using BTCPayServer.Models;
 using Microsoft.AspNetCore.Mvc.Rendering;
 
 namespace BTCPayServer.Plugins.TicketTailor;
@@ -12,6 +13,7 @@ public class UpdateTicketTailorSettingsViewModel
     public SelectList Events { get; set; }
     public string EventId { get; set; }
     public bool ShowDescription { get; set; }
+    public bool SendEmail { get; set; }
     public string CustomCSS { get; set; }
     public TicketTailorClient.TicketType[] TicketTypes { get; set; }
 
@@ -41,6 +43,7 @@ public class TicketTailorViewModel
     public PurchaseRequestItem[] Items { get; set; }
     public string AccessCode { get; set; }
     public string DiscountCode { get; set; }
+    public StoreBrandingViewModel StoreBranding { get; set; }
 
     public class PurchaseRequestItem
     {

@@ -238,24 +238,30 @@ public class TicketTailorService : EventHostedServiceBase
                 }
                 await _invoiceRepository.UpdateInvoiceMetadata(invoice.Id, invoice.StoreId, invoice.Metadata.ToJObject());
                 await _invoiceRepository.AddInvoiceLogs(invoice.Id, invLogs);
-                var uri = new Uri(btcpayUrl);
-                var url =
-                    _linkGenerator.GetUriByAction("Receipt",
-                        "TicketTailor",
-                        new {invoiceId = invoice.Id},
-                        uri.Scheme,
-                        new HostString(uri.Host),
-                        uri.AbsolutePath);
 
-                try
+                if (settings.SendEmail)
                 {
-                    var sender = await _emailSenderFactory.GetEmailSender(issueTicket.Invoice.StoreId);
-                    sender.SendEmail(MailboxAddress.Parse(email), "Your ticket is available now.",
-                        $"Your payment has been settled and the event ticket has been issued successfully. Please go to <a href='{url}'>{url}</a>");
-                }
-                catch (Exception e)
-                {
-                    // ignored
+
+                    var uri = new Uri(btcpayUrl);
+                    var url =
+                        _linkGenerator.GetUriByAction("Receipt",
+                            "TicketTailor",
+                            new {invoiceId = invoice.Id},
+                            uri.Scheme,
+                            new HostString(uri.Host),
+                            uri.AbsolutePath);
+
+                    try
+                    {
+                        var sender = await _emailSenderFactory.GetEmailSender(issueTicket.Invoice.StoreId);
+                        sender.SendEmail(MailboxAddress.Parse(email), "Your ticket is available now.",
+                            $"Your payment has been settled and the event ticket has been issued successfully. Please go to <a href='{url}'>{url}</a>");
+                    }
+                    catch (Exception e)
+                    {
+                        // ignored
+                    }
+
                 }
             }
             catch (Exception e)

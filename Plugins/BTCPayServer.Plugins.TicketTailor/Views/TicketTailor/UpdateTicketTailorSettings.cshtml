@@ -53,7 +53,7 @@
                 <input asp-for="AppName" class="form-control" required/>
                 <span asp-validation-for="AppName" class="text-danger"></span>
             </div>
-    <div class="form-group">
+            <div class="form-group">
                 <label asp-for="ApiKey" class="form-label" data-required>TicketTailor API Key</label>
                 <input asp-for="ApiKey" class="form-control" required/>
                 <span asp-validation-for="ApiKey" class="text-danger"></span>
@@ -88,6 +88,11 @@
                     <input asp-for="AllowDiscountCodes" type="checkbox" class="form-check-input"/>
                     <label asp-for="AllowDiscountCodes" class="form-check-label">Allow discount codes (due to the nature of Ticket Tailor's API, redemption limit is not applied.</label>
                     <span asp-validation-for="AllowDiscountCodes" class="text-danger"></span>
+                </div>
+                <div class="form-group form-check">
+                    <input asp-for="SendEmail" type="checkbox" class="form-check-input"/>
+                    <label asp-for="SendEmail" class="form-check-label">Send an email when an invoice settles and the ticket is issued. </label>
+                    <span asp-validation-for="SendEmail" class="text-danger"></span>
                 </div>
 
                 <div class="form-group">
@@ -162,7 +167,7 @@
 <div class="d-grid d-sm-flex flex-wrap gap-3 mt-3">
     <a class="btn btn-secondary" asp-action="ListInvoices" asp-controller="UIInvoice" asp-route-storeId="@storeId" asp-route-searchterm="@AppService.GetAppSearchTerm(TicketTailorApp.AppType, appId)">Invoices</a>
     <form method="post" asp-controller="UIApps" asp-action="ToggleArchive" asp-route-appId="@appId">
-        <button type="submit" class="w-100 btn btn-outline-secondary" id="btn-archive-toggle" >
+        <button type="submit" class="w-100 btn btn-outline-secondary" id="btn-archive-toggle">
             @if (Model.Archived)
             {
                 <span class="text-nowrap">Unarchive this app</span>
@@ -176,6 +181,6 @@
     <a id="DeleteApp" class="btn btn-outline-danger" asp-controller="UIApps" asp-action="DeleteApp" asp-route-appId="@appId" data-bs-toggle="modal" data-bs-target="#ConfirmModal" data-description="The app and its settings will be permanently deleted." data-confirm-input="DELETE">Delete this app</a>
 </div>
 
-<partial name="_Confirm" model="@(new ConfirmModel("Delete app", "This app will be removed from this store.", "Delete"))" />
+<partial name="_Confirm" model="@(new ConfirmModel("Delete app", "This app will be removed from this store.", "Delete"))"/>
 
 <partial name="_ValidationScriptsPartial"/>
