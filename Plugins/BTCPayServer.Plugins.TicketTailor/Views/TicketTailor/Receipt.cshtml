@@ -1,4 +1,7 @@
 ﻿@using BTCPayServer.Client.Models
+@using BTCPayServer.Plugins.TicketTailor
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using BTCPayServer.Abstractions.TagHelpers
 @model BTCPayServer.Plugins.TicketTailor.TicketTailorController.TicketReceiptPage
 @{
     Layout = "_LayoutSimple";
@@ -52,11 +55,11 @@
                         for (var index = 0; index < Model.Tickets.Length; index++)
                         {
                             var ticket = Model.Tickets[index];
-                            var ticketType = Model.Event.TicketTypes.First(type => type.Id == ticket.TicketTypeId);
+                            var ticketType = Model.Event.TicketTypes.FirstOrDefault(type => type.Id == ticket.TicketTypeId) ?? new TicketTailorClient.TicketType();
                             var specificTicketType = Model.Settings?.SpecificTickets?
                                 .FirstOrDefault(specificTicket => specificTicket.TicketTypeId == ticket.TicketTypeId);
 
-                            ticketType.Name = specificTicketType?.Name ?? ticketType.Name;
+                            ticketType.Name = specificTicketType?.Name??ticketType.Name?? ticket.TicketTypeId;
                             ticketType.Description = specificTicketType?.Description ?? ticketType.Description;
 
                             <div class="bg-tile  m-0 p-3 p-sm-5 rounded ">

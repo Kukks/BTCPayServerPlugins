@@ -233,7 +233,7 @@ public class TicketTailorClient : IDisposable
 
         [JsonPropertyName("min_per_order")] public int? MinPerOrder { get; set; }
 
-        [JsonPropertyName("name")] public string Name { get; set; }
+        [JsonPropertyName("name")] public string? Name { get; set; }
 
         [JsonPropertyName("price")] public decimal Price { get; set; }
 
