@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
     <PropertyGroup>
-        <TargetFramework>net6.0</TargetFramework>
+        <TargetFramework>net8.0</TargetFramework>
         <LangVersion>10</LangVersion>
     </PropertyGroup>
 
@@ -10,6 +10,7 @@
         <Product>LDK</Product>
         <Description>The way lightning's meant to be</Description>
         <Version>1.0.0</Version>
+<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->
     <PropertyGroup>

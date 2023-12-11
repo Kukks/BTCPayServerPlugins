@@ -27,7 +27,7 @@ public class BlinkLightningClient : ILightningClient
 {
     private readonly string _apiKey;
     private readonly Uri _apiEndpoint;
-    private readonly string _walletId;
+    public  string? WalletId { get; set; }
     private readonly Network _network;
     private readonly NBXplorerDashboard _nbXplorerDashboard;
     private readonly GraphQLHttpClient _client;
@@ -37,15 +37,16 @@ public class BlinkLightningClient : ILightningClient
     {
         _apiKey = apiKey;
         _apiEndpoint = apiEndpoint;
-        _walletId = walletId;
+        WalletId = walletId;
         _network = network;
         _nbXplorerDashboard = nbXplorerDashboard;
         _client = new GraphQLHttpClient(new GraphQLHttpClientOptions() {EndPoint = _apiEndpoint}, new NewtonsoftJsonSerializer(), httpClient);
+        
     }
 
     public override string ToString()
     {
-        return $"type=blink;server={_apiEndpoint};api-key={_apiKey};wallet-id={_walletId}";
+        return $"type=blink;server={_apiEndpoint};api-key={_apiKey}{(WalletId is null? "":$";wallet-id={WalletId}")}";
     }
 
     public async Task<LightningInvoice?> GetInvoice(string invoiceId,
@@ -73,7 +74,7 @@ query InvoiceByPaymentHash($paymentHash: PaymentHash!, $walletId: WalletId!) {
             OperationName = "InvoiceByPaymentHash",
             Variables = new
             {
-                walletId = _walletId,
+                walletId = WalletId,
                 paymentHash = invoiceId
             }
         };
@@ -146,7 +147,7 @@ query Invoices($walletId: WalletId!) {
             OperationName = "Invoices",
             Variables = new
             {
-                walletId = _walletId
+                walletId = WalletId
             }
         };
         var response = await _client.SendQueryAsync<dynamic>(reques,  cancellation);
@@ -192,7 +193,7 @@ query TransactionsByPaymentHash($paymentHash: PaymentHash!, $walletId: WalletId!
             OperationName = "TransactionsByPaymentHash",
             Variables = new
             {
-                walletId = _walletId,
+                walletId = WalletId,
                 paymentHash = paymentHash
             }
         };
@@ -277,7 +278,7 @@ query Transactions($walletId: WalletId!) {
             OperationName = "Transactions",
             Variables = new
             {
-                walletId = _walletId
+                walletId = WalletId
             }
         };
         var response = await _client.SendQueryAsync<dynamic>(reques,  cancellation);
@@ -318,7 +319,7 @@ mutation LnInvoiceCreate($input: LnInvoiceCreateInput!) {
             {
                 input = new
                 {
-                    walletId = _walletId,
+                    walletId = WalletId,
                     memo = createInvoiceRequest.Description?? createInvoiceRequest.DescriptionHash?.ToString(),
                     amount = (long)createInvoiceRequest.Amount.ToUnit(LightMoneyUnit.Satoshi),
 expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
@@ -462,6 +463,38 @@ expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
         }
     }
 
+    public async Task<(Network Network, string DefaultWalletId)> GetNetworkAndDefaultWallet(CancellationToken cancellation =default)
+    {
+               
+        var reques = new GraphQLRequest
+        {
+            Query = @"
+query GetNetworkAndDefaultWallet {
+  globals {
+    network
+  }
+  me {
+    defaultAccount {
+      defaultWalletId
+    }
+  }
+}",
+            OperationName = "GetNetworkAndDefaultWallet"
+        };
+        
+        var response = await _client.SendQueryAsync<dynamic>(reques,  cancellation);
+
+        var defaultWalletId = (string) response.Data.me.defaultAccount.defaultWalletId;
+        var network = response.Data.globals.network.ToString() switch
+        {
+            "mainnet" => Network.Main,
+            "testnet" => Network.TestNet,
+            "regtest" => Network.RegTest,
+            _ => throw new ArgumentOutOfRangeException()
+        };
+        return (network, defaultWalletId);
+    }
+
     public async Task<LightningNodeInformation> GetInfo(CancellationToken cancellation = new CancellationToken())
     {
        
@@ -504,7 +537,7 @@ query GetWallet($walletId: WalletId!) {
 }",
             OperationName = "GetWallet",
             Variables = new {
-                walletId = _walletId
+                walletId = WalletId
             }
         };
         
@@ -570,7 +603,7 @@ mutation LnInvoicePaymentSend($input: LnInvoicePaymentInput!) {
             OperationName = "LnInvoicePaymentSend",
             Variables = new {
                 input = new {
-                    walletId = _walletId,
+                    walletId = WalletId,
                     paymentRequest = bolt11,
                 }
             }

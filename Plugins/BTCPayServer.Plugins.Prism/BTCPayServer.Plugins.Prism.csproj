@@ -12,6 +12,7 @@
         <Product>Prism</Product>
         <Description>Automated value splits for Bitcoin.</Description>
         <Version>1.2.1</Version>
+<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->
     <PropertyGroup>

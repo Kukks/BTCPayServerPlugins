@@ -12,6 +12,7 @@
         <Product>Nostr </Product>
         <Description>Allows you to verify your nostr account with NIP5 and zap like the rest of the crazies</Description>
         <Version>1.1.3</Version>
+<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->
     <PropertyGroup>

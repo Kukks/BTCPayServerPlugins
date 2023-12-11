@@ -10,6 +10,7 @@
         <Product>FixedFloat</Product>
         <Description>Allows you to embed a FixedFloat conversion screen to allow customers to pay with altcoins.</Description>
         <Version>1.1.6</Version>
+<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->
     <PropertyGroup>

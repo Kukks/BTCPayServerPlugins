@@ -14,6 +14,7 @@
         <Product>Coinjoin</Product>
         <Description>Allows you to integrate your btcpayserver store with coinjoins.</Description>
         <Version>1.0.67</Version>
+<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
 
     <!-- Plugin development properties -->

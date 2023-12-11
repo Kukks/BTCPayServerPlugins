@@ -10,6 +10,7 @@
         <Product>Dynamic Reports</Product>
         <Description>Allows you to create custom reports using SQL.</Description>
         <Version>1.0.1</Version>
+<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->
     <PropertyGroup>

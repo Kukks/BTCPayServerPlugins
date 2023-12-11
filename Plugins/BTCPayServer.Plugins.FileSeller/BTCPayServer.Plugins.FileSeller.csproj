@@ -10,6 +10,7 @@
         <Product>File Seller</Product>
         <Description>Allows you to sell files through the point of sale/crowdfund apps.</Description>
         <Version>1.0.4</Version>
+<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->
     <PropertyGroup>

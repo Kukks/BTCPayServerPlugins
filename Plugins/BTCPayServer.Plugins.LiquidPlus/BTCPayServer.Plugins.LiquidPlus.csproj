@@ -12,6 +12,7 @@
       <Product>Liquid+</Product>
       <Description>Enhanced support for the liquid network.</Description>
       <Version>1.1.3</Version>
+<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
 
     <!-- Plugin development properties -->
