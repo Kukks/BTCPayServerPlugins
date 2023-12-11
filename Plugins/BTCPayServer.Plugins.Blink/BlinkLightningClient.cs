@@ -27,7 +27,8 @@ public class BlinkLightningClient : ILightningClient
 {
     private readonly string _apiKey;
     private readonly Uri _apiEndpoint;
-    public  string? WalletId { get; set; }
+    public string? WalletId { get; set; }
+    public string? WalletCurrency { get; set; }
     private readonly Network _network;
     private readonly NBXplorerDashboard _nbXplorerDashboard;
     private readonly GraphQLHttpClient _client;
@@ -298,11 +299,9 @@ query Transactions($walletId: WalletId!) {
     public async Task<LightningInvoice> CreateInvoice(CreateInvoiceParams createInvoiceRequest,
         CancellationToken cancellation = new())
     {
-        var reques = new GraphQLRequest
-        {
-            Query = @"
-mutation LnInvoiceCreate($input: LnInvoiceCreateInput!) {
-  lnInvoiceCreate(input: $input) {
+        string btcLnInvoiceCreate = @"
+mutation LnInvoiceCreate($input: LnInvoiceCreateOnBehalfOfRecipientInput!) {
+  lnInvoiceCreateOnBehalfOfRecipient(input: $input) {
     invoice {
       createdAt
       paymentHash
@@ -310,20 +309,38 @@ mutation LnInvoiceCreate($input: LnInvoiceCreateInput!) {
       paymentSecret
       paymentStatus
       satoshis
-      
     }
   }
-}",
+}";
+
+        string usdLnInvoiceCreate = @"
+mutation LnUsdInvoiceCreate($input: LnUsdInvoiceBtcDenominatedCreateOnBehalfOfRecipientInput!) {
+  lnUsdInvoiceBtcDenominatedCreateOnBehalfOfRecipient(input: $input) {
+    invoice {
+      createdAt
+      paymentHash
+      paymentRequest
+      paymentSecret
+      paymentStatus
+      satoshis
+    }
+  }
+}";
+        string selectedQuery = (WalletCurrency == "BTC") ? btcLnInvoiceCreate : usdLnInvoiceCreate;
+
+        var reques = new GraphQLRequest
+        {
+            Query = selectedQuery,
             OperationName = "LnInvoiceCreate",
             Variables = new
             {
                 input = new
                 {
-                    walletId = WalletId,
-                    memo = createInvoiceRequest.Description?? createInvoiceRequest.DescriptionHash?.ToString(),
+                    recipientWalletId = WalletId,
+                    memo = createInvoiceRequest.Description ?? createInvoiceRequest.DescriptionHash?.ToString(),
                     amount = (long)createInvoiceRequest.Amount.ToUnit(LightMoneyUnit.Satoshi),
-expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
-                    
+                    expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
+
                 }
             }
         };
