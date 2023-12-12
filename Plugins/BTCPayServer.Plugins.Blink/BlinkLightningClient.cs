@@ -28,6 +28,9 @@ public class BlinkLightningClient : ILightningClient
     private readonly string _apiKey;
     private readonly Uri _apiEndpoint;
     public  string? WalletId { get; set; }
+
+    public string? WalletCurrency { get; set; }
+
     private readonly Network _network;
     private readonly NBXplorerDashboard _nbXplorerDashboard;
     private readonly GraphQLHttpClient _client;
@@ -301,8 +304,8 @@ query Transactions($walletId: WalletId!) {
         var reques = new GraphQLRequest
         {
             Query = @"
-mutation LnInvoiceCreate($input: LnInvoiceCreateInput!) {
-  lnInvoiceCreate(input: $input) {
+mutation lnInvoiceCreateOnBehalfOfRecipient($input: LnInvoiceCreateOnBehalfOfRecipientInput!) {
+  lnInvoiceCreateOnBehalfOfRecipient(input: $input) {
     invoice {
       createdAt
       paymentHash
@@ -310,7 +313,6 @@ mutation LnInvoiceCreate($input: LnInvoiceCreateInput!) {
       paymentSecret
       paymentStatus
       satoshis
-      
     }
   }
 }",
@@ -319,8 +321,9 @@ mutation LnInvoiceCreate($input: LnInvoiceCreateInput!) {
             {
                 input = new
                 {
-                    walletId = WalletId,
-                    memo = createInvoiceRequest.Description?? createInvoiceRequest.DescriptionHash?.ToString(),
+                    recipientWalletId = WalletId,
+                    memo = createInvoiceRequest.Description,
+                    descriptionHash = createInvoiceRequest.DescriptionHash?.ToString(),
                     amount = (long)createInvoiceRequest.Amount.ToUnit(LightMoneyUnit.Satoshi),
 expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
                     
@@ -543,6 +546,7 @@ query GetWallet($walletId: WalletId!) {
         
         var response = await  _client.SendQueryAsync<dynamic>(request,  cancellation);
 
+        WalletCurrency = response.Data.me.defaultAccount.walletById.walletCurrency;
         if (response.Data.me.defaultAccount.walletById.walletCurrency == "BTC")
         {
             return new LightningNodeBalance()
@@ -556,8 +560,6 @@ query GetWallet($walletId: WalletId!) {
 
         return new LightningNodeBalance();
     }
-        
-    
 
     public async Task<PayResponse> Pay(PayInvoiceParams payParams,
         CancellationToken cancellation = new CancellationToken())
