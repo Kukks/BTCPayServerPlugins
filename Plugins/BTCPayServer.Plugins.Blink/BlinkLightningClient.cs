@@ -301,10 +301,8 @@ query Transactions($walletId: WalletId!) {
     public async Task<LightningInvoice> CreateInvoice(CreateInvoiceParams createInvoiceRequest,
         CancellationToken cancellation = new())
     {
-        var reques = new GraphQLRequest
-        {
-            Query = @"
-mutation lnInvoiceCreateOnBehalfOfRecipient($input: LnInvoiceCreateOnBehalfOfRecipientInput!) {
+        var query = @"
+mutation lnInvoiceCreate($input: LnInvoiceCreateOnBehalfOfRecipientInput!) {
   lnInvoiceCreateOnBehalfOfRecipient(input: $input) {
     invoice {
       createdAt
@@ -315,8 +313,29 @@ mutation lnInvoiceCreateOnBehalfOfRecipient($input: LnInvoiceCreateOnBehalfOfRec
       satoshis
     }
   }
-}",
-            OperationName = "LnInvoiceCreate",
+}";
+        
+        if (WalletCurrency?.Equals("btc", StringComparison.InvariantCultureIgnoreCase) is not true)
+        {
+            query = @"
+mutation lnInvoiceCreate($input: LnUsdInvoiceBtcDenominatedCreateOnBehalfOfRecipientInput!) {
+  lnUsdInvoiceBtcDenominatedCreateOnBehalfOfRecipient(input: $input) {
+    invoice {
+      createdAt
+      paymentHash
+      paymentRequest
+      paymentSecret
+      paymentStatus
+      satoshis
+    }
+  }
+}";
+        }
+        
+        var reques = new GraphQLRequest
+        {
+            Query = query,
+            OperationName = "lnInvoiceCreate",
             Variables = new
             {
                 input = new

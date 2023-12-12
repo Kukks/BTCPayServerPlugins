@@ -109,12 +109,6 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
             try
             {
                 bclient.GetBalance().GetAwaiter().GetResult();
-                if (!bclient.WalletCurrency.Equals("btc", StringComparison.InvariantCultureIgnoreCase))
-                {
-                    error = "Cannot use a non BTC denominated wallet";
-                    return null;
-                    
-                }
             }
             catch (Exception e)
             {
