@@ -1,23 +1,17 @@
 ﻿#nullable enable
 using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Net.Http;
-using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Lightning;
-using BTCPayServer.Lightning.LndHub;
 using GraphQL;
 using GraphQL.Client.Http;
 using GraphQL.Client.Serializer.Newtonsoft;
+using Microsoft.AspNetCore.OutputCaching;
 using NBitcoin;
-using NBitpayClient;
 using Newtonsoft.Json.Linq;
 using Network = NBitcoin.Network;
 
@@ -32,18 +26,20 @@ public class BlinkLightningClient : ILightningClient
     public string? WalletCurrency { get; set; }
 
     private readonly Network _network;
-    private readonly NBXplorerDashboard _nbXplorerDashboard;
     private readonly GraphQLHttpClient _client;
 
-    public BlinkLightningClient(string apiKey, Uri apiEndpoint, string walletId, Network network,
-        NBXplorerDashboard nbXplorerDashboard, HttpClient httpClient)
+    public BlinkLightningClient(string apiKey, Uri apiEndpoint, string walletId, Network network, HttpClient httpClient)
     {
         _apiKey = apiKey;
         _apiEndpoint = apiEndpoint;
         WalletId = walletId;
         _network = network;
-        _nbXplorerDashboard = nbXplorerDashboard;
-        _client = new GraphQLHttpClient(new GraphQLHttpClientOptions() {EndPoint = _apiEndpoint}, new NewtonsoftJsonSerializer(), httpClient);
+        _client = new GraphQLHttpClient(new GraphQLHttpClientOptions() {EndPoint = _apiEndpoint, WebSocketEndPoint = new Uri( "wss://" + _apiEndpoint.Host.Replace("api.", "ws.") + _apiEndpoint.PathAndQuery), ConfigureWebsocketOptions =
+            options =>
+            {
+                options.SetRequestHeader("X-API-KEY", apiKey);
+            }}, new NewtonsoftJsonSerializer(), httpClient);
+        
         
     }
 
@@ -301,23 +297,9 @@ query Transactions($walletId: WalletId!) {
     public async Task<LightningInvoice> CreateInvoice(CreateInvoiceParams createInvoiceRequest,
         CancellationToken cancellation = new())
     {
-        var query = @"
-mutation lnInvoiceCreate($input: LnInvoiceCreateOnBehalfOfRecipientInput!) {
-  lnInvoiceCreateOnBehalfOfRecipient(input: $input) {
-    invoice {
-      createdAt
-      paymentHash
-      paymentRequest
-      paymentSecret
-      paymentStatus
-      satoshis
-    }
-  }
-}";
+        string query;
         
-        if (WalletCurrency?.Equals("btc", StringComparison.InvariantCultureIgnoreCase) is not true)
-        {
-            query = @"
+        query = WalletCurrency?.Equals("btc", StringComparison.InvariantCultureIgnoreCase) is not true ? @"
 mutation lnInvoiceCreate($input: LnUsdInvoiceBtcDenominatedCreateOnBehalfOfRecipientInput!) {
   lnUsdInvoiceBtcDenominatedCreateOnBehalfOfRecipient(input: $input) {
     invoice {
@@ -327,10 +309,27 @@ mutation lnInvoiceCreate($input: LnUsdInvoiceBtcDenominatedCreateOnBehalfOfRecip
       paymentSecret
       paymentStatus
       satoshis
+    },
+    errors{
+      message
+    }
+  }
+}" : @"
+mutation lnInvoiceCreate($input: LnInvoiceCreateOnBehalfOfRecipientInput!) {
+  lnInvoiceCreateOnBehalfOfRecipient(input: $input) {
+    invoice {
+      createdAt
+      paymentHash
+      paymentRequest
+      paymentSecret
+      paymentStatus
+      satoshis
+    },
+    errors{
+      message
     }
   }
 }";
-        }
         
         var reques = new GraphQLRequest
         {
@@ -350,142 +349,101 @@ expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
             }
         };
         var response = await _client.SendQueryAsync<dynamic>(reques,  cancellation);
-        
-        
-        return ToInvoice(response.Data.lnInvoiceCreate.invoice);
+        var inv = (WalletCurrency?.Equals("btc", StringComparison.InvariantCultureIgnoreCase) is not true
+            ? response.Data.lnUsdInvoiceBtcDenominatedCreateOnBehalfOfRecipient.invoice
+            : response.Data.lnInvoiceCreateOnBehalfOfRecipient.invoice)as JObject;
+
+        if (inv is null)
+        {
+            var errors = (WalletCurrency?.Equals("btc", StringComparison.InvariantCultureIgnoreCase) is not true
+                ? response.Data.lnUsdInvoiceBtcDenominatedCreateOnBehalfOfRecipient.errors
+                : response.Data.lnInvoiceCreateOnBehalfOfRecipient.errors) as JArray;
+
+            if (errors.Any())
+            {
+                throw new Exception(errors.First()["message"].ToString());
+            }
+        }
+        return ToInvoice(inv);
     }
 
     public async Task<ILightningInvoiceListener> Listen(CancellationToken cancellation = new CancellationToken())
     {
-        return new BlinkListener(this, cancellation);
+        return new BlinkListener(_client, this);
     }
-
 
     public class BlinkListener : ILightningInvoiceListener
     {
-        private readonly ILightningClient _client;
+        private readonly BlinkLightningClient _lightningClient;
         private readonly Channel<LightningInvoice> _invoices = Channel.CreateUnbounded<LightningInvoice>();
-        private readonly CancellationTokenSource _cts;
-        private HttpClient _httpClient;
-        private HttpResponseMessage _response;
-        private Stream _body;
-        private StreamReader _reader;
-        private Task _listenLoop;
-        private readonly List<string> _paidInvoiceIds;
+        private readonly IDisposable _subscription;
 
-        public BlinkListener(ILightningClient client, CancellationToken cancellation)
+        public BlinkListener(GraphQLHttpClient httpClient, BlinkLightningClient lightningClient)
         {
-            _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-            _client = client;
-            _paidInvoiceIds = new List<string>();
-            _listenLoop = ListenLoop();
+            try
+            {
+
+                _lightningClient = lightningClient;
+                var stream = httpClient.CreateSubscriptionStream<dynamic>(new GraphQLRequest()
+                {
+                    Query = @"subscription myUpdates {
+  myUpdates {
+    update {
+      ... on LnUpdate {
+        transaction {
+          initiationVia {
+            ... on InitiationViaLn {
+              paymentHash
+            }
+          }
+          direction
+        }
+      }
+    }
+  }
+}
+", OperationName = "myUpdates"
+                });
+
+                _subscription = stream.Subscribe(async response =>
+                {
+                    try
+                    {
+                        var x = stream;
+                        var y  = _lightningClient;
+                        if (response.Data.myUpdates.update.transaction.direction != "RECEIVE")
+                            return;
+                        if ((await _lightningClient.GetInvoice(response.Data.myUpdates.update.transaction.initiationVia
+                                .paymentHash.ToString())) is LightningInvoice inv)
+                        {
+
+                            _invoices.Writer.TryWrite(inv);
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine(e);
+                    }
+                   
+                });
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+            }
+        }
+        public void Dispose()
+        {
+            _subscription.Dispose();
+            _invoices.Writer.TryComplete();
         }
 
         public async Task<LightningInvoice> WaitInvoice(CancellationToken cancellation)
         {
-            try
-            {
-                return await _invoices.Reader.ReadAsync(cancellation);
-            }
-            catch (ChannelClosedException ex) when (ex.InnerException == null)
-            {
-                throw new OperationCanceledException();
-            }
-            catch (ChannelClosedException ex)
-            {
-                ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
-                throw;
-            }
-        }
-
-        public void Dispose()
-        {
-            Dispose(true);
-        }
-
-        static readonly AsyncDuplicateLock _locker = new();
-        static readonly ConcurrentDictionary<string, LightningInvoice[]> _activeListeners = new();
-
-        private async Task ListenLoop()
-        {
-            try
-            {
-                var releaser = await _locker.LockOrBustAsync(_client.ToString(), _cts.Token);
-                if (releaser is null)
-                {
-                    while (!_cts.IsCancellationRequested && releaser is null)
-                    {
-                        if (_activeListeners.TryGetValue(_client.ToString(), out var invoicesData))
-                        {
-                            await HandleInvoicesData(invoicesData);
-                        }
-
-                        releaser = await _locker.LockOrBustAsync(_client.ToString(), _cts.Token);
-
-                        if (releaser is null)
-                            await Task.Delay(2500, _cts.Token);
-                    }
-                }
-
-                using (releaser)
-                {
-                    while (!_cts.IsCancellationRequested)
-                    {
-                        var invoicesData = await _client.ListInvoices(_cts.Token);
-                        _activeListeners.AddOrReplace(_client.ToString(), invoicesData);
-                        await HandleInvoicesData(invoicesData);
-
-                        await Task.Delay(2500, _cts.Token);
-                    }
-                }
-            }
-            catch when (_cts.IsCancellationRequested)
-            {
-            }
-            catch (Exception ex)
-            {
-                _invoices.Writer.TryComplete(ex);
-            }
-            finally
-            {
-                _activeListeners.TryRemove(_client.ToString(), out _);
-                Dispose(false);
-            }
-        }
-
-        private async Task HandleInvoicesData(IEnumerable<LightningInvoice> invoicesData)
-        {
-            foreach (var data in invoicesData)
-            {
-                var invoice = data;
-                if (invoice.PaidAt != null && !_paidInvoiceIds.Contains(invoice.Id))
-                {
-                    await _invoices.Writer.WriteAsync(invoice, _cts.Token);
-                    _paidInvoiceIds.Add(invoice.Id);
-                }
-            }
-        }
-
-        private void Dispose(bool waitLoop)
-        {
-            if (_cts.IsCancellationRequested)
-                return;
-            _cts.Cancel();
-            _reader?.Dispose();
-            _reader = null;
-            _body?.Dispose();
-            _body = null;
-            _response?.Dispose();
-            _response = null;
-            _httpClient?.Dispose();
-            _httpClient = null;
-            if (waitLoop)
-                _listenLoop?.Wait();
-            _invoices.Writer.TryComplete();
+            return await  _invoices.Reader.ReadAsync(cancellation);
         }
     }
-
-    public async Task<(Network Network, string DefaultWalletId)> GetNetworkAndDefaultWallet(CancellationToken cancellation =default)
+    public async Task<(Network Network, string DefaultWalletId, string DefaultWalletCurrency)> GetNetworkAndDefaultWallet(CancellationToken cancellation =default)
     {
                
         var reques = new GraphQLRequest
@@ -497,7 +455,10 @@ query GetNetworkAndDefaultWallet {
   }
   me {
     defaultAccount {
-      defaultWalletId
+      defaultWallet{
+        id
+        currency
+      }
     }
   }
 }",
@@ -506,7 +467,8 @@ query GetNetworkAndDefaultWallet {
         
         var response = await _client.SendQueryAsync<dynamic>(reques,  cancellation);
 
-        var defaultWalletId = (string) response.Data.me.defaultAccount.defaultWalletId;
+        var defaultWalletId = (string) response.Data.me.defaultAccount.defaultWallet.id;
+        var defaultWalletCurrency = (string) response.Data.me.defaultAccount.defaultWallet.currency;
         var network = response.Data.globals.network.ToString() switch
         {
             "mainnet" => Network.Main,
@@ -514,31 +476,13 @@ query GetNetworkAndDefaultWallet {
             "regtest" => Network.RegTest,
             _ => throw new ArgumentOutOfRangeException()
         };
-        return (network, defaultWalletId);
+        return (network, defaultWalletId, defaultWalletCurrency);
     }
 
-    public async Task<LightningNodeInformation> GetInfo(CancellationToken cancellation = new CancellationToken())
+    public Task<LightningNodeInformation> GetInfo(CancellationToken cancellation = new CancellationToken())
     {
-       
-        var reques = new GraphQLRequest
-        {
-            Query = @"
-query Globals {
-  globals {
-    nodesIds
-  }
-}",
-            OperationName = "Globals"
-        };
-        var response = await _client.SendQueryAsync<dynamic>(reques,  cancellation);
-        var result = new LightningNodeInformation()
-        {
-            BlockHeight =  _nbXplorerDashboard.Get("BTC").Status.ChainHeight,
-            Alias = "Blink",
-            
-        };
-        result.NodeInfoList.AddRange(((JArray)response.Data.globals.nodesIds).Select(s => new NodeInfo(new PubKey(s.Value<string>()), "galoy.com", 69)));
-        return result;
+
+        throw new NotSupportedException();
     }
 
     public async Task<LightningNodeBalance> GetBalance(CancellationToken cancellation = new())

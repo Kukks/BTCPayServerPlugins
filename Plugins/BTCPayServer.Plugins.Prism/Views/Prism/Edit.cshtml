@@ -1,5 +1,4 @@
-﻿@using BTCPayServer.Abstractions.TagHelpers
-@using BTCPayServer.Abstractions.Extensions
+﻿@using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Components.UIExtensionPoint
 @using BTCPayServer.Plugins.Prism.Components
 @using BTCPayServer.Abstractions.Contracts
@@ -15,6 +14,4 @@
 {
     StoreId = ScopeProvider.GetCurrentStoreId(),
 }))
-
-<script src="_framework/blazor.server.js"></script>
 <vc:ui-extension-point location="prism-edit" model="@Model"></vc:ui-extension-point>

@@ -2,7 +2,6 @@
 using System;
 using System.Linq;
 using System.Net.Http;
-using BTCPayServer.HostedServices;
 using BTCPayServer.Lightning;
 using Network = NBitcoin.Network;
 
@@ -11,13 +10,10 @@ namespace BTCPayServer.Plugins.Blink;
 public class BlinkLightningConnectionStringHandler : ILightningConnectionStringHandler
 {
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly NBXplorerDashboard _nbXplorerDashboard;
 
-    public BlinkLightningConnectionStringHandler(IHttpClientFactory httpClientFactory,
-        NBXplorerDashboard nbXplorerDashboard)
+    public BlinkLightningConnectionStringHandler(IHttpClientFactory httpClientFactory)
     {
         _httpClientFactory = httpClientFactory;
-        _nbXplorerDashboard = nbXplorerDashboard;
     }
 
 
@@ -32,8 +28,9 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
 
         if (!kv.TryGetValue("server", out var server))
         {
-            error = $"The key 'server' is mandatory for blink connection strings";
-            return null;
+            server = "https://api.blink.sv/graphql";
+            // error = $"The key 'server' is mandatory for blink connection strings";
+            // return null;
         }
 
         if (!Uri.TryCreate(server, UriKind.Absolute, out var uri)
@@ -77,8 +74,8 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
         client.BaseAddress = uri;
 
         kv.TryGetValue("wallet-id", out var walletId);
-        var bclient = new BlinkLightningClient(apiKey, uri, walletId, network, _nbXplorerDashboard, client);
-        (Network Network, string DefaultWalletId) res;
+        var bclient = new BlinkLightningClient(apiKey, uri, walletId, network, client);
+        (Network Network, string DefaultWalletId, string DefaultWalletCurrency) res;
         try
         {
             res = bclient.GetNetworkAndDefaultWallet().GetAwaiter().GetResult();
@@ -103,6 +100,7 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
         if (walletId is null)
         {
             bclient.WalletId = res.DefaultWalletId;
+            bclient.WalletCurrency = res.DefaultWalletCurrency;
         }
         else
         {

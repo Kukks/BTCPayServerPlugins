@@ -5,6 +5,7 @@
       <LangVersion>10</LangVersion>
       <Configurations>Debug;Release;Altcoins-Debug;Altcoins-Release</Configurations>
       <Platforms>AnyCPU</Platforms>
+        <DefineConstants>$(DefineConstants);ALTCOINS</DefineConstants>
     </PropertyGroup>
 
     <!-- Plugin specific properties -->
@@ -31,18 +32,6 @@
       </ProjectReference>
     </ItemDefinitionGroup>
 
-
-      <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
-          <Altcoins>true</Altcoins>
-      </PropertyGroup>
-
-      <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
-          <Altcoins>true</Altcoins>
-      </PropertyGroup>
-
-      <PropertyGroup Condition="'$(Altcoins)' == 'true'">
-          <DefineConstants>$(DefineConstants);ALTCOINS</DefineConstants>
-      </PropertyGroup>
     <ItemGroup>
       <EmbeddedResource Include="Resources\**" />
       <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj">
