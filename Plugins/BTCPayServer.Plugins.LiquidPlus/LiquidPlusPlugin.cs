@@ -65,7 +65,10 @@ namespace BTCPayServer.Plugins.LiquidPlus
             {
                 var code = configuration.CryptoCode
                     .Replace("-", "")
-                    .Replace("_", "");
+                    .Replace("_", "").ToUpperInvariant();
+                
+                if(code == "LBTC" || code == "USDT" || code == "ETB" || code == "LCAD")
+                    return;
                 services.AddBTCPayNetwork(new ElementsBTCPayNetwork()
                 {
                     CryptoCode = code,
