@@ -8,7 +8,7 @@
     <!-- Plugin specific properties -->
     <PropertyGroup>
         <Product>Blink</Product>
-        <Description>Brink Lightning support</Description>
+        <Description>Blink Lightning support</Description>
         <Version>1.0.3</Version>
 <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         <RootNamespace>BTCPayServer.Plugins.Blink</RootNamespace>
