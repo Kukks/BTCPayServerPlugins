@@ -51,8 +51,7 @@ public class OnChainPrismClaimCreate : IPluginHookFilter
             }
             catch (Exception exception)
             {
-                Console.WriteLine(exception);
-                throw;
+                // ignored
             }
         }
 

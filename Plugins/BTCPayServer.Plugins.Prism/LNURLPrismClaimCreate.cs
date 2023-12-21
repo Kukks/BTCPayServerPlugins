@@ -41,6 +41,7 @@ public class LNURLPrismClaimCreate : IPluginHookFilter
             }
             catch (Exception)
             {
+                // ignored
             }
         }
 
