@@ -1,5 +1,6 @@
 ﻿#nullable enable
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -9,10 +10,13 @@ using BTCPayServer.HostedServices;
 using BTCPayServer.Lightning;
 using GraphQL;
 using GraphQL.Client.Http;
+using GraphQL.Client.Http.Websocket;
 using GraphQL.Client.Serializer.Newtonsoft;
 using Microsoft.AspNetCore.OutputCaching;
 using NBitcoin;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Newtonsoft.Json.Serialization;
 using Network = NBitcoin.Network;
 
 namespace BTCPayServer.Plugins.Blink;
@@ -28,17 +32,32 @@ public class BlinkLightningClient : ILightningClient
     private readonly Network _network;
     private readonly GraphQLHttpClient _client;
 
+    public class BlinkConnectionInit
+    {
+        [JsonProperty("X-API-KEY")] public string ApiKey { get; set; }
+    }
     public BlinkLightningClient(string apiKey, Uri apiEndpoint, string walletId, Network network, HttpClient httpClient)
     {
         _apiKey = apiKey;
         _apiEndpoint = apiEndpoint;
         WalletId = walletId;
         _network = network;
-        _client = new GraphQLHttpClient(new GraphQLHttpClientOptions() {EndPoint = _apiEndpoint, WebSocketEndPoint = new Uri( "wss://" + _apiEndpoint.Host.Replace("api.", "ws.") + _apiEndpoint.PathAndQuery), ConfigureWebsocketOptions =
-            options =>
+        _client = new GraphQLHttpClient(new GraphQLHttpClientOptions() {EndPoint = _apiEndpoint,
+            WebSocketEndPoint =
+                new Uri("wss://" + _apiEndpoint.Host.Replace("api.", "ws.") + _apiEndpoint.PathAndQuery),
+            WebSocketProtocol = WebSocketProtocols.GRAPHQL_TRANSPORT_WS,
+            ConfigureWebSocketConnectionInitPayload = options => new BlinkConnectionInit() {ApiKey = apiKey},
+            ConfigureWebsocketOptions =
+                _ => { }
+        }, new NewtonsoftJsonSerializer(settings =>
+        {
+            if (settings.ContractResolver is CamelCasePropertyNamesContractResolver
+                camelCasePropertyNamesContractResolver)
             {
-                options.SetRequestHeader("X-API-KEY", apiKey);
-            }}, new NewtonsoftJsonSerializer(), httpClient);
+                camelCasePropertyNamesContractResolver.NamingStrategy.OverrideSpecifiedNames = false;
+                camelCasePropertyNamesContractResolver.NamingStrategy.ProcessDictionaryKeys = false;
+            }
+        }), httpClient);
         
         
     }
@@ -384,7 +403,7 @@ expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
             {
 
                 _lightningClient = lightningClient;
-                var stream = httpClient.CreateSubscriptionStream<dynamic>(new GraphQLRequest()
+                var stream = httpClient.CreateSubscriptionStream<JObject>(new GraphQLRequest()
                 {
                     Query = @"subscription myUpdates {
   myUpdates {
@@ -409,14 +428,16 @@ expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
                 {
                     try
                     {
-                        var x = stream;
-                        var y  = _lightningClient;
-                        if (response.Data.myUpdates.update.transaction.direction != "RECEIVE")
+                        if(response.Data is null)
                             return;
-                        if ((await _lightningClient.GetInvoice(response.Data.myUpdates.update.transaction.initiationVia
-                                .paymentHash.ToString())) is LightningInvoice inv)
+                        if (response.Data.SelectToken("myUpdates.update.transaction.direction")?.Value<string>() != "RECEIVE")
+                            return;
+                        var invoiceId = response.Data
+                            .SelectToken("myUpdates.update.transaction.initiationVia.paymentHash")?.Value<string>();
+                        if (invoiceId is null)
+                            return;
+                        if (await _lightningClient.GetInvoice(invoiceId) is LightningInvoice inv)
                         {
-
                             _invoices.Writer.TryWrite(inv);
                         }
                     }
