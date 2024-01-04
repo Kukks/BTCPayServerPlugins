@@ -13,6 +13,7 @@ using GraphQL.Client.Http;
 using GraphQL.Client.Http.Websocket;
 using GraphQL.Client.Serializer.Newtonsoft;
 using Microsoft.AspNetCore.OutputCaching;
+using Microsoft.Extensions.Logging;
 using NBitcoin;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -30,18 +31,20 @@ public class BlinkLightningClient : ILightningClient
     public string? WalletCurrency { get; set; }
 
     private readonly Network _network;
+    public ILogger Logger;
     private readonly GraphQLHttpClient _client;
 
     public class BlinkConnectionInit
     {
         [JsonProperty("X-API-KEY")] public string ApiKey { get; set; }
     }
-    public BlinkLightningClient(string apiKey, Uri apiEndpoint, string walletId, Network network, HttpClient httpClient)
+    public BlinkLightningClient(string apiKey, Uri apiEndpoint, string walletId, Network network, HttpClient httpClient, ILogger logger)
     {
         _apiKey = apiKey;
         _apiEndpoint = apiEndpoint;
         WalletId = walletId;
         _network = network;
+        Logger = logger;
         _client = new GraphQLHttpClient(new GraphQLHttpClientOptions() {EndPoint = _apiEndpoint,
             WebSocketEndPoint =
                 new Uri("wss://" + _apiEndpoint.Host.Replace("api.", "ws.") + _apiEndpoint.PathAndQuery),
@@ -226,11 +229,11 @@ query TransactionsByPaymentHash($paymentHash: PaymentHash!, $walletId: WalletId!
             return null;
 
         var initiationVia = transaction["initiationVia"];
-        if (initiationVia["paymentHash"] == null)
+        if (initiationVia?["paymentHash"] == null)
             return null;
 
         var bolt11 = BOLT11PaymentRequest.Parse((string)initiationVia["paymentRequest"], _network);
-
+        var preimage = transaction["settlementVia"]?["preImage"]?.Value<string>();
         return new LightningPayment()
         {
             Amount = bolt11.MinimumAmount,
@@ -246,6 +249,8 @@ query TransactionsByPaymentHash($paymentHash: PaymentHash!, $walletId: WalletId!
             PaymentHash = (string)initiationVia["paymentHash"],
             CreatedAt = DateTimeOffset.FromUnixTimeSeconds(transaction["createdAt"].Value<long>()),
             AmountSent = bolt11.MinimumAmount,
+            Preimage =  preimage
+
         };
     }
 
@@ -388,7 +393,7 @@ expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
 
     public async Task<ILightningInvoiceListener> Listen(CancellationToken cancellation = new CancellationToken())
     {
-        return new BlinkListener(_client, this);
+        return new BlinkListener(_client, this, Logger);
     }
 
     public class BlinkListener : ILightningInvoiceListener
@@ -397,7 +402,7 @@ expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
         private readonly Channel<LightningInvoice> _invoices = Channel.CreateUnbounded<LightningInvoice>();
         private readonly IDisposable _subscription;
 
-        public BlinkListener(GraphQLHttpClient httpClient, BlinkLightningClient lightningClient)
+        public BlinkListener(GraphQLHttpClient httpClient, BlinkLightningClient lightningClient, ILogger logger)
         {
             try
             {
@@ -443,14 +448,14 @@ expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
                     }
                     catch (Exception e)
                     {
-                        Console.WriteLine(e);
+                        logger.LogError(e, "Error while processing detecting lightning invoice payment");
                     }
                    
                 });
             }
             catch (Exception e)
             {
-                Console.WriteLine(e);
+                logger.LogError(e, "Error while creating lightning invoice listener");
             }
         }
         public void Dispose()
@@ -594,6 +599,8 @@ mutation LnInvoicePaymentSend($input: LnInvoicePaymentInput!) {
                 }
             }
         };
+        var bolt11Parsed = BOLT11PaymentRequest.Parse(bolt11, _network);
+       
         CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation,
             new CancellationTokenSource(payParams?.SendTimeout ?? PayInvoiceParams.DefaultSendTimeout).Token);
         var response =(JObject) (await  _client.SendQueryAsync<dynamic>(request,  cts.Token)).Data.lnInvoicePaymentSend;
@@ -612,7 +619,7 @@ mutation LnInvoicePaymentSend($input: LnInvoicePaymentInput!) {
         {
             result.Details = new PayDetails()
             {
-                PaymentHash = new uint256(response["transaction"]["initiationVia"]["paymentHash"].Value<string>()),
+                PaymentHash = bolt11Parsed.PaymentHash ?? new uint256(response["transaction"]["initiationVia"]["paymentHash"].Value<string>()),
                 Status = response["status"].Value<string>() switch
                 {
                     "ALREADY_PAID"  => LightningPaymentStatus.Complete,
