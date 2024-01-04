@@ -33,6 +33,11 @@ namespace BTCPayServer.Plugins.Prism
 
         public string Id { get; }
         public decimal? Amount { get; } = null;
+        
+        public override string ToString()
+        {
+            return Id;
+        }
     }
     
     /// <summary>
