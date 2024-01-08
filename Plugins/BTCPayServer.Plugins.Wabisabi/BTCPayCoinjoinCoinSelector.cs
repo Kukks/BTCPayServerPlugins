@@ -11,6 +11,7 @@ using WalletWasabi.Blockchain.TransactionOutputs;
 using WalletWasabi.Crypto.Randomness;
 using WalletWasabi.Extensions;
 using WalletWasabi.Helpers;
+using WalletWasabi.WabiSabi;
 using WalletWasabi.WabiSabi.Backend.Rounds;
 using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.Wallets;
@@ -20,12 +21,10 @@ namespace BTCPayServer.Plugins.Wabisabi;
 public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
 {
     private readonly BTCPayWallet _wallet;
-    private readonly ILogger _logger;
 
-    public BTCPayCoinjoinCoinSelector(BTCPayWallet wallet, ILogger logger)
+    public BTCPayCoinjoinCoinSelector(BTCPayWallet wallet)
     {
         _wallet = wallet;
-        _logger = logger;
     }
 
     public async Task<ImmutableList<SmartCoin>> SelectCoinsAsync(IEnumerable<SmartCoin> coinCandidates,
@@ -98,12 +97,13 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             ConsolidationModeType.WhenLowFeeAndManyUTXO => isLowFee && coinCandidates.Count() > BTCPayWallet.HighAmountOfCoins,
             _ => throw new ArgumentOutOfRangeException()
         };
-        
+        Dictionary<AnonsetType, int> idealMinimumPerType = new Dictionary<AnonsetType, int>()
+            {{AnonsetType.Red, 1}, {AnonsetType.Orange, 1}, {AnonsetType.Green, 1}};
 
         var solution = await SelectCoinsInternal(utxoSelectionParameters, coinCandidates, payments,
             Random.Shared.Next(10, 31),
             maxPerType,
-            new Dictionary<AnonsetType, int>() {{AnonsetType.Red, 1}, {AnonsetType.Orange, 1}, {AnonsetType.Green, 1}},
+            idealMinimumPerType,
             consolidationMode, liquidityClue, secureRandom);
 
         if (attemptingTobeParanoid && !solution.HandledPayments.Any())
@@ -119,7 +119,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             attemptingToMixToOtherWallet = false;
             goto selectCoins;
         }
-        _logger.LogTrace(solution.ToString());
+        _wallet.LogTrace(solution.ToString());
         return solution.Coins.ToImmutableList();
     }
 
@@ -140,19 +140,26 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
         var solution = new SubsetSolution(remainingPendingPayments.Count, _wallet.AnonScoreTarget,
             utxoSelectionParameters);
 
-
+        var cv = new CoinsView(remainingCoins);
+        var percentage = await _wallet.GetPrivacyPercentageAsync(cv);
         var fullyPrivate = await _wallet.IsWalletPrivateAsync(new CoinsView(remainingCoins));
         var coinjoiningOnlyForPayments = fullyPrivate && remainingPendingPayments.Any();
+
+        if (!consolidationMode && percentage < 1 && _wallet.ConsolidationMode != ConsolidationModeType.Never)
+        {
+            consolidationMode = true;    
+        }
+        solution.ConsolidationMode = consolidationMode;
         if (fullyPrivate && !coinjoiningOnlyForPayments )
         {
             var rand = Random.Shared.Next(1, 1001);
             if (rand > _wallet.WabisabiStoreSettings.ExtraJoinProbability)
             {
-                _logger.LogTrace($"All coins are private and we have no pending payments. Skipping join.");
+                _wallet.LogTrace($"All coins are private and we have no pending payments. Skipping join.");
                 return solution;
             }
 
-            _logger.LogTrace(
+            _wallet.LogTrace(
                 "All coins are private and we have no pending payments but will join just to reduce timing analysis");
         }
 
@@ -234,6 +241,8 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                 {
                     continue;
                 }
+
+             
                 //if we have less than the max suggested output registration, we should add more coins to reach that number to avoid breaking up into too many coins?
                 var isLessThanMaxOutputRegistration = solution.Coins.Count < Math.Max(solution.HandledPayments.Count +1, 8);
                 var rand = Random.Shared.Next(1, 101);
@@ -253,10 +262,17 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                     chance -= maxCoinCapacityPercentage;
                 }
 
-                _logger.LogDebug($"coin selection: no payments left but at {solution.Coins.Count()} coins. random chance to add another coin if: {chance} > {rand} (random 0-100) continue: {chance > rand}");
-
+               
                 if (chance <= rand)
                 {
+                    if (_wallet.MinimumDenominationAmount is not null &&
+                        Money.Coins(solution.LeftoverValue).Satoshi < _wallet.MinimumDenominationAmount)
+                    {
+                        _wallet.LogDebug(
+                            $"coin selection: leftover value {solution.LeftoverValue} is less than minimum denomination amount {_wallet.MinimumDenominationAmount} so we will try to add more coins");
+                        continue;
+                    }
+                    _wallet.LogDebug($"coin selection: no payments left but at {solution.Coins.Count()} coins. random chance to add another coin if: {chance} > {rand} (random 0-100) continue: {chance > rand}");
                     break;
                 }
                 
@@ -265,7 +281,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
 
         if (coinjoiningOnlyForPayments && solution.HandledPayments?.Any() is not true)
         {
-            _logger.LogInformation(
+            _wallet.LogInfo(
                 "Attempted to coinjoin only to fulfill payments but the coin selection results yielded no handled payment.");
             return  new SubsetSolution(remainingPendingPayments.Count, _wallet.AnonScoreTarget,
                 utxoSelectionParameters);
@@ -326,8 +342,6 @@ public static class SmartCoinExtensions
     public static AnonsetType CoinColor(this SmartCoin coin, int anonsetTarget)
     {
         return coin.IsPrivate(anonsetTarget)? AnonsetType.Green: coin.IsSemiPrivate(anonsetTarget)? AnonsetType.Orange: AnonsetType.Red;
-        return coin.AnonymitySet <= 1 ? AnonsetType.Red :
-            coin.AnonymitySet >= anonsetTarget ? AnonsetType.Green : AnonsetType.Orange;
     }
 }
 
@@ -365,10 +379,10 @@ public class SubsetSolution
         payment.ToTxOut().EffectiveCost(_utxoSelectionParameters.MiningFeeRate).ToDecimal(MoneyUnit.BTC));
 
     public decimal LeftoverValue => TotalValue - TotalPaymentCost;
+    public bool ConsolidationMode { get; set; }
 
     public override string ToString()
     {
-        var sb = new StringBuilder();
         if (!Coins.Any())
         {
             return "Solution yielded no selection of coins";
@@ -378,20 +392,8 @@ public class SubsetSolution
         sc.TryGetValue(AnonsetType.Green, out var gcoins);
         sc.TryGetValue(AnonsetType.Orange, out var ocoins);
         sc.TryGetValue(AnonsetType.Red, out var rcoins);
-        sb.AppendLine(
-            $"Solution total coins:{Coins.Count} R:{rcoins?.Length ?? 0} O:{ocoins?.Length ?? 0} G:{gcoins?.Length ?? 0} AL:{GetAnonLoss(Coins)} total value: {TotalValue} total payments:{TotalPaymentCost}/{TotalPaymentsGross} leftover: {LeftoverValue}");
-        if (HandledPayments.Any())
-            sb.AppendLine($"handled payments: {string.Join(", ", HandledPayments.Select(p => p.Value))} ");
-        return sb.ToString();
-    }
 
-
-    private static decimal GetAnonLoss<TCoin>(IEnumerable<TCoin> coins)
-        where TCoin : SmartCoin
-    {
-        double minimumAnonScore = coins.Min(x => x.AnonymitySet);
-        var rawSum = coins.Sum(x => x.Amount);
-        return coins.Sum(x =>
-            ((decimal)x.AnonymitySet - (decimal)minimumAnonScore) * x.Amount.ToDecimal(MoneyUnit.BTC)) / rawSum;
+        
+        return $"Selected {Coins.Count} ({TotalValue} BTC) ({ocoins?.Length +  rcoins?.Length} not private, {gcoins?.Length ?? 0} private) coins to pay {TotalPaymentsGross} payments ({TotalPaymentCost} BTC) with {LeftoverValue} BTC leftover\n Consolidation mode:{ConsolidationMode}";
     }
 }

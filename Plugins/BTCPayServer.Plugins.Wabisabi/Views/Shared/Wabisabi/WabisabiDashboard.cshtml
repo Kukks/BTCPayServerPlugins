@@ -13,7 +13,6 @@
 @inject WabisabiCoordinatorClientInstanceManager WabisabiCoordinatorClientInstanceManager
 
 <script src="~/Resources/chart.js" type="text/javascript"> </script>
-@inject IExplorerClientProvider ExplorerClientProvider
 
 @{
     var available = true;
@@ -21,6 +20,7 @@
     {
         return;
     }
+
     var storeId = ScopeProvider.GetCurrentStoreId();
     Context.Items["cjlite"] = true;
 }
@@ -34,7 +34,7 @@
         @if (!enabledSettings.Any())
         {
             <div class="widget">
-               <partial name="../WabisabiStore/UpdateWabisabiStoreSettings" model="@settings"/>
+                <partial name="../WabisabiStore/UpdateWabisabiStoreSettings" model="@settings"/>
             </div>
         }
         else
@@ -65,7 +65,7 @@
             var privacy = wallet.GetPrivacyPercentage(coins, wallet.AnonScoreTarget);
 
             var privacyPercentage = Math.Round(privacy * 100);
-           var data = new
+            var data = new
             {
                 privacyProgress = privacyPercentage,
                 targetScore = wallet.AnonScoreTarget,
@@ -78,11 +78,9 @@
                     id = coin.Outpoint.ToString(),
                     coinjoinInProgress = coin.CoinJoinInProgress
                 }).OrderBy(coin => coin.isPrivate).ThenBy(coin => coin.score),
-
             };
-            @if(coins.Any())
+            @if (coins.Any())
             {
-        
                 <script>
             
             document.addEventListener("DOMContentLoaded", function () {
@@ -261,6 +259,7 @@ updateInProgressAnimation(myChart);
             });
             </script>
             }
+
             <div class="widget store-numbers">
 
                 @if (wallet is { })
@@ -289,10 +288,11 @@ updateInProgressAnimation(myChart);
 
                     @if (coins.Any())
                     {
-                        <div class="d-flex justify-content-center mb-4" style="max-height: 400px; "> <canvas id="cjchart"></canvas></div>
-                       
-                    }                  
-                    
+                        <div class="d-flex justify-content-center mb-4" style="max-height: 400px; ">
+                            <canvas id="cjchart"></canvas>
+                        </div>
+                    }
+
                     <div class="modal modal-lg fade" id="coins" data-bs-keyboard="false" tabindex="-1">
                         <div class="modal-dialog">
                             <div class="modal-content">
@@ -372,6 +372,7 @@ updateInProgressAnimation(myChart);
                                     tracker?.CoinJoinClient?.RoundStatusUpdater?.RoundStates?.TryGetValue(tracker?.CoinJoinClient?.CurrentRoundId, out currentRound) is true)
                                 {
                                 }
+
                                 var statusMsg = coordinator.WasabiCoordinatorStatusFetcher.Connected ? $"Connected to {(coordinator.Coordinator?.ToString() ?? "local")}" : $"Not connected to {(coordinator.Coordinator?.ToString() ?? "local")}";
                                 <div class="list-group-item">
                                     <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
@@ -422,7 +423,9 @@ updateInProgressAnimation(myChart);
                                                     </tr>
                                                     <tr>
                                                         <th scope="">Round id</th>
-                                                        <td class="text-truncate"><vc:truncate-center text="@currentRound.Id.ToString()" classes="truncate-center-id"></vc:truncate-center></td>
+                                                        <td class="text-truncate">
+                                                            <vc:truncate-center text="@currentRound.Id.ToString()" classes="truncate-center-id"></vc:truncate-center>
+                                                        </td>
                                                     </tr>
                                                     <tr>
                                                         <th scope="">Mining feerate</th>
@@ -439,7 +442,9 @@ updateInProgressAnimation(myChart);
                                                         {
                                                             statement += $" / {tracker.CoinJoinClient.CoinsToRegister.Count()} inputs ({tracker.CoinJoinClient.CoinsToRegister.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC))} BTC)";
                                                         }
-                                                        <tr>
+
+                                                        var inputToolTip = tracker.CoinJoinClient.CoinsToRegister.Aggregate("", (current, coin) => current + $"{coin.Amount.ToDecimal(MoneyUnit.BTC)} BTC\n");
+                                                        <tr data-bs-toggle="tooltip" title="@inputToolTip">
                                                             <th scope="">Your inputs</th>
                                                             <td class="">
                                                                 <span class="w-100">@statement</span>
@@ -459,9 +464,11 @@ updateInProgressAnimation(myChart);
                                                         </tr>
                                                         if (tracker.CoinJoinClient.OutputTxOuts is { } outputs)
                                                         {
-                                                            var statement = $"{outputs.outputTxOuts.Count()} outputs ({outputs.outputTxOuts.Sum(coin => coin.Value.ToDecimal(MoneyUnit.BTC))} BTC {(outputs.batchedPayments.Any()? $"{outputs.batchedPayments.Count()} batched payments": "")}";
-                                                            
-                                                            <tr>
+                                                            var statement = $"{outputs.outputTxOuts.Count()} outputs ({outputs.outputTxOuts.Sum(coin => coin.Value.ToDecimal(MoneyUnit.BTC))} BTC {(outputs.batchedPayments.Any() ? $"{outputs.batchedPayments.Count()} batched payments" : "")}";
+                                                            var outputToolTip = outputs.outputTxOuts.Aggregate("", (current, output) => current + $"{output.Value.ToDecimal(MoneyUnit.BTC)} BTC\n");
+
+
+                                                            <tr data-bs-toggle="tooltip" title="@outputToolTip">
                                                                 <th scope="">Your outputs</th>
                                                                 <td >@statement</td>
                                                             </tr>
@@ -470,8 +477,6 @@ updateInProgressAnimation(myChart);
                                                 </table>
 
                                             </div>
-
-                                   
                                         }
                                     }
                                 </div>
@@ -481,16 +486,14 @@ updateInProgressAnimation(myChart);
 
                     @if (coins.Any())
                     {
-                        
                         <button type="button" class="btn btn-text p-1" data-bs-toggle="modal" data-bs-target="#coins">
                             View coins
                         </button>
                     }
                     @if (wallet.LastLogs.Any())
                     {
-                        
                         <button type="button" class="btn btn-text p-1" data-bs-toggle="modal" data-bs-target="#logs">
-                           Recent logs
+                            Recent logs
                         </button>
                         <div class="modal modal-lg fade" id="logs" data-bs-keyboard="false" tabindex="-1">
                             <div class="modal-dialog">
@@ -499,32 +502,41 @@ updateInProgressAnimation(myChart);
                                         <h3 class="mb-0">Coinjoin logs</h3>
                                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                                     </div>
-                                    <div class="modal-body table-responsive mt-0">
-                                        <table class="table">
-                                            <thead>
-                                            <tr>
-                                                <th>Message</th>
-                                            </tr>
-                                            </thead>
-                                            <tbody>
-                                            @foreach (var evt in wallet.LastLogs)
-                                            {
-                                                string cssClass = evt.Item1 <= (LogLevel) 2 ? "info" : evt.Item1 == (LogLevel) 4 ? "warning" : "danger";
-                                                <tr class="text-@cssClass">
-                                                    <td>@evt.Item2</td>
+                                    <div class="modal-body  mt-0">
+                                        <div class="table-responsive">
+                                            
+                                            <table class="table">
+                                                <thead>
+                                                <tr>
+                                                    <th>Time</th>
+                                                    <th>Message</th>
                                                 </tr>
-                                            }
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                    <div class="modal-footer">
-                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                                </thead>
+                                                <tbody>
+                                                @foreach (var evt in wallet.LastLogs)
+                                                {
+                                                    string cssClass = evt.level <= (LogLevel) 2 ? "info" : evt.level == (LogLevel) 4 ? "warning" : "danger";
+                                                    <tr class="text-@cssClass">
+                                                        <td>
+                                                            <small class="text-muted" data-timeago-unixms="@evt.time.ToUnixTimeMilliseconds()">@evt.time.ToTimeAgo()</small>
+                                                        </td>
+                                                        <td>
+                                                            <pre>@evt.message</pre>
+                                                        </td>
+                                                    </tr>
+                                                }
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                    </div>
+                        </div>
                     }
-                    
+
                 </div>
             </div>
         }
