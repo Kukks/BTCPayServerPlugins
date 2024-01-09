@@ -27,12 +27,14 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
         _wallet = wallet;
     }
 
-    public async Task<ImmutableList<SmartCoin>> SelectCoinsAsync(IEnumerable<SmartCoin> coinCandidates,
+    public async Task<ImmutableList<SmartCoin>> SelectCoinsAsync(
+        (IEnumerable<SmartCoin> Candidates, IEnumerable<SmartCoin> Ineligible) coinCandidates,
         UtxoSelectionParameters utxoSelectionParameters,
         Money liquidityClue, SecureRandom secureRandom)
     {
-        coinCandidates =
-            coinCandidates
+        SmartCoin[] FilterCoinsMore(IEnumerable<SmartCoin> coins)
+        {
+            return coins
                 .Where(coin => utxoSelectionParameters.AllowedInputScriptTypes.Contains(coin.ScriptType))
                 .Where(coin => utxoSelectionParameters.AllowedInputAmounts.Contains(coin.Amount))
                 .Where(coin =>
@@ -65,11 +67,18 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
 
                     return false;
                     
-                });
+                }).ToArray();
+        }
+
+        var candidates =
+            FilterCoinsMore(coinCandidates.Candidates);
+        var ineligibleCoins =
+            FilterCoinsMore(coinCandidates.Ineligible);
+        
         var payments =
-            _wallet.BatchPayments
+            (_wallet.BatchPayments
                 ? await _wallet.DestinationProvider.GetPendingPaymentsAsync(utxoSelectionParameters)
-                : Array.Empty<PendingPayment>();
+                : Array.Empty<PendingPayment>()).ToArray();
         
         var maxPerType = new Dictionary<AnonsetType, int>();
 
@@ -94,13 +103,13 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             ConsolidationModeType.Always => true,
             ConsolidationModeType.Never => false,
             ConsolidationModeType.WhenLowFee => isLowFee,
-            ConsolidationModeType.WhenLowFeeAndManyUTXO => isLowFee && coinCandidates.Count() > BTCPayWallet.HighAmountOfCoins,
+            ConsolidationModeType.WhenLowFeeAndManyUTXO => isLowFee && candidates.Count() > BTCPayWallet.HighAmountOfCoins,
             _ => throw new ArgumentOutOfRangeException()
         };
         Dictionary<AnonsetType, int> idealMinimumPerType = new Dictionary<AnonsetType, int>()
             {{AnonsetType.Red, 1}, {AnonsetType.Orange, 1}, {AnonsetType.Green, 1}};
 
-        var solution = await SelectCoinsInternal(utxoSelectionParameters, coinCandidates, payments,
+        var solution = await SelectCoinsInternal(utxoSelectionParameters, candidates, ineligibleCoins,payments,
             Random.Shared.Next(10, 31),
             maxPerType,
             idealMinimumPerType,
@@ -124,7 +133,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
     }
 
     private async Task<SubsetSolution> SelectCoinsInternal(UtxoSelectionParameters utxoSelectionParameters,
-        IEnumerable<SmartCoin> coins, IEnumerable<PendingPayment> pendingPayments,
+        IEnumerable<SmartCoin> coins,IEnumerable<SmartCoin> ineligibleCoins, IEnumerable<PendingPayment> pendingPayments,
         int maxCoins,
         Dictionary<AnonsetType, int> maxPerType, Dictionary<AnonsetType, int> idealMinimumPerType,
         bool consolidationMode, Money liquidityClue, SecureRandom random)
@@ -150,6 +159,23 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             consolidationMode = true;    
         }
         solution.ConsolidationMode = consolidationMode;
+        if(consolidationMode && coins.Count() < 8 && !coinjoiningOnlyForPayments  && ineligibleCoins.Any())
+        {
+            //if we're in consolidation mode, and there are coins not eligible for a reason  that will be ok in the near future, we should try to wait for them to become eligible instead of entering multiple coinjoins, which costs more.
+            // why are they ineligible? banned if not too far in the future is ok, unconfrmed as well
+            if (ineligibleCoins.Any(coin => !coin.Confirmed))
+            {
+                // if there are unconfirmed coins, we should wait for them to confirm, but since we cant determine if they will be unconfirmed for a long time,. let's play  a random chance game: the more coins we have towards the 8 coin goal, the bigger the chance we proceed with the coinjoin
+                var rand = Random.Shared.Next(1, 101);
+                var chance = (coins.Count()/8) * 100;
+                _wallet.LogDebug($"coin selection: consolidation mode, and there are coins not eligible for a reason  that will be ok in the near future, we should try to wait for them to become eligible instead of entering multiple coinjoins, which costs more. random chance to proceed: {chance} > {rand} (random 0-100) continue: {chance > rand}");
+                if (chance > rand)
+                {
+                    return solution;
+                }
+            }
+        }
+        
         if (fullyPrivate && !coinjoiningOnlyForPayments )
         {
             var rand = Random.Shared.Next(1, 1001);

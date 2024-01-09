@@ -106,7 +106,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         };
         if(LastLogs.FirstOrDefault().message != logMessage)
             LastLogs.Insert(0, (DateTimeOffset.Now, ll, logMessage) );
-        if (LastLogs.Count >= 100)
+        if (LastLogs.Count >= 500)
             LastLogs.RemoveLast();
         
         _logger.Log(ll, logMessage, callerFilePath, callerMemberName, callerLineNumber);
