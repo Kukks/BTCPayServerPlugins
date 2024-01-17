@@ -1,0 +1,19 @@
+﻿@inject MicroNodeService MicroNodeService;
+@using BTCPayServer.Plugins.MicroNode
+@model BTCPayServer.Models.StoreViewModels.LightningNodeViewModel
+
+@if (Model.CryptoCode != "BTC")
+{
+    return;
+}
+@{
+    var client = await MicroNodeService.GetStoreSettings(Model.StoreId);
+    var storeId = Model.StoreId;
+}
+@if (client is null)
+{
+    <a asp-action="Configure" asp-controller="MicroNode" asp-route-storeId="@storeId" value="Custom" type="radio" id="LightningNodeType-MicroNode" role="tab" aria-controls="MicroNodeSetup" aria-selected="false" name="LightningNodeType"  ><label for="LightningNodeType-MicroNode">Configure Micro Node</label></a>
+
+}else{
+<input value="Custom" type="radio" id="LightningNodeType-MicroNode" data-bs-toggle="pill" data-bs-target="#MicroNodeSetup" role="tab" aria-controls="MicroNodeSetup" aria-selected="false" name="LightningNodeType">
+<label for="LightningNodeType-MicroNode">Use Micro node</label>}

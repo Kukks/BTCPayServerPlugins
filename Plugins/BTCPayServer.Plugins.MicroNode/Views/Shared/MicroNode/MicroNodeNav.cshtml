@@ -1,0 +1,31 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Client
+@using BTCPayServer.Plugins.MicroNode
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@inject IScopeProvider ScopeProvider
+@inject MicroNodeService MicroNodeService
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+}
+@if (!string.IsNullOrEmpty(storeId))
+{
+    var masters = (await MicroNodeService.GetMasterSettings()).Select(m => new SelectListItem(m.Value.Name, m.Key)).ToArray();
+    @if (masters.Any())
+    {
+
+
+        <li class="nav-item">
+            <a permission="@Policies.CanModifyStoreSettings" asp-controller="MicroNode" asp-action="Configure" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("MicroNode")" id="Nav-MicroNode">
+                <span>MicroNode</span>
+            </a>
+        </li>
+
+    }
+
+    <li class="nav-item">
+        <a permission="@Policies.CanModifyStoreSettings" asp-controller="MicroNode" asp-action="ConfigureMaster" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("MicroNodeMaster")" id="Nav-MicroNodeMaster">
+            <span>MicroNode Master</span>
+        </a>
+    </li>
+}

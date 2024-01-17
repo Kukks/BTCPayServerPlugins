@@ -1,0 +1,102 @@
+﻿@using BTCPayServer
+@using BTCPayServer.Lightning
+@using BTCPayServer.Plugins.MicroNode
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@model BTCPayServer.Plugins.MicroNode.MicroNodeSettings
+@inject MicroNodeService MicroNodeService
+@{
+    ViewData.SetActivePage("MicroNode ", "Configure Master", "ConfigureMaster");
+    var storeId = Context.GetCurrentStoreId();
+}
+<form method="post" asp-action="ConfigureMaster" asp-controller="MicroNode" asp-route-storeId="@storeId">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <h3 class="mb-0">
+                    <span>@ViewData["Title"]</span>
+                </h3>
+                <div class="d-flex gap-3 mt-3 mt-sm-0">
+                    <button name="command" type="submit" value="save" class="btn btn-primary">Save</button>
+                    @if (Model is not null)
+                    {
+                        <button name="command" type="submit" value="clear" class="btn btn-danger">Clear</button>
+                    }
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-xl-8 col-xxl-constrain">
+                    <div class="form-group form-check">
+                        <input asp-for="Enabled" type="checkbox" class="form-check-input"/>
+                        <label asp-for="Enabled" class="form-check-label"></label>
+                        <span asp-validation-for="Enabled" class="text-danger"></span>
+                    </div>
+                    <div class="form-group form-check">
+                        <input asp-for="AdminOnly" type="checkbox" class="form-check-input"/>
+                        <label asp-for="AdminOnly" class="form-check-label"></label>
+                        <span asp-validation-for="AdminOnly" class="text-danger"></span>
+                    </div>
+                    <div class="form-group">
+                        <label asp-for="Name" class="form-label" ></label>
+                        <input asp-for="Name" type="text" class="form-control" required/>
+                        <span asp-validation-for="Name" class="text-danger"></span>
+                    </div>
+
+                </div>
+            </div>
+            
+            @if (Model is not null)
+            {
+               var ls =  await MicroNodeService.GetMasterLiabilities(storeId, true);
+               
+               <table class="table">
+                   
+                   <tr>
+                       <th>Store id</th>
+                       <th>Key</th>
+                       <th>Balance</th>
+                       
+                   </tr>
+                   
+                   @foreach (var l in ls)
+                   {
+                       var ssk = await MicroNodeService.GetStoreSettingsFromKey(l.Key);
+
+                       <tr>
+                           <td>
+                               @ssk?.Key
+                           </td>
+                           <td>@l.Key</td>
+                           <td>@LightMoney.MilliSatoshis(l.Balance).ToDecimal(LightMoneyUnit.BTC) BTC</td>
+                       </tr>
+                       <tr >
+                           <td colspan="2">
+                               <table class="table">
+                                   <tr>
+                                       <th>Id</th>
+                                       <th>Accounted</th>
+                                       <th>Active</th>
+                                       <th>Type</th>
+                                       <th>Amount</th>
+
+                                   </tr>
+                                   @foreach(var p in l.Transactions)
+                                   {
+                                       <tr>
+                                           <td>@p.Id</td>
+                                           <td>@p.Accounted</td>
+                                           <td>@p.Active</td>
+                                           <td>@p.Type</td>
+                                           <td>@LightMoney.MilliSatoshis(p.Amount).ToDecimal(LightMoneyUnit.BTC) BTC</td>
+                                       </tr>
+                                   }
+                               </table>
+                           </td>
+                       </tr>
+                   }
+               </table>
+               
+            }
+        </div>
+    </div>
+</form>

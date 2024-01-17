@@ -1,0 +1,66 @@
+﻿@inject MicroNodeService MicroNodeService;
+@using BTCPayServer.Plugins.MicroNode
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using BTCPayServer.Abstractions.TagHelpers
+@model BTCPayServer.Models.StoreViewModels.LightningNodeViewModel
+@{
+    var storeId = Model.StoreId;
+    if (Model.CryptoCode != "BTC")
+    {
+        return;
+    }
+    var client = await MicroNodeService.GetStoreSettings(storeId);
+}
+
+<div id="MicroNodeSetup" class="pt-3 tab-pane fade" role="tabpanel" aria-labelledby="LightningNodeType-MicroNode">
+    @if (client is not null)
+    {
+    }
+    else
+    {
+        <a asp-action="Configure" asp-controller="MicroNode" asp-route-storeId="@storeId">MicroNode needs to be configured beforehand.</a>
+    }
+</div>
+@if (client is not null)
+{
+    <script>
+    const typePrefix = 'type=micro;key=@client.Key';
+    const triggerEl = document.getElementById('LightningNodeType-MicroNode')
+    const connStringEl = document.getElementById('ConnectionString')
+    const connString = connStringEl.value;
+    const isMicro = connString.startsWith(typePrefix);
+
+    
+    if (isMicro) {
+        
+        // deactivate currently active tab and activate Breez tab
+        const activeEl = document.querySelector('input[name="LightningNodeType"]:checked')
+        if (activeEl) {
+            activeEl.removeAttribute('checked')
+            activeEl.setAttribute('aria-selected', 'false')
+            document.querySelector('#LightningNodeTypeTabs .tab-pane.active').classList.remove('active', 'show')
+            triggerEl.setAttribute('checked', 'checked')
+            triggerEl.setAttribute('aria-selected', 'true')
+            document.getElementById('MicroNodeSetup').classList.add('active', 'show')
+           
+        }
+    }
+    
+    document.addEventListener('DOMContentLoaded', () => {
+        if (isBreez) {
+            const tabTrigger = new bootstrap.Tab(triggerEl)
+            triggerEl.checked = true
+            tabTrigger.show()
+        }
+        
+        delegate('change', 'input[name="LightningNodeType"]', e => {
+           
+            const activeEl = document.querySelector('input[name="LightningNodeType"]:checked')
+            if (activeEl.id === "LightningNodeType-MicroNode"){
+                connStringEl.value =typePrefix;
+            }
+             
+        })
+    })
+</script>
+}

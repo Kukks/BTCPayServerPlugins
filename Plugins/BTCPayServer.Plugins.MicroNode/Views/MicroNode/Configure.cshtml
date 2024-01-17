@@ -1,0 +1,96 @@
+﻿@using BTCPayServer
+@using BTCPayServer.Client
+@using BTCPayServer.Lightning
+@using BTCPayServer.Plugins.MicroNode
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@model BTCPayServer.Plugins.MicroNode.MicroNodeStoreSettings?
+@inject IAuthorizationService AuthorizationService
+@inject MicroNodeService MicroNodeService
+@{
+    ViewData.SetActivePage("MicroNode ", "Configure", "Configure");
+    var storeId = Context.GetCurrentStoreId();
+    var isAdmin = (await AuthorizationService.AuthorizeAsync(User, Policies.CanModifyServerSettings)).Succeeded;
+    var masters = (await MicroNodeService.GetMasterSettings())
+        .Where(pair => pair.Key != storeId && (isAdmin || pair.Value.AdminOnly is false))
+        .Select(m => new SelectListItem(m.Value.Name, m.Key)).ToArray();
+    var masterId = Context.Items.TryGetValue("MasterId", out var masterIdObj) ? masterIdObj?.ToString() : null;
+
+    var payments = await MicroNodeService.GetTransactions(storeId);
+}
+<form method="post" asp-action="Configure" asp-controller="MicroNode" asp-route-storeId="@storeId">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <h3 class="mb-0">
+                    <span>@ViewData["Title"]</span>
+                </h3>
+                <div class="d-flex gap-3 mt-3 mt-sm-0">
+                    @if (masters.Any())
+                    {
+                        <button name="command" type="submit" value="save" class="btn btn-primary">Save</button>
+                    }
+                    @if (Model?.Key is not null)
+                    {
+                        <button name="command" type="submit" value="clear" class="btn btn-danger">Clear</button>
+                    }
+                </div>
+            </div>
+ @if (masters.Any())
+            {
+
+                <div class="row">
+                    <div class="col-xl-8 col-xxl-constrain">
+                        <div class="form-group">
+                            <label for="masterStoreId" class="form-label" data-required>Master</label>
+                            <select name="masterStoreId" id="masterStoreId" asp-items="@masters" class="form-select" value="@masterId"></select>
+                        </div>
+                        <div class="form-group">
+                            <label asp-for="ForwardDestination" class="form-label">Forward Destination</label>
+                            <input asp-for="ForwardDestination" class="form-control"/>
+                            <span asp-validation-for="ForwardDestination" class="text-danger"></span>
+                            <p class="text-muted pt-2">Forward Destination</p>
+
+                        </div>
+                    </div>
+                </div>
+            }
+ else
+ {
+     <div class="alert alert-warning">
+         <p class="mb-0">There is no master node available to use</p>
+        </div>
+ }
+            @if (payments?.Any() is true)
+            {
+                <div class="row">
+                    <div class="table-responsive">
+                        <table class="table">
+                            <tr>
+                                <th>Id</th>
+                                <th>Accounted</th>
+                                <th>Active</th>
+                                <th>Type</th>
+                                <th>Amount</th>
+
+                            </tr>
+                            @foreach (var p in payments)
+                            {
+                                <tr>
+                                    <td>@p.Id</td>
+                                    <td>@p.Accounted</td>
+                                    <td>@p.Active</td>
+                                    <td>@p.Type</td>
+                                    <td>@LightMoney.MilliSatoshis(p.Amount).ToDecimal(LightMoneyUnit.BTC) BTC</td>
+                                </tr>
+                            }
+                        </table>
+                    </div>
+                </div>
+            }
+
+
+            <input type="hidden" asp-for="Key"/>
+        </div>
+    </div>
+</form>
