@@ -2,6 +2,7 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Extensions;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
+using BTCPayServer.HostedServices.Webhooks;
 using BTCPayServer.Services.Apps;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -18,6 +19,7 @@ namespace BTCPayServer.Plugins.TicketTailor
         {
             applicationBuilder.AddStartupTask<AppMigrate>();
             applicationBuilder.AddSingleton<TicketTailorService>();
+            applicationBuilder.AddSingleton<IWebhookProvider>(o => o.GetRequiredService<TicketTailorService>());
             applicationBuilder.AddHostedService(s => s.GetRequiredService<TicketTailorService>());
 
             applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("TicketTailor/NavExtension", "header-nav"));
