@@ -9,7 +9,7 @@
     <PropertyGroup>
         <Product>TicketTailor</Product>
         <Description>Allows you to integrate with TicketTailor.com to sell tickets for Bitcoin</Description>
-        <Version>2.0.0</Version>
+        <Version>2.0.1</Version>
 <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->

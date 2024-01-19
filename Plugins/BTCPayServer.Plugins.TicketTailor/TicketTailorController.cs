@@ -152,6 +152,13 @@ namespace BTCPayServer.Plugins.TicketTailor
                             !new[] {"on_sale", "locked"}.Contains(ticketType.Status.ToLowerInvariant())
                             || specificTicket?.Hidden is true)
                         {
+                            if (preview)
+                            {
+                                return Json(new
+                                {
+                                   Error = "The ticket was not found."
+                                });
+                            }
                             TempData.SetStatusMessageModel(new StatusMessageModel
                             {
                                 Severity = StatusMessageModel.StatusSeverity.Error,
@@ -163,6 +170,14 @@ namespace BTCPayServer.Plugins.TicketTailor
                         if (purchaseRequestItem.Quantity > ticketType.MaxPerOrder ||
                             purchaseRequestItem.Quantity < ticketType.MinPerOrder)
                         {
+                            if (preview)
+                            {
+                                return Json(new
+                                {
+                                    Error = "The amount of tickets was not allowed."
+                                });
+                            }
+                            
                             TempData.SetStatusMessageModel(new StatusMessageModel
                             {
                                 Severity = StatusMessageModel.StatusSeverity.Error,

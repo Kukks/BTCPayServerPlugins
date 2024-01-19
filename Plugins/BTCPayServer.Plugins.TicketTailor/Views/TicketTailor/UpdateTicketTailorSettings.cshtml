@@ -54,7 +54,7 @@
                 <span asp-validation-for="AppName" class="text-danger"></span>
             </div>
             <div class="form-group">
-                <label asp-for="ApiKey" class="form-label" data-required>TicketTailor API Key</label>
+                <label asp-for="ApiKey" class="form-label" data-required>TicketTailor API Key (<a href="https://get.tickettailor.com/8z1ee1o4xrne" target="_blank">get it here</a>)</label>
                 <input asp-for="ApiKey" class="form-control" required/>
                 <span asp-validation-for="ApiKey" class="text-danger"></span>
             </div>
@@ -86,7 +86,7 @@
                 </div>
                 <div class="form-group form-check">
                     <input asp-for="AllowDiscountCodes" type="checkbox" class="form-check-input"/>
-                    <label asp-for="AllowDiscountCodes" class="form-check-label">Allow discount codes (due to the nature of Ticket Tailor's API, redemption limit is not applied.</label>
+                    <label asp-for="AllowDiscountCodes" class="form-check-label">Allow discount codes (due to the nature of Ticket Tailor's API, redemption limit is not applied)</label>
                     <span asp-validation-for="AllowDiscountCodes" class="text-danger"></span>
                 </div>
                 <div class="form-group form-check">

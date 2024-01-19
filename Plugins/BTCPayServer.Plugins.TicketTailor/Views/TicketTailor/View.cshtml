@@ -29,8 +29,67 @@
                {
                    @Safe.Raw(Model.Settings.CustomCSS)
                }
-
-</style>
+    </style>
+    <script>
+    document.addEventListener("DOMContentLoaded", ()=>{
+        const form = document.querySelector("form");
+        const btn = document.querySelector("button[type='submit']");
+        const inputs = document.querySelectorAll("input");
+        const discountCode = document.querySelector("#DiscountCode");
+        inputs.forEach(value => value.addEventListener("input", (evt)=>{    
+            let total = 0;
+            let totalQty = 0;
+            document.querySelectorAll("[data-price]").forEach(value1 => {
+                if (!!value1.value){
+                    const qty = parseInt(value1.value);
+                    if (qty > 0){
+                        
+                    const price = parseFloat(value1.dataset.price).toPrecision(12);
+                    total += price * qty;
+                    totalQty += qty;
+                    }
+                }
+            });
+            
+                        btn.classList.remove("btn-warning");
+            if (totalQty > 0){
+                btn.removeAttribute("disabled");
+            }
+            else{
+                btn.setAttribute("disabled", "disabled");
+            }
+            btn.textContent = `Purchase for ${total.toFixed(2)} @Model.Event.Currency.ToUpperInvariant()`
+            
+            if (discountCode && discountCode.value && totalQty > 0){
+                const data = new FormData(form);
+                const xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                if (this.readyState === 4 && this.status === 200) {
+                    const response = JSON.parse(this.responseText);  
+                    if (response.error){
+                        console.error(response.error);
+                        btn.setAttribute("disabled", "disabled");
+                        btn.classList.add("btn-warning");
+                        btn.textContent = `Purchase unavailable due to ${response.error.toLowerCase()}`
+                        return;
+                    }
+                    if (response.discountedAmount){  
+                        btn.innerHTML = `Purchase for ${response.total.toFixed(2)} @Model.Event.Currency.ToUpperInvariant()<br/><span class="">${response.discountedAmount.toFixed(2)} @Model.Event.Currency.ToUpperInvariant() discount</span>`
+                    } else{  
+                        btn.textContent = `Purchase for ${response.total.toFixed(2)} @Model.Event.Currency.ToUpperInvariant()`
+                    }
+                }
+            }
+                 xhttp.open("POST", "@Url.Action("Purchase", new {appId, preview = true})", true);
+                 xhttp.send(data);
+               }
+        }))
+        form.addEventListener("submit", ()=>{
+            btn.setAttribute("disabled", "disabled");
+            inputs.forEach(value => value.setAttribute("readonly", "readonly"));
+        })
+    })
+    </script>
 </head>
 <body class="min-vh-100">
 <div id="TicketTailor" class="public-page-wrap">
