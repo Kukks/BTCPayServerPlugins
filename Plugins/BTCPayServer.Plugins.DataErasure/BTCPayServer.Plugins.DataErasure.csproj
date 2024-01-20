@@ -39,4 +39,10 @@
     <ItemGroup>
       <Folder Include="Resources\js" />
     </ItemGroup>
+
+
+
+    <ItemGroup>
+      <PackageReference Include="AsyncKeyedLock" Version="6.3.3" />
+    </ItemGroup>
 </Project>

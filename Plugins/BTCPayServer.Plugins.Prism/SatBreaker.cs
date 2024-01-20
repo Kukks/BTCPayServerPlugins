@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using AsyncKeyedLock;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Configuration;
@@ -252,16 +253,7 @@ namespace BTCPayServer.Plugins.Prism
                 }, cancellationToken);
         }
 
-        public async Task WaitAndLock(CancellationToken cancellationToken = default)
-        {
-            await _updateLock.WaitAsync(cancellationToken);
-        }
-
-        public void Unlock()
-        {
-            _updateLock.Release();
-        }
-        private readonly SemaphoreSlim _updateLock = new(1, 1);
+        private readonly AsyncNonKeyedLocker _updateLock = new(1);
 
         public async Task<PrismSettings> Get(string storeId)
         {
@@ -274,10 +266,11 @@ namespace BTCPayServer.Plugins.Prism
         public async Task<bool> UpdatePrismSettingsForStore(string storeId, PrismSettings updatedSettings,
             bool skipLock = false)
         {
+            AsyncNonKeyedLockReleaser releaser = default;
             try
             {
                 if (!skipLock)
-                    await WaitAndLock();
+                    releaser = await _updateLock.LockAsync();
                 var currentSettings = await Get(storeId);
 
                 if (currentSettings.Version != updatedSettings.Version)
@@ -297,7 +290,7 @@ namespace BTCPayServer.Plugins.Prism
             finally
             {
                 if (!skipLock)
-                    Unlock();
+                    releaser.Dispose();
             }
 
             var prismPaymentDetectedEventArgs = new PrismPaymentDetectedEventArgs()
@@ -415,74 +408,71 @@ namespace BTCPayServer.Plugins.Prism
         {
             try
             {
-                await WaitAndLock(cancellationToken);
-
-                switch (evt)
+                using (await _updateLock.LockAsync(cancellationToken))
                 {
-                    case StoreRemovedEvent storeRemovedEvent:
-                        _prismSettings.Remove(storeRemovedEvent.StoreId);
-                        return;
-                    case InvoiceEvent invoiceEvent when
-                        new[] {InvoiceEventCode.Confirmed, InvoiceEventCode.MarkedCompleted}.Contains(
-                            invoiceEvent.EventCode):
+                    switch (evt)
                     {
-                        if (!_prismSettings.TryGetValue(invoiceEvent.Invoice.StoreId, out var prismSettings) ||
-                            !prismSettings.Enabled)
-                        {
+                        case StoreRemovedEvent storeRemovedEvent:
+                            _prismSettings.Remove(storeRemovedEvent.StoreId);
                             return;
-                        }
-
-                        var prisms = DetermineMatches(prismSettings, invoiceEvent.Invoice);
-                        foreach (var prism in prisms)
-                        {
-                            if (prism.Item2 is not { } msats || msats<= 0)
-                                continue;
-                            var splits = prism.Item1?.Destinations;
-                            if (splits?.Any() is not true)
-                                continue;
-
-                            //compute the sats for each destination  based on splits percentage
-                            var msatsPerDestination =
-                                splits.ToDictionary(s => s.Destination, s => (long) (msats.MilliSatoshi * (s.Percentage / 100)));
-
-                            prismSettings.DestinationBalance ??= new Dictionary<string, long>();
-                            foreach (var (destination, splitMSats) in msatsPerDestination)
+                        case InvoiceEvent invoiceEvent when
+                            new[] { InvoiceEventCode.Confirmed, InvoiceEventCode.MarkedCompleted }.Contains(
+                                invoiceEvent.EventCode):
                             {
-                                if (prismSettings.DestinationBalance.TryGetValue(destination, out var currentBalance))
+                                if (!_prismSettings.TryGetValue(invoiceEvent.Invoice.StoreId, out var prismSettings) ||
+                                    !prismSettings.Enabled)
                                 {
-                                    prismSettings.DestinationBalance[destination] = currentBalance + splitMSats;
+                                    return;
                                 }
-                                else if (splitMSats > 0)
-                                {
-                                    prismSettings.DestinationBalance.Add(destination, splitMSats);
-                                }
-                            }
-                        }
 
-                        await UpdatePrismSettingsForStore(invoiceEvent.Invoice.StoreId, prismSettings, true);
-                        if (await CreatePayouts(invoiceEvent.Invoice.StoreId, prismSettings))
-                        {
-                            await UpdatePrismSettingsForStore(invoiceEvent.Invoice.StoreId, prismSettings, true);
-                        }
-                        break;
+                                var prisms = DetermineMatches(prismSettings, invoiceEvent.Invoice);
+                                foreach (var prism in prisms)
+                                {
+                                    if (prism.Item2 is not { } msats || msats <= 0)
+                                        continue;
+                                    var splits = prism.Item1?.Destinations;
+                                    if (splits?.Any() is not true)
+                                        continue;
+
+                                    //compute the sats for each destination  based on splits percentage
+                                    var msatsPerDestination =
+                                        splits.ToDictionary(s => s.Destination, s => (long)(msats.MilliSatoshi * (s.Percentage / 100)));
+
+                                    prismSettings.DestinationBalance ??= new Dictionary<string, long>();
+                                    foreach (var (destination, splitMSats) in msatsPerDestination)
+                                    {
+                                        if (prismSettings.DestinationBalance.TryGetValue(destination, out var currentBalance))
+                                        {
+                                            prismSettings.DestinationBalance[destination] = currentBalance + splitMSats;
+                                        }
+                                        else if (splitMSats > 0)
+                                        {
+                                            prismSettings.DestinationBalance.Add(destination, splitMSats);
+                                        }
+                                    }
+                                }
+
+                                await UpdatePrismSettingsForStore(invoiceEvent.Invoice.StoreId, prismSettings, true);
+                                if (await CreatePayouts(invoiceEvent.Invoice.StoreId, prismSettings))
+                                {
+                                    await UpdatePrismSettingsForStore(invoiceEvent.Invoice.StoreId, prismSettings, true);
+                                }
+                                break;
+                            }
+                        case CheckPayoutsEvt:
+                            await CheckPayouts(cancellationToken);
+                            break;
+                        case PayoutEvent payoutEvent when !_prismSettings.TryGetValue(payoutEvent.Payout.StoreDataId, out var prismSettings) || payoutEvent.Type != PayoutEvent.PayoutEventType.Approved:
+                            return;
+                        case PayoutEvent payoutEvent:
+                            _checkPayoutTcs?.TrySetResult();
+                            break;
                     }
-                    case CheckPayoutsEvt:
-                        await CheckPayouts(cancellationToken);
-                        break;
-                    case PayoutEvent payoutEvent when !_prismSettings.TryGetValue(payoutEvent.Payout.StoreDataId, out var prismSettings) || payoutEvent.Type != PayoutEvent.PayoutEventType.Approved:
-                        return;
-                    case PayoutEvent payoutEvent:
-                        _checkPayoutTcs?.TrySetResult();
-                        break;
                 }
             }
             catch (Exception e)
             {
                 Logs.PayServer.LogWarning(e, "Error while processing prism event");
-            }
-            finally
-            {
-                Unlock();
             }
         }
 
