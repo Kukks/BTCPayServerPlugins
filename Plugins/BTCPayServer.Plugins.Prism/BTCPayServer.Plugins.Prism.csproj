@@ -39,6 +39,6 @@
       <AdditionalFiles Include="Views\Prism\Edit.cshtml" />
     </ItemGroup>
     <ItemGroup>
-      <PackageReference Include="AsyncKeyedLock" Version="6.3.3" />
+      <PackageReference Include="AsyncKeyedLock" Version="6.3.4" />
     </ItemGroup>
 </Project>
