@@ -43,6 +43,6 @@
 
 
     <ItemGroup>
-      <PackageReference Include="AsyncKeyedLock" Version="6.3.3" />
+      <PackageReference Include="AsyncKeyedLock" Version="6.3.4" />
     </ItemGroup>
 </Project>
