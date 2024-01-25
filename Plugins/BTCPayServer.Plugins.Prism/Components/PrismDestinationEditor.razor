@@ -13,7 +13,7 @@
     {
         <div class="form-group">
             <label class="form-label">Destination</label>
-            <input type="text" @bind="WorkingCopy.Destination" class="form-control"/>
+            <input type="text" @bind="WorkingCopy.Destination" list="destinations"  class="form-control"/>
             @if (Invalid)
             {
                 <span class="text-danger w-100">Invalid</span>
