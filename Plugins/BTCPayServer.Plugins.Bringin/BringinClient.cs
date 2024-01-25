@@ -43,40 +43,57 @@ public class BringinClient
     public async Task<CreateOrderResponse> PlaceOrder(CreateOrderRequest request)
     {
         var content = new StringContent(JsonConvert.SerializeObject(request), Encoding.UTF8, "application/json");
-        var response = await HttpClient.PostAsync($"/api/v0/offramp/order/lightning", content);
+        var response = await HttpClient.PostAsync($"/api/v0/offramp/order", content);
         var responseContent = await response.Content.ReadAsStringAsync();
         if (response.IsSuccessStatusCode) return JObject.Parse(responseContent).ToObject<CreateOrderResponse>();
         var error = JObject.Parse(responseContent).ToObject<BringinErrorResponse>();
         throw new BringinException(error);
     }
 
-    public async Task<RateResponse> GetOrderInfo(GetOrderRequest request)
+    public async Task<decimal> GetFiatBalance(string currency = "EUR")
     {
-        var content = new StringContent(JsonConvert.SerializeObject(request), Encoding.UTF8, "application/json");
-        var response = await HttpClient.PostAsync($"/api/v0/offramp/order/lightning", content);
+        var content = new StringContent(JsonConvert.SerializeObject(new
+        {
+            currency
+        }), Encoding.UTF8, "application/json");
+        var response = await HttpClient.PostAsync($"/api/v0/user/get-balance/fiat", content);
         var responseContent = await response.Content.ReadAsStringAsync();
-        if (response.IsSuccessStatusCode) return JObject.Parse(responseContent).ToObject<RateResponse>();
+        if (response.IsSuccessStatusCode)
+        {
+            var balance = JObject.Parse(responseContent).ToObject<BalanceResponse>();
+            return balance.Balance / 100m; //response is in cents 
+        }
         var error = JObject.Parse(responseContent).ToObject<BringinErrorResponse>();
         throw new BringinException(error);
     }
 
-    public class GetOrderResponse
+    public class BalanceResponse
     {
-        public string OrderId { get; set; }
-        public string Status { get; set; }
-        public string SubType { get; set; }
-
+        [JsonProperty("balance")]   
         [JsonConverter(typeof(NumericStringJsonConverter))]
-        public decimal SourceAmount { get; set; }
-
-        public string SourceCurrency { get; set; }
-
-        [JsonConverter(typeof(NumericStringJsonConverter))]
-        public decimal DestinationAmount { get; set; }
-
-        public string DestinationCurrency { get; set; }
-        public BringinPrice BringinPrice { get; set; }
+        public decimal Balance {
+            get;
+            set;
+        }
     }
+    //
+    // public class GetOrderResponse
+    // {
+    //     public string OrderId { get; set; }
+    //     public string Status { get; set; }
+    //     public string SubType { get; set; }
+    //
+    //     [JsonConverter(typeof(NumericStringJsonConverter))]
+    //     public decimal SourceAmount { get; set; }
+    //
+    //     public string SourceCurrency { get; set; }
+    //
+    //     [JsonConverter(typeof(NumericStringJsonConverter))]
+    //     public decimal DestinationAmount { get; set; }
+    //
+    //     public string DestinationCurrency { get; set; }
+    //     public BringinPrice BringinPrice { get; set; }
+    // }
 
     public class BringinPrice
     {
@@ -86,32 +103,31 @@ public class BringinClient
         public string Currency { get; set; }
     }
 
-    public class GetOrderRequest
-    {
-        public string UserId { get; set; }
-        public string OrderId { get; set; }
-    }
 
     public class CreateOrderResponse
     {
+        [JsonProperty("id")]
         public string Id { get; set; }
 
+        [JsonProperty("amount")]
         [JsonConverter(typeof(NumericStringJsonConverter))]
         public decimal Amount { get; set; }
 
+        [JsonProperty("invoice")]
         public string Invoice { get; set; }
 
-        [JsonConverter(typeof(NBitcoin.JsonConverters.DateTimeToUnixTimeConverter))]
         [JsonProperty("expiresAt")]
-        public string Expiry { get; set; }
+        public long Expiry { get; set; }
     }
 
     public class CreateOrderRequest
-    {
+    { [JsonProperty("sourceAmount")] 
         [JsonConverter(typeof(NumericStringJsonConverter))]
         public decimal SourceAmount { get; set; }
 
         [JsonProperty("ipAddress")] public string IP { get; set; }
+        [JsonProperty("paymentMethod")] 
+        public string PaymentMethod { get; set; }
     }
 
     public class RateResponse
@@ -119,8 +135,8 @@ public class BringinClient
         public string Ticker { get; set; }
         public string Currency { get; set; }
 
-        [JsonConverter(typeof(NBitcoin.JsonConverters.DateTimeToUnixTimeConverter))]
-        public string Timestamp { get; set; }
+        
+        public long Timestamp { get; set; }
 
         [JsonConverter(typeof(NumericStringJsonConverter))]
         public decimal Price { get; set; }
@@ -135,15 +151,5 @@ public class BringinClient
         public string StatusCode { get; set; }
         public string ErrorCode { get; set; }
         public JObject ErrorDetails { get; set; }
-    }
-}
-
-public class BringinException : Exception
-{
-    private readonly BringinClient.BringinErrorResponse _error;
-
-    public BringinException(BringinClient.BringinErrorResponse error)
-    {
-        _error = error;
     }
 }
