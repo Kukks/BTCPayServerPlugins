@@ -74,6 +74,7 @@ public class OpenSatsPrismClaimCreate : IPluginHookFilter
             var invoiceUrl = $"{rawInvoice.Value<string>("checkoutLink").TrimEnd('/')}/{paymentMethod}/status";
             var invoiceBtcpayModel = JObject.Parse(await httpClient.GetStringAsync(invoiceUrl).ConfigureAwait(false));
             var destination = invoiceBtcpayModel.Value<string>("btcAddress");
+            var receiptLink = invoiceBtcpayModel.Value<string>("receiptLink");
            
             var claimDestination = await handler.ParseClaimDestination(paymentMethod,destination, CancellationToken.None);
             if (claimDestination.destination is null)
@@ -81,7 +82,11 @@ public class OpenSatsPrismClaimCreate : IPluginHookFilter
 
                 return null;
             }
-
+            claimRequest.Metadata = JObject.FromObject(new
+            {
+                Source = $"Prism->OpenSats ({project}",
+                SourceLink = receiptLink
+            });
 
             claimRequest.Destination = claimDestination.destination;
             claimRequest.PaymentMethodId = paymentMethod;

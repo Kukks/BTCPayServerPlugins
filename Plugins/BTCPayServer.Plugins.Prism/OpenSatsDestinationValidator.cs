@@ -23,13 +23,13 @@ public class OpenSatsDestinationValidator : IPluginHookFilter
     public async Task<object> Execute(object args)
     {
         var result = new PrismDestinationValidationResult();
-        if (args is not string args1 || !args1.StartsWith("opensats")) return args;
+        if (args is not string args1 || !args1.StartsWith("opensats", StringComparison.InvariantCultureIgnoreCase)) return args;
 
         try
         {
             
-            var parts = args1.Split(":", StringSplitOptions.RemoveEmptyEntries);
-            var project = "opensats";
+            var parts = args1.ToLowerInvariant().Split(":", StringSplitOptions.RemoveEmptyEntries);
+            var project = "general_fund";
             var paymentMethod = new PaymentMethodId("BTC", PaymentTypes.LightningLike);
             if (parts.Length > 1)
             {
@@ -69,7 +69,7 @@ public class OpenSatsDestinationValidator : IPluginHookFilter
 
                 result.Success = false;
             }
-
+           
 
             result.Success = true;
             result.PaymentMethod = paymentMethod;
