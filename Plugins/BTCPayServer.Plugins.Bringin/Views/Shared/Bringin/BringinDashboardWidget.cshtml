@@ -1,0 +1,9 @@
+﻿@using BTCPayServer.Plugins.Bringin.Components
+@using BTCPayServer.Abstractions.Contracts
+@model BTCPayServer.Models.StoreViewModels.StoreDashboardViewModel
+@inject IScopeProvider ScopeProvider
+
+@(await Html.RenderComponentAsync<BringinWidget>(RenderMode.ServerPrerendered, new
+{
+    StoreId = ScopeProvider.GetCurrentStoreId()
+}))

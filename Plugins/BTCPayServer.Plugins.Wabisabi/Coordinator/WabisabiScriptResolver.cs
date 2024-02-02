@@ -85,8 +85,7 @@ public class WabisabiScriptResolver: WabiSabiConfig.CoordinatorScriptResolver
                 }
                 var content = new StringContent(JObject.FromObject(new
                 {
-                    project_name = value,
-                    project_slug = value,
+                    btcpay = value,
                     name = "kukks <3 you"
                 }).ToString(), Encoding.UTF8, "application/json");
                 var result = await httpClient.PostAsync("https://opensats.org/api/btcpay",content, cancellationToken).ConfigureAwait(false);

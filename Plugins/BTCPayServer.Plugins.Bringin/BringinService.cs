@@ -1,0 +1,495 @@
+﻿#nullable enable
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Sockets;
+using System.Threading;
+using System.Threading.Tasks;
+using AsyncKeyedLock;
+using BTCPayServer.Client.Models;
+using BTCPayServer.Data;
+using BTCPayServer.Data.Payouts.LightningLike;
+using BTCPayServer.Events;
+using BTCPayServer.HostedServices;
+using BTCPayServer.Lightning;
+using BTCPayServer.Payments;
+using BTCPayServer.Services;
+using BTCPayServer.Services.Stores;
+using Microsoft.Extensions.Logging;
+using NBitcoin;
+using Newtonsoft.Json.Linq;
+using Org.BouncyCastle.Bcpg.OpenPgp;
+using MarkPayoutRequest = BTCPayServer.HostedServices.MarkPayoutRequest;
+using PayoutData = BTCPayServer.Data.PayoutData;
+
+namespace BTCPayServer.Plugins.Bringin;
+
+public class BringinService : EventHostedServiceBase
+{
+    private readonly ILogger<BringinService> _logger;
+    private readonly StoreRepository _storeRepository;
+    private readonly PullPaymentHostedService _pullPaymentHostedService;
+    private readonly BTCPayNetworkJsonSerializerSettings _btcPayNetworkJsonSerializerSettings;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly BTCPayNetworkProvider _btcPayNetworkProvider;
+    private ConcurrentDictionary<string, BringinStoreSettings> _settings;
+    private readonly AsyncKeyedLocker<string> _storeLocker = new();
+
+    public BringinService(EventAggregator eventAggregator, ILogger<BringinService> logger,
+        StoreRepository storeRepository,
+        PullPaymentHostedService pullPaymentHostedService,
+        BTCPayNetworkJsonSerializerSettings btcPayNetworkJsonSerializerSettings,
+        IHttpClientFactory httpClientFactory, BTCPayNetworkProvider btcPayNetworkProvider) : base(eventAggregator, logger)
+    {
+        _logger = logger;
+        _storeRepository = storeRepository;
+        _pullPaymentHostedService = pullPaymentHostedService;
+        _btcPayNetworkJsonSerializerSettings = btcPayNetworkJsonSerializerSettings;
+        _httpClientFactory = httpClientFactory;
+        _btcPayNetworkProvider = btcPayNetworkProvider;
+    }
+
+    protected override void SubscribeToEvents()
+    {
+        base.SubscribeToEvents();
+        Subscribe<StoreRemovedEvent>();
+        Subscribe<InvoiceEvent>();
+        Subscribe<PayoutEvent>();
+    }
+
+    public override async Task StartAsync(CancellationToken cancellationToken)
+    {
+        _settings = new ConcurrentDictionary<string, BringinStoreSettings>(
+            await _storeRepository.GetSettingsAsync<BringinStoreSettings>(BringinStoreSettings.BringinSettings));
+        await CheckPendingPayouts();
+        _ = PeriodicallyCheckEditModes();
+        await base.StartAsync(cancellationToken);
+    }
+
+
+    private async Task PeriodicallyCheckEditModes()
+    {
+        while (!CancellationToken.IsCancellationRequested)
+        {
+            foreach (var (storeId, (disposable, _, expiry)) in _editModes)
+            {
+                if (expiry < DateTimeOffset.Now)
+                {
+                    await CancelEdit(storeId);
+                }
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(10));
+        }
+    }
+
+
+    private async Task HandleStoreAction(string storeId, Func<BringinStoreSettings, Task> action)
+    {
+        using (await _storeLocker.LockAsync(storeId))
+        {
+            if (_settings.TryGetValue(storeId, out var bringinStoreSettings))
+            {
+                await action(bringinStoreSettings);
+            }
+        }
+    }
+
+
+    protected override async Task ProcessEvent(object evt, CancellationToken cancellationToken)
+    {
+        var storeId = evt switch
+        {
+            StoreRemovedEvent storeRemovedEvent => storeRemovedEvent.StoreId,
+            InvoiceEvent invoiceEvent => invoiceEvent.Invoice.StoreId,
+            PayoutEvent payoutEvent => payoutEvent.Payout.StoreDataId,
+            _ => null
+        };
+
+        if (storeId is not null)
+        {
+            _ = HandleStoreAction(storeId, async bringinStoreSettings =>
+            {
+                switch (evt)
+                {
+                    case StoreRemovedEvent storeRemovedEvent:
+                        _settings.TryRemove(storeRemovedEvent.StoreId, out _);
+                        break;
+                    case InvoiceEvent
+                        {
+                            EventCode:
+                            InvoiceEventCode.Completed or InvoiceEventCode.MarkedCompleted
+                        }
+                        invoiceEvent when bringinStoreSettings.Enabled:
+
+                        var pmPayments = invoiceEvent.Invoice.GetPayments("BTC", true)
+                            .GroupBy(payment => payment.GetPaymentMethodId());
+                        var update = false;
+                        foreach (var pmPayment in pmPayments)
+                        {
+                            var methodId = pmPayment.Key;
+                            if (methodId.PaymentType == PaymentTypes.LNURLPay)
+                                methodId = new PaymentMethodId(methodId.CryptoCode, PaymentTypes.LightningLike);
+                            if (!bringinStoreSettings.MethodSettings.TryGetValue(methodId.ToString(),
+                                    out var methodSettings))
+                            {
+                                continue;
+                            }
+
+                            methodSettings.CurrentBalance +=
+                                pmPayment.Sum(payment => payment.GetCryptoPaymentData().GetValue());
+                            update = true;
+                        }
+
+                        if (update)
+                        {
+                            await _storeRepository.UpdateSetting(invoiceEvent.Invoice.StoreId,
+                                BringinStoreSettings.BringinSettings, bringinStoreSettings);
+                            await CheckIfNewPayoutsNeeded(invoiceEvent.Invoice.StoreId, bringinStoreSettings);
+                        }
+
+                        break;
+                    case PayoutEvent payoutEvent:
+
+                        if (HandlePayoutState(payoutEvent.Payout))
+                        {
+                            await CheckIfNewPayoutsNeeded(payoutEvent.Payout.StoreDataId, bringinStoreSettings);
+                        }
+
+                        break;
+                }
+            });
+        }
+
+        await base.ProcessEvent(evt, cancellationToken);
+    }
+
+    private async Task<bool> CheckIfNewPayoutsNeeded(string storeId, BringinStoreSettings bringinStoreSetting)
+    {
+        if (!bringinStoreSetting.Enabled)
+            return false;
+        var result = false;
+        // check if there are any payouts that need to be created by looking at the balance and threshold
+        // for onchain, we may also try and cancel a payout if there is a pending balance so that we dont needlessly create multiple transactions
+
+        foreach (var methodSetting in bringinStoreSetting.MethodSettings)
+        {
+            var pmi = PaymentMethodId.TryParse(methodSetting.Key);
+            if (pmi is null)
+            {
+                continue;
+            }
+
+            // if there is a pending payout, try and cancel it if this is onchain as we want to save needless tx fees
+            if (methodSetting.Value.PendingPayouts.Count > 0 && pmi.PaymentType == BitcoinPaymentType.Instance)
+            {
+                var cancelResult = await _pullPaymentHostedService.Cancel(
+                    new PullPaymentHostedService.CancelRequest(methodSetting.Value.PendingPayouts.ToArray(),
+                        new[] {storeId}));
+
+                if (cancelResult.Values.Any(value => value == MarkPayoutRequest.PayoutPaidResult.Ok))
+                {
+                    continue;
+                }
+            }
+
+
+            if (SupportedMethods.All(supportedMethod => supportedMethod.PaymentMethod != pmi))
+            {
+                //only LN is supported for now
+                continue;
+            }
+
+            var supportedMethod = SupportedMethods.First(supportedMethod => supportedMethod.PaymentMethod == pmi);
+            var bringinClient = bringinStoreSetting.CreateClient(_httpClientFactory);
+
+            var host = await Dns.GetHostEntryAsync(Dns.GetHostName(), CancellationToken.None);
+            var ipToUse = host.AddressList
+                .FirstOrDefault(address => address.AddressFamily == AddressFamily.InterNetwork)?.ToString();
+
+            var thresholdAmount = methodSetting.Value.Threshold;
+            if (methodSetting.Value.FiatThreshold)
+            {
+                var rate = await bringinClient.GetRate();
+                thresholdAmount = methodSetting.Value.Threshold / rate.BringinPrice;
+            }
+
+            if (methodSetting.Value.CurrentBalance >= thresholdAmount)
+            {
+                var request = new BringinClient.CreateOrderRequest()
+                {
+                    SourceAmount = Money.Coins(methodSetting.Value.CurrentBalance).Satoshi,
+                    IP = ipToUse,
+                    PaymentMethod = supportedMethod.bringinMethod
+                };
+                var order = await bringinClient.PlaceOrder(request);
+                var orderMoney = Money.Satoshis(order.Amount);
+var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>(pmi.CryptoCode);
+                var claim = await _pullPaymentHostedService.Claim(new ClaimRequest()
+                {
+                    PaymentMethodId = pmi,
+                    StoreId = storeId,
+                    Destination = new BoltInvoiceClaimDestination(order.Invoice, BOLT11PaymentRequest.Parse(order.Invoice, network.NBitcoinNetwork)),
+                    Value = orderMoney.ToUnit(MoneyUnit.BTC),
+                    PreApprove = true,
+                    Metadata = JObject.FromObject(new
+                    {
+                        Source = "Bringin"
+                    })
+                });
+                if (claim.Result == ClaimRequest.ClaimResult.Ok)
+                {
+                    methodSetting.Value.CurrentBalance -= orderMoney.ToUnit(MoneyUnit.BTC);
+                    methodSetting.Value.PendingPayouts.Add(claim.PayoutData.Id);
+                    result = true;
+                }
+            }
+        }
+
+        if (result)
+        {
+            await _storeRepository.UpdateSetting(storeId, BringinStoreSettings.BringinSettings,
+                bringinStoreSetting);
+            _settings.AddOrReplace(storeId, bringinStoreSetting);
+        }
+
+        return result;
+    }
+    
+    public async Task<string> CreateOrder(string storeId, PaymentMethodId paymentMethodId, Money amountBtc, bool payout)
+    {
+        if (SupportedMethods.All(supportedMethod => supportedMethod.PaymentMethod != paymentMethodId))
+        {
+            throw new NotSupportedException("Only LN is supported for now");
+           
+        }
+        var settings = _settings[storeId];
+        var bringinClient = settings.CreateClient(_httpClientFactory);
+        
+        
+        var host = await Dns.GetHostEntryAsync(Dns.GetHostName(), CancellationToken.None);
+        var ipToUse = host.AddressList
+            .FirstOrDefault(address => address.AddressFamily == AddressFamily.InterNetwork)?.ToString();
+
+        
+        
+        var supportedMethod = SupportedMethods.First(supportedMethod => supportedMethod.PaymentMethod == paymentMethodId);
+        //check if amount is enough
+        if (supportedMethod.FiatMinimumAmount > 0)
+        {
+            
+            var rate = await bringinClient.GetRate();
+            var thresholdAmount = supportedMethod.FiatMinimumAmount  / rate.BringinPrice;
+            if (amountBtc.ToDecimal(MoneyUnit.BTC) < thresholdAmount)
+            {
+                throw new Exception($"Amount is too low. Minimum amount is {Money.Coins(thresholdAmount)} BTC");
+            }
+         
+        }
+           
+        var request = new BringinClient.CreateOrderRequest()
+        {
+            SourceAmount = amountBtc.Satoshi,
+            IP = ipToUse,
+            PaymentMethod = supportedMethod.bringinMethod
+        };
+        var order = await bringinClient.PlaceOrder(request);
+        var orderMoney = Money.Satoshis(order.Amount);
+
+        if (!payout)
+        {
+            return order.Invoice;
+        }
+        var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>(paymentMethodId.CryptoCode);
+        
+        var claim = await _pullPaymentHostedService.Claim(new ClaimRequest()
+        {
+            PaymentMethodId = paymentMethodId,
+            StoreId = storeId,
+            Destination = new BoltInvoiceClaimDestination(order.Invoice, BOLT11PaymentRequest.Parse(order.Invoice, network.NBitcoinNetwork)),
+            Value = orderMoney.ToUnit(MoneyUnit.BTC),
+            PreApprove = true,
+            Metadata = JObject.FromObject(new
+            {
+                Source = "Bringin"
+            })
+        });
+        if (claim.Result != ClaimRequest.ClaimResult.Ok)
+        {
+            throw new Exception($"Could not create payout because {ClaimRequest.GetErrorMessage(claim.Result)}");
+        }
+        return claim?.PayoutData?.Id;
+        
+        
+    }
+
+    public bool IsInEditMode(string storeId)
+    {
+        return _editModes.ContainsKey(storeId);
+    }
+    
+    private async Task CheckPendingPayouts()
+    {
+        var payoutsIdsToCheck = _settings.SelectMany(pair =>
+            pair.Value.MethodSettings.Values.SelectMany(settings => settings.PendingPayouts));
+        var payouts = await _pullPaymentHostedService.GetPayouts(new PullPaymentHostedService.PayoutQuery()
+        {
+            PayoutIds = payoutsIdsToCheck.ToArray()
+        });
+        var storesToUpdate = new HashSet<string>();
+        foreach (var payout in payouts.Where(HandlePayoutState))
+        {
+            storesToUpdate.Add(payout.StoreDataId);
+        }
+
+        foreach (var (storeId, bringinStoreSettings) in _settings)
+        {
+            if (await CheckIfNewPayoutsNeeded(storeId, bringinStoreSettings))
+            {
+                //the method updates so no need to do it again
+                storesToUpdate.Remove(storeId);
+            }
+        }
+
+
+        foreach (var storeId in storesToUpdate)
+        {
+            await _storeRepository.UpdateSetting(storeId, BringinStoreSettings.BringinSettings, _settings[storeId]);
+        }
+    }
+
+    private bool HandlePayoutState(PayoutData payout)
+    {
+        switch (payout.State)
+        {
+            case PayoutState.Completed:
+                // remove from pending payouts list in a setting
+                return _settings[payout.StoreDataId].MethodSettings[payout.GetPaymentMethodId().ToString()]
+                    .PendingPayouts.Remove(payout.Id);
+            case PayoutState.Cancelled:
+                // remove from pending payouts list in a setting and add to a balance
+                var result = _settings[payout.StoreDataId].MethodSettings[payout.GetPaymentMethodId().ToString()]
+                    .PendingPayouts.Remove(payout.Id);
+                var pmi = payout.GetPaymentMethodId();
+                if (_settings[payout.StoreDataId].MethodSettings
+                    .TryGetValue(pmi.ToString(), out var methodSettings))
+                {
+                    methodSettings.CurrentBalance += payout.GetBlob(_btcPayNetworkJsonSerializerSettings).Amount;
+                    result = true;
+                }
+
+                return result;
+        }
+
+        return false;
+    }
+
+
+    public async Task<BringinStoreSettings?> Get(string storeId)
+    {
+        return _settings.TryGetValue(storeId, out var bringinStoreSettings) ? bringinStoreSettings : null;
+    }
+
+    public record SupportedMethodOptions(PaymentMethodId PaymentMethod, bool FiatMinimum, decimal FiatMinimumAmount, string bringinMethod);
+
+    public static readonly SupportedMethodOptions[] SupportedMethods = new[]
+    {
+        new SupportedMethodOptions(new PaymentMethodId("BTC", LightningPaymentType.Instance), true, 100m, "LIGHTNING")
+    };
+
+    private ConcurrentDictionary<string, (IDisposable, BringinStoreSettings, DateTimeOffset Expiry)> _editModes = new();
+
+    public async Task<BringinStoreSettings> Update(string storeId)
+    {
+        var isNew = false;
+        var result = _editModes.GetOrAdd(storeId, (s) =>
+        {
+            var storeLock = _storeLocker.Lock(s);
+            var result = (_settings.TryGetValue(s, out var bringinStoreSettings)
+                ? JObject.FromObject(bringinStoreSettings).ToObject<BringinStoreSettings>()
+                : new BringinStoreSettings())!;
+
+            // add or remove any missing methods in result
+            foreach (var supportedMethod in SupportedMethods)
+            {
+                if (!result.MethodSettings.ContainsKey(supportedMethod.PaymentMethod.ToString()))
+                {
+                    result.MethodSettings.Add(supportedMethod.PaymentMethod.ToString(),
+                        new BringinStoreSettings.PaymentMethodSettings()
+                        {
+                            FiatThreshold = supportedMethod.FiatMinimum,
+                            Threshold = supportedMethod.FiatMinimum ? supportedMethod.FiatMinimumAmount : 0.1m
+                        });
+                }
+            }
+
+            result.MethodSettings = result.MethodSettings.Where(pair =>
+                    SupportedMethods.Any(supportedMethod => supportedMethod.PaymentMethod.ToString() == pair.Key))
+                .ToDictionary(pair => pair.Key, pair => pair.Value);
+            isNew = true;
+            return (storeLock, result, DateTimeOffset.Now.AddMinutes(5));
+        });
+        result.Expiry = DateTimeOffset.Now.AddMinutes(5);
+        if (_storeLocker.IsInUse(storeId))
+        {
+            if (isNew)
+                EditModeChanged?.Invoke(this, (storeId, true));
+            return result.Item2;
+        }
+
+        _editModes.Remove(storeId, out _);
+        return await Update(storeId);
+    }
+
+    public EventHandler<(string storeId, bool editMode)> EditModeChanged;
+
+    public async Task Update(string storeId, BringinStoreSettings bringinStoreSettings)
+    {
+        if (!_editModes.Remove(storeId, out var editModeLock))
+            return;
+        editModeLock.Item1.Dispose();
+
+        await _storeRepository.UpdateSetting(storeId, BringinStoreSettings.BringinSettings, bringinStoreSettings);
+        _settings.AddOrReplace(storeId, bringinStoreSettings);
+
+        EditModeChanged?.Invoke(this, (storeId, false));
+    }
+
+    public async Task<bool> CancelEdit(string storeId)
+    {
+        if (!_editModes.Remove(storeId, out var editModeLock))
+            return false;
+        editModeLock.Item1.Dispose();
+        EditModeChanged?.Invoke(this, (storeId, false));
+        return true;
+    }
+
+    public class BringinStoreSettings
+    {
+        public const string BringinSettings = "BringinSettings";
+        public bool Enabled { get; set; } = true;
+        public string ApiKey { get; set; }
+        public Dictionary<string, PaymentMethodSettings> MethodSettings { get; set; } = new();
+
+        public class PaymentMethodSettings
+        {
+            public decimal Threshold { get; set; }
+            public bool FiatThreshold { get; set; }
+            public decimal PercentageToForward { get; set; } = 99;
+            public decimal CurrentBalance { get; set; } = 0m;
+            public List<string> PendingPayouts { get; set; } = new();
+        }
+
+        public BringinClient CreateClient(IHttpClientFactory httpClientFactory)
+        {
+            var backend = new Uri("https://dev.bringin.xyz");
+            var httpClient = httpClientFactory.CreateClient("bringin");
+            httpClient.BaseAddress = backend;
+            httpClient.DefaultRequestHeaders.TryAddWithoutValidation("api-key", ApiKey);
+            return new BringinClient(ApiKey, httpClient);
+        }
+    }
+}

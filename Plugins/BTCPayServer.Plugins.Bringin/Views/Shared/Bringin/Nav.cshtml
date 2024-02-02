@@ -1,0 +1,23 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Client
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+}
+@if (!string.IsNullOrEmpty(storeId))
+{
+    <li class="nav-item">
+        <a permission="@Policies.CanModifyStoreSettings" asp-controller="Bringin" asp-action="Edit" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Bringin")" id="Nav-Bringin">
+            <svg xmlns="http://www.w3.org/2000/svg" style="margin-right: 7px;"  width="14.000000pt" height="14.000000pt" viewBox="0 0 32.000000 32.000000" preserveAspectRatio="xMidYMid meet">
+            
+            <g transform="translate(0.000000,32.000000) scale(0.100000,-0.100000)" fill="currentColor" stroke="none">
+            <path d="M92 304 c-18 -10 -45 -33 -60 -52 -22 -29 -27 -46 -27 -92 0 -47 5 -63 29 -94 87 -115 267 -67 283 76 7 57 -15 108 -61 143 -46 35 -116 43 -164 19z m101 -102 c33 -29 19 -78 -32 -107 -11 -6 -13 -4 -8 8 6 16 -11 41 -35 50 -9 3 -4 12 14 26 18 14 25 27 21 38 -7 18 8 12 40 -15z"/>
+            </g>
+            </svg>
+            
+            <span>Bringin</span>
+        </a>
+    </li>
+}

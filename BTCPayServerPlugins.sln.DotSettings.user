@@ -1,4 +1,18 @@
 ﻿<wpf:ResourceDictionary xml:space="preserve" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:s="clr-namespace:System;assembly=mscorlib" xmlns:ss="urn:shemas-jetbrains-com:settings-storage-xaml" xmlns:wpf="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=0D438B7D_002DF996_002D4BF3_002D8F54_002D02CB9DF120D8_002Ff_003ABTCPayCoinjoinCoinSelector_002Ecs/@EntryIndexedValue">ExplicitlyExcluded</s:String>
+	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=0D438B7D_002DF996_002D4BF3_002D8F54_002D02CB9DF120D8_002Ff_003ABTCPayWallet_002Ecs/@EntryIndexedValue">ExplicitlyExcluded</s:String>
+	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003ABlockchain_002Fd_003ATransactionOutputs_002Ff_003ACoinsView_002Ecs/@EntryIndexedValue">ExplicitlyExcluded</s:String>
+	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003ABlockchain_002Fd_003ATransactionOutputs_002Ff_003ASmartCoin_002Ecs/@EntryIndexedValue">ExplicitlyExcluded</s:String>
+	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003AWabiSabi_002Fd_003AClient_002Ff_003ACoinJoinClient_002Ecs/@EntryIndexedValue">ExplicitlyExcluded</s:String>
+	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003AWabiSabi_002Fd_003AClient_002Ff_003ACoinJoinManager_002Ecs/@EntryIndexedValue">ExplicitlyExcluded</s:String>
+	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003AWabiSabi_002Fd_003AClient_002Ff_003ACoinJoinTracker_002Ecs/@EntryIndexedValue">ExplicitlyExcluded</s:String>
+	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003AWabiSabi_002Fd_003AClient_002Ff_003ACoinJoinTrackerFactory_002Ecs/@EntryIndexedValue">ExplicitlyExcluded</s:String>
+	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003AWallets_002Ff_003AWallet_002Ecs/@EntryIndexedValue">ExplicitlyExcluded</s:String>
+	<s:String x:Key="/Default/Environment/UnitTesting/UnitTestSessionStore/Sessions/=cedf4985_002D652b_002D4803_002D9af5_002D7e2c856d885a/@EntryIndexedValue">&lt;SessionState ContinuousTestingMode="0" IsActive="True" Name="EnsureNewLightningInvoiceOnPartialPayment" xmlns="urn:schemas-jetbrains-com:jetbrains-ut-session"&gt;&#xD;
+  &lt;TestAncestor&gt;&#xD;
+    &lt;TestId&gt;xUnit::4146B6DF-7BEE-4BD0-B6B1-77E7630A1B81::net8.0::BTCPayServer.Tests.UnitTest1.EnsureNewLightningInvoiceOnPartialPayment&lt;/TestId&gt;&#xD;
+  &lt;/TestAncestor&gt;&#xD;
+&lt;/SessionState&gt;</s:String>
 	
 	
 	<s:Boolean x:Key="/Default/UserDictionary/Words/=Nostr/@EntryIndexedValue">True</s:Boolean></wpf:ResourceDictionary>

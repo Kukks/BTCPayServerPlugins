@@ -4,16 +4,12 @@
 @using BTCPayServer.HostedServices
 @using BTCPayServer.Payments
 @using BTCPayServer.PayoutProcessors
-@using BTCPayServer.Services.Custodian.Client
 @using Microsoft.AspNetCore.Http
 @using Microsoft.AspNetCore.Routing
 @using Microsoft.Extensions.Logging
 @using NBitcoin
 @using LightningAddressData = BTCPayServer.Data.LightningAddressData
 @using MarkPayoutRequest = BTCPayServer.HostedServices.MarkPayoutRequest
-@using System.Collections
-@using BTCPayServer.Abstractions.Custodians
-@using BTCPayServer.Abstractions.Extensions
 @inject IPluginHookService PluginHookService
 @inject LightningAddressService LightningAddressService
 @inject PayoutProcessorService PayoutProcessorService
@@ -22,8 +18,6 @@
 @inject LinkGenerator LinkGenerator
 @inject PullPaymentHostedService PullPaymentHostedService
 @inject IHttpContextAccessor HttpContextAccessor
-@inject CustodianAccountRepository CustodianAccountRepository
-@inject IEnumerable<ICustodian> Custodians
 @inject ILogger<PrismEdit> Logger
 @implements IDisposable
 
@@ -46,10 +40,6 @@ else
         @foreach (var destination in Destinations)
         {
             <option value="@destination">@destination</option>
-        }
-        @foreach (var destination in CustodianDestinations)
-        {
-            <option value="@destination.Key">@destination.Value</option>
         }
     </datalist>
 
@@ -215,7 +205,6 @@ else
     public PaymentMethodId pmichain { get; set; } = new("BTC", PaymentTypes.BTCLike);
     public bool NoPayoutProcessors { get; set; }
 
-    public Dictionary<string, string> CustodianDestinations { get; set; }
     private string PrismEditButtonsFilter { get; set; }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -247,34 +236,6 @@ else
             await Task.WhenAll(tasks);
             Settings = await fetchSettings;
             Users = await fetchLnAddresses;
-            CustodianDestinations = await FetchCustodians();
-
-            async Task<Dictionary<string, string>> FetchCustodians()
-            {
-                var result = new Dictionary<string, string>();
-               var custodianConfigs  = await  CustodianAccountRepository.FindByStoreId(StoreId);
-               foreach (var custodianConfig in custodianConfigs)
-               {
-                  var  custodian =  Custodians.GetCustodianByCode(custodianConfig.CustodianCode);
-                  if(custodian is not ICanDeposit canDeposit)
-                      continue;
-                  foreach (var depositablePaymentMethod in canDeposit.GetDepositablePaymentMethods())
-                  {
-                      var pmi = PaymentMethodId.TryParse(depositablePaymentMethod);
-                        if(pmi is null || pmi.CryptoCode != "BTC")
-                            continue;
-
-                        var custodianDestination = new CustodianDestinationValidator.CustodianDestination()
-                        {
-                            CustodianId = custodianConfig.Id,
-                            PaymentMethod = pmi.ToString()
-                        };
-                        result.TryAdd(custodianDestination.ToString(), $"{custodianConfig.Name} {pmi.ToPrettyString()} (Custodian)");
-                  }
-                  
-               }
-               return result;   
-            }
 
             EditContext = new EditContext(Settings);
             MessageStore = new ValidationMessageStore(EditContext);

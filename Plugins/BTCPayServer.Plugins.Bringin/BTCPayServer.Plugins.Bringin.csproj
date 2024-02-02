@@ -36,6 +36,11 @@
 
 
     <ItemGroup>
-      <Folder Include="Views\Bringin\" />
+      <AdditionalFiles Include="Components\_Imports.razor" />
+    </ItemGroup>
+
+
+    <ItemGroup>
+      <PackageReference Include="AsyncKeyedLock" Version="6.3.4" />
     </ItemGroup>
 </Project>
