@@ -361,11 +361,11 @@ public class TicketTailorService : EventHostedServiceBase, IWebhookProvider
 
     public class WebhookTicketTailorEvent : StoreWebhookEvent
     {
-        public WebhookTicketTailorEvent(string evtType, string storeId)
+        public WebhookTicketTailorEvent(string type, string storeId)
         {
-            if (!evtType.StartsWith("tickettailor", StringComparison.InvariantCultureIgnoreCase))
-                throw new ArgumentException("Invalid event type", nameof(evtType));
-            Type = evtType;
+            if (!type.StartsWith("tickettailor", StringComparison.InvariantCultureIgnoreCase))
+                throw new ArgumentException("Invalid event type", nameof(type));
+            Type = type;
             StoreId = storeId;
         }
 
