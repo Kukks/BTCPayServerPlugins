@@ -201,6 +201,9 @@ query TransactionsByPaymentHash($paymentHash: PaymentHash!, $walletId: WalletId!
             ... on SettlementViaLn {
               preImage
             }
+            ... on SettlementViaIntraLedger {
+              preImage
+            }
           }
           status
         }
@@ -282,6 +285,9 @@ query Transactions($walletId: WalletId!) {
           settlementCurrency
           settlementVia {
             ... on SettlementViaLn {
+              preImage
+            }
+            ... on SettlementViaIntraLedger {
               preImage
             }
           }
@@ -575,6 +581,9 @@ mutation LnInvoicePaymentSend($input: LnInvoicePaymentInput!) {
           settlementCurrency
           settlementVia {
             ... on SettlementViaLn {
+              preImage
+            }
+            ... on SettlementViaIntraLedger {
               preImage
             }
           }
