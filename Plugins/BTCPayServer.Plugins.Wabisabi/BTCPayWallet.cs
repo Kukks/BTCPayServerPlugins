@@ -45,13 +45,10 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     private readonly BTCPayNetworkJsonSerializerSettings _btcPayNetworkJsonSerializerSettings;
     private readonly Services.Wallets.BTCPayWallet _btcPayWallet;
     private readonly PullPaymentHostedService _pullPaymentHostedService;
-    // public OnChainPaymentMethodData OnChainPaymentMethodData;
     public readonly DerivationStrategyBase DerivationScheme;
     public readonly ExplorerClient ExplorerClient;
-    // public readonly IBTCPayServerClientFactory BtcPayServerClientFactory;
     public WabisabiStoreSettings WabisabiStoreSettings;
     public readonly IUTXOLocker UtxoLocker;
-    // public readonly ILogger Logger;
     public static readonly BlockchainAnalyzer BlockchainAnalyzer = new();
 
     public BTCPayWallet(
@@ -152,6 +149,11 @@ public class BTCPayWallet : IWallet, IDestinationProvider
             .MixToOtherWallet);
         var forceConsolidate = ConsolidationMode == ConsolidationModeType.WhenLowFeeAndManyUTXO && coins.Available().Confirmed().Count() > HighAmountOfCoins;
         return !BatchPayments &&  privacy >= 1 && !mixToOtherWallet && !forceConsolidate;
+    }
+    
+    public bool ForceConsolidate(CoinsView coins, bool isLowFee)
+    {
+        return ConsolidationMode == ConsolidationModeType.WhenLowFeeAndManyUTXO && isLowFee && coins.Available().Confirmed().Count() > HighAmountOfCoins;
     }
     
     public async Task<double> GetPrivacyPercentageAsync(CoinsView coins)

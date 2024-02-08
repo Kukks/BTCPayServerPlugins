@@ -27,7 +27,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
         _wallet = wallet;
     }
 
-    public async Task<ImmutableList<SmartCoin>> SelectCoinsAsync(
+    public async Task<(ImmutableList<SmartCoin> selected, Func<IEnumerable<SmartCoin>, Task<bool>> acceptableSigned)> SelectCoinsAsync(
         (IEnumerable<SmartCoin> Candidates, IEnumerable<SmartCoin> Ineligible) coinCandidates,
         UtxoSelectionParameters utxoSelectionParameters,
         Money liquidityClue, SecureRandom secureRandom)
@@ -82,11 +82,11 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
         
         var maxPerType = new Dictionary<AnonsetType, int>();
 
-        var attemptingTobeParanoid = payments.Any() && _wallet.WabisabiStoreSettings.ParanoidPayments;
+        var attemptingTobeParanoidWhenDoingPayments = payments.Any() && _wallet.WabisabiStoreSettings.ParanoidPayments;
         var attemptingToMixToOtherWallet = string.IsNullOrEmpty(_wallet.WabisabiStoreSettings.MixToOtherWallet);
         selectCoins:
         maxPerType.Clear();
-        if (attemptingTobeParanoid || attemptingToMixToOtherWallet)
+        if (attemptingTobeParanoidWhenDoingPayments || attemptingToMixToOtherWallet)
         {
             maxPerType.Add(AnonsetType.Red,0);
             maxPerType.Add(AnonsetType.Orange,0);
@@ -110,14 +110,14 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             {{AnonsetType.Red, 1}, {AnonsetType.Orange, 1}, {AnonsetType.Green, 1}};
 
         var solution = await SelectCoinsInternal(utxoSelectionParameters, candidates, ineligibleCoins,payments,
-            Random.Shared.Next(10, 31),
+            Random.Shared.Next(20, 31),
             maxPerType,
             idealMinimumPerType,
             consolidationMode, liquidityClue, secureRandom);
 
-        if (attemptingTobeParanoid && !solution.HandledPayments.Any())
+        if (attemptingTobeParanoidWhenDoingPayments && !solution.HandledPayments.Any())
         {
-            attemptingTobeParanoid = false;
+            attemptingTobeParanoidWhenDoingPayments = false;
             payments = Array.Empty<PendingPayment>();
             goto selectCoins;
         }
@@ -129,7 +129,27 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             goto selectCoins;
         }
         _wallet.LogTrace(solution.ToString());
-        return solution.Coins.ToImmutableList();
+        return (solution.Coins.ToImmutableList(), async coins =>
+        {
+            
+            
+            if (consolidationMode && coins.Count() <8)
+            {
+                var cv = new CoinsView(candidates);
+                var percentage = await _wallet.GetPrivacyPercentageAsync(cv);
+                var fullyPrivate = await _wallet.IsWalletPrivateAsync(cv);
+                
+                if(percentage >=1 && fullyPrivate && !solution.HandledPayments.Any() )
+                {
+                    _wallet.LogTrace("less than ideal coins were registered, so we will abandon this");
+                    return false;
+                }
+                
+            }
+            return true;
+            
+            
+        } );
     }
 
     private async Task<SubsetSolution> SelectCoinsInternal(UtxoSelectionParameters utxoSelectionParameters,
@@ -151,14 +171,17 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
 
         var cv = new CoinsView(remainingCoins);
         var percentage = await _wallet.GetPrivacyPercentageAsync(cv);
-        var fullyPrivate = await _wallet.IsWalletPrivateAsync(new CoinsView(remainingCoins));
+        var fullyPrivate = await _wallet.IsWalletPrivateAsync(cv);
         var coinjoiningOnlyForPayments = fullyPrivate && remainingPendingPayments.Any();
 
         if (!consolidationMode && percentage < 1 && _wallet.ConsolidationMode != ConsolidationModeType.Never)
         {
             consolidationMode = true;    
         }
+        
+        
         solution.ConsolidationMode = consolidationMode;
+        
         if(consolidationMode && coins.Count() < 8 && !coinjoiningOnlyForPayments  && ineligibleCoins.Any())
         {
             //if we're in consolidation mode, and there are coins not eligible for a reason  that will be ok in the near future, we should try to wait for them to become eligible instead of entering multiple coinjoins, which costs more.
@@ -270,7 +293,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
 
              
                 //if we have less than the max suggested output registration, we should add more coins to reach that number to avoid breaking up into too many coins?
-                var isLessThanMaxOutputRegistration = solution.Coins.Count < Math.Max(solution.HandledPayments.Count +1, 8);
+                var isLessThanMaxOutputRegistration = solution.Coins.Count < Math.Max(solution.HandledPayments.Count +1, consolidationMode? 11: 10);
                 var rand = Random.Shared.Next(1, 101);
                 //let's check how many coins we are allowed to add max and how many we added, and use that percentage as the random chance of not adding it.
                 // if max coins = 20, and current coins  = 5 then 5/20 = 0.25 * 100 = 25
