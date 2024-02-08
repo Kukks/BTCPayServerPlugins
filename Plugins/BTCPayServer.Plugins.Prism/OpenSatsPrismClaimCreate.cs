@@ -64,8 +64,7 @@ public class OpenSatsPrismClaimCreate : IPluginHookFilter
             
             var content = new StringContent(JObject.FromObject(new
             {
-                project_name = project,
-                project_slug = project,
+                btcpay = project,
                 name = "kukks <3 you"
             }).ToString(), Encoding.UTF8, "application/json");
             var result = await httpClient.PostAsync("https://opensats.org/api/btcpay",content).ConfigureAwait(false);
