@@ -137,23 +137,53 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     public bool BatchPayments => WabisabiStoreSettings.PlebMode || WabisabiStoreSettings.BatchPayments;
     public long? MinimumDenominationAmount => WabisabiStoreSettings.PlebMode? 10000 : WabisabiStoreSettings.MinimumDenominationAmount;
 
-    public async Task<bool> IsWalletPrivateAsync()
-    {
-        return await IsWalletPrivateAsync(await GetAllCoins());
-    }
+ 
     
-    public async Task<bool> IsWalletPrivateAsync(CoinsView coins)
+    public async Task<IWallet.MixingReason[]> ShouldMix(string coordinatorName, bool? isLowFee = null,
+        bool? anyPayments = false)
     {
-        var privacy=  await GetPrivacyPercentageAsync(coins);
-        var mixToOtherWallet = !WabisabiStoreSettings.PlebMode && !string.IsNullOrEmpty(WabisabiStoreSettings
-            .MixToOtherWallet);
-        var forceConsolidate = ConsolidationMode == ConsolidationModeType.WhenLowFeeAndManyUTXO && coins.Available().Confirmed().Count() > HighAmountOfCoins;
-        return !BatchPayments &&  privacy >= 1 && !mixToOtherWallet && !forceConsolidate;
-    }
-    
-    public bool ForceConsolidate(CoinsView coins, bool isLowFee)
-    {
-        return ConsolidationMode == ConsolidationModeType.WhenLowFeeAndManyUTXO && isLowFee && coins.Available().Confirmed().Count() > HighAmountOfCoins;
+        var results = new List<IWallet.MixingReason>();
+        
+        if(BatchPayments && anyPayments is true)
+            results.Add(IWallet.MixingReason.Payment);
+        else if(BatchPayments && anyPayments is null)
+            return new []{IWallet.MixingReason.PreliminaryMixConclusion};
+        
+        var candidates = (await GetCoinjoinCoinCandidatesAsync(coordinatorName)).ToArray();
+        if (!candidates.Any())
+            return Array.Empty<IWallet.MixingReason>();
+        
+        var confirmed = candidates.Where(coin => coin.IsAvailable()).ToArray();
+        if (ConsolidationMode == ConsolidationModeType.WhenLowFeeAndManyUTXO && confirmed.Count() >= HighAmountOfCoins )
+        {
+            if (isLowFee is null)
+            {
+                return new []{IWallet.MixingReason.PreliminaryMixConclusion};
+            }
+            else if (isLowFee is true)
+            {
+                results.Add(IWallet.MixingReason.Consolidation);
+            }
+        }
+        
+        var privacy = await GetPrivacyPercentageAsync(new CoinsView(candidates));
+        if (privacy >= 1)
+        {
+            var rand = Random.Shared.Next(1, 1001);
+            if (rand <= (WabisabiStoreSettings.PlebMode ? 0 : WabisabiStoreSettings.ExtraJoinProbability))
+                results.Add(IWallet.MixingReason.ExtraJoin);
+            if (!string.IsNullOrEmpty(WabisabiStoreSettings.MixToOtherWallet))
+            {
+                results.Add(IWallet.MixingReason.WalletForward);
+            }
+        }
+        else
+        {   
+            results.Add(IWallet.MixingReason.NotPrivate);
+        }
+
+        return results.ToArray();
+
     }
     
     public async Task<double> GetPrivacyPercentageAsync(CoinsView coins)
