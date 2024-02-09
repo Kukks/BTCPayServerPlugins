@@ -64,7 +64,7 @@
                     labels.push(value.value);
                 });
                 let url =@Safe.Json(@Url.Action("ComputeCoinSelection", "WabisabiStore", new { storeId }));
-                url += "?amount=${amount}";
+                url += `?amount=${amount}`;
                 url += labels.length >0?  "&" + labels.map(x => "labels=" + encodeURIComponent(x)).join("&"): "";
                 const response = await fetch(url);
                 const coins = await response.json();

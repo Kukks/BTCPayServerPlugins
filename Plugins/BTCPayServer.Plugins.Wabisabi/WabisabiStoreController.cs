@@ -426,9 +426,6 @@ namespace BTCPayServer.Plugins.Wabisabi
                 
                 if (directLinkCoins.TotalAmount().ToDecimal(MoneyUnit.BTC) > amount)
                 {
-                    
-              
-                
                     //select enough to be able to spend the amount requested
                     var result = directLinkCoins.ToShuffled(new InsecureRandom()).Aggregate(
                         (Money.Zero, new List<SmartCoin>()), (acc, coin) =>
@@ -448,9 +445,31 @@ namespace BTCPayServer.Plugins.Wabisabi
               
             }
 
+            
+            // coinSelect:
             var selectedCoinSum = selectedCoins.Sum(coin => ((Money)coin.Amount).ToDecimal(MoneyUnit.BTC));
             var remaining = amount - selectedCoinSum;
             var remainingCoins = coins.FilterBy(coin => !selectedCoins.Contains(coin.Coin)).Available().ToList();
+            // if (remaining > 0 && remainingCoins.Any())
+            // {
+            //     //try to select the closest coin to the remaining amount while also prioritizing privacy
+            //     //so filter rby the highest anonymity set first and then by closest amount
+            //     var closestCoin = remainingCoins
+            //         .OrderByDescending(coin => coin.AnonymitySet)
+            //         .ThenBy(coin => Math.Abs(coin.Amount.ToDecimal(MoneyUnit.BTC) - remaining))
+            //         .FirstOrDefault();
+            //     if (closestCoin is not null)
+            //     {
+            //         selectedCoins.Add(closestCoin.Coin);
+            //         remainingCoins.Remove(closestCoin);
+            //         
+            //         goto coinSelect;
+            //     }
+            //
+            // }
+            //
+            // return Ok(selectedCoins.Select(coin => coin.Outpoint.ToString()).ToArray());
+
             var defaultCoinSelector = new DefaultCoinSelector();
             var defaultSelection =
                 (defaultCoinSelector.Select(coins.Select(coin => coin.Coin).ToArray(),
@@ -458,6 +477,7 @@ namespace BTCPayServer.Plugins.Wabisabi
                 .ToArray();
             var selector = new SmartCoinSelector(remainingCoins);
             selectedCoins.AddRange(selector.Select(defaultSelection, new Money(remaining, MoneyUnit.BTC)).ToList());
+            
             return Ok(selectedCoins.Select(coin => coin.Outpoint.ToString()).ToArray());
         }
         
