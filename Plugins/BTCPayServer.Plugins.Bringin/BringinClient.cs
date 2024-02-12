@@ -20,6 +20,30 @@ public class BringinClient
     private HttpClient HttpClient { get; set; }
 
 
+    public static HttpClient CreateClient(IHttpClientFactory httpClientFactory, string? apiKey = null)
+    {
+        var httpClient = httpClientFactory.CreateClient("bringin");
+        httpClient.BaseAddress = new Uri("https://dev.bringin.xyz");
+        if(apiKey != null) 
+            httpClient.DefaultRequestHeaders.TryAddWithoutValidation("api-key", apiKey);
+        return httpClient;
+    }
+    
+    public static async Task<Uri> OnboardUri(HttpClient httpClient, Uri callback)
+    {
+        
+        var content = new StringContent(JsonConvert.SerializeObject(new
+        {
+            callback
+        }), Encoding.UTF8, "application/json");
+        var response = await httpClient.PostAsync($"/api/v0/application/btcpay/signup-url", content);
+        var responseContent = await response.Content.ReadAsStringAsync();
+        if (response.IsSuccessStatusCode) return new Uri(JObject.Parse(responseContent)["signupURL"].ToString());
+        return new Uri("https://dev-app.bringin.xyz");
+        var error = JObject.Parse(responseContent).ToObject<BringinErrorResponse>();
+        throw new BringinException(error);
+    }
+    
     public async Task<string> GetUserId()
     {
         var response = await HttpClient.GetAsync($"/api/v0/user/user-id");

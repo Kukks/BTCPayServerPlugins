@@ -197,56 +197,34 @@ public class BringinService : EventHostedServiceBase
             }
 
 
-            if (SupportedMethods.All(supportedMethod => supportedMethod.PaymentMethod != pmi))
+            try
             {
-                //only LN is supported for now
-                continue;
-            }
+                var bringinClient = bringinStoreSetting.CreateClient(_httpClientFactory);
 
-            var supportedMethod = SupportedMethods.First(supportedMethod => supportedMethod.PaymentMethod == pmi);
-            var bringinClient = bringinStoreSetting.CreateClient(_httpClientFactory);
-
-            var host = await Dns.GetHostEntryAsync(Dns.GetHostName(), CancellationToken.None);
-            var ipToUse = host.AddressList
-                .FirstOrDefault(address => address.AddressFamily == AddressFamily.InterNetwork)?.ToString();
-
-            var thresholdAmount = methodSetting.Value.Threshold;
-            if (methodSetting.Value.FiatThreshold)
-            {
-                var rate = await bringinClient.GetRate();
-                thresholdAmount = methodSetting.Value.Threshold / rate.BringinPrice;
-            }
-
-            if (methodSetting.Value.CurrentBalance >= thresholdAmount)
-            {
-                var request = new BringinClient.CreateOrderRequest()
+                var thresholdAmount = methodSetting.Value.Threshold;
+                if (methodSetting.Value.FiatThreshold)
                 {
-                    SourceAmount = Money.Coins(methodSetting.Value.CurrentBalance).Satoshi,
-                    IP = ipToUse,
-                    PaymentMethod = supportedMethod.bringinMethod
-                };
-                var order = await bringinClient.PlaceOrder(request);
-                var orderMoney = Money.Satoshis(order.Amount);
-var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>(pmi.CryptoCode);
-                var claim = await _pullPaymentHostedService.Claim(new ClaimRequest()
+                    var rate = await bringinClient.GetRate();
+                    thresholdAmount = methodSetting.Value.Threshold / rate.BringinPrice;
+                }
+
+                if (methodSetting.Value.CurrentBalance >= thresholdAmount)
                 {
-                    PaymentMethodId = pmi,
-                    StoreId = storeId,
-                    Destination = new BoltInvoiceClaimDestination(order.Invoice, BOLT11PaymentRequest.Parse(order.Invoice, network.NBitcoinNetwork)),
-                    Value = orderMoney.ToUnit(MoneyUnit.BTC),
-                    PreApprove = true,
-                    Metadata = JObject.FromObject(new
+                    var payoutId = await CreateOrder(storeId, pmi, Money.Coins(methodSetting.Value.CurrentBalance)
+                        , true);
+                    if (payoutId is not null)
                     {
-                        Source = "Bringin"
-                    })
-                });
-                if (claim.Result == ClaimRequest.ClaimResult.Ok)
-                {
-                    methodSetting.Value.CurrentBalance -= orderMoney.ToUnit(MoneyUnit.BTC);
-                    methodSetting.Value.PendingPayouts.Add(claim.PayoutData.Id);
-                    result = true;
+                        methodSetting.Value.CurrentBalance -= methodSetting.Value.CurrentBalance;
+                        methodSetting.Value.PendingPayouts.Add(payoutId);
+                        result = true;
+                    }
                 }
             }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Could not create payout");
+            }            
+            
         }
 
         if (result)
@@ -259,11 +237,11 @@ var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>(pmi.CryptoCode);
         return result;
     }
     
-    public async Task<string> CreateOrder(string storeId, PaymentMethodId paymentMethodId, Money amountBtc, bool payout)
+    public async Task<string?> CreateOrder(string storeId, PaymentMethodId paymentMethodId, Money amountBtc, bool payout)
     {
         if (SupportedMethods.All(supportedMethod => supportedMethod.PaymentMethod != paymentMethodId))
         {
-            throw new NotSupportedException("Only LN is supported for now");
+            throw new NotSupportedException($"{paymentMethodId.ToPrettyString()} Payment method not supported");
            
         }
         var settings = _settings[storeId];
@@ -397,7 +375,7 @@ var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>(pmi.CryptoCode);
 
     public static readonly SupportedMethodOptions[] SupportedMethods = new[]
     {
-        new SupportedMethodOptions(new PaymentMethodId("BTC", LightningPaymentType.Instance), true, 100m, "LIGHTNING")
+        new SupportedMethodOptions(new PaymentMethodId("BTC", LightningPaymentType.Instance), true, 15, "LIGHTNING")
     };
 
     private ConcurrentDictionary<string, (IDisposable, BringinStoreSettings, DateTimeOffset Expiry)> _editModes = new();
@@ -472,6 +450,7 @@ var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>(pmi.CryptoCode);
         public const string BringinSettings = "BringinSettings";
         public bool Enabled { get; set; } = true;
         public string ApiKey { get; set; }
+        public string Code { get; set; } = Guid.NewGuid().ToString();
         public Dictionary<string, PaymentMethodSettings> MethodSettings { get; set; } = new();
 
         public class PaymentMethodSettings
@@ -485,11 +464,21 @@ var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>(pmi.CryptoCode);
 
         public BringinClient CreateClient(IHttpClientFactory httpClientFactory)
         {
-            var backend = new Uri("https://dev.bringin.xyz");
-            var httpClient = httpClientFactory.CreateClient("bringin");
-            httpClient.BaseAddress = backend;
-            httpClient.DefaultRequestHeaders.TryAddWithoutValidation("api-key", ApiKey);
+            var httpClient = BringinClient.CreateClient(httpClientFactory, ApiKey);
             return new BringinClient(ApiKey, httpClient);
         }
+    }
+
+    public void ResetBalance(string storeId, PaymentMethodId pmi)
+    {
+        _ = HandleStoreAction(storeId, async bringinStoreSettings =>
+        {
+            if (bringinStoreSettings.MethodSettings.TryGetValue(pmi.ToString(), out var methodSettings) && methodSettings.CurrentBalance > 0)
+            {
+                methodSettings.CurrentBalance = 0;
+                await _storeRepository.UpdateSetting(storeId, BringinStoreSettings.BringinSettings, bringinStoreSettings);
+                _settings.AddOrReplace(storeId, bringinStoreSettings);
+            }
+        });
     }
 }
