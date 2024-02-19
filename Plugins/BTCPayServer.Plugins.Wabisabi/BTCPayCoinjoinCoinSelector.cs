@@ -2,20 +2,24 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
 using NBitcoin;
+using WalletWasabi.Blockchain.Analysis;
+using WalletWasabi.Blockchain.Analysis.Clustering;
 using WalletWasabi.Blockchain.Keys;
 using WalletWasabi.Blockchain.TransactionOutputs;
+using WalletWasabi.Blockchain.Transactions;
 using WalletWasabi.Crypto.Randomness;
 using WalletWasabi.Exceptions;
 using WalletWasabi.Extensions;
 using WalletWasabi.Helpers;
+using WalletWasabi.Models;
 using WalletWasabi.WabiSabi;
 using WalletWasabi.WabiSabi.Backend.Rounds;
 using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.WabiSabi.Client.StatusChangedEvents;
+using WalletWasabi.WabiSabi.Models;
+using WalletWasabi.WabiSabi.Models.MultipartyTransaction;
 using WalletWasabi.Wallets;
 
 namespace BTCPayServer.Plugins.Wabisabi;
@@ -24,15 +28,25 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
 {
     private readonly BTCPayWallet _wallet;
 
+    private static BlockchainAnalyzer BlockchainAnalyzer { get; } = new();
     public BTCPayCoinjoinCoinSelector(BTCPayWallet wallet)
     {
         _wallet = wallet;
     }
 
-    public async Task<(ImmutableList<SmartCoin> selected, Func<IEnumerable<SmartCoin>, Task<bool>> acceptableSigned)> SelectCoinsAsync(
-        (IEnumerable<SmartCoin> Candidates, IEnumerable<SmartCoin> Ineligible) coinCandidates,
-        UtxoSelectionParameters utxoSelectionParameters,
-        Money liquidityClue, SecureRandom secureRandom)
+    public async
+        Task<(
+            ImmutableList<SmartCoin> selected,
+            Func<IEnumerable<AliceClient>, Task<bool>> acceptableRegistered,
+            Func<
+                ImmutableArray<AliceClient>,
+                (IEnumerable<TxOut> outputTxOuts, Dictionary<TxOut, PendingPayment> batchedPayments),
+                TransactionWithPrecomputedData,
+                RoundState,
+                Task<bool>> acceptableOutputs
+            )>
+        SelectCoinsAsync((IEnumerable<SmartCoin> Candidates, IEnumerable<SmartCoin> Ineligible) coinCandidates,
+            UtxoSelectionParameters utxoSelectionParameters, Money liquidityClue, SecureRandom secureRandom)
     {
         SmartCoin[] FilterCoinsMore(IEnumerable<SmartCoin> coins)
         {
@@ -145,18 +159,114 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
         }
         
         _wallet.LogTrace(solution.ToString());
-        return (solution.Coins.ToImmutableList(), async coins =>
+
+        async Task<bool> AcceptableRegistered(IEnumerable<AliceClient> coins)
         {
-            var onlyForConsolidation = mixReasons.Length == 1 && mixReasons.Contains(IWallet.MixingReason.Consolidation);
-            if(onlyForConsolidation && coins.Count() < 10)
+            var remainingMixReasons = mixReasons.ToList();
+            // var onlyForConsolidation = mixReasons.Length == 1 && mixReasons.Contains(IWallet.MixingReason.Consolidation);
+            if (mixReasons.Contains(IWallet.MixingReason.Consolidation) && coins.Count() < 10)
             {
-                _wallet.LogTrace("ShouldMix returned true only for consolidation, but less than 10 coins were registered successfully, so we will not mix");
-                return false;
+                remainingMixReasons.Remove(IWallet.MixingReason.Consolidation);
+                //
+                // _wallet.LogTrace("ShouldMix returned true only for consolidation, but less than 10 coins were registered successfully, so we will not mix");
+                // return false;
             }
-            return true;
             
+            if (mixReasons.Contains(IWallet.MixingReason.Payment) && !solution.HandledPayments.Any())
+            {
+                if (!solution.HandledPayments.Any()) remainingMixReasons.Remove(IWallet.MixingReason.Payment);
+                // can the registered coins handle any of the solution payments?
+                // if not, then we should not proceed
+                // _wallet.LogTrace("ShouldMix returned true only for payments, but no handled payments were found, so we will not mix");
+                //check if we can handle any of the payments in solution.HandledPayments with coins
+                
+                var effectiveSumOfRegisteredCoins = coins.Sum(coin => coin.EffectiveValue);
+                var canHandleAPayment = solution.HandledPayments.Any(payment =>
+                {
+                    var cost = payment.ToTxOut().EffectiveCost(utxoSelectionParameters.MiningFeeRate) + payment.Value;
+                    return effectiveSumOfRegisteredCoins >= cost;
+                });
+                if (!canHandleAPayment)
+                {
+                    remainingMixReasons.Remove(IWallet.MixingReason.Payment);
+                }
+            }
+
+            if (mixReasons.Contains(IWallet.MixingReason.NotPrivate) && coins.All(coin => coin.SmartCoin.IsPrivate(_wallet.AnonScoreTarget)))
+            {
+                remainingMixReasons.Remove(IWallet.MixingReason.NotPrivate);
+            }
+
+            if (coins.Count() != solution.Coins.Count() && mixReasons.Contains(IWallet.MixingReason.ExtraJoin))
+            {
+                remainingMixReasons.Remove(IWallet.MixingReason.ExtraJoin);
+            }
+
+            if (remainingMixReasons.Count != mixReasons.Length)
+            {
+                _wallet.LogDebug($"Some mix reasons were removed due to the difference in registered coins: {string.Join(", ", mixReasons.Except(remainingMixReasons))}. Remaining: {string.Join(", ", remainingMixReasons)}");
+            }
+
+            return remainingMixReasons.Any();
+        }
+
+        async Task<bool> AcceptableOutputs(ImmutableArray<AliceClient> registeredAliceClients, (IEnumerable<TxOut> outputTxOuts, Dictionary<TxOut, PendingPayment> batchedPayments) outputTxOuts, TransactionWithPrecomputedData unsignedCoinJoin, RoundState roundState)
+        {
+            var remainingMixReasons = mixReasons.ToList();
+            var ourCoins = registeredAliceClients.Select(client => client.SmartCoin);
+            var ourOutputsThatAreNotPayments = outputTxOuts.outputTxOuts.ToList();
+            foreach (var batchedPayment in outputTxOuts.batchedPayments)
+            {
+                ourOutputsThatAreNotPayments.Remove(ourOutputsThatAreNotPayments.First(@out => @out.ScriptPubKey == batchedPayment.Key.ScriptPubKey && @out.Value == batchedPayment.Key.Value));
+            }
+
+            var smartTx = new SmartTransaction(unsignedCoinJoin.Transaction, new Height(HeightType.Unknown));
+            foreach (var smartCoin in ourCoins)
+            {
+                smartTx.TryAddWalletInput(SmartCoin.Clone(smartCoin));
+            }
+
+            var outputCoins = new List<SmartCoin>();
+            var matchedIndexes = new List<uint>();
+            foreach (var txOut in ourOutputsThatAreNotPayments)
+            {
+                var index = unsignedCoinJoin.Transaction.Outputs.AsIndexedOutputs().First(@out => !matchedIndexes.Contains(@out.N) && @out.TxOut.ScriptPubKey == txOut.ScriptPubKey && @out.TxOut.Value == txOut.Value).N;
+                matchedIndexes.Add(index);
+                var coin = new SmartCoin(smartTx, index, new HdPubKey(new Key().PubKey, new KeyPath(0, 0, 0, 0, 0, 0), LabelsArray.Empty, KeyState.Clean));
+                smartTx.TryAddWalletOutput(coin);
+                outputCoins.Add(coin);
+            }
+
+            BlockchainAnalyzer.Analyze(smartTx);
+            var wavgInAnon = CoinjoinAnalyzer.WeightedAverage.Invoke(ourCoins.Select(coin => new CoinjoinAnalyzer.AmountWithAnonymity(coin.AnonymitySet, new Money(coin.Amount, MoneyUnit.BTC))));
+            var wavgOutAnon = CoinjoinAnalyzer.WeightedAverage.Invoke(outputCoins.Select(coin => new CoinjoinAnalyzer.AmountWithAnonymity(coin.AnonymitySet, new Money(coin.Amount, MoneyUnit.BTC))));
+
+
+            if (!outputTxOuts.batchedPayments.Any())
+            {
+                remainingMixReasons.Remove(IWallet.MixingReason.Payment);
+                if (wavgOutAnon < wavgInAnon - CoinJoinCoinSelector.MaxWeightedAnonLoss)
+                {
+                    remainingMixReasons.Remove(IWallet.MixingReason.NotPrivate);
+                }
+            }
+            else if (wavgOutAnon < wavgInAnon)
+            {
+
+                remainingMixReasons.Remove(IWallet.MixingReason.NotPrivate);
+                remainingMixReasons.Remove(IWallet.MixingReason.ExtraJoin);
+            }
+
+            if (remainingMixReasons.Contains(IWallet.MixingReason.Consolidation) && ourOutputsThatAreNotPayments.Count > registeredAliceClients.Length)
+            {
+                remainingMixReasons.Remove(IWallet.MixingReason.Consolidation);
+            }
             
-        } );
+
+            return remainingMixReasons.Any();
+        }
+
+        return (solution.Coins.ToImmutableList(), (IEnumerable<AliceClient> coins) => AcceptableRegistered(coins) , AcceptableOutputs);
     }
 
     private async Task<SubsetSolution> SelectCoinsInternal(UtxoSelectionParameters utxoSelectionParameters,
@@ -179,37 +289,6 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
 
         
         solution.ConsolidationMode = consolidationMode;
-
-        // if (consolidationMode && coins.Count() < 8 && !coinjoiningOnlyForPayments &&
-        //     ineligibleCoins.Any(coin => !coin.Confirmed))
-        // {
-        //     //if we're in consolidation mode, and there are coins not eligible for a reason  that will be ok in the near future, we should try to wait for them to become eligible instead of entering multiple coinjoins, which costs more.
-        //     // why are they ineligible? banned if not too far in the future is ok, unconfrmed as well
-        //
-        //     // if there are unconfirmed coins, we should wait for them to confirm, but since we cant determine if they will be unconfirmed for a long time,. let's play  a random chance game: the more coins we have towards the 8 coin goal, the bigger the chance we proceed with the coinjoin
-        //     var rand = Random.Shared.Next(1, 101);
-        //     var chance = (coins.Count() / 8) * 100;
-        //     _wallet.LogDebug(
-        //         $"coin selection: consolidation mode, and there are coins not eligible for a reason  that will be ok in the near future, we should try to wait for them to become eligible instead of entering multiple coinjoins, which costs more. random chance to proceed: {chance} > {rand} (random 0-100) continue: {chance > rand}");
-        //     if (chance > rand)
-        //     {
-        //         return solution;
-        //
-        //     }
-        // }
-        //
-        // if (fullyPrivate && !coinjoiningOnlyForPayments && percentage )
-        // {
-        //     var rand = Random.Shared.Next(1, 1001);
-        //     if (rand > _wallet.WabisabiStoreSettings.ExtraJoinProbability)
-        //     {
-        //         _wallet.LogTrace($"All coins are private and we have no pending payments. Skipping join.");
-        //         return solution;
-        //     }
-        //
-        //     _wallet.LogTrace(
-        //         "All coins are private and we have no pending payments but will join just to reduce timing analysis");
-        // }
 
         while (remainingCoins.Any())
         {

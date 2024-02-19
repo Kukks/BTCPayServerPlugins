@@ -469,9 +469,9 @@ public class BringinService : EventHostedServiceBase
         }
     }
 
-    public void ResetBalance(string storeId, PaymentMethodId pmi)
+    public async Task ResetBalance(string storeId, PaymentMethodId pmi)
     {
-        _ = HandleStoreAction(storeId, async bringinStoreSettings =>
+        await HandleStoreAction(storeId, async bringinStoreSettings =>
         {
             if (bringinStoreSettings.MethodSettings.TryGetValue(pmi.ToString(), out var methodSettings) && methodSettings.CurrentBalance > 0)
             {

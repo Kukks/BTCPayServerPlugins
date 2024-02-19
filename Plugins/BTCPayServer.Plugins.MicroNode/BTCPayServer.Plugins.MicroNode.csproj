@@ -37,8 +37,6 @@
         <PackageReference Include="AsyncKeyedLock" Version="6.2.6" />
         <PackageReference Include="FlexLabs.EntityFrameworkCore.Upsert" Version="8.0.0" />
         <PackageReference Include="Laraue.EfCoreTriggers.PostgreSql" Version="8.0.1" />
-        <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.0" />
-        <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.0" />
         <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="4.8.0" />
         <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
     </ItemGroup>

@@ -292,9 +292,19 @@
 
     public string OnboardLink;
 
-    private void ResetBalance(PaymentMethodId pmi)
+    private async void ResetBalance(PaymentMethodId pmi)
     {
-        BringinService.ResetBalance(StoreId, pmi);
+        if (_saving)
+            return;
+        try
+        {
+            _saving = true;
+            await BringinService.ResetBalance(StoreId, pmi);
+        }
+        finally
+        {
+            _saving = false;
+        }
     }
 
 }
@@ -475,15 +485,14 @@
                             <h3 class="d-inline-block me-1" data-balance="@method.Value.CurrentBalance" data-sensitive>@DisplayFormatter.Currency(method.Value.CurrentBalance, "BTC", DisplayFormatter.CurrencyFormat.None)</h3>
                             <span class="text-secondary fw-semibold currency">BTC</span>
                             <span class="text-secondary"> (@DisplayFormatter.Currency(balanceInFiat.Value, "EUR", DisplayFormatter.CurrencyFormat.Code)) pending to forward once @DisplayFormatter.Currency(thresholdinBtc.Value, "BTC", DisplayFormatter.CurrencyFormat.Code) (@DisplayFormatter.Currency(method.Value.Threshold, "EUR")) is reached.</span>
-                        @if (method.Value.CurrentBalance > 0)
-                                            {
-                                                <button class="btn btn-link" @onclick="() => ResetBalance(pmi)">Reset balance</button>
-                                                //Clear balance
-                                                
-                                            }
-                            </div>
+                            @if (method.Value.CurrentBalance > 0)
+                            {
+                                <button class="btn btn-link" @onclick="() => ResetBalance(pmi)" disabled="@_saving">Reset balance</button>
+                                //Clear balance
+                            }
+                        </div>
                     }
-                    
+
                     @if (method.Value.PendingPayouts.Any())
                     {
                         <div class="balance d-flex align-items-baseline gap-1">
