@@ -34,6 +34,8 @@ public class WabisabiStoreSettings
     public int ExplicitHighestFeeTarget { get; set; } = BTCPayWallet.DefaultExplicitHighestFeeTarget;
     public int LowFeeTarget { get; set; } = BTCPayWallet.DefaultLowFeeTarget;
 
+    public bool ConsiderEntryProximity { get; set; } = true;
+
     public enum CrossMixMode
     {
         WhenFree,

@@ -134,11 +134,11 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
         Dictionary<AnonsetType, int> idealMinimumPerType = new Dictionary<AnonsetType, int>()
             {{AnonsetType.Red, 1}, {AnonsetType.Orange, 1}, {AnonsetType.Green, 1}};
 
-        var solution = await SelectCoinsInternal(utxoSelectionParameters, candidates, ineligibleCoins,payments,
+        var solution = await SelectCoinsInternal(utxoSelectionParameters, candidates,payments,
             Random.Shared.Next(20, 31),
             maxPerType,
             idealMinimumPerType,
-            consolidationMode, liquidityClue, secureRandom,mixReasons);
+            consolidationMode, liquidityClue, secureRandom);
 
         if (attemptingTobeParanoidWhenDoingPayments && !solution.HandledPayments.Any())
         {
@@ -192,7 +192,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                 }
             }
 
-            if (mixReasons.Contains(IWallet.MixingReason.NotPrivate) && coins.All(coin => coin.SmartCoin.IsPrivate(_wallet.AnonScoreTarget)))
+            if (mixReasons.Contains(IWallet.MixingReason.NotPrivate) && coins.All(coin => coin.SmartCoin.IsPrivate(_wallet)))
             {
                 remainingMixReasons.Remove(IWallet.MixingReason.NotPrivate);
             }
@@ -266,25 +266,25 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             return remainingMixReasons.Any();
         }
 
-        return (solution.Coins.ToImmutableList(), (IEnumerable<AliceClient> coins) => AcceptableRegistered(coins) , AcceptableOutputs);
+        return (solution.Coins.ToImmutableList(), AcceptableRegistered , AcceptableOutputs);
     }
 
     private async Task<SubsetSolution> SelectCoinsInternal(UtxoSelectionParameters utxoSelectionParameters,
-        IEnumerable<SmartCoin> coins, IEnumerable<SmartCoin> ineligibleCoins,
+        IEnumerable<SmartCoin> coins,
         IEnumerable<PendingPayment> pendingPayments,
         int maxCoins,
         Dictionary<AnonsetType, int> maxPerType, Dictionary<AnonsetType, int> idealMinimumPerType,
-        bool consolidationMode, Money liquidityClue, SecureRandom random, IWallet.MixingReason[] mixReason)
+        bool consolidationMode, Money liquidityClue, SecureRandom random)
     {
         // Sort the coins by their anon score and then by descending order their value, and then slightly randomize in 2 ways:
         //attempt to shift coins that comes from the same tx AND also attempt to shift coins based on percentage probability
         var remainingCoins = SlightlyShiftOrder(RandomizeCoins(
-            coins.OrderBy(coin => coin.CoinColor(_wallet.AnonScoreTarget)).ThenByDescending(x =>
+            coins.OrderBy(coin => coin.CoinColor(_wallet)).ThenByDescending(x =>
                     x.EffectiveValue(utxoSelectionParameters.MiningFeeRate,
                         utxoSelectionParameters.CoordinationFeeRate))
                 .ToList(), liquidityClue), 10);
         var remainingPendingPayments = new List<PendingPayment>(pendingPayments);
-        var solution = new SubsetSolution(remainingPendingPayments.Count, _wallet.AnonScoreTarget,
+        var solution = new SubsetSolution(remainingPendingPayments.Count, _wallet,
             utxoSelectionParameters);
 
         
@@ -308,20 +308,20 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                     coinColorCount.TryGetValue(coinColor.Key, out var currentCoinColorCount);
                     if (currentCoinColorCount < coinColor.Value)
                     {
-                        predicate = coin1 => coin1.CoinColor(_wallet.AnonScoreTarget) == coinColor.Key;
+                        predicate = coin1 => coin1.CoinColor(_wallet) == coinColor.Key;
                         break;
                     }
                 }
                 else
                 {
                     //if the ideal amount = 0, then we should de-prioritize.
-                    predicate = coin1 => coin1.CoinColor(_wallet.AnonScoreTarget) != coinColor.Key;
+                    predicate = coin1 => coin1.CoinColor(_wallet) != coinColor.Key;
                     break;
                 }
             }
 
             var coin = remainingCoins.FirstOrDefault(predicate) ?? remainingCoins.First();
-            var color = coin.CoinColor(_wallet.AnonScoreTarget);
+            var color = coin.CoinColor(_wallet);
             // If the selected coins list is at its maximum size, break out of the loop
             if (solution.Coins.Count == maxCoins)
             {
@@ -330,7 +330,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
 
             remainingCoins.Remove(coin);
             if (maxPerType.TryGetValue(color, out var maxColor) &&
-                solution.Coins.Count(coin1 => coin1.CoinColor(_wallet.AnonScoreTarget) == color) == maxColor)
+                solution.Coins.Count(coin1 => coin1.CoinColor(_wallet) == color) == maxColor)
             {
                 continue;
             }
@@ -436,7 +436,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             var currentCoin = remainingCoins.First();
             remainingCoins.RemoveAt(0);
             var lastCoin = workingList.LastOrDefault();
-            if (lastCoin is null || currentCoin.CoinColor(_wallet.AnonScoreTarget) == AnonsetType.Green ||
+            if (lastCoin is null || currentCoin.CoinColor(_wallet) == AnonsetType.Green ||
                 !remainingCoins.Any() ||
                 (remainingCoins.Count == 1 && remainingCoins.First().TransactionId == currentCoin.TransactionId) ||
                 lastCoin.TransactionId != currentCoin.TransactionId ||
@@ -458,9 +458,9 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
 
 public static class SmartCoinExtensions
 {
-    public static AnonsetType CoinColor(this SmartCoin coin, int anonsetTarget)
+    public static AnonsetType CoinColor(this SmartCoin coin, IWallet wallet)
     {
-        return coin.IsPrivate(anonsetTarget)? AnonsetType.Green: coin.IsSemiPrivate(anonsetTarget)? AnonsetType.Orange: AnonsetType.Red;
+        return coin.IsPrivate(wallet)? AnonsetType.Green: coin.IsSemiPrivate(wallet)? AnonsetType.Orange: AnonsetType.Red;
     }
 }
 
@@ -475,11 +475,11 @@ public class SubsetSolution
 {
     private readonly UtxoSelectionParameters _utxoSelectionParameters;
 
-    public SubsetSolution(int totalPaymentsGross, int anonsetTarget, UtxoSelectionParameters utxoSelectionParameters)
+    public SubsetSolution(int totalPaymentsGross, IWallet wallet, UtxoSelectionParameters utxoSelectionParameters)
     {
         _utxoSelectionParameters = utxoSelectionParameters;
         TotalPaymentsGross = totalPaymentsGross;
-        AnonsetTarget = anonsetTarget;
+        Wallet = wallet;
     }
     public List<SmartCoin> Coins { get; set; } = new();
     public List<PendingPayment> HandledPayments { get; set; } = new();
@@ -489,10 +489,10 @@ public class SubsetSolution
             .ToDecimal(MoneyUnit.BTC));
 
     public Dictionary<AnonsetType, SmartCoin[]> SortedCoins =>
-        Coins.GroupBy(coin => coin.CoinColor(AnonsetTarget)).ToDictionary(coins => coins.Key, coins => coins.ToArray());
+        Coins.GroupBy(coin => coin.CoinColor(Wallet)).ToDictionary(coins => coins.Key, coins => coins.ToArray());
 
     public int TotalPaymentsGross { get; }
-    public int AnonsetTarget { get; }
+    public IWallet Wallet { get; }
 
     public decimal TotalPaymentCost => HandledPayments.Sum(payment =>
         payment.ToTxOut().EffectiveCost(_utxoSelectionParameters.MiningFeeRate).ToDecimal(MoneyUnit.BTC));

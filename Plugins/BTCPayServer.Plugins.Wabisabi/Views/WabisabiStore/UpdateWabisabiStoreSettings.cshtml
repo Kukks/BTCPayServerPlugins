@@ -17,8 +17,8 @@
 @inject BTCPayNetworkProvider BtcPayNetworkProvider
 @inject BTCPayServerOptions BtcPayServerOptions
 @{
-    var liteMode = Context.Items.TryGetValue("cjlite" , out _);
-    
+    var liteMode = Context.Items.TryGetValue("cjlite", out _);
+
     var storeId = _scopeProvider.GetCurrentStoreId();
     ViewData.SetActivePage("CoinjoinSettings", "Coinjoin", "Coinjoin settings", storeId);
     var userid = Context.User.Claims.Single(claim => claim.Type == ClaimTypes.NameIdentifier).Value;
@@ -48,19 +48,19 @@
         </a>
     </h3>
     <div class="d-flex align-items-center gap-1 ">
-        <div class="d-flex align-items-center @(liteMode? "d-none": "")">
+        <div class="d-flex align-items-center @(liteMode ? "d-none" : "")">
             <input asp-for="Active" type="checkbox" class="btcpay-toggle me-2"/>
             <label asp-for="Active" class="form-label mb-0 me-1"></label>
         </div>
-        <button name="command" type="submit" value="save" class="btn btn-primary mt-3 mt-sm-0 @(liteMode? "btn-lin": "btn-secondary")">Save</button>
-        <a asp-action="ListCoinjoins" asp-route-storeId="@storeId" class="btn btn-secondary mt-3 mt-sm-0 @(liteMode? "d-none": "")" role="button">
+        <button name="command" type="submit" value="save" class="btn btn-primary mt-3 mt-sm-0 @(liteMode ? "btn-lin" : "btn-secondary")">Save</button>
+        <a asp-action="ListCoinjoins" asp-route-storeId="@storeId" class="btn btn-secondary mt-3 mt-sm-0 @(liteMode ? "d-none" : "")" role="button">
             Coinjoin History
         </a>
-        <button type="button" class="btn btn-secondary mt-3 mt-sm-0 @(liteMode? "d-none": "")" permission="@Policies.CanModifyServerSettings"
+        <button type="button" class="btn btn-secondary mt-3 mt-sm-0 @(liteMode ? "d-none" : "")" permission="@Policies.CanModifyServerSettings"
                 data-bs-toggle="modal" data-bs-target="#discover-prompt">
             Add Coordinator
         </button>
-        <a asp-controller="WabisabiCoordinatorConfig" asp-action="UpdateWabisabiSettings" class="btn @(liteMode? "btn-lin": "btn-secondary")  mt-3 mt-sm-0" permission="@Policies.CanModifyServerSettings">Coordinator</a>
+        <a asp-controller="WabisabiCoordinatorConfig" asp-action="UpdateWabisabiSettings" class="btn @(liteMode ? "btn-lin" : "btn-secondary")  mt-3 mt-sm-0" permission="@Policies.CanModifyServerSettings">Coordinator</a>
 
         @* <a class="btn btn-secondary mt-3 mt-sm-0" href="https://gist.github.com/nopara73/bb17e89d7dc9af536ca41f50f705d329" rel="noreferrer noopener" target="_blank">Enable Discreet payments - Coming soon</a> *@
     </div>
@@ -75,14 +75,13 @@
     }
 
     var wallet = await WalletProvider.GetWalletAsync(storeId);
-    if (wallet is BTCPayWallet &&  !((BTCPayKeyChain) wallet.KeyChain).KeysAvailable)
-        {
-            <div class="alert alert-danger d-flex align-items-center" role="alert">
-                <vc:icon symbol="warning"/>
-                <span class="ms-3">This wallet is either not a hot wallet, or enabled in your store settings and will not be able to participate in coinjoins.</span>
-            </div>
-        }
-    
+    if (wallet is BTCPayWallet && !((BTCPayKeyChain) wallet.KeyChain).KeysAvailable)
+    {
+        <div class="alert alert-danger d-flex align-items-center" role="alert">
+            <vc:icon symbol="warning"/>
+            <span class="ms-3">This wallet is either not a hot wallet, or enabled in your store settings and will not be able to participate in coinjoins.</span>
+        </div>
+    }
 }
 <style>
     #blocker:hover{
@@ -126,14 +125,29 @@
         </div>
     </div>
     <div id="advanced" class="@(Model.PlebMode ? "d-none" : "")">
-        <button type="submit" name="command" value="reset"  class="btn btn-link">Reset to defaults </button>
-        <div class="form-group">
+        <button type="submit" name="command" value="reset" class="btn btn-link">Reset to defaults </button>
 
-            <label asp-for="AnonymitySetTarget" class="form-label">Anon score target</label>
-            <input type="number" class="form-control" asp-for="AnonymitySetTarget" placeholder="target anon score" min="0">
+        <div class="row">
 
-            <p class="text-muted">Scores your coinjoined utxos based on how many other utxos in the coinjoin (and other previous coinjoin rounds) had the same value.<br/> Anonset score computation is not an exact science, and when using coordinators with massive liquidity, is not that important as all rounds (past, present, future) contribute to your privacy.</p>
+            <div class="col-sm-12 col-md-6">
+                <div class="form-group">
+
+                    <label asp-for="AnonymitySetTarget" class="form-label">Anon score target</label>
+                    <input type="number" class="form-control" asp-for="AnonymitySetTarget" placeholder="target anon score" min="0">
+
+                    <p class="text-muted">Scores your coinjoined utxos based on how many other utxos in the coinjoin (and other previous coinjoin rounds) had the same value.<br/> Anonset score computation is not an exact science, and when using coordinators with massive liquidity, is not that important as all rounds (past, present, future) contribute to your privacy.</p>
+                </div>
+            </div>
+            <div class="col-sm-12 col-md-6">
+                <div class="form-group  form-check">
+                    <label asp-for="ConsiderEntryProximity" class="form-check-label">Consider entry proximity</label>
+                    <input asp-for="ConsiderEntryProximity" type="checkbox" class="form-check-input"/>
+                    <p class="text-muted">Coins which have been mixed but are only one hop away from the original coinjoin transaction won't be considered private. This helps break linking assumptions when coins are spent.</p>
+                </div>
+            </div>
         </div>
+
+
         <div class="row">
 
             <div class="col-sm-12 col-md-6">
@@ -454,7 +468,6 @@
 {
     <partial name="Wabisabi/AddCoordinatorPrompt" model="@(new DiscoveredCoordinator())"/>
 }
-
 
 
 @section PageFootContent {

@@ -73,7 +73,7 @@
                 {
                     value = coin.Amount.ToDecimal(MoneyUnit.BTC),
                     score = coin.AnonymitySet,
-                    isPrivate = coin.CoinColor(wallet.AnonScoreTarget) == AnonsetType.Green,
+                    isPrivate = coin.CoinColor(wallet) == AnonsetType.Green,
                     confirmed = coin.Confirmed,
                     id = coin.Outpoint.ToString(),
                     coinjoinInProgress = coin.CoinJoinInProgress

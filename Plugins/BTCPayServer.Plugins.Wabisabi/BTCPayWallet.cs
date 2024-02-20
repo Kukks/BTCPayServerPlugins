@@ -27,6 +27,7 @@ using WalletWasabi.Blockchain.Keys;
 using WalletWasabi.Blockchain.TransactionOutputs;
 using WalletWasabi.Blockchain.Transactions;
 using WalletWasabi.Extensions;
+using WalletWasabi.Helpers;
 using WalletWasabi.Models;
 using WalletWasabi.WabiSabi;
 using WalletWasabi.WabiSabi.Backend.Rounds;
@@ -133,6 +134,9 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     public const int HighAmountOfCoins = 30;
     public int ExplicitHighestFeeTarget => WabisabiStoreSettings.PlebMode? DefaultExplicitHighestFeeTarget: WabisabiStoreSettings.ExplicitHighestFeeTarget;
     public int LowFeeTarget => WabisabiStoreSettings.PlebMode? DefaultLowFeeTarget: WabisabiStoreSettings.LowFeeTarget;
+
+    public bool ConsiderEntryProximity => WabisabiStoreSettings.PlebMode || WabisabiStoreSettings.ConsiderEntryProximity;
+
     public bool RedCoinIsolation => !WabisabiStoreSettings.PlebMode &&WabisabiStoreSettings.RedCoinIsolation;
     public bool BatchPayments => WabisabiStoreSettings.PlebMode || WabisabiStoreSettings.BatchPayments;
     public long? MinimumDenominationAmount => WabisabiStoreSettings.PlebMode? 10000 : WabisabiStoreSettings.MinimumDenominationAmount;
@@ -213,8 +217,8 @@ public class BTCPayWallet : IWallet, IDestinationProvider
 
     public double GetPrivacyPercentage(CoinsView coins, int privateThreshold)
     {
-        var privateAmount = coins.FilterBy(x => x.HdPubKey.AnonymitySet >= privateThreshold).TotalAmount();
-        var normalAmount = coins.FilterBy(x => x.HdPubKey.AnonymitySet < privateThreshold).TotalAmount();
+        var privateAmount = coins.FilterBy(x => x.IsPrivate(this)).TotalAmount();
+        var normalAmount = coins.FilterBy(x => !x.IsPrivate(this)).TotalAmount();
 
         var privateDecimalAmount = privateAmount.ToDecimal(MoneyUnit.BTC);
         var normalDecimalAmount = normalAmount.ToDecimal(MoneyUnit.BTC);
