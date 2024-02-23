@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Net.Http;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.JsonConverters;
 using Newtonsoft.Json;
@@ -53,12 +54,12 @@ public class BringinClient
         throw new BringinException(error);
     }
 
-    public async Task<RateResponse> GetRate(string ticker = "BTCEUR")
+    public async Task<RateResponse> GetRate(string ticker = "BTCEUR", CancellationToken cancellationToken = default)
     {
         var request = new {ticker};
         var content = new StringContent(JsonConvert.SerializeObject(request), Encoding.UTF8, "application/json");
-        var response = await HttpClient.PostAsync($"/api/v0/offramp/rates", content);
-        var responseContent = await response.Content.ReadAsStringAsync();
+        var response = await HttpClient.PostAsync($"/api/v0/offramp/rates", content, cancellationToken);
+        var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
         if (response.IsSuccessStatusCode) return JObject.Parse(responseContent).ToObject<RateResponse>();
         var error = JObject.Parse(responseContent).ToObject<BringinErrorResponse>();
         throw new BringinException(error);
