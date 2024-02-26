@@ -38,7 +38,8 @@ public class BringinService : EventHostedServiceBase
     private ConcurrentDictionary<string, BringinStoreSettings> _settings;
     private readonly AsyncKeyedLocker<string> _storeLocker = new();
 
-    public BringinService(EventAggregator eventAggregator, ILogger<BringinService> logger,
+    public BringinService(EventAggregator eventAggregator, 
+        ILogger<BringinService> logger,
         StoreRepository storeRepository,
         PullPaymentHostedService pullPaymentHostedService,
         BTCPayNetworkJsonSerializerSettings btcPayNetworkJsonSerializerSettings,
@@ -199,7 +200,9 @@ public class BringinService : EventHostedServiceBase
 
             try
             {
-                var bringinClient = bringinStoreSetting.CreateClient(_httpClientFactory);
+                
+                var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>("BTC");
+                var bringinClient = bringinStoreSetting.CreateClient(_httpClientFactory,network.NBitcoinNetwork);
 
                 var thresholdAmount = methodSetting.Value.Threshold;
                 if (methodSetting.Value.FiatThreshold)
@@ -245,7 +248,8 @@ public class BringinService : EventHostedServiceBase
            
         }
         var settings = _settings[storeId];
-        var bringinClient = settings.CreateClient(_httpClientFactory);
+        
+        var bringinClient = settings.CreateClient(_httpClientFactory, _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>(paymentMethodId.CryptoCode).NBitcoinNetwork);
         
         
         var host = await Dns.GetHostEntryAsync(Dns.GetHostName(), CancellationToken.None);
@@ -462,9 +466,9 @@ public class BringinService : EventHostedServiceBase
             public List<string> PendingPayouts { get; set; } = new();
         }
 
-        public BringinClient CreateClient(IHttpClientFactory httpClientFactory)
+        public BringinClient CreateClient(IHttpClientFactory httpClientFactory, Network network)
         {
-            var httpClient = BringinClient.CreateClient(httpClientFactory, ApiKey);
+            var httpClient = BringinClient.CreateClient(network, httpClientFactory, ApiKey);
             return new BringinClient(ApiKey, httpClient);
         }
     }

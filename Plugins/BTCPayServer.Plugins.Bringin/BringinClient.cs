@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 using BTCPayServer.JsonConverters;
+using NBitcoin;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -20,18 +21,38 @@ public class BringinClient
     private HttpClient HttpClient { get; set; }
 
 
-    public static HttpClient CreateClient(IHttpClientFactory httpClientFactory, string? apiKey = null)
+    public static Uri GetDashboardUri(Network network)
+    {
+        if (network.ChainName == ChainName.Mainnet)
+        {
+            return new Uri("https://app.bringin.xyz");
+        }
+
+        return new Uri("https://dev-app.bringin.xyz");
+    }
+
+    public static Uri GetApiUrl(Network network)
+    {
+        if (network.ChainName == ChainName.Mainnet)
+        {
+            return new Uri("https://api.bringin.xyz");
+        }
+
+        return new Uri("https://dev.bringin.xyz");
+    }
+
+
+    public static HttpClient CreateClient(Network network, IHttpClientFactory httpClientFactory, string? apiKey = null)
     {
         var httpClient = httpClientFactory.CreateClient("bringin");
-        httpClient.BaseAddress = new Uri("https://dev.bringin.xyz");
-        if(apiKey != null) 
+        httpClient.BaseAddress = GetApiUrl(network);
+        if (apiKey != null)
             httpClient.DefaultRequestHeaders.TryAddWithoutValidation("api-key", apiKey);
         return httpClient;
     }
-    
-    public static async Task<Uri> OnboardUri(HttpClient httpClient, Uri callback)
+
+    public static async Task<Uri> OnboardUri(HttpClient httpClient, Uri callback, Network network)
     {
-        
         var content = new StringContent(JsonConvert.SerializeObject(new
         {
             callback
@@ -39,11 +60,9 @@ public class BringinClient
         var response = await httpClient.PostAsync($"/api/v0/application/btcpay/signup-url", content);
         var responseContent = await response.Content.ReadAsStringAsync();
         if (response.IsSuccessStatusCode) return new Uri(JObject.Parse(responseContent)["signupURL"].ToString());
-        return new Uri("https://dev-app.bringin.xyz");
-        var error = JObject.Parse(responseContent).ToObject<BringinErrorResponse>();
-        throw new BringinException(error);
+        return GetDashboardUri(network);
     }
-    
+
     public async Task<string> GetUserId()
     {
         var response = await HttpClient.GetAsync($"/api/v0/user/user-id");
@@ -87,18 +106,16 @@ public class BringinClient
             var balance = JObject.Parse(responseContent).ToObject<BalanceResponse>();
             return balance.Balance / 100m; //response is in cents 
         }
+
         var error = JObject.Parse(responseContent).ToObject<BringinErrorResponse>();
         throw new BringinException(error);
     }
 
     public class BalanceResponse
     {
-        [JsonProperty("balance")]   
+        [JsonProperty("balance")]
         [JsonConverter(typeof(NumericStringJsonConverter))]
-        public decimal Balance {
-            get;
-            set;
-        }
+        public decimal Balance { get; set; }
     }
     //
     // public class GetOrderResponse
@@ -130,28 +147,25 @@ public class BringinClient
 
     public class CreateOrderResponse
     {
-        [JsonProperty("id")]
-        public string Id { get; set; }
+        [JsonProperty("id")] public string Id { get; set; }
 
         [JsonProperty("amount")]
         [JsonConverter(typeof(NumericStringJsonConverter))]
         public decimal Amount { get; set; }
 
-        [JsonProperty("invoice")]
-        public string Invoice { get; set; }
+        [JsonProperty("invoice")] public string Invoice { get; set; }
 
-        [JsonProperty("expiresAt")]
-        public long Expiry { get; set; }
+        [JsonProperty("expiresAt")] public long Expiry { get; set; }
     }
 
     public class CreateOrderRequest
-    { [JsonProperty("sourceAmount")] 
+    {
+        [JsonProperty("sourceAmount")]
         [JsonConverter(typeof(NumericStringJsonConverter))]
         public decimal SourceAmount { get; set; }
 
         [JsonProperty("ipAddress")] public string IP { get; set; }
-        [JsonProperty("paymentMethod")] 
-        public string PaymentMethod { get; set; }
+        [JsonProperty("paymentMethod")] public string PaymentMethod { get; set; }
     }
 
     public class RateResponse
@@ -159,7 +173,7 @@ public class BringinClient
         public string Ticker { get; set; }
         public string Currency { get; set; }
 
-        
+
         public long Timestamp { get; set; }
 
         [JsonConverter(typeof(NumericStringJsonConverter))]

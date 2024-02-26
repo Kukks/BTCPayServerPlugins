@@ -15,11 +15,13 @@ public class BringinController : Controller
 {
     private readonly BringinService _bringinService;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly BTCPayNetworkProvider _btcPayNetworkProvider;
 
-    public BringinController(BringinService bringinService, IHttpClientFactory httpClientFactory)
+    public BringinController(BringinService bringinService, IHttpClientFactory httpClientFactory, BTCPayNetworkProvider btcPayNetworkProvider)
     {
         _bringinService = bringinService;
         _httpClientFactory = httpClientFactory;
+        _btcPayNetworkProvider = btcPayNetworkProvider;
     }
     
     [HttpGet("onboard")]
@@ -35,8 +37,9 @@ public class BringinController : Controller
             storeId
         }, Request.Scheme);
         
-        var httpClient = BringinClient.CreateClient(_httpClientFactory);
-        var onboardUri = await BringinClient.OnboardUri(httpClient, new Uri(callbackUri));
+        var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>("BTC").NBitcoinNetwork;
+        var httpClient = BringinClient.CreateClient(network,_httpClientFactory);
+        var onboardUri = await BringinClient.OnboardUri(httpClient, new Uri(callbackUri), network);
         return Redirect(onboardUri.ToString());
     }
 

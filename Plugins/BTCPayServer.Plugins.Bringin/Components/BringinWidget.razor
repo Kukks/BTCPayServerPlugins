@@ -133,7 +133,8 @@
             return;
         try
         {
-            var userId = await _settings.CreateClient(HttpClientFactory).GetUserId();
+            var network = BTCPayNetworkProvider.GetNetwork<BTCPayNetwork>("BTC");
+            var userId = await _settings.CreateClient(HttpClientFactory, network.NBitcoinNetwork).GetUserId();
             ApiKeyError = string.IsNullOrEmpty(userId);
         }
         catch (Exception e)
@@ -182,7 +183,9 @@
         {
             if (_settings?.ApiKey is null || EditMode)
                 return;
-            var client = _settings.CreateClient(HttpClientFactory);
+            
+            var network = BTCPayNetworkProvider.GetNetwork<BTCPayNetwork>("BTC");
+            var client = _settings.CreateClient(HttpClientFactory, network.NBitcoinNetwork);
             LastFiatBalance = await client.GetFiatBalance();
             LastFiatRate = (await client.GetRate()).BringinPrice;
             LastDataFetch = DateTimeOffset.UtcNow;
