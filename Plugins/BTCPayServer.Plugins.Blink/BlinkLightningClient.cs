@@ -624,6 +624,11 @@ mutation LnInvoicePaymentSend($input: LnInvoicePaymentInput!) {
             null => PayResult.Unknown,
             _ => throw new ArgumentOutOfRangeException()
         };
+        if (result.Result == PayResult.Error && response.TryGetValue("errors", out var error) && error.ToString().Contains("ResourceAttemptsRedlockServiceError", StringComparison.InvariantCultureIgnoreCase))
+        {
+            await Task.Delay(Random.Shared.Next(200, 600), cts.Token);
+            return await Pay(bolt11, payParams, cts.Token);
+        }
         if (response["transaction"]?.Value<JObject>() is not null)
         {
             result.Details = new PayDetails()
