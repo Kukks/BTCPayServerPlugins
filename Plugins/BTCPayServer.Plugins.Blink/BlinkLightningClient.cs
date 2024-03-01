@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Lightning;
 using GraphQL;
+using GraphQL.Client.Abstractions.Websocket;
 using GraphQL.Client.Http;
 using GraphQL.Client.Http.Websocket;
 using GraphQL.Client.Serializer.Newtonsoft;
@@ -458,6 +459,14 @@ expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
                     }
                    
                 });
+                _wsSubscriptionDisposable = httpClient.WebsocketConnectionState.Subscribe(state =>
+                {
+                    if (state == GraphQLWebsocketConnectionState.Disconnected)
+                    {
+                        streamEnded.TrySetResult();
+                    }
+                });
+                
             }
             catch (Exception e)
             {
@@ -468,11 +477,22 @@ expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
         {
             _subscription.Dispose();
             _invoices.Writer.TryComplete();
+            _wsSubscriptionDisposable.Dispose();
+            streamEnded.TrySetResult();
         }
+
+        private TaskCompletionSource streamEnded = new();
+        private readonly IDisposable _wsSubscriptionDisposable;
 
         public async Task<LightningInvoice> WaitInvoice(CancellationToken cancellation)
         {
-            return await  _invoices.Reader.ReadAsync(cancellation);
+            var resultz = await Task.WhenAny(streamEnded.Task, _invoices.Reader.ReadAsync(cancellation).AsTask());
+            if (resultz is Task<LightningInvoice> res)
+            {
+                return await res;
+            }
+
+            throw new Exception("Stream disconnected, cannot await invoice");
         }
     }
     public async Task<(Network Network, string DefaultWalletId, string DefaultWalletCurrency)> GetNetworkAndDefaultWallet(CancellationToken cancellation =default)
