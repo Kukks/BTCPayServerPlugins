@@ -27,6 +27,7 @@ public class BlinkLightningClient : ILightningClient
 {
     private readonly string _apiKey;
     private readonly Uri _apiEndpoint;
+    private readonly bool _allowInsecure;
     public  string? WalletId { get; set; }
 
     public string? WalletCurrency { get; set; }
@@ -39,10 +40,11 @@ public class BlinkLightningClient : ILightningClient
     {
         [JsonProperty("X-API-KEY")] public string ApiKey { get; set; }
     }
-    public BlinkLightningClient(string apiKey, Uri apiEndpoint, string walletId, Network network, HttpClient httpClient, ILogger logger)
+    public BlinkLightningClient(string apiKey, Uri apiEndpoint, bool allowInsecure, string walletId, Network network, HttpClient httpClient, ILogger logger)
     {
         _apiKey = apiKey;
         _apiEndpoint = apiEndpoint;
+        _allowInsecure = allowInsecure;
         WalletId = walletId;
         _network = network;
         Logger = logger;
@@ -68,7 +70,7 @@ public class BlinkLightningClient : ILightningClient
 
     public override string ToString()
     {
-        return $"type=blink;server={_apiEndpoint};api-key={_apiKey}{(WalletId is null? "":$";wallet-id={WalletId}")}";
+        return $"type=blink;server={_apiEndpoint};allowInsecure={_allowInsecure};api-key={_apiKey}{(WalletId is null? "":$";wallet-id={WalletId}")}";
     }
 
     public async Task<LightningInvoice?> GetInvoice(string invoiceId,

@@ -77,7 +77,7 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
         client.BaseAddress = uri;
 
         kv.TryGetValue("wallet-id", out var walletId);
-        var bclient = new BlinkLightningClient(apiKey, uri, walletId, network, client, _loggerFactory.CreateLogger($"{nameof(BlinkLightningClient)}:{walletId}"));
+        var bclient = new BlinkLightningClient(apiKey, uri, allowInsecure, walletId, network, client, _loggerFactory.CreateLogger($"{nameof(BlinkLightningClient)}:{walletId}"));
         (Network Network, string DefaultWalletId, string DefaultWalletCurrency) res;
         try
         {
