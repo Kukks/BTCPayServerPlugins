@@ -392,7 +392,14 @@ updateInProgressAnimation(myChart);
                                         }
                                         else if (coordinator.WasabiCoordinatorStatusFetcher.Connected)
                                         {
-                                            if (coordinator.CoinJoinManager.TrackedWallets.TryGetValue(wallet.WalletName, out _))
+                                            var roundParameters = coordinator.RoundStateUpdater.RoundStates.LastOrDefault(pair => pair.Value.BlameOf == uint256.Zero).Value?.CoinjoinState.Parameters;
+                                            coordinator.CoinJoinManager.TrackedWallets.TryGetValue(wallet.WalletName, out var trackedWallet);
+                                            if(trackedWallet is {} && setting.RoundWhenEnabled is not null && roundParameters is not null && !BTCPayWallet.IsRoundOk(roundParameters, setting))
+                                            {
+                                                <a asp-controller="WabisabiStore" asp-action="UpdateWabisabiStoreSettings" asp-route-storeId="@storeId" class="h6 text-danger">
+                                                   New terms detected
+                                                </a>
+                                            }else if (trackedWallet is {})
                                             {
                                                 <span class="h6">Idle</span>
                                             }

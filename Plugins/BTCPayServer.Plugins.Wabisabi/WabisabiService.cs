@@ -116,22 +116,21 @@ namespace BTCPayServer.Plugins.Wabisabi
                 {
                     wabisabiStoreCoordinatorSettings.RoundWhenEnabled = null;
                 }
-                else if (
-                    (termsCoord == wabisabiStoreCoordinatorSettings.Coordinator ||
-                     res?.Settings?.Find(settings =>
-                             settings.Coordinator == wabisabiStoreCoordinatorSettings.Coordinator)
-                         ?.RoundWhenEnabled is null) &&
-                    _coordinatorClientInstanceManager.HostedServices.TryGetValue(
-                        wabisabiStoreCoordinatorSettings.Coordinator, out var coordinator))
+                else if ((termsCoord == wabisabiStoreCoordinatorSettings.Coordinator  ||  wabisabiStoreCoordinatorSettings.RoundWhenEnabled is null)&&
+                         _coordinatorClientInstanceManager.HostedServices.TryGetValue(wabisabiStoreCoordinatorSettings.Coordinator, out var coordinator))
                 {
+                    
                     var round = coordinator.RoundStateUpdater.RoundStates.LastOrDefault();
-                    wabisabiStoreCoordinatorSettings.RoundWhenEnabled = new LastCoordinatorRoundConfig()
-                    {
-                        CoordinationFeeRate = round.Value.CoinjoinState.Parameters.CoordinationFeeRate.Rate,
-                        PlebsDontPayThreshold = round.Value.CoinjoinState.Parameters.CoordinationFeeRate
-                            .PlebsDontPayThreshold.Satoshi.ToString(),
-                        MinInputCountByRound = round.Value.CoinjoinState.Parameters.MinInputCountByRound,
-                    };
+                    wabisabiStoreCoordinatorSettings.RoundWhenEnabled =
+                        round.Value?.CoinjoinState?.Parameters is { } roundParameters
+                            ? new LastCoordinatorRoundConfig()
+                            {
+                                CoordinationFeeRate = roundParameters.CoordinationFeeRate.Rate,
+                                PlebsDontPayThreshold = roundParameters.CoordinationFeeRate
+                                    .PlebsDontPayThreshold.Satoshi.ToString(),
+                                MinInputCountByRound = roundParameters.MinInputCountByRound,
+                            }
+                            : null;
                 }
             }
 
