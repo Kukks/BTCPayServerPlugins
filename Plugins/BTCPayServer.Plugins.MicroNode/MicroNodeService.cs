@@ -40,7 +40,11 @@ public class MicroNodeService : EventHostedServiceBase
     private Dictionary<string, MicroNodeStoreSettings?> _storeSettings;
     private readonly BTCPayNetwork _network;
     private readonly IServiceProvider _serviceProvider;
-    private static readonly AsyncKeyedLock.AsyncKeyedLocker<string> KeyedLocker = new();
+    private static readonly AsyncKeyedLock.AsyncKeyedLocker<string> KeyedLocker = new(o =>
+    {
+        o.PoolSize = 20;
+        o.PoolInitialFill = 1;
+    });
 
     public const string MasterSettingsKey = "MicroNodeMasterSettings";
     public const string StoreSettingsKey = "MicroNodeStoreSettings";
