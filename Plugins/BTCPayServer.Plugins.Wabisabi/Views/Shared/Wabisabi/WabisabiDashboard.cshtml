@@ -1,6 +1,10 @@
 ﻿@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.TagHelpers
+@using BTCPayServer.Client
 @using BTCPayServer.Common
+@using BTCPayServer.Components.TruncateCenter
 @using BTCPayServer.Plugins.Wabisabi
+@using Microsoft.AspNetCore.Mvc.TagHelpers
 @using Microsoft.Extensions.Logging
 @using NBitcoin
 @using WalletWasabi.WabiSabi.Backend.Rounds
@@ -33,7 +37,7 @@
 
         @if (!enabledSettings.Any())
         {
-            <div class="widget">
+            <div class="widget" permission="@Policies.CanModifyStoreSettings">
                 <partial name="../WabisabiStore/UpdateWabisabiStoreSettings" model="@settings"/>
             </div>
         }
@@ -279,7 +283,7 @@ updateInProgressAnimation(myChart);
                             @(settings.Active ? "Deactivate" : "Activate")
                         </a>
                         -
-                        <a asp-controller="WabisabiStore" asp-action="UpdateWabisabiStoreSettings" asp-route-storeId="@storeId" class="fw-semibold">
+                        <a asp-controller="WabisabiStore" asp-action="UpdateWabisabiStoreSettings" asp-route-storeId="@storeId" class="fw-semibold" permission="@Policies.CanModifyStoreSettings">
                             Configure
                         </a>
                     </div>

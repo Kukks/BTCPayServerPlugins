@@ -9,7 +9,6 @@ using Microsoft.AspNetCore.Mvc;
 namespace BTCPayServer.Plugins.Bringin;
 
 [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-[Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
 [Route("plugins/{storeId}/Bringin")]
 public class BringinController : Controller
 {
@@ -24,11 +23,10 @@ public class BringinController : Controller
         _btcPayNetworkProvider = btcPayNetworkProvider;
     }
     
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     [HttpGet("onboard")]
     public async Task<IActionResult> Onboard(string storeId)
     {
-        
-       
         var vm = await _bringinService.Update(storeId);
         
         var callbackUri = Url.Action("Callback", "Bringin", new
@@ -43,6 +41,7 @@ public class BringinController : Controller
         return Redirect(onboardUri.ToString());
     }
 
+    [Authorize(Policy = Policies.CanViewStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     [HttpGet("")]
     public async Task<IActionResult> Edit()
     {
@@ -51,6 +50,7 @@ public class BringinController : Controller
     
     [HttpPost("callback")]
     [HttpGet("callback")]
+    [AllowAnonymous]
     public async Task<IActionResult> Callback(string storeId, string code, [FromBody]BringinVerificationUpdate content)
     {
         var vm = await _bringinService.Update(storeId);
@@ -72,28 +72,5 @@ public class BringinController : Controller
         public string apikey { get; set; }
         public string verificationStatus { get; set; }
     }
-
-
     
-
-    // [HttpGet("callback")]
-    // public async Task<IActionResult> Callback(string storeId, string apiKey, string code)
-    // {
-    //     //truncate with showing only first 3 letters on start ond end
-    //
-    //     var truncatedApikey = apiKey.Substring(0, 3) + "***" + apiKey.Substring(apiKey.Length - 3);
-    //
-    //     return View("Confirm",
-    //         new ConfirmModel("Confirm Bringin API Key",
-    //             $"You are about to set your Bringin API key to {truncatedApikey}", "Set", "btn-primary"));
-    // }
-    //
-    // [HttpPost("callback")]
-    // public async Task<IActionResult> CallbackConfirm(string storeId, string apiKey)
-    // {
-    //     var vm = await _bringinService.Update(storeId);
-    //     vm.ApiKey = apiKey;
-    //     await _bringinService.Update(storeId, vm);
-    //     return RedirectToAction("Edit", new {storeId});
-    // }
 }

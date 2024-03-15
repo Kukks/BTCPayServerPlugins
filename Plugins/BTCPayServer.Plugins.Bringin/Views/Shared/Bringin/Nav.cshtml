@@ -9,7 +9,7 @@
 @if (!string.IsNullOrEmpty(storeId))
 {
     <li class="nav-item">
-        <a permission="@Policies.CanModifyStoreSettings" asp-controller="Bringin" asp-action="Edit" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Bringin")" id="Nav-Bringin">
+        <a permission="@Policies.CanViewStoreSettings" asp-controller="Bringin" asp-action="Edit" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Bringin")" id="Nav-Bringin">
             <svg xmlns="http://www.w3.org/2000/svg" style="margin-right: 7px;"  width="14.000000pt" height="14.000000pt" viewBox="0 0 32.000000 32.000000" preserveAspectRatio="xMidYMid meet">
             
             <g transform="translate(0.000000,32.000000) scale(0.100000,-0.100000)" fill="currentColor" stroke="none">
