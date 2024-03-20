@@ -31,7 +31,12 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
 
         if (!kv.TryGetValue("server", out var server))
         {
-            server = "https://api.blink.sv/graphql";
+            server = network.Name switch
+            {
+                nameof(Network.TestNet) => "https://api.staging.galoy.io/graphql",
+                nameof(Network.RegTest) => "http://localhost:4455/graphql",
+                _ => "https://api.blink.sv/graphql"
+            };
             // error = $"The key 'server' is mandatory for blink connection strings";
             // return null;
         }
