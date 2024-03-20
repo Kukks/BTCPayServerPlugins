@@ -43,7 +43,7 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
             return null;
         }
 
-        bool allowInsecure = false;
+        bool allowInsecure = network.Name == nameof(Network.RegTest);
         if (kv.TryGetValue("allowinsecure", out var allowinsecureStr))
         {
             var allowedValues = new[] {"true", "false"};
