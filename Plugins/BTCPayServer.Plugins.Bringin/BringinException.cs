@@ -6,7 +6,7 @@ public class BringinException : Exception
 {
     private readonly BringinClient.BringinErrorResponse _error;
 
-    public BringinException(BringinClient.BringinErrorResponse error)
+    public BringinException(BringinClient.BringinErrorResponse error):base(error.Message?? error.ErrorMessage)
     {
         _error = error;
     }

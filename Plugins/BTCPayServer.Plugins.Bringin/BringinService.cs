@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -27,6 +28,15 @@ using PayoutData = BTCPayServer.Data.PayoutData;
 
 namespace BTCPayServer.Plugins.Bringin;
 
+public static class StringExtensions
+{
+
+    public static string ToHumanReadable(this string str)
+    {
+     return  string.Join(' ', str.Split('_', '-').Select(part => 
+            CultureInfo.CurrentCulture.TextInfo.ToTitleCase(part.ToLower(CultureInfo.CurrentCulture))));
+    }
+}
 public class BringinService : EventHostedServiceBase
 {
     private readonly ILogger<BringinService> _logger;
@@ -265,7 +275,7 @@ public class BringinService : EventHostedServiceBase
             
             var rate = await bringinClient.GetRate();
             var thresholdAmount = supportedMethod.FiatMinimumAmount  / rate.BringinPrice;
-            if (amountBtc.ToDecimal(MoneyUnit.BTC) < thresholdAmount)
+            if (amountBtc.ToDecimal(MoneyUnit.BTC) <= thresholdAmount)
             {
                 throw new Exception($"Amount is too low. Minimum amount is {Money.Coins(thresholdAmount)} BTC");
             }
@@ -283,15 +293,17 @@ public class BringinService : EventHostedServiceBase
 
         if (!payout)
         {
-            return order.Invoice;
+            return order.Invoice?? order.DepositAddress;
         }
         var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>(paymentMethodId.CryptoCode);
         
+        var destination = !string.IsNullOrEmpty(order.Invoice)?  (IClaimDestination) new BoltInvoiceClaimDestination(order.Invoice, BOLT11PaymentRequest.Parse(order.Invoice, network.NBitcoinNetwork)):
+            new AddressClaimDestination(BitcoinAddress.Create(order.DepositAddress, network.NBitcoinNetwork));
         var claim = await _pullPaymentHostedService.Claim(new ClaimRequest()
         {
             PaymentMethodId = paymentMethodId,
             StoreId = storeId,
-            Destination = new BoltInvoiceClaimDestination(order.Invoice, BOLT11PaymentRequest.Parse(order.Invoice, network.NBitcoinNetwork)),
+            Destination = destination,
             Value = orderMoney.ToUnit(MoneyUnit.BTC),
             PreApprove = true,
             Metadata = JObject.FromObject(new
@@ -379,7 +391,8 @@ public class BringinService : EventHostedServiceBase
 
     public static readonly SupportedMethodOptions[] SupportedMethods = new[]
     {
-        new SupportedMethodOptions(new PaymentMethodId("BTC", LightningPaymentType.Instance), true, 15, "LIGHTNING")
+        new SupportedMethodOptions(new PaymentMethodId("BTC", LightningPaymentType.Instance), true, 15, "LIGHTNING"),
+        new SupportedMethodOptions(new PaymentMethodId("BTC", BitcoinPaymentType.Instance), true, 20, "ON_CHAIN"),
     };
 
     private ConcurrentDictionary<string, (IDisposable, BringinStoreSettings, DateTimeOffset Expiry)> _editModes = new();

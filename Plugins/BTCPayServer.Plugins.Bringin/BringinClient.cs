@@ -117,6 +117,71 @@ public class BringinClient
         [JsonConverter(typeof(NumericStringJsonConverter))]
         public decimal Balance { get; set; }
     }
+    
+    
+    public async Task<GetTransactionListResponse> GetTransactions()
+    {
+        var content = new StringContent(JsonConvert.SerializeObject(new
+        {
+            startDate = DateTimeOffset.UtcNow.AddDays(-30).ToUnixTimeMilliseconds(),
+            endDate = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        }), Encoding.UTF8, "application/json");
+        var response = await HttpClient.PostAsync($"/api/v0/account/transactions", content);
+        var responseContent = await response.Content.ReadAsStringAsync();
+        if (response.IsSuccessStatusCode)
+        {
+            return JObject.Parse(responseContent).ToObject<GetTransactionListResponse>();
+        }
+
+        var error = JObject.Parse(responseContent).ToObject<BringinErrorResponse>();
+        throw new BringinException(error);
+    }
+
+    public class GetTransactionListResponse
+    {
+        [JsonProperty("transactions")]
+        public BringinTransaction[] Transactions { get; set; }
+    }
+    
+    
+    public class BringinTransaction
+    {
+        // {
+        //     "orderId": "3521154c-30b4-480c-834d-38f80d507963",
+        //     "type": "OFFRAMP_WITHOUT_FIAT_WITHDRAWAL",
+        //     "subType": "LIGHTNING",
+        //     "sourceAmount": "100000",
+        //     "sourceCurrency": "BTC",
+        //     "destinationAmount": "3816",
+        //     "destinationAddress": "b0a4c862-c941-4d3c-8727-18e5097a3b5a",
+        //     "destinationCurrency": "EUR",
+        //     "status": "SUCCESSFUL",
+        //     "createdAt": "2024-01-18T14:02:59.709Z",
+        // }
+        [JsonProperty("orderId")]
+        public string OrderId { get; set; }
+        [JsonProperty("type")]
+        public string Type { get; set; }
+        [JsonProperty("subType")]
+        public string SubType { get; set; }
+        [JsonProperty("sourceAmount")]
+        [JsonConverter(typeof(NumericStringJsonConverter))]
+        public decimal SourceAmount { get; set; }
+        [JsonProperty("sourceCurrency")]
+        public string SourceCurrency { get; set; }
+        [JsonProperty("destinationAmount")]
+        [JsonConverter(typeof(NumericStringJsonConverter))]
+        public decimal DestinationAmount { get; set; }
+        [JsonProperty("destinationCurrency")]
+        public string DestinationCurrency { get; set; }
+        [JsonProperty("destinationAddress")]
+        public string DestinationAddress { get; set; }
+        [JsonProperty("status")]
+        public string Status { get; set; }
+        [JsonProperty("createdAt")]
+        public DateTimeOffset CreatedAt { get; set; }
+
+    }
     //
     // public class GetOrderResponse
     // {
@@ -154,6 +219,7 @@ public class BringinClient
         public decimal Amount { get; set; }
 
         [JsonProperty("invoice")] public string Invoice { get; set; }
+        [JsonProperty("depositAddress")] public string DepositAddress { get; set; }
 
         [JsonProperty("expiresAt")] public long Expiry { get; set; }
     }
@@ -188,6 +254,7 @@ public class BringinClient
         public string Message { get; set; }
         public string StatusCode { get; set; }
         public string ErrorCode { get; set; }
-        public JObject ErrorDetails { get; set; }
+        public string ErrorMessage { get; set; }
+        public JToken ErrorDetails { get; set; }
     }
 }
