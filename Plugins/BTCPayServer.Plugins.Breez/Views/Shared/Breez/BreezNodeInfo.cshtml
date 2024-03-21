@@ -58,7 +58,7 @@
 
         </header>
         <div class="balance d-flex align-items-baseline gap-1">
-            <h3 class="d-inline-block me-1" data-balance="@LightMoney.MilliSatoshis(nodeState.onchainBalanceMsat)" data-sensitive>@LightMoney.MilliSatoshis(nodeState.onchainBalanceMsat)</h3>
+            <h3 class="d-inline-block me-1" data-balance="@LightMoney.MilliSatoshis(nodeState.onchainBalanceMsat).ToUnit(LightMoneyUnit.BTC)" data-sensitive>@LightMoney.MilliSatoshis(nodeState.onchainBalanceMsat).ToUnit(LightMoneyUnit.BTC)</h3>
             <span class="text-secondary fw-semibold currency">BTC</span>
         </div>
     </div>
@@ -79,7 +79,7 @@
 
         </header>
         <div class="balance d-flex align-items-baseline gap-1">
-            <h3 class="d-inline-block me-1" data-balance="@LightMoney.MilliSatoshis(nodeState.channelsBalanceMsat)" data-sensitive>@LightMoney.MilliSatoshis(nodeState.channelsBalanceMsat)</h3>
+            <h3 class="d-inline-block me-1" data-balance="@LightMoney.MilliSatoshis(nodeState.channelsBalanceMsat).ToUnit(LightMoneyUnit.BTC)" data-sensitive>@LightMoney.MilliSatoshis(nodeState.channelsBalanceMsat).ToUnit(LightMoneyUnit.BTC)</h3>
             <span class="text-secondary fw-semibold currency">BTC</span>
         </div>
     </div>
@@ -89,15 +89,15 @@
             <h6>Lightning insight</h6>
         </header>
         <div class="balance d-flex align-items-baseline gap-1">
-            <h3 class="d-inline-block me-1" data-balance="@LightMoney.MilliSatoshis(nodeState.maxReceivableMsat)" data-sensitive>@LightMoney.MilliSatoshis(nodeState.maxReceivableMsat)</h3>
+            <h3 class="d-inline-block me-1" data-balance="@LightMoney.MilliSatoshis(nodeState.maxReceivableMsat).ToUnit(LightMoneyUnit.BTC)" data-sensitive>@LightMoney.MilliSatoshis(nodeState.maxReceivableMsat).ToUnit(LightMoneyUnit.BTC)</h3>
             <span class="text-secondary fw-semibold currency">BTC receivable</span>
         </div>
         <div class="balance d-flex align-items-baseline gap-1">
-            <h3 class="d-inline-block me-1" data-balance="@LightMoney.MilliSatoshis(nodeState.inboundLiquidityMsats)" data-sensitive>@LightMoney.MilliSatoshis(nodeState.inboundLiquidityMsats)</h3>
+            <h3 class="d-inline-block me-1" data-balance="@LightMoney.MilliSatoshis(nodeState.inboundLiquidityMsats).ToUnit(LightMoneyUnit.BTC)" data-sensitive>@LightMoney.MilliSatoshis(nodeState.inboundLiquidityMsats).ToUnit(LightMoneyUnit.BTC)</h3>
             <span class="text-secondary fw-semibold currency">BTC inbound liquidity</span>
         </div>
         <div class="balance d-flex align-items-baseline gap-1">
-            <h3 class="d-inline-block me-1" data-balance="@LightMoney.MilliSatoshis(nodeState.maxPayableMsat)" data-sensitive>@LightMoney.MilliSatoshis(nodeState.maxPayableMsat)</h3>
+            <h3 class="d-inline-block me-1" data-balance="@LightMoney.MilliSatoshis(nodeState.maxPayableMsat).ToUnit(LightMoneyUnit.BTC)" data-sensitive>@LightMoney.MilliSatoshis(nodeState.maxPayableMsat).ToUnit(LightMoneyUnit.BTC)</h3>
             <span class="text-secondary fw-semibold currency">BTC spendable</span>
         </div>
     </div>

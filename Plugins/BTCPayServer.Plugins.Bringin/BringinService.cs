@@ -33,7 +33,9 @@ public static class StringExtensions
 
     public static string ToHumanReadable(this string str)
     {
-     return  string.Join(' ', str.Split('_', '-').Select(part => 
+        if(string.IsNullOrEmpty(str))
+            return string.Empty;
+        return  string.Join(' ', str.Split('_', '-').Select(part => 
             CultureInfo.CurrentCulture.TextInfo.ToTitleCase(part.ToLower(CultureInfo.CurrentCulture))));
     }
 }
