@@ -56,10 +56,10 @@ public class BreezService:EventHostedServiceBase
         await base.ProcessEvent(evt, cancellationToken);
     }
 
-    private string GetWorkDir()
+    public  string GetWorkDir(string storeId)
     {
         var dir =  _dataDirectories.Value.DataDir;
-        return Path.Combine(dir, "Plugins", "Breez");
+        return Path.Combine(dir, "Plugins", "Breez",storeId);
     }
 
     TaskCompletionSource tcs = new();
@@ -103,9 +103,11 @@ public class BreezService:EventHostedServiceBase
             try
             {
                 var network = Network.Main; // _btcPayNetworkProvider.BTC.NBitcoinNetwork;
-                Directory.CreateDirectory(GetWorkDir());
-                var client = new BreezLightningClient(settings.InviteCode, settings.ApiKey, GetWorkDir(),
-                    network, settings.Mnemonic, settings.PaymentKey);
+                var dir = GetWorkDir(storeId);
+                Directory.CreateDirectory(dir);
+                settings.PaymentKey ??= Guid.NewGuid().ToString();
+                var client = new BreezLightningClient(settings.InviteCode, settings.ApiKey, dir,
+                    network, new Mnemonic(settings.Mnemonic), settings.PaymentKey);
                 if (storeId is not null)
                 {
                     _clients.AddOrReplace(storeId, client);
@@ -140,6 +142,7 @@ public class BreezService:EventHostedServiceBase
                 data.SetSupportedPaymentMethod(new PaymentMethodId("BTC", LightningPaymentType.Instance), null );
                 await _storeRepository.UpdateStore(data);
             }
+            Directory.Delete(GetWorkDir(storeId), true);
 
         }
         else if(result is not null )

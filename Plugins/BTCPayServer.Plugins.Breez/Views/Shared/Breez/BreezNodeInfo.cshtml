@@ -2,6 +2,7 @@
 @using BTCPayServer.Models.StoreViewModels
 @using BTCPayServer.Plugins.Breez
 @using BTCPayServer.Security
+@using BTCPayServer.Client
 @inject BreezService BreezService
 @{
     string storeId = null;
@@ -42,7 +43,7 @@
     {
         <div class="d-flex w-100 align-items-center justify-content-start gap-3">
             <span class="btcpay-status btcpay-status--enabled"></span>
-            <h6 class="text-truncate">@lspInfo.name connected</h6>
+            <h6 class="text-truncate">@lspInfo.name LSP connected</h6>
         </div>
     }
     <div class="store-number">
@@ -50,7 +51,7 @@
             <h6>On-Chain Balance</h6>
             @if (Model is StoreDashboardViewModel && nodeState.onchainBalanceMsat > 0)
             {
-                <div>
+                <div permission="@Policies.CanModifyStoreSettings">
                     <a asp-action="Sweep" asp-controller="Breez" asp-route-storeId="@storeId">Sweep</a>
                 </div>
             }
@@ -66,7 +67,7 @@
             <h6>Lightning Balance</h6>
             @if (Model is StoreDashboardViewModel)
             {
-                <div>
+                <div permission="@Policies.CanModifyStoreSettings">
                     <a asp-action="SwapIn" asp-controller="Breez" asp-route-storeId="@storeId">Swap in</a>
                     @if (nodeState.channelsBalanceMsat > 0)
                     {

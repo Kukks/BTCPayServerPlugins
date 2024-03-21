@@ -1,6 +1,10 @@
 ﻿@using BTCPayServer.Components
 @using BTCPayServer
 @using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Client
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using BTCPayServer.Components.QRCode
+@using BTCPayServer.Components.TruncateCenter
 @model BTCPayServer.Plugins.Breez.PaymentsViewModel
 @{
     var storeId = Context.GetCurrentStoreId();
@@ -17,8 +21,8 @@
             </h3>
             <div class="d-flex gap-3 mt-3 mt-sm-0">
 
-                <a asp-action="Send" asp-controller="Breez" asp-route-storeId="@storeId" type="submit" class="btn btn-primary">Send</a>
-                <a asp-action="Receive" asp-controller="Breez" asp-route-storeId="@storeId" type="submit" class="btn btn-primary">Receive</a>
+                <a  permission="@Policies.CanModifyStoreSettings" asp-action="Send" asp-controller="Breez" asp-route-storeId="@storeId" type="submit" class="btn btn-primary">Send</a>
+                <a permission="@Policies.CanCreateInvoice" asp-action="Receive" asp-controller="Breez" asp-route-storeId="@storeId" type="submit" class="btn btn-primary">Receive</a>
             </div>
         </div>
 

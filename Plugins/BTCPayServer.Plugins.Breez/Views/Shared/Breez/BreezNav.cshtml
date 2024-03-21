@@ -9,7 +9,7 @@
 @if (!string.IsNullOrEmpty(storeId))
 {
     <li class="nav-item">
-        <a permission="@Policies.CanModifyStoreSettings" asp-controller="Breez" asp-action="Index" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez")" id="Nav-Breez">
+        <a permission="@Policies.CanViewStoreSettings" asp-controller="Breez" asp-action="Index" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez")" id="Nav-Breez">
             
 <svg style="width: 15px; margin-left: 3px; margin-right: 7px;"  viewBox="0 0 64 64"  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
     <g id="favicon-64-2" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">

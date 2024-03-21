@@ -2,6 +2,7 @@
 @using BTCPayServer
 @using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Client
 @using BTCPayServer.Components.QRCode
 @using BTCPayServer.Components.TruncateCenter
 @using BTCPayServer.Models.StoreViewModels
@@ -9,6 +10,7 @@
 @using BTCPayServer.Plugins.Breez
 @using BTCPayServer.Security
 @using BTCPayServer.Services
+@using Microsoft.AspNetCore.Mvc.TagHelpers
 @using NBitcoin
 @inject BreezService BreezService
 @inject BTCPayNetworkProvider BtcPayNetworkProvider
@@ -20,7 +22,7 @@
         string s => s,
         StoreDashboardViewModel dashboardModel => dashboardModel.StoreId,
         _ => Context.GetImplicitStoreId()
-        };
+    };
     var sdk = BreezService.GetClient(storeId)?.Sdk;
     if (sdk is null)
         return;
@@ -34,13 +36,12 @@
     catch (Exception e)
     {
     }
+
     var refundables = sdk.ListRefundables();
     var deriv = Context.GetStoreData().GetDerivationSchemeSettings(BtcPayNetworkProvider, "BTC");
     var ni = sdk.NodeInfo();
     var f = sdk.RecommendedFees();
     var pmi = new PaymentMethodId("BTC", PaymentTypes.BTCLike);
-
-
 }
 
 <datalist id="fees">
@@ -70,34 +71,35 @@
                         <vc:truncate-center text="@inProgressSwap.bitcoinAddress" padding="15" elastic="true" classes="form-control-plaintext" id="Address"/>
                         <label for="Address">Address</label>
                     </div>
-                    <span class="text-muted">Please send an amount between <br/> @Money.Satoshis(inProgressSwap.minAllowedDeposit).ToDecimal(MoneyUnit.BTC) and @Money.Satoshis(inProgressSwap.maxAllowedDeposit).ToDecimal(MoneyUnit.BTC)BTC </span>
-                    @if (deriv is not null)
-                    {
-                        var wallet = new WalletId(storeId, "BTC");
-                        <a class="btn btn-link w-100" asp-controller="UIWallets" asp-action="WalletSend" asp-route-walletId="@wallet" asp-route-defaultDestination="@inProgressSwap.bitcoinAddress">Send using BTCPay Wallet</a>
-                    }
-                    @{
-                        var onChainSats = ni.onchainBalanceMsat / 1000;
-                        if (inProgressSwap.minAllowedDeposit <= (long) onChainSats)
+                    <div>
+                        <span class="text-muted">Please send an amount between <br/> @Money.Satoshis(inProgressSwap.minAllowedDeposit).ToDecimal(MoneyUnit.BTC) and @Money.Satoshis(inProgressSwap.maxAllowedDeposit).ToDecimal(MoneyUnit.BTC)BTC </span>
+                        @if (deriv is not null)
                         {
-                            <div class="w-100">
-                                <form asp-action="Sweep" asp-route-storeId="@storeId">
-                                    <input type="hidden" value="@inProgressSwap.bitcoinAddress" name="address"/>
-                                    <button class="btn btn-link w-100" type="submit"> Sweep onchain funds to swap in</button>
-                                </form>
-                            </div>
+                            var wallet = new WalletId(storeId, "BTC");
+                            <a class="btn btn-link w-100" permission="@Policies.CanModifyStoreSettings" asp-controller="UIWallets" asp-action="WalletSend" asp-route-walletId="@wallet" asp-route-defaultDestination="@inProgressSwap.bitcoinAddress">Send using BTCPay Wallet</a>
                         }
-
-                    }
+                        @{
+                            var onChainSats = ni.onchainBalanceMsat / 1000;
+                            if (inProgressSwap.minAllowedDeposit <= (long) onChainSats)
+                            {
+                                <div class="w-100">
+                                    <form asp-action="Sweep" asp-route-storeId="@storeId">
+                                        <input type="hidden" value="@inProgressSwap.bitcoinAddress" name="address"/>
+                                        <button class="btn btn-link w-100" type="submit"> Sweep onchain funds to swap in</button>
+                                    </form>
+                                </div>
+                            }
+                        }
+                    </div>
 
                 </div>
 
-                @if (inProgressSwap.unconfirmedSats + inProgressSwap.confirmedSats + inProgressSwap.paidSats > 0)
+                @if (inProgressSwap.unconfirmedSats + inProgressSwap.confirmedSats + (inProgressSwap.paidMsat * 1000) > 0)
                 {
                     <div class="card truncate-center-id">
                         <span class="text-nowrap">@inProgressSwap.unconfirmedSats sats unconfirmed</span>
                         <span class="text-nowrap">@inProgressSwap.confirmedSats sats confirmed</span>
-                        <span class="text-nowrap">@inProgressSwap.paidSats sats paid</span>
+                        <span class="text-nowrap">@(inProgressSwap.paidMsat * 1000) sats paid</span>
                     </div>
                 }
                 @if (inProgressSwap.unconfirmedTxIds.Any())
@@ -144,12 +146,12 @@
                         <td>@DateTimeOffset.FromUnixTimeSeconds(refund.createdAt)</td>
                         <td>@refund.bitcoinAddress</td>
                         <td>
-                            @if (refund.unconfirmedSats + refund.confirmedSats + refund.paidSats > 0)
+                            @if (refund.unconfirmedSats + refund.confirmedSats + refund.paidMsat > 0)
                             {
                                 <div class="card truncate-center-id">
                                     <span class="text-nowrap">@refund.unconfirmedSats sats unconfirmed</span>
                                     <span class="text-nowrap">@refund.confirmedSats sats confirmed</span>
-                                    <span class="text-nowrap">@refund.paidSats sats paid</span>
+                                    <span class="text-nowrap">@(refund.paidMsat * 1000) sats paid</span>
                                 </div>
                             }
                             @if (refund.unconfirmedTxIds.Any())

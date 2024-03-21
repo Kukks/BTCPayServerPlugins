@@ -1,12 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Threading.Tasks;
 using Breez.Sdk;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Client;
+using BTCPayServer.Data;
 using BTCPayServer.Lightning;
 using BTCPayServer.Models;
+using BTCPayServer.Payments;
+using BTCPayServer.Payments.Lightning;
+using BTCPayServer.Services.Stores;
 using BTCPayServer.Services.Wallets;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,21 +23,22 @@ using NBXplorer.DerivationStrategy;
 namespace BTCPayServer.Plugins.Breez;
 
 [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-[Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
 [Route("plugins/{storeId}/Breez")]
 public class BreezController : Controller
 {
     private readonly BTCPayNetworkProvider _btcPayNetworkProvider;
     private readonly BreezService _breezService;
     private readonly BTCPayWalletProvider _btcWalletProvider;
+    private readonly StoreRepository _storeRepository;
 
     public BreezController(BTCPayNetworkProvider btcPayNetworkProvider,
         BreezService breezService,
-        BTCPayWalletProvider btcWalletProvider)
+        BTCPayWalletProvider btcWalletProvider, StoreRepository storeRepository)
     {
         _btcPayNetworkProvider = btcPayNetworkProvider;
         _breezService = breezService;
         _btcWalletProvider = btcWalletProvider;
+        _storeRepository = storeRepository;
     }
 
 
@@ -43,6 +50,7 @@ public class BreezController : Controller
     }
 
     [HttpGet("swapin")]
+    [Authorize(Policy = Policies.CanCreateInvoice, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> SwapIn(string storeId)
     {
         var client = _breezService.GetClient(storeId);
@@ -55,6 +63,7 @@ public class BreezController : Controller
     }
 
     [HttpGet("info")]
+    [Authorize(Policy = Policies.CanViewStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> Info(string storeId)
     {
         var client = _breezService.GetClient(storeId);
@@ -67,6 +76,7 @@ public class BreezController : Controller
     }
 
     [HttpGet("sweep")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> Sweep(string storeId)
     {
         var client = _breezService.GetClient(storeId);
@@ -79,6 +89,7 @@ public class BreezController : Controller
     }
 
     [HttpPost("sweep")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> Sweep(string storeId, string address, uint satPerByte)
     {
         var client = _breezService.GetClient(storeId);
@@ -98,7 +109,7 @@ public class BreezController : Controller
 
         try
         {
-            var response = client.Sdk.Sweep(new SweepRequest(address, satPerByte));
+            var response = client.Sdk.RedeemOnchainFunds(new RedeemOnchainFundsRequest(address, satPerByte));
 
             TempData[WellKnownTempData.SuccessMessage] = $"sweep successful: {response.txid}";
         }
@@ -112,6 +123,7 @@ public class BreezController : Controller
     }
 
     [HttpGet("send")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> Send(string storeId)
     {
         var client = _breezService.GetClient(storeId);
@@ -122,6 +134,7 @@ public class BreezController : Controller
 
         return View((object) storeId);
     }   
+    [Authorize(Policy = Policies.CanCreateInvoice, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     [Route("receive")]
     public async Task<IActionResult> Receive(string storeId, ulong? amount)
     {
@@ -130,11 +143,20 @@ public class BreezController : Controller
         {
             return RedirectToAction(nameof(Configure), new {storeId});
         }
-        if (amount is not null)
+
+        try
         {
-           var invoice  = await  client.CreateInvoice(LightMoney.FromUnit(amount.Value, LightMoneyUnit.Satoshi).MilliSatoshi, null, TimeSpan.Zero);
-           TempData["bolt11"] = invoice.BOLT11;
-           return RedirectToAction("Payments", "Breez", new {storeId });
+            if (amount is not null)
+            {
+                var invoice  = await  client.CreateInvoice(LightMoney.FromUnit(amount.Value, LightMoneyUnit.Satoshi).MilliSatoshi, null, TimeSpan.Zero);
+                TempData["bolt11"] = invoice.BOLT11;
+                return RedirectToAction("Payments", "Breez", new {storeId });
+            }
+
+        }
+        catch (Exception e)
+        {
+            TempData[WellKnownTempData.ErrorMessage] = $"{e.Message}";
         }
       
 
@@ -142,6 +164,7 @@ public class BreezController : Controller
     }
 
     [HttpPost("send")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> Send(string storeId, string address, ulong? amount)
     {
         var client = _breezService.GetClient(storeId);
@@ -203,6 +226,7 @@ public class BreezController : Controller
 
 
     [HttpGet("swapout")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> SwapOut(string storeId)
     {
         var client = _breezService.GetClient(storeId);
@@ -215,6 +239,7 @@ public class BreezController : Controller
     }
 
     [HttpPost("swapout")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> SwapOut(string storeId, string address, ulong amount, uint satPerByte,
         string feesHash)
     {
@@ -247,6 +272,7 @@ public class BreezController : Controller
     }
 
     [HttpGet("swapin/{address}/refund")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> SwapInRefund(string storeId, string address)
     {
         var client = _breezService.GetClient(storeId);
@@ -259,6 +285,7 @@ public class BreezController : Controller
     }
 
     [HttpPost("swapin/{address}/refund")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> SwapInRefund(string storeId, string address, string refundAddress, uint satPerByte)
     {
         var client = _breezService.GetClient(storeId);
@@ -280,27 +307,100 @@ public class BreezController : Controller
         return RedirectToAction(nameof(SwapIn), new {storeId});
     }
 
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     [HttpGet("configure")]
     public async Task<IActionResult> Configure(string storeId)
     {
         return View(await _breezService.Get(storeId));
     }
+    
+    private static async Task<byte[]> ReadAsByteArrayAsync( Stream source)
+    {
+        // Optimization
+        if (source is MemoryStream memorySource)
+            return memorySource.ToArray();
+
+        using var memoryStream = new MemoryStream();
+        await source.CopyToAsync(memoryStream);
+        return memoryStream.ToArray();
+    }
 
     [HttpPost("configure")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> Configure(string storeId, string command, BreezSettings settings)
     {
+        var store = HttpContext.GetStoreData();
+        var existing = store.GetSupportedPaymentMethods(_btcPayNetworkProvider).OfType<LightningSupportedPaymentMethod>()
+            .FirstOrDefault(method =>
+                method.PaymentId.PaymentType == LightningPaymentType.Instance &&
+                method.PaymentId.CryptoCode == "BTC");
+       
         if (command == "clear")
         {
             await _breezService.Set(storeId, null);
             TempData[WellKnownTempData.SuccessMessage] = "Settings cleared successfully";
+            var client = _breezService.GetClient(storeId);
+            var isStoreSetToThisMicro = existing?.GetExternalLightningUrl() == client?.ToString();
+            if (client is not null && isStoreSetToThisMicro)
+            {
+                store.SetSupportedPaymentMethod(existing.PaymentId, null);
+                await _storeRepository.UpdateStore(store);
+            }
             return RedirectToAction(nameof(Configure), new {storeId});
         }
 
         if (command == "save")
         {
+          
             try
             {
-                await _breezService.Set(storeId, settings);
+                if (string.IsNullOrEmpty(settings.Mnemonic))
+                {
+                    ModelState.AddModelError(nameof(settings.Mnemonic), "Mnemonic is required");
+                    return View(settings);
+                }
+                else
+                 {
+                    try
+                    {
+                        new Mnemonic(settings.Mnemonic);
+                    }
+                    catch (Exception e)
+                    {
+                        ModelState.AddModelError(nameof(settings.Mnemonic), "Invalid mnemonic");
+                        return View(settings);
+                    }
+                }
+
+                if (settings.GreenlightCredentials is not null)
+                {
+                    await using var stream = settings.GreenlightCredentials .OpenReadStream();
+                    using var archive = new ZipArchive(stream);
+                    var deviceClientArchiveEntry = archive.GetEntry("client.crt");
+                    var deviceKeyArchiveEntry = archive.GetEntry("client-key.pem");
+                    if(deviceClientArchiveEntry is null || deviceKeyArchiveEntry is null)
+                    {
+                       ModelState.AddModelError(nameof(settings.GreenlightCredentials), "Invalid zip file (does not have client.crt or client-key.pem)");
+                       return View(settings);
+                    }
+                    else
+                    {
+                        var deviceClient = await ReadAsByteArrayAsync(deviceClientArchiveEntry.Open());
+                        var deviceKey = await ReadAsByteArrayAsync(deviceKeyArchiveEntry.Open());
+                        var dir = _breezService.GetWorkDir(storeId);
+                        Directory.CreateDirectory(dir);
+                        await System.IO.File.WriteAllBytesAsync(Path.Combine(dir, "client.crt"), deviceClient);
+                        await System.IO.File.WriteAllBytesAsync(Path.Combine(dir, "client-key.pem"), deviceKey);
+                        
+                        await _breezService.Set(storeId, settings);
+                    }
+                    
+                }
+                else
+                {
+                    
+                    await _breezService.Set(storeId, settings);
+                }
             }
             catch (Exception e)
             {
@@ -308,14 +408,27 @@ public class BreezController : Controller
                 return View(settings);
             }
 
+            if(existing is null)
+            {
+                existing = new LightningSupportedPaymentMethod()
+                {
+                    CryptoCode = "BTC"
+                };
+                var client = _breezService.GetClient(storeId);
+                existing.SetLightningUrl(client);
+                store.SetSupportedPaymentMethod(existing);
+                await _storeRepository.UpdateStore(store);
+            }
+            
             TempData[WellKnownTempData.SuccessMessage] = "Settings saved successfully";
-            return RedirectToAction(nameof(Configure), new {storeId});
+            return RedirectToAction(nameof(Info), new {storeId});
         }
 
         return NotFound();
     }
 
     [Route("payments")]
+    [Authorize(Policy = Policies.CanViewStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> Payments(string storeId, PaymentsViewModel viewModel)
     {
         var client = _breezService.GetClient(storeId);
@@ -326,7 +439,7 @@ public class BreezController : Controller
 
         viewModel ??= new PaymentsViewModel();
 
-        viewModel.Payments = client.Sdk.ListPayments(new ListPaymentsRequest(null, null, null, true,
+        viewModel.Payments = client.Sdk.ListPayments(new ListPaymentsRequest(null, null, null,null,true,
             (uint?) viewModel.Skip, (uint?) viewModel.Count));
 
         return View(viewModel);

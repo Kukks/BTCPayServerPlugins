@@ -1,7 +1,9 @@
 @using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Client
 @using BTCPayServer.Models.StoreViewModels
 @using BTCPayServer.Plugins.Breez
 @using BTCPayServer.Security
+@using Microsoft.AspNetCore.Mvc.TagHelpers
 
 @inject BreezService BreezService
 @{
@@ -22,12 +24,12 @@
         <div class="nav">
             @if (sdk is not null)
             {
-                <a asp-action="Info" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "Info")">Info</a>
-                <a asp-action="Payments" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "Payments")">Payments</a>
-                <a asp-action="SwapIn" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "SwapIn")">Swap In</a>
-                <a asp-action="SwapOut" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "SwapOut")">Swap Out</a>
+                <a permission="@Policies.CanViewStoreSettings" asp-action="Info" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "Info")">Info</a>
+                <a permission="@Policies.CanViewStoreSettings" asp-action="Payments" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "Payments")">Payments</a>
+                <a permission="@Policies.CanCreateInvoice" asp-action="SwapIn" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "SwapIn")">Swap In</a>
+                <a permission="@Policies.CanModifyStoreSettings" asp-action="SwapOut" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "SwapOut")">Swap Out</a>
             }
-            <a asp-action="Configure" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "Configure")">Configuration</a>
+            <a permission="@Policies.CanModifyStoreSettings" asp-action="Configure" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "Configure")">Configuration</a>
         </div>
     </nav>
 </div>

@@ -15,7 +15,7 @@
         if (sdk is null)
             return;
 
-        data = sdk.ListPayments(new ListPaymentsRequest(null, null, null, null, 0, 10));
+        data = sdk.ListPayments(new ListPaymentsRequest(null, null, null, null, true, 0, 10));
     }
 
     var isDashboard = Model is StoreDashboardViewModel;
@@ -47,7 +47,7 @@
                     <th class="w-125px">Id</th>
                     <th class="w-125px">Timestamp</th>
                     <th class="w-125px">Type</th>
-                    <th class="w-125px">Amount</th>
+                    <th class="w-125px">Amount</th>a
                     <th class="text-nowrap">Fee</th>
                     <th class="text-nowrap">Status</th>
                     <th class="text-nowrap">Description</th>
@@ -57,25 +57,25 @@
                 @foreach (var payment in data)
                 {
                     <tr>
-                        <td>
+                        <td class="smMaxWidth text-truncate">
 
-                            <span class="text-break">@payment.id</span>
+                            <span >@payment.id</span>
 
                         </td>
                         <td>
-                            <span class="text-break">@DateTimeOffset.FromUnixTimeSeconds(payment.paymentTime).ToTimeAgo()</span>
+                            <span >@DateTimeOffset.FromUnixTimeSeconds(payment.paymentTime).ToTimeAgo()</span>
                         </td>
                         <td>
-                            <span class="text-break">>@payment.paymentType.ToString().ToLowerInvariant().Replace("_", " ")</span>
+                            <span >@payment.paymentType.ToString().ToLowerInvariant().Replace("_", " ")</span>
                         </td>
                         <td>
-                            <span class="text-break">>@LightMoney.MilliSatoshis(payment.amountMsat).ToDecimal(LightMoneyUnit.BTC) BTC</span>
+                            <span >@LightMoney.MilliSatoshis(payment.amountMsat).ToDecimal(LightMoneyUnit.BTC) BTC</span>
                         </td>
                         <td>
-                            <span class="text-break">>@LightMoney.MilliSatoshis(payment.feeMsat).ToDecimal(LightMoneyUnit.BTC) BTC</span>
+                            <span >@LightMoney.MilliSatoshis(payment.feeMsat).ToDecimal(LightMoneyUnit.BTC) BTC</span>
                         </td>
                         <td>
-                            <span class="text-break">@payment.status.ToString().ToLowerInvariant()</span>
+                            <span >@payment.status.ToString().ToLowerInvariant()</span>
                         </td>
                         <td>
                             <span class="text-break">@payment.description</span>

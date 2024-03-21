@@ -20,6 +20,7 @@ public class BreezLightningConnectionStringHandler : ILightningConnectionStringH
             return null;
         }
 
+        
         if (!kv.TryGetValue("key", out var key))
         {
             error = $"The key 'key' is mandatory for breez connection strings";

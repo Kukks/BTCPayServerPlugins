@@ -6,8 +6,10 @@
 @{
     ViewData.SetActivePage("Breez", "Configure", "Configure");
     var storeId = Context.GetCurrentStoreId();
+    var showAdvancedOptions = !string.IsNullOrEmpty(Model?.ApiKey) || !string.IsNullOrEmpty(Model?.InviteCode);
+    var active = (await BreezService.Get(storeId)) is not null;
 }
-<form method="post" asp-action="Configure" asp-controller="Breez" asp-route-storeId="@storeId">
+<form method="post" asp-action="Configure" asp-controller="Breez" asp-route-storeId="@storeId" enctype="multipart/form-data">
     <div class="row mb-4">
         <div class="col-12">
             <div class="d-flex align-items-center justify-content-between mb-3">
@@ -16,7 +18,7 @@
                 </h3>
                 <div class="d-flex gap-3 mt-3 mt-sm-0">
                     <button name="command" type="submit" value="save" class="btn btn-primary">Save</button>
-                    @if (await BreezService.Get(storeId) is not null)
+                    @if (active)
                     {
                         <button name="command" type="submit" value="clear" class="btn btn-danger">Clear</button>
                     }
@@ -25,21 +27,55 @@
 
             <div class="form-group">
                 <label asp-for="Mnemonic" class="form-label">Mnemonic</label>
-                <input asp-for="Mnemonic" class="form-control"/>
+                <input value="@Model?.Mnemonic" asp-for="Mnemonic" class="form-control" type="password" disabled="@active"/>
                 <span asp-validation-for="Mnemonic" class="text-danger"></span>
+                <span class="text-muted">A Bitcoin 12-word mnemonic seed phrase.<strong>BACK THIS UP SAFELY! GENERATE IT RANDOMLY! SERVER ADMINS HAVE ACCESS TO THIS!</strong></span>
 
             </div>
-            <div class="form-group">
-                <label asp-for="ApiKey" class="form-label">ApiKey</label>
-                <input asp-for="ApiKey" class="form-control"/>
-                <span asp-validation-for="ApiKey" class="text-danger"></span>
+            @if (!active)
+            {
+                <div class="row">
+                    <div class="col-6">
+                        <div class="form-group">
+                            <label asp-for="GreenlightCredentials" class="form-label">Greenlight credentials</label>
+                            <input asp-for="GreenlightCredentials" type="file" class="form-control">
+                            <span asp-validation-for="GreenlightCredentials" class="text-danger w-100 d-block"></span>
+                            <a href="https://greenlight.blockstream.com/" target="_blank">Get Greenlight credentials directly from Blockstream</a>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="form-group">
+                            <label asp-for="InviteCode" class="form-label">Invite Code</label>
+                            <input asp-for="InviteCode" class="form-control"/>
+                            <span asp-validation-for="InviteCode" class="text-danger"></span>
 
-            </div>
-            <div class="form-group">
-                <label asp-for="InviteCode" class="form-label">InviteCode</label>
-                <input asp-for="InviteCode" class="form-control"/>
-                <span asp-validation-for="InviteCode" class="text-danger"></span>
+                            <span class="text-muted">Alternatively, you can use an invite code.</span>
 
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <button class="d-inline-flex align-items-center btn btn-link text-primary fw-semibold p-0 mb-3" type="button" id="AdvancedSettingsButton" data-bs-toggle="collapse" data-bs-target="#AdvancedSettings" aria-expanded="false" aria-controls="AdvancedSettings">
+                <vc:icon symbol="caret-down"/>
+                <span class="ms-1">Advanced settings</span>
+            </button>
+            <div id="AdvancedSettings" class="collapse @(showAdvancedOptions ? "show" : "")">
+                <div class="form-group">
+                    <label asp-for="ApiKey" class="form-label">Breez API Key</label>
+                    <input asp-for="ApiKey" class="form-control"/>
+                    <span asp-validation-for="ApiKey" class="text-danger"></span>
+
+                </div>
+                @if (active)
+                {
+                    <div class="form-group">
+                        <label asp-for="InviteCode" class="form-label">Invite Code</label>
+                        <input asp-for="InviteCode" class="form-control"/>
+                        <span asp-validation-for="InviteCode" class="text-danger"></span>
+
+                    </div>
+                }
             </div>
 
             <input type="hidden" asp-for="PaymentKey"/>

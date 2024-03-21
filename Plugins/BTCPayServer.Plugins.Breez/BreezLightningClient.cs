@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,12 +23,21 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
     public readonly string PaymentKey;
 
     public BreezLightningClient(string inviteCode, string apiKey, string workingDir, NBitcoin.Network network,
-        string mnemonic, string paymentKey)
+        Mnemonic mnemonic, string paymentKey)
     {
+        apiKey??= "99010c6f84541bf582899db6728f6098ba98ca95ea569f4c63f2c2c9205ace57";
         _network = network;
         PaymentKey = paymentKey;
+        GreenlightCredentials glCreds = null;
+        if (File.Exists(Path.Combine(workingDir, "client.crt")) && File.Exists(Path.Combine(workingDir, "client-key.pem")))
+        {
+            var deviceCert = File.ReadAllBytes(Path.Combine(workingDir, "client.crt"));
+            var deviceKey = File.ReadAllBytes(Path.Combine(workingDir, "client-key.pem"));
+            
+            glCreds = new GreenlightCredentials(deviceKey.ToList(), deviceCert.ToList());
+        }
         var nodeConfig = new NodeConfig.Greenlight(
-            new GreenlightNodeConfig(null, inviteCode)
+            new GreenlightNodeConfig(glCreds, inviteCode)
         );
         var config = BreezSdkMethods.DefaultConfig(
                 network == NBitcoin.Network.Main ? EnvironmentType.PRODUCTION : EnvironmentType.STAGING,
@@ -40,8 +50,8 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
                 network == NBitcoin.Network.TestNet ? Network.TESTNET :
                 network == NBitcoin.Network.RegTest ? Network.REGTEST : Network.SIGNET
             };
-        var seed = BreezSdkMethods.MnemonicToSeed(mnemonic);
-        Sdk = BreezSdkMethods.Connect(config, seed, this);
+        var seed = mnemonic.DeriveSeed();
+        Sdk = BreezSdkMethods.Connect(config, seed.ToList(), this);
     }
 
     public BlockingBreezServices Sdk { get; }
@@ -137,7 +147,7 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
         CancellationToken cancellation = default)
     {
         return Sdk.ListPayments(new ListPaymentsRequest(new List<PaymentTypeFilter>(){PaymentTypeFilter.RECEIVED}, null, null,
-                request?.PendingOnly is not true, (uint?) request?.OffsetIndex, null))
+                null, request?.PendingOnly is not true, (uint?) request?.OffsetIndex, null))
             .Select(FromPayment).ToArray();
     }
 
@@ -155,7 +165,7 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
         CancellationToken cancellation = default)
     {
         return Sdk.ListPayments(new ListPaymentsRequest(new List<PaymentTypeFilter>(){PaymentTypeFilter.RECEIVED}, null, null, null,
-                (uint?) request?.OffsetIndex, null))
+          null,      (uint?) request?.OffsetIndex, null))
             .Select(ToLightningPayment).ToArray();
     }
 
@@ -164,6 +174,7 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
         CancellationToken cancellation = default)
     {
         var expiryS = expiry == TimeSpan.Zero ? (uint?) null : Math.Max(0, (uint) expiry.TotalSeconds);
+        description??= "Invoice";
         var p = Sdk.ReceivePayment(new ReceivePaymentRequest((ulong) amount.MilliSatoshi, description, null, null,
             false, expiryS));
         return FromPR(p);
@@ -207,10 +218,6 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
         {
             PeersCount = ni.connectedPeers.Count,
             Alias = $"greenlight {ni.id}",
-            NodeInfoList =
-            {
-                new NodeInfo(new PubKey(ni.id), "blockstrean.com", 69)
-            }, //we have to fake this as btcpay currently requires this to enable the payment method
             BlockHeight = (int) ni.blockHeight
         };
     }
