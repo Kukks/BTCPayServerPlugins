@@ -417,6 +417,11 @@ public class BreezController : Controller
                 var client = _breezService.GetClient(storeId);
                 existing.SetLightningUrl(client);
                 store.SetSupportedPaymentMethod(existing);
+                var lnurl = new LNURLPaySupportedPaymentMethod()
+                {
+                    CryptoCode = "BTC",
+                };
+                store.SetSupportedPaymentMethod(lnurl);
                 await _storeRepository.UpdateStore(store);
             }
             
@@ -438,7 +443,6 @@ public class BreezController : Controller
         }
 
         viewModel ??= new PaymentsViewModel();
-
         viewModel.Payments = client.Sdk.ListPayments(new ListPaymentsRequest(null, null, null,null,true,
             (uint?) viewModel.Skip, (uint?) viewModel.Count));
 

@@ -12,24 +12,25 @@
         string s => s,
         StoreDashboardViewModel dashboardModel => dashboardModel.StoreId,
         _ => Context.GetImplicitStoreId()
-        };
+    };
     var sdk = BreezService.GetClient(storeId)?.Sdk;
-
 }
 
 <div class="sticky-header-setup"></div>
 <div class="sticky-header mb-l">
-    <h2 class="mt-1 mb-2 mb-lg-4">Breez</h2>
-    <nav id="SectionNav">
-        <div class="nav">
-            @if (sdk is not null)
-            {
+    <h2 class="mt-1 mb-2 mb-lg-4">Breez / Greenlight</h2>
+    @if (sdk is not null)
+    {
+        <nav id="SectionNav">
+            <div class="nav">
+
                 <a permission="@Policies.CanViewStoreSettings" asp-action="Info" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "Info")">Info</a>
                 <a permission="@Policies.CanViewStoreSettings" asp-action="Payments" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "Payments")">Payments</a>
                 <a permission="@Policies.CanCreateInvoice" asp-action="SwapIn" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "SwapIn")">Swap In</a>
                 <a permission="@Policies.CanModifyStoreSettings" asp-action="SwapOut" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "SwapOut")">Swap Out</a>
-            }
-            <a permission="@Policies.CanModifyStoreSettings" asp-action="Configure" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "Configure")">Configuration</a>
-        </div>
-    </nav>
+
+                <a permission="@Policies.CanModifyStoreSettings" asp-action="Configure" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "Configure")">Configuration</a>
+            </div>
+        </nav>
+    }
 </div>

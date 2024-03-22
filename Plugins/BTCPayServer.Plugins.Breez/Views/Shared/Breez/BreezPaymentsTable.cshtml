@@ -1,5 +1,4 @@
 ﻿@using Breez.Sdk
-@using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Lightning
 @using BTCPayServer.Models.StoreViewModels
 @using BTCPayServer.Plugins.Breez
@@ -20,8 +19,16 @@
 
     var isDashboard = Model is StoreDashboardViewModel;
 }
-
-<div class="@(isDashboard ? "widget store-wallet-balance" : "")" style="@(isDashboard ? "grid-column-start: 4;grid-column-end: 13;" : "")">
+@if (isDashboard)
+{
+    <style>
+@@media (min-width: 1200px) {
+    #breez-payments{
+    grid-column-start: 6; grid-column-end: 13;
+    }}
+</style>
+}
+<div id="breez-payments" class="@(isDashboard ? "widget store-wallet-balance" : "")">
     @if (isDashboard)
     {
         <header>
@@ -47,7 +54,7 @@
                     <th class="w-125px">Id</th>
                     <th class="w-125px">Timestamp</th>
                     <th class="w-125px">Type</th>
-                    <th class="w-125px">Amount</th>a
+                    <th class="w-125px">Amount</th>
                     <th class="text-nowrap">Fee</th>
                     <th class="text-nowrap">Status</th>
                     <th class="text-nowrap">Description</th>

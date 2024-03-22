@@ -114,6 +114,7 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
             BOLT11 = lnPaymentDetails.data.bolt11,
             Status = p.status switch
             {
+                PaymentStatus.PENDING => LightningInvoiceStatus.Unpaid,
                 PaymentStatus.FAILED => LightningInvoiceStatus.Expired,
                 PaymentStatus.COMPLETE => LightningInvoiceStatus.Paid,
                 _ => LightningInvoiceStatus.Unpaid
@@ -132,7 +133,7 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
             {
                 Id = paymentHash.ToString(),
                 PaymentHash = paymentHash.ToString(),
-                Status = LightningInvoiceStatus.Expired,
+                Status = LightningInvoiceStatus.Unpaid
             };
     
         return FromPayment(p);
@@ -328,7 +329,7 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
 
     public void Dispose()
     {
-        Sdk.Dispose();
+        Sdk.Dispose(); 
         Sdk.Dispose();
     }
 
@@ -345,13 +346,14 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
             breezLightningClient.EventReceived += BreezLightningClientOnEventReceived;
         }
 
-        private readonly ConcurrentQueue<Task<LightningInvoice>> _invoices = new();
+        private readonly ConcurrentQueue<Payment> _invoices = new();
 
         private void BreezLightningClientOnEventReceived(object sender, BreezEvent e)
         {
-            if (e is BreezEvent.InvoicePaid pre)
+            if (e is BreezEvent.InvoicePaid pre && pre.details.payment is {})
             {
-                _invoices.Enqueue(_breezLightningClient.GetInvoice(pre.details.paymentHash, _cancellationToken));
+                
+                _invoices.Enqueue(pre.details.payment);
             }
         }
 
@@ -364,9 +366,9 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
         {
             while (cancellation.IsCancellationRequested is not true)
             {
-                if (_invoices.TryDequeue(out var task))
+                if (_invoices.TryDequeue(out var payment))
                 {
-                    return await task.WithCancellation(cancellation);
+                    return _breezLightningClient.FromPayment(payment);
                 }
 
                 await Task.Delay(100, cancellation);

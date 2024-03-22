@@ -24,7 +24,17 @@
     var nodeState = sdk.NodeInfo();
     var lspInfo = sdk.LspInfo();
 }
-<div class="widget store-numbers" id="Breez-Info" style="grid-column-start: 1; grid-column-end: 4;">
+<style>
+    #Breez-Info{
+        order: -3;
+    }
+    @@media (min-width: 1200px) {
+        #Breez-Info{
+        grid-column-start: 1; grid-column-end: 6;     order: -1;
+    }}
+</style>
+
+<div class="widget store-numbers" id="Breez-Info" style="">
     @if (Model is StoreDashboardViewModel)
     {
         <header>

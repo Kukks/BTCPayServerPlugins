@@ -16,5 +16,5 @@ public class BreezSettings
     
     
     [JsonIgnore]
-    public IFormFile GreenlightCredentials { get; set; }
+    public IFormFile? GreenlightCredentials { get; set; }
 }

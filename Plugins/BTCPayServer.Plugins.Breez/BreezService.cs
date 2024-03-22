@@ -160,6 +160,8 @@ public class BreezService:EventHostedServiceBase
 
     public BreezLightningClient? GetClient(string? storeId)
     {
+        
+        tcs.Task.GetAwaiter().GetResult();
         if(storeId is null)
             return null;
         _clients.TryGetValue(storeId, out var client);
@@ -167,6 +169,7 @@ public class BreezService:EventHostedServiceBase
     }  
     public BreezLightningClient? GetClientByPaymentKey(string? paymentKey)
     {
+        tcs.Task.GetAwaiter().GetResult();
         if(paymentKey is null)
             return null;
         var match = _settings.FirstOrDefault(pair => pair.Value.PaymentKey == paymentKey).Key;
