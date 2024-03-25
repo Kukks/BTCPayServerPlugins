@@ -1,4 +1,4 @@
-# Bringing Euro offramp plugin
+# Bringin Euro offramp plugin
 
 Allows you to automatically forward received funds to Bringin, a Euro offramp provider.
 
