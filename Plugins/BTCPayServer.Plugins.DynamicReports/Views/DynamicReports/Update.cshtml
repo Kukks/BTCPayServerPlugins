@@ -17,7 +17,6 @@
     reportName = string.IsNullOrEmpty(reportName) ? null : reportName;
     var existingReports = ReportService.ReportProviders.Where(pair => pair.Value is PostgresReportProvider).Select(pair => pair.Key).ToList();
     ViewData.SetActivePage("DynamicReports", reportName is null ? "Create dynamic report" : $"Edit {reportName} dynamic report", reportName);
-    var legacyEnabled = await DynamicReportService.IsLegacyEnabled();
 }
 
 
@@ -55,9 +54,6 @@
                     }
                 </select>
             }
-            <a class="btn btn-outline-secondary text-nowrap" asp-controller="DynamicReports" asp-action="ToggleLegacy" >
-                @(legacyEnabled ? "Disable legacy report" : "Enable legacy report")
-            </a>
         </div>
     </div>
     <div class="row">
@@ -98,7 +94,7 @@
     {
         var queryContext = JsonConvert.DeserializeObject<QueryContext>(dataS);
         <div class="row">
-
+.
             <div class="col-12 col-xxl-constrain">
 
                 <div class="table-responsive" style="  transform: rotateX(180deg);">

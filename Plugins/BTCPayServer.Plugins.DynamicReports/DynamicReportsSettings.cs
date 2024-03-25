@@ -6,7 +6,6 @@ namespace BTCPayServer.Plugins.DynamicReports;
 public class DynamicReportsSettings
 {
     public Dictionary<string, DynamicReportSetting> Reports { get; set; } = new();
-    public bool EnableLegacyInvoiceExport { get; set; }
 
     public class DynamicReportSetting
     {

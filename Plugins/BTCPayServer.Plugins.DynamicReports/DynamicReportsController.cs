@@ -34,14 +34,6 @@ public class DynamicReportsController : Controller
         _scopeProvider = scopeProvider;
     }
     
-    [HttpGet("toggle-legacy")]
-    public async Task<IActionResult> ToggleLegacy()
-    {
-        var result = await _dynamicReportService.ToggleLegacy();
-        TempData[WellKnownTempData.SuccessMessage] = $"Legacy report {(result? "enabled" : "disabled")}";
-        return RedirectToAction(nameof(Update));
-    }
-    
     [HttpGet("update")]
     [Authorize(Policy = Policies.CanModifyServerSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public IActionResult Update(

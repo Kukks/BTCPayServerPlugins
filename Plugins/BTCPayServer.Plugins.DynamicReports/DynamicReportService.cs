@@ -80,17 +80,4 @@ public class DynamicReportService:IHostedService
             _reportService.ReportProviders.TryAdd(name, reportProvider);
         }
     }
-
-    public async Task<bool> IsLegacyEnabled()
-    {
-        var result = await _settingsRepository.GetSettingAsync<DynamicReportsSettings>();
-        return result?.EnableLegacyInvoiceExport is true;
-    }
-    public async Task<bool> ToggleLegacy()
-    {
-        var result = await _settingsRepository.GetSettingAsync<DynamicReportsSettings>() ?? new DynamicReportsSettings();
-        result.EnableLegacyInvoiceExport = !result.EnableLegacyInvoiceExport;
-        await _settingsRepository.UpdateSetting(result);
-        return result.EnableLegacyInvoiceExport;
-    }
 }
