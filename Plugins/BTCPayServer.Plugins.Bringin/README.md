@@ -14,6 +14,6 @@ Allows you to automatically forward received funds to Bringin, a Euro offramp pr
 8. Make sure to configure payout processors so that payments to Bringin are automatically created.
 
 ## Flow
-When an invoice on your store is paid and settled, every payment is counted per payment type (on-chain, lightning), relative to the "percentage" configured (set to 0 to not enable this payment).
+When an invoice on your store is paid and settled, every payment is counted per payment type (lightning, on-chain coming soon), relative to the "percentage" configured (set to 0 to not enable this payment).
 Once the threshold is reached, an order is created on Bringin, and a payout paying this order is created. A payout processor then picks this payout and sends it to Bringin. Once the payment settles, the funds are automatically converted to Euro and the balance is reflected in your Bringin account and the BTCPay Server Bringin widget.
 
