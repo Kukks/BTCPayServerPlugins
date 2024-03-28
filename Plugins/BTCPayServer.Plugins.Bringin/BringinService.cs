@@ -393,7 +393,7 @@ public class BringinService : EventHostedServiceBase
 
     public static readonly SupportedMethodOptions[] SupportedMethods = new[]
     {
-        new SupportedMethodOptions(new PaymentMethodId("BTC", LightningPaymentType.Instance), true, 15, "LIGHTNING"),
+        new SupportedMethodOptions(new PaymentMethodId("BTC", LightningPaymentType.Instance), true, 22, "LIGHTNING"),
         // new SupportedMethodOptions(new PaymentMethodId("BTC", BitcoinPaymentType.Instance), true, 20, "ON_CHAIN"),
     };
 
