@@ -446,29 +446,29 @@ namespace BTCPayServer.Plugins.Wabisabi
             }
 
             
-            // coinSelect:
+            coinSelect:
             var selectedCoinSum = selectedCoins.Sum(coin => ((Money)coin.Amount).ToDecimal(MoneyUnit.BTC));
             var remaining = amount - selectedCoinSum;
             var remainingCoins = coins.FilterBy(coin => !selectedCoins.Contains(coin.Coin)).Available().ToList();
-            // if (remaining > 0 && remainingCoins.Any())
-            // {
-            //     //try to select the closest coin to the remaining amount while also prioritizing privacy
-            //     //so filter rby the highest anonymity set first and then by closest amount
-            //     var closestCoin = remainingCoins
-            //         .OrderByDescending(coin => coin.AnonymitySet)
-            //         .ThenBy(coin => Math.Abs(coin.Amount.ToDecimal(MoneyUnit.BTC) - remaining))
-            //         .FirstOrDefault();
-            //     if (closestCoin is not null)
-            //     {
-            //         selectedCoins.Add(closestCoin.Coin);
-            //         remainingCoins.Remove(closestCoin);
-            //         
-            //         goto coinSelect;
-            //     }
-            //
-            // }
-            //
-            // return Ok(selectedCoins.Select(coin => coin.Outpoint.ToString()).ToArray());
+            if (remaining > 0 && remainingCoins.Any())
+            {
+                //try to select the closest coin to the remaining amount while also prioritizing privacy
+                //so filter rby the highest anonymity set first and then by closest amount
+                var closestCoin = remainingCoins
+                    .OrderByDescending(coin => coin.AnonymitySet)
+                    .ThenBy(coin => Math.Abs(coin.Amount.ToDecimal(MoneyUnit.BTC) - remaining))
+                    .FirstOrDefault();
+                if (closestCoin is not null)
+                {
+                    selectedCoins.Add(closestCoin.Coin);
+                    remainingCoins.Remove(closestCoin);
+                    
+                    goto coinSelect;
+                }
+            
+            }
+            
+            return Ok(selectedCoins.Select(coin => coin.Outpoint.ToString()).ToArray());
 
             var defaultCoinSelector = new DefaultCoinSelector();
             var defaultSelection =
