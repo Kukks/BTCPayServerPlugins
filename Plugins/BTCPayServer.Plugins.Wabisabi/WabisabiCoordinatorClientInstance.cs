@@ -108,8 +108,15 @@ public class WabisabiCoordinatorClientInstanceManager:IHostedService
     {
         if (termsConditions is null && name == "zksnacks")
         {
-            termsConditions = new HttpClient().GetStringAsync("https://wasabiwallet.io/api/v4/Wasabi/legaldocuments?id=ww2")
-                .Result;
+            try
+            {
+                termsConditions = new HttpClient().GetStringAsync("https://wasabiwallet.io/api/v4/Wasabi/legaldocuments?id=ww2")
+                    .Result;
+            }
+            catch (Exception e)
+            {
+            }
+           
 
         }
         if (HostedServices.ContainsKey(name))
