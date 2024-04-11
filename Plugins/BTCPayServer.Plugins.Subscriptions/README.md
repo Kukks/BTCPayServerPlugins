@@ -13,4 +13,12 @@ Additionally there is one new Greenfield API endpoint: GET https://btcpay.host/a
 
 If the subscription is about to expire (within 3 days), a payment request is created to extend the period of the subscription. This payment request expires when the subscription expires. if this happens, the subscription is marked as inactive
 
+quick demo
+https://streamable.com/y9gimo
 
+## Email rules:
+
+There are 2 new email rules:
+
+* A subscription status has been updated: has placeholders:{Subscription.SubscriptionId},{Subscription.Status},{Subscription.AppId}
+* "A subscription has generated a payment request for renewal: has placeholders: {Subscription.SubscriptionId}, {Subscription.PaymentRequestId},{Subscription.AppId}
