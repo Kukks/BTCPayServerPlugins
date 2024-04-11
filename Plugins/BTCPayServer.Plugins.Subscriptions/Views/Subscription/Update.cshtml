@@ -1,0 +1,183 @@
+﻿@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Views.Apps
+@using Microsoft.AspNetCore.Routing
+@using BTCPayServer
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.Forms
+@using BTCPayServer.Services.Apps
+@using BTCPayServer.TagHelpers
+@model BTCPayServer.Plugins.Subscriptions.SubscriptionAppSettings
+@inject FormDataService FormDataService
+@{
+    var appId = Context.GetRouteValue("appId").ToString();
+    var storeId = Context.GetCurrentStoreId();
+    ViewData.SetActivePage(AppsNavPages.Update.ToString(), typeof(AppsNavPages).ToString(), "Update Subscription app", appId);
+    var checkoutFormOptions = await FormDataService.GetSelect(storeId, Model.FormId);
+    var archived = ViewData["Archived"] as bool? is true;
+}
+
+
+<form method="post">
+
+    <div class="sticky-header-setup"></div>
+    <div class="sticky-header d-sm-flex align-items-center justify-content-between">
+        <h2 class="mb-0">@ViewData["Title"]</h2>
+        <div class="d-flex gap-3 mt-3 mt-sm-0">
+            <input type="submit" value="Save" name="command" class="btn btn-primary"/>
+            @if (archived)
+            {
+            }else if (this.ViewContext.ModelState.IsValid)
+            {
+                <a class="btn btn-secondary" target="_blank" href=" @Url.Action("View", "Subscription", new {appId})">
+                    Subscription page
+                </a>
+            }
+        </div>
+    </div>
+
+
+    <partial name="_StatusMessage"/>
+
+
+    <div class="row">
+        <div class="col-xl-8 col-xxl-constrain">
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+
+            <div class="form-group">
+                <label asp-for="SubscriptionName" class="form-label" data-required>App name</label>
+                <input asp-for="SubscriptionName" class="form-control" required/>
+                <span asp-validation-for="SubscriptionName" class="text-danger"></span>
+            </div>
+            <div class="d-flex justify-content-between">
+                <div class="form-group flex-fill me-4">
+                    <label asp-for="Price" class="form-label" data-required></label>
+                    <input type="number" inputmode="decimal" step="any" asp-for="Price" class="form-control" required/>
+                    <span asp-validation-for="Price" class="text-danger"></span>
+
+                </div>
+                <div class="form-group">
+                    <label asp-for="Currency" class="form-label"></label>
+                    <input asp-for="Currency" class="form-control w-auto" currency-selection/>
+                    <span asp-validation-for="Currency" class="text-danger"></span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="DurationDays" class="form-label" data-required></label>
+                <input type="number" inputmode="decimal" step="1" min="1" asp-for="DurationDays" class="form-control" required/>
+                <span asp-validation-for="DurationDays" class="text-danger"></span>
+
+            </div>
+            <div class="form-group">
+                <label asp-for="FormId" class="form-label"></label>
+                <select asp-for="FormId" class="form-select w-auto" asp-items="@checkoutFormOptions"></select>
+                <span asp-validation-for="FormId" class="text-danger"></span>
+            </div>
+
+
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-xl-10 col-xxl-constrain">
+            <div class="form-group">
+                <label asp-for="Description" class="form-label"></label>
+                <textarea asp-for="Description" class="form-control richtext"></textarea>
+                <span asp-validation-for="Description" class="text-danger"></span>
+            </div>
+        </div>
+    </div>
+
+
+</form>
+
+@if (Model.Subscriptions?.Any() is true)
+{
+    <div class="row">
+        <div class="col-xl-10 col-xxl-constrain">
+            <div class="table-responsive">
+
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th>Subscription</th>
+                        <th>Created</th>
+                        <th>Status</th>
+                        <th>Email</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var sub in Model.Subscriptions)
+                    {
+                        <tr>
+                            <td>
+                                <a asp-action="ViewSubscription"
+                                   asp-controller="Subscription"
+                                   asp-route-appId="@appId"
+                                   asp-route-id="@sub.Key">
+                                    
+                                    <vc:truncate-center text="@sub.Key" padding="7" classes="truncate-center-id"/>
+                                </a>
+
+                            </td>
+                            <td>@sub.Value.Start.ToBrowserDate()</td>
+                            <td>@sub.Value.Status</td>
+                            <td>@sub.Value.Email</td>
+                        </tr>
+                        <tr>
+                            <td colspan="4" class="pt-0">
+                                <table class="table bg-light my-0">
+                                    <tr>
+                                        <th>Payment Request</th>
+                                        <th>Period Start</th>
+                                        <th>Period End</th>
+                                        <th>Settled</th>
+                                    </tr>
+                                    @foreach (var x in sub.Value.Payments)
+                                    {
+                                        <tr>
+                                            <td>
+                                                <a asp-action="ViewPaymentRequest"
+                                                   asp-controller="UIPaymentRequest"
+                                                   asp-route-payReqId="@x.PaymentRequestId">
+                                                    
+                                        <vc:truncate-center text="@x.PaymentRequestId" padding="7" classes="truncate-center-id"/>
+                                                </a>
+                                            </td>
+                                            <td>@x.PeriodStart.ToBrowserDate()</td>
+                                            <td>@x.PeriodEnd.ToBrowserDate()</td>
+                                            <td>@x.Settled</td>
+                                        </tr>
+                                    }
+                                </table>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+}
+
+
+<div class="d-grid d-sm-flex flex-wrap gap-3 mt-3">
+    <form method="post" asp-controller="UIApps" asp-action="ToggleArchive" asp-route-appId="@appId">
+        <button type="submit" class="w-100 btn btn-outline-secondary" id="btn-archive-toggle">
+            @if (archived)
+            {
+                <span class="text-nowrap">Unarchive this app</span>
+            }
+            else
+            {
+                <span class="text-nowrap" data-bs-toggle="tooltip" title="Archive this app so that it does not appear in the apps list by default">Archive this app</span>
+            }
+        </button>
+    </form>
+    <a id="DeleteApp" class="btn btn-outline-danger" asp-controller="UIApps" asp-action="DeleteApp" asp-route-appId="@appId" data-bs-toggle="modal" data-bs-target="#ConfirmModal" data-description="The app and its settings will be permanently deleted." data-confirm-input="DELETE">Delete this app</a>
+</div>
+
+<partial name="_Confirm" model="@(new ConfirmModel("Delete app", "This app will be removed from this store.", "Delete"))"/>
+
+<partial name="_ValidationScriptsPartial"/>

@@ -1,0 +1,113 @@
+﻿@using Microsoft.AspNetCore.Routing
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using BTCPayServer.Models
+@using BTCPayServer.Services
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Plugins.Subscriptions
+@inject DisplayFormatter DisplayFormatter
+@model BTCPayServer.Plugins.Subscriptions.SubscriptionAppSettings
+@{
+    var appId = Context.GetRouteValue("appId");
+    var subscriptionId = Context.GetRouteValue("id") as string;
+    var subscription = Model.Subscriptions[subscriptionId!];
+    StoreBrandingViewModel storeBranding = (StoreBrandingViewModel) ViewData["StoreBranding"];
+    Layout = null;
+}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <partial name="LayoutHead"/>
+</head>
+<body class="min-vh-100">
+<div id="Subscription" class="public-page-wrap">
+
+    <partial name="_StoreHeader" model="(Model.SubscriptionName, storeBranding)"/>
+    <main>
+        <partial name="_StatusMessage"/>
+        <div class="text-muted mb-4 text-center lead ">@Model.DurationDays day@(Model.DurationDays > 1 ? "s" : "") subscription for @DisplayFormatter.Currency(Model.Price, Model.Currency)</div>
+        <div class=" mb-4 text-center lead d-flex gap-2 justify-content-center">
+            <span class=" fw-semibold ">@subscription.Status</span>
+            @if (subscription.Status == SubscriptionStatus.Inactive)
+            {
+                <a class="btn btn-link" asp-action="Reactivate" asp-controller="Subscription" asp-route-id="@subscriptionId" asp-route-appId="@appId">Reactivate</a>
+            }
+        </div>
+        @if (!string.IsNullOrEmpty(Model.Description))
+        {
+            <div class="subscription-description lead text-center mb-4">@Safe.Raw(Model.Description)</div>
+        }
+
+
+        <section class="tile">
+
+            @if (subscription.Payments?.Any() is not true)
+            {
+                <p class="text-muted mb-0">No payments have been made yet.</p>
+            }
+            else
+            {
+                <div class="table-responsive my-0">
+                    <table class="invoice table table-borderless">
+                        <thead>
+                        <tr>
+                            <th class="fw-normal text-secondary" scope="col">Payment Request Id</th>
+                            <th class="fw-normal text-secondary">Period</th>
+                            <th class="fw-normal text-secondary text-end">Settled</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var payment in subscription.Payments)
+                        {
+                            var isThisPeriodActive = payment.PeriodStart <= DateTimeOffset.UtcNow && payment.PeriodEnd >= DateTimeOffset.UtcNow;
+                            var isThisPeriodFuture = payment.PeriodStart > DateTimeOffset.UtcNow;
+
+                            <tr>
+                                <td>
+                                    <a asp-action="ViewPaymentRequest"
+                                       asp-controller="UIPaymentRequest"
+                                       asp-route-payReqId="@payment.PaymentRequestId">
+                                        <vc:truncate-center text="@payment.PaymentRequestId" padding="7" classes="truncate-center-id"/>
+                                    </a>
+                                </td>
+                                <td class="text-print-default d-flex justify-content-start gap-2">
+                                    <div> @payment.PeriodStart.ToBrowserDate() - @payment.PeriodEnd.ToBrowserDate()</div>
+                                    @if (payment.Settled && isThisPeriodActive)
+                                    {
+                                        <span class="badge badge-settled">Active</span>
+                                    }
+                                    @if (isThisPeriodFuture)
+                                    {
+                                        <span class="badge badge-processing">Next period</span>
+                                    }
+                                </td>
+                                <td class="text-end text-print-default ">
+                                    @if (payment.Settled)
+                                    {
+                                        <span class="badge badge-settled">Settled</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge badge-invalid">Not settled</span>
+                                    }
+
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    </main>
+
+    <footer class="store-footer">
+        <a class="store-powered-by" href="https://btcpayserver.org" target="_blank" rel="noreferrer noopener">
+            Powered by <partial name="_StoreFooterLogo"/>
+        </a>
+    </footer>
+</div>
+<partial name="LayoutFoot"/>
+
+</body>
+</html>

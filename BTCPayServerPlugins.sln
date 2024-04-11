@@ -59,6 +59,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.Blink"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.MicroNode", "Plugins\BTCPayServer.Plugins.MicroNode\BTCPayServer.Plugins.MicroNode.csproj", "{95626F3B-7722-4AE7-9C12-EDB1E58687E2}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BTCPayServer.Plugins.Subscriptions", "Plugins\BTCPayServer.Plugins.Subscriptions\BTCPayServer.Plugins.Subscriptions.csproj", "{994E5D32-849B-4276-82A9-2A18DBC98D39}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -283,6 +285,14 @@ Global
 		{95626F3B-7722-4AE7-9C12-EDB1E58687E2}.Altcoins-Debug|Any CPU.Build.0 = Debug|Any CPU
 		{95626F3B-7722-4AE7-9C12-EDB1E58687E2}.Altcoins-Release|Any CPU.ActiveCfg = Debug|Any CPU
 		{95626F3B-7722-4AE7-9C12-EDB1E58687E2}.Altcoins-Release|Any CPU.Build.0 = Debug|Any CPU
+		{994E5D32-849B-4276-82A9-2A18DBC98D39}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{994E5D32-849B-4276-82A9-2A18DBC98D39}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{994E5D32-849B-4276-82A9-2A18DBC98D39}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{994E5D32-849B-4276-82A9-2A18DBC98D39}.Release|Any CPU.Build.0 = Release|Any CPU
+		{994E5D32-849B-4276-82A9-2A18DBC98D39}.Altcoins-Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{994E5D32-849B-4276-82A9-2A18DBC98D39}.Altcoins-Debug|Any CPU.Build.0 = Debug|Any CPU
+		{994E5D32-849B-4276-82A9-2A18DBC98D39}.Altcoins-Release|Any CPU.ActiveCfg = Debug|Any CPU
+		{994E5D32-849B-4276-82A9-2A18DBC98D39}.Altcoins-Release|Any CPU.Build.0 = Debug|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{B19C9F52-DC47-466D-8B5C-2D202B7B003F} = {9E04ECE9-E304-4FF2-9CBC-83256E6C6962}
