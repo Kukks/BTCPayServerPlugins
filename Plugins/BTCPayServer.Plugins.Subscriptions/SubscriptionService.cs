@@ -28,6 +28,13 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
     private readonly BTCPayNetworkJsonSerializerSettings _btcPayNetworkJsonSerializerSettings;
     private readonly WebhookSender _webhookSender;
 
+    public const string PaymentRequestSubscriptionIdKey = "subscriptionId";
+    public const string PaymentRequestSourceKey = "source";
+    public const string PaymentRequestSourceValue = "subscription";
+    public const string PaymentRequestAppId = "appId";
+    
+    
+    
     public SubscriptionService(EventAggregator eventAggregator,
         ILogger<SubscriptionService> logger,
         AppService appService,
@@ -43,18 +50,31 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
         _webhookSender = webhookSender;
     }
 
-    public override Task StartAsync(CancellationToken cancellationToken)
+    public override async Task StartAsync(CancellationToken cancellationToken)
     {
-        _ = ScheduleChecks(cancellationToken);
-        return base.StartAsync(cancellationToken);
+        
+        await  base.StartAsync(cancellationToken);
+        _ = ScheduleChecks();
     }
 
-    private async Task ScheduleChecks(CancellationToken cancellationToken)
+    private CancellationTokenSource _checkTcs = new();
+    private async Task ScheduleChecks()
     {
-        while (!cancellationToken.IsCancellationRequested)
+        
+        while (!CancellationToken.IsCancellationRequested)
         {
-            await CreatePaymentRequestForActiveSubscriptionCloseToEnding();
-            await Task.Delay(TimeSpan.FromHours(1), cancellationToken);
+            try
+            {
+
+                await CreatePaymentRequestForActiveSubscriptionCloseToEnding();
+            }
+            catch (Exception e)
+            {
+                Logs.PayServer.LogError(e, "Error while checking subscriptions");
+            }
+            _checkTcs = new CancellationTokenSource();
+            _checkTcs.CancelAfter(TimeSpan.FromHours(1));
+            await CancellationTokenSource.CreateLinkedTokenSource(_checkTcs.Token, CancellationToken).Token;
         }
     }
 
@@ -76,7 +96,6 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
             }
 
             if (subscription.Status == SubscriptionStatus.Active)
-
                 return null;
 
             var lastSettled = subscription.Payments.Where(p => p.Settled).MaxBy(history => history.PeriodEnd);
@@ -91,6 +110,8 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
                 Status = PaymentRequestData.PaymentRequestStatus.Pending,
                 Created = DateTimeOffset.UtcNow, Archived = false,
             };
+            var additionalData = lastBlob.AdditionalData;
+            additionalData[PaymentRequestSubscriptionIdKey] = JToken.FromObject(subscriptionId);
             pr.SetBlob(new PaymentRequestBaseData()
             {
                 ExpiryDate = DateTimeOffset.UtcNow.AddDays(1),
@@ -99,12 +120,15 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
                 StoreId = app.StoreDataId,
                 Title = $"{settings.SubscriptionName} Subscription Reactivation",
                 Description = settings.Description,
-                AdditionalData = lastBlob.AdditionalData
+                AdditionalData = additionalData
             });
             return await _paymentRequestRepository.CreateOrUpdatePaymentRequest(pr);
         }, tcs));
+        
+        
         return await tcs.Task as Data.PaymentRequestData;
     }
+
 
     private async Task CreatePaymentRequestForActiveSubscriptionCloseToEnding()
     {
@@ -121,14 +145,18 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
                 settings.SubscriptionName = app.Name;
                 if (settings.Subscriptions?.Any() is true)
                 {
+                    var changedSubscriptions = new List<KeyValuePair<string, Subscription>>();
+                    
                     foreach (var subscription in settings.Subscriptions)
                     {
+                        var changed = DetermineStatusOfSubscription(subscription.Value);
                         if (subscription.Value.Status == SubscriptionStatus.Active)
                         {
                             var currentPeriod = subscription.Value.Payments.FirstOrDefault(p => p.Settled &&
                                 p.PeriodStart <= DateTimeOffset.UtcNow &&
                                 p.PeriodEnd >= DateTimeOffset.UtcNow);
 
+                            //there should only ever be one future payment request at a time
                             var nextPeriod =
                                 subscription.Value.Payments.FirstOrDefault(p => p.PeriodStart > DateTimeOffset.UtcNow);
 
@@ -138,12 +166,12 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
 
                             var noticePeriod = currentPeriod.PeriodEnd - DateTimeOffset.UtcNow;
 
-                            var lastPr =
-                                await _paymentRequestRepository.FindPaymentRequest(currentPeriod.PaymentRequestId, null,
-                                    CancellationToken.None);
+                            var lastPr = await _paymentRequestRepository.FindPaymentRequest(
+                                currentPeriod.PaymentRequestId, null,
+                                CancellationToken.None);
                             var lastBlob = lastPr.GetBlob();
 
-                            if (noticePeriod.TotalDays < Math.Min(3, settings.DurationDays))
+                            if (noticePeriod.Days <= Math.Min(3, settings.Duration))
                             {
                                 var pr = new Data.PaymentRequestData()
                                 {
@@ -163,22 +191,47 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
                                 });
                                 pr = await _paymentRequestRepository.CreateOrUpdatePaymentRequest(pr);
 
+                                var start = DateOnly.FromDateTime(currentPeriod.PeriodEnd.AddDays(1));
+                                var end = settings.DurationType == DurationType.Day
+                                    ? start.AddDays(settings.Duration)
+                                    : start.AddMonths(settings.Duration);
                                 var newHistory = new SubscriptionPaymentHistory()
                                 {
                                     PaymentRequestId = pr.Id,
-                                    PeriodStart = currentPeriod.PeriodEnd,
-                                    PeriodEnd = currentPeriod.PeriodEnd.AddDays(settings.DurationDays),
+                                    PeriodStart = start.ToDateTime(TimeOnly.MinValue),
+                                    PeriodEnd = end.ToDateTime(TimeOnly.MinValue),
                                     Settled = false
                                 };
                                 subscription.Value.Payments.Add(newHistory);
-                                
+
                                 deliverRequests.Add((app.Id, subscription.Key, pr.Id, subscription.Value.Email));
                             }
                         }
+                        if(changed)
+                            changedSubscriptions.Add(subscription);
                     }
+
                     app.SetSettings(settings);
 
                     await _appService.UpdateOrCreateApp(app);
+                    
+                    if (changedSubscriptions.Any())
+                    {
+                        var webhooks = await _webhookSender.GetWebhooks(app.StoreDataId, SubscriptionStatusUpdated);
+                        foreach (var changedSubscription in changedSubscriptions)
+                        {
+                            foreach (var webhook in webhooks)
+                            {
+                                _webhookSender.EnqueueDelivery(CreateSubscriptionStatusUpdatedDeliveryRequest(webhook, app.Id,
+                                    app.StoreDataId,
+                                    changedSubscription.Key, changedSubscription.Value.Status, null, changedSubscription.Value.Email));
+                            }
+
+                            EventAggregator.Publish(CreateSubscriptionStatusUpdatedDeliveryRequest(null, app.Id, app.StoreDataId,
+                                changedSubscription.Key, changedSubscription.Value.Status, null, changedSubscription.Value.Email));
+                        }
+                        
+                    }
                 }
 
                 foreach (var deliverRequest in deliverRequests)
@@ -223,40 +276,82 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
                 sequentialExecute.TaskCompletionSource.SetResult(task);
                 return;
             }
-            case PaymentRequestEvent paymentRequestUpdated
-                when paymentRequestUpdated.Type == PaymentRequestEvent.StatusChanged:
+            case PaymentRequestEvent {Type: PaymentRequestEvent.StatusChanged} paymentRequestStatusUpdated:
             {
-                var prBlob = paymentRequestUpdated.Data.GetBlob();
-                if (!prBlob.AdditionalData.TryGetValue("source", out var src) ||
-                    src.Value<string>() != "subscription" ||
-                    !prBlob.AdditionalData.TryGetValue("appId", out var subscriptionAppidToken) ||
+                var prBlob = paymentRequestStatusUpdated.Data.GetBlob();
+                if (!prBlob.AdditionalData.TryGetValue(PaymentRequestSourceKey, out var src) ||
+                    src.Value<string>() != PaymentRequestSourceValue ||
+                    !prBlob.AdditionalData.TryGetValue(PaymentRequestAppId, out var subscriptionAppidToken) ||
                     subscriptionAppidToken.Value<string>() is not { } subscriptionAppId)
                 {
                     return;
                 }
 
-                var isNew = !prBlob.AdditionalData.TryGetValue("subcriptionId", out var subscriptionIdToken);
+                var isNew = !prBlob.AdditionalData.TryGetValue(PaymentRequestSubscriptionIdKey, out var subscriptionIdToken);
 
-                if (isNew && paymentRequestUpdated.Data.Status != PaymentRequestData.PaymentRequestStatus.Completed)
+                if (isNew && paymentRequestStatusUpdated.Data.Status !=
+                    PaymentRequestData.PaymentRequestStatus.Completed)
                 {
                     return;
                 }
 
-                if (paymentRequestUpdated.Data.Status == PaymentRequestData.PaymentRequestStatus.Completed)
+                if (paymentRequestStatusUpdated.Data.Status == PaymentRequestData.PaymentRequestStatus.Completed)
                 {
                     var subscriptionId = subscriptionIdToken?.Value<string>();
-                    var blob = paymentRequestUpdated.Data.GetBlob();
+                    var blob = paymentRequestStatusUpdated.Data.GetBlob();
                     var email = blob.Email ?? blob.FormResponse?["buyerEmail"]?.Value<string>();
-                    await HandlePaidSubscription(subscriptionAppId, subscriptionId, paymentRequestUpdated.Data.Id, email);
+                    await HandlePaidSubscription(subscriptionAppId, subscriptionId, paymentRequestStatusUpdated.Data.Id,
+                        email);
                 }
                 else if (!isNew)
                 {
                     await HandleUnSettledSubscription(subscriptionAppId, subscriptionIdToken.Value<string>(),
-                        paymentRequestUpdated.Data.Id);
+                        paymentRequestStatusUpdated.Data.Id);
                 }
+
+                
+                await _checkTcs.CancelAsync();
 
                 break;
             }
+            // case PaymentRequestEvent {Type: PaymentRequestEvent.Updated} paymentRequestEvent:
+            // {
+            //     var prBlob = paymentRequestEvent.Data.GetBlob();
+            //     if (!prBlob.AdditionalData.TryGetValue("source", out var src) ||
+            //         src.Value<string>() != "subscription" ||
+            //         !prBlob.AdditionalData.TryGetValue("appId", out var subscriptionAppidToken) ||
+            //         subscriptionAppidToken.Value<string>() is not { } subscriptionAppId)
+            //     {
+            //         return;
+            //     }
+            //
+            //     
+            //     var isNew = !prBlob.AdditionalData.TryGetValue("subscriptionId", out var subscriptionIdToken);
+            //     if(isNew)
+            //         return;
+            //     
+            //     var app = await _appService.GetApp(subscriptionAppId, SubscriptionApp.AppType, false, true);
+            //     if (app == null)
+            //     {
+            //         return;
+            //     }
+            //
+            //     var settings = app.GetSettings<SubscriptionAppSettings>();
+            //
+            //     var subscriptionId = subscriptionIdToken!.Value<string>();
+            //
+            //     if (!settings.Subscriptions.TryGetValue(subscriptionId, out var subscription))
+            //     {
+            //         return;
+            //     }
+            //
+            //     var payment = subscription.Payments.Find(p => p.PaymentRequestId == paymentRequestEvent.Data.Id);
+            //
+            //     if (payment is null)
+            //     {
+            //         return;
+            //     }
+            // }
         }
 
         await base.ProcessEvent(evt, cancellationToken);
@@ -298,7 +393,8 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
         }
     }
 
-    private async Task HandlePaidSubscription(string appId, string? subscriptionId, string paymentRequestId, string? email)
+    private async Task HandlePaidSubscription(string appId, string? subscriptionId, string paymentRequestId,
+        string? email)
     {
         var app = await _appService.GetApp(appId, SubscriptionApp.AppType, false, true);
         if (app == null)
@@ -310,6 +406,8 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
 
         subscriptionId ??= Guid.NewGuid().ToString();
 
+        var start = DateOnly.FromDateTime(DateTimeOffset.UtcNow.DateTime);
+        var end = settings.DurationType == DurationType.Day? start.AddDays(settings.Duration).ToDateTime(TimeOnly.MaxValue): start.AddMonths(settings.Duration).ToDateTime(TimeOnly.MaxValue);
         if (!settings.Subscriptions.TryGetValue(subscriptionId, out var subscription))
         {
             subscription = new Subscription()
@@ -322,8 +420,8 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
                     new SubscriptionPaymentHistory()
                     {
                         PaymentRequestId = paymentRequestId,
-                        PeriodStart = DateTimeOffset.UtcNow,
-                        PeriodEnd = DateTimeOffset.UtcNow.AddDays(settings.DurationDays),
+                        PeriodStart = start.ToDateTime(TimeOnly.MinValue),
+                        PeriodEnd = end,
                         Settled = true
                     }
                 ]
@@ -337,8 +435,8 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
             subscription.Payments.Add(new SubscriptionPaymentHistory()
             {
                 PaymentRequestId = paymentRequestId,
-                PeriodStart = DateTimeOffset.UtcNow,
-                PeriodEnd = DateTimeOffset.UtcNow.AddDays(settings.DurationDays),
+                PeriodStart = start.ToDateTime(TimeOnly.MinValue),
+                PeriodEnd = end,
                 Settled = true
             });
         }
@@ -384,10 +482,12 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
     }
 
     SubscriptionWebhookDeliveryRequest CreateSubscriptionStatusUpdatedDeliveryRequest(WebhookData? webhook,
-        string appId, string storeId, string subscriptionId, SubscriptionStatus status, string subscriptionUrl, string email)
+        string appId, string storeId, string subscriptionId, SubscriptionStatus status, string subscriptionUrl,
+        string email)
     {
         var webhookEvent = new WebhookSubscriptionEvent(SubscriptionStatusUpdated, storeId)
         {
+            WebhookId = webhook?.Id,
             AppId = appId,
             SubscriptionId = subscriptionId,
             Status = status.ToString(),
@@ -413,6 +513,7 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
     {
         var webhookEvent = new WebhookSubscriptionEvent(SubscriptionRenewalRequested, storeId)
         {
+            WebhookId = webhook?.Id,
             AppId = appId,
             SubscriptionId = subscriptionId,
             PaymentRequestId = paymentRequestId,
@@ -501,7 +602,6 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
         [JsonProperty(Order = 4)] public string Status { get; set; }
         [JsonProperty(Order = 5)] public string PaymentRequestId { get; set; }
         [JsonProperty(Order = 6)] public string Email { get; set; }
-
     }
 
     public class SubscriptionWebhookDeliveryRequest(

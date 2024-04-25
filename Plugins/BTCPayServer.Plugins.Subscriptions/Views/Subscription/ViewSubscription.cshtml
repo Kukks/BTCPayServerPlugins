@@ -18,6 +18,17 @@
 <html lang="en">
 <head>
     <partial name="LayoutHead"/>
+
+    <style>
+        #Subscription{
+            --wrap-max-width: 720px;
+        }
+        #InvoiceDescription > :last-child { margin-bottom: 0; }
+        
+                @@media print {
+                    thead { display: table-row-group; }
+                }
+    </style>
 </head>
 <body class="min-vh-100">
 <div id="Subscription" class="public-page-wrap">
@@ -25,7 +36,7 @@
     <partial name="_StoreHeader" model="(Model.SubscriptionName, storeBranding)"/>
     <main>
         <partial name="_StatusMessage"/>
-        <div class="text-muted mb-4 text-center lead ">@Model.DurationDays day@(Model.DurationDays > 1 ? "s" : "") subscription for @DisplayFormatter.Currency(Model.Price, Model.Currency)</div>
+        <div class="text-muted mb-4 text-center lead ">@Model.GetSubscriptionHumanReadableLength() subscription for @DisplayFormatter.Currency(Model.Price, Model.Currency)</div>
         <div class=" mb-4 text-center lead d-flex gap-2 justify-content-center">
             <span class=" fw-semibold ">@subscription.Status</span>
             @if (subscription.Status == SubscriptionStatus.Inactive)
@@ -99,6 +110,9 @@
                 </div>
             }
         </section>
+        <div class="d-flex justify-content-center mt-4    ">
+            <a asp-action="View" asp-route-appId="@appId.ToString()" class="btn btn-secondary rounded-pill">Return to subscription</a>
+        </div>
     </main>
 
     <footer class="store-footer">

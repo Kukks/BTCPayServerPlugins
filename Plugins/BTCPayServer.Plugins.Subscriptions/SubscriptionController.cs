@@ -159,9 +159,9 @@ public class SubscriptionController : Controller
             ModelState.AddModelError(nameof(vm.Price), "Price must be greater than 0");
         }
 
-        if (vm.DurationDays <= 0)
+        if (vm.Duration <= 0)
         {
-            ModelState.AddModelError(nameof(vm.DurationDays), "Duration must be greater than 0");
+            ModelState.AddModelError(nameof(vm.Duration), "Duration must be greater than 0");
         }
 
 

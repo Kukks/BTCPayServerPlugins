@@ -1,6 +1,7 @@
 ﻿@using Microsoft.AspNetCore.Routing
 @using Microsoft.AspNetCore.Mvc.TagHelpers
 @using BTCPayServer.Models
+@using BTCPayServer.Plugins.Subscriptions
 @using BTCPayServer.Services
 @inject DisplayFormatter DisplayFormatter
 @model BTCPayServer.Plugins.Subscriptions.SubscriptionAppSettings
@@ -15,6 +16,16 @@
 <head>
     <partial name="LayoutHead"/>
 
+    <style>
+        #Subscription{
+            --wrap-max-width: 720px;
+        }
+        #InvoiceDescription > :last-child { margin-bottom: 0; }
+        
+                @@media print {
+                    thead { display: table-row-group; }
+                }
+    </style>
 </head>
 <body class="min-vh-100">
 <div id="Subscription" class="public-page-wrap">
@@ -22,14 +33,22 @@
     <partial name="_StoreHeader" model="(Model.SubscriptionName, storeBranding)"/>
     <main>
         <partial name="_StatusMessage"/>
-        <div class="text-muted mb-4 text-center lead ">@Model.DurationDays day@(Model.DurationDays>1?"s": "") subscription for @DisplayFormatter.Currency(Model.Price, Model.Currency)</div>
+        <div class="text-muted mb-4 text-center lead ">@Model.GetSubscriptionHumanReadableLength() subscription for @DisplayFormatter.Currency(Model.Price, Model.Currency)</div>
+
         @if (!string.IsNullOrEmpty(Model.Description))
         {
-            <div class="subscription-description lead text-center">@Safe.Raw(Model.Description)</div>
+            <section class="tile">
+                <h2 class="h4 mb-3">Description</h2>
+                <div id="InvoiceDescription" class="subscription-description">
+                    @Safe.Raw(Model.Description)
+                </div>
+            </section>
         }
 
-        <div class="text-center w-100 mt-4"> <a asp-action="Subscribe" asp-route-appId="@appId" asp- class="btn btn-primary btn-lg m-auto">Subscribe</a></div>
-       
+        <div class="text-center w-100 mt-4">
+            <a asp-action="Subscribe" asp-route-appId="@appId" asp- class="btn btn-primary btn-lg m-auto">Subscribe</a>
+        </div>
+
 
     </main>
 
