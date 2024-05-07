@@ -74,7 +74,7 @@ Ideally, the minimum number of inputs is 50 and the fee is below 1% (the default
 
 ## Running a coordinator
 
-In the spirit of "be the change you want to see in the world", this plugin ships with the ability to run your own coordinator (and publish it over Nostr for discoverability). This feature is still considered experimental, and may have [legal repercussions for operating a coordinator](docs/https://bitcoinmagazine.com/technical/is-bitcoin-next-after-tornado-cash).
+In the spirit of "be the change you want to see in the world", this plugin ships with the ability to run your own coordinator (and publish it over Nostr for discoverability). This feature is still considered experimental, and may have [legal repercussions for operating a coordinator](https://bitcoinmagazine.com/technical/is-bitcoin-next-after-tornado-cash).
 ![docs/img_7.png](docs/img_7.png)
 
 ![docs/img_8.png](docs/img_8.png)
