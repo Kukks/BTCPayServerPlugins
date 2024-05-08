@@ -51,7 +51,7 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
                 network == NBitcoin.Network.RegTest ? Network.REGTEST : Network.SIGNET
             };
         var seed = mnemonic.DeriveSeed();
-        Sdk = BreezSdkMethods.Connect(config, seed.ToList(), this);
+        Sdk = BreezSdkMethods.Connect(new ConnectRequest(config, seed.ToList()), this);
     }
 
     public BlockingBreezServices Sdk { get; }
