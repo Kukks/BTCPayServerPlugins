@@ -9,8 +9,8 @@
 
     <!-- Plugin specific properties -->
     <PropertyGroup>
-        <Product>Nostr </Product>
-        <Description>Allows you to verify your nostr account with NIP5 and zap like the rest of the crazies</Description>
+        <Product>Nostr</Product>
+        <Description>NIP5 addresses, Zap support, Nostr Wallet Connect Lightning support</Description>
         <Version>1.1.4</Version>
 <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
