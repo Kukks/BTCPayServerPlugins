@@ -59,7 +59,7 @@ public class Nostr
             {
                 new() {TagIdentifier = EndpointTagIdentifier, Data = new List<string>() {new Uri(coordinatorUri, "plugins/wabisabi-coordinator/").ToString()}},
                 new() {TagIdentifier = TypeTagIdentifier, Data = new List<string>() { TypeTagValue}},
-                new() {TagIdentifier = NetworkTagIdentifier, Data = new List<string>() {currentNetwork.Name.ToLower()}}
+                new() {TagIdentifier = NetworkTagIdentifier, Data = new List<string>() {currentNetwork.ChainName.ToString().ToLower()}}
             }
         };
         
@@ -83,12 +83,13 @@ public class Nostr
             }
         });
         var result = new List<NostrEvent>();
-        var network = currentNetwork.Name.ToLower();
+        var network = currentNetwork.ChainName.ToString().ToLower();
         
-        var cts = CancellationTokenSource.CreateLinkedTokenSource(new CancellationTokenSource(TimeSpan.FromMinutes(1)).Token,
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token,
             cancellationToken);
         await nostrClient.Connect(cts.Token);
 
+        
         result = await nostrClient.SubscribeForEvents(
             new[]
             {
@@ -98,7 +99,7 @@ public class Nostr
                     ExtensionData = new Dictionary<string, JsonElement>()
                     {
                         ["#type"] = JsonSerializer.SerializeToElement(new[] {TypeTagValue}),
-                        ["#network"] = JsonSerializer.SerializeToElement(new[] {network})
+                        ["#network"] = JsonSerializer.SerializeToElement(new[] {network, currentNetwork.Name.ToLower()})
                     },
                     Limit = 1000
                 }
