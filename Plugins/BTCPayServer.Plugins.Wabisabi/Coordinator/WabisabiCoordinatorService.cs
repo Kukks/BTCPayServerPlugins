@@ -14,6 +14,7 @@ using BTCPayServer.Services;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NBitcoin;
@@ -22,14 +23,18 @@ using NBitcoin.Secp256k1;
 using NBXplorer;
 using Newtonsoft.Json.Linq;
 using NNostr.Client;
+using NNostr.Client.Protocols;
 using WalletWasabi.Bases;
 using WalletWasabi.BitcoinCore.Rpc;
 using WalletWasabi.Cache;
 using WalletWasabi.Services;
+using WalletWasabi.Tor.Socks5.Pool.Circuits;
 using WalletWasabi.WabiSabi;
 using WalletWasabi.WabiSabi.Backend;
 using WalletWasabi.WabiSabi.Backend.Rounds.CoinJoinStorage;
 using WalletWasabi.WabiSabi.Backend.Statistics;
+using WalletWasabi.WabiSabi.Models;
+using WalletWasabi.WebClients.Wasabi;
 
 namespace WalletWasabi.Backend.Controllers;
 
@@ -267,6 +272,46 @@ public class WabisabiCoordinatorService : PeriodicRunner
             s.UriToAdvertise is not null)
         {
             var k = s.GetKey();
+            
+            if(s.UriToAdvertise.Scheme.StartsWith("http", StringComparison.InvariantCultureIgnoreCase))
+            {
+                //make sure the end is with plugins/wabisabi-coordinator/
+                var uri = new UriBuilder(s.UriToAdvertise);
+                
+                uri.Path = uri.Path.Replace("plugins/wabisabi-coordinator/", "").TrimEnd('/') + "/plugins/wabisabi-coordinator/";
+                
+            }
+            //verify the url
+            IWasabiHttpClientFactory factory = null;
+            if (s.UriToAdvertise.Scheme == "nostr" &&
+                     s.UriToAdvertise.Host.FromNIP19Note() is NIP19.NosteProfileNote nostrProfileNote)
+            {
+                 factory = new NostrWabisabiClientFactory(null, nostrProfileNote);
+                 
+            }
+            else
+            {
+                factory = new WasabiHttpClientFactory(null, () => s.UriToAdvertise);
+            }
+
+            try
+            {
+
+                var handler = factory.NewWabiSabiApiRequestHandler(Mode.SingleCircuitPerLifetime);
+                var resp = await handler.GetStatusAsync(RoundStateRequest.Empty, cancel);
+            }
+            finally
+            {
+                if (factory is IHostedService hs)
+                {
+                    await hs.StopAsync(cancel);
+                }
+            }
+
+          
+            _logger.LogInformation("Publishing coordinator discovery event with url {0}", s.UriToAdvertise);
+            
+            
             await Nostr.Publish(s.NostrRelay,
                 new[]
                 {

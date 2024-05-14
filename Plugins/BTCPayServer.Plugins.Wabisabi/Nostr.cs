@@ -28,6 +28,7 @@ public class Nostr
         Socks5HttpClientHandler? httpClientHandler,
         CancellationToken cancellationToken )
     {
+        
         if (!evts.Any())
             return;
         var ct = CancellationTokenSource
@@ -57,7 +58,7 @@ public class Nostr
             Content =  description??string.Empty,
             Tags = new List<NostrEventTag>()
             {
-                new() {TagIdentifier = EndpointTagIdentifier, Data = new List<string>() {new Uri(coordinatorUri, "plugins/wabisabi-coordinator/").ToString()}},
+                new() {TagIdentifier = EndpointTagIdentifier, Data = new List<string>() {coordinatorUri.ToString()}},
                 new() {TagIdentifier = TypeTagIdentifier, Data = new List<string>() { TypeTagValue}},
                 new() {TagIdentifier = NetworkTagIdentifier, Data = new List<string>() {currentNetwork.ChainName.ToString().ToLower()}}
             }
