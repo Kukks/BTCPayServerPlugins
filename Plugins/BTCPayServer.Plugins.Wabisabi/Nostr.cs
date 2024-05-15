@@ -84,7 +84,6 @@ public class Nostr
             }
         });
         var result = new List<NostrEvent>();
-        var network = currentNetwork.ChainName.ToString().ToLower();
         
         var cts = CancellationTokenSource.CreateLinkedTokenSource(new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token,
             cancellationToken);
@@ -99,7 +98,7 @@ public class Nostr
                     Kinds = new[] {Kind},
                     ExtensionData = new Dictionary<string, JsonElement>()
                     {
-                        ["#type"] = JsonSerializer.SerializeToElement(new[] {TypeTagValue}),
+                        // ["#type"] = JsonSerializer.SerializeToElement(new[] {TypeTagValue}),
                         // ["#network"] = JsonSerializer.SerializeToElement(new[] {network, currentNetwork.Name.ToLower()})
                     },
                     Limit = 1000
@@ -107,7 +106,7 @@ public class Nostr
             }, true, cts.Token).ToListAsync(cancellationToken);
 
         nostrClient.Dispose();
-
+var network = new []{currentNetwork.ChainName.ToString().ToLower(), currentNetwork.Name.ToLower()};
         return result.Where(@event =>
             @event.PublicKey != ourPubKey && 
             @event.Verify() &&
@@ -115,10 +114,10 @@ public class Nostr
                 tag.TagIdentifier == EndpointTagIdentifier &&
                 tag.Data.Any(s => Uri.IsWellFormedUriString(s, UriKind.Absolute))) &&
             @event.Tags.Any(tag =>
-                tag.TagIdentifier == TypeTagIdentifier &&
-                tag.Data.FirstOrDefault() == TypeTagValue) &&
-            @event.Tags.Any(tag =>
-                tag.TagIdentifier == NetworkTagIdentifier && tag.Data.FirstOrDefault()?.Equals(network, StringComparison.InvariantCultureIgnoreCase) is true)
+                tag.TagIdentifier.Equals(TypeTagIdentifier, StringComparison.InvariantCultureIgnoreCase) &&
+                tag.Data.Any(tag => tag.Equals(TypeTagValue, StringComparison.InvariantCultureIgnoreCase)) &&
+            @event.Tags.Any(tag => tag.TagIdentifier.Equals(NetworkTagIdentifier, StringComparison.InvariantCultureIgnoreCase) && 
+                                   tag.Data.Any(s => network.Contains(s, StringComparer.InvariantCultureIgnoreCase))))
         ).OrderByDescending(@event => @event.CreatedAt)
             .DistinctBy(@event => @event.PublicKey)
             .Select(@event => new DiscoveredCoordinator()
