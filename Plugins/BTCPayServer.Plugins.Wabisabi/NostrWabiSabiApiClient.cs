@@ -12,6 +12,7 @@ using NBitcoin.Secp256k1;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using NNostr.Client;
+using WalletWasabi.Extensions;
 using WalletWasabi.Logging;
 using WalletWasabi.Tor.Socks5.Pool.Circuits;
 using WalletWasabi.WabiSabi;
@@ -24,7 +25,7 @@ namespace BTCPayServer.Plugins.Wabisabi;
 
 public class NostrWabiSabiApiClient : IWabiSabiApiRequestHandler, IHostedService, IDisposable
 {
-    public static int RoundStateKind = 15750;
+    public static int RoundStateKind = 15751;
     public static int CommunicationKind = 25750;
     private NostrClient _client;
     private readonly Uri _relay;
@@ -96,14 +97,22 @@ public class NostrWabiSabiApiClient : IWabiSabiApiRequestHandler, IHostedService
     {
         await foreach (var evt in subscriptions)
         {
-            if (evt.Kind != RoundStateKind)
-                continue;
-            if (_lastRoundStateEvent is not null && evt.CreatedAt <= _lastRoundStateEvent.CreatedAt)
-                continue;
-            _lastRoundStateEvent = evt;
+            try
+            {
+                if (evt.Kind != RoundStateKind)
+                    continue;
+                if (_lastRoundStateEvent is not null && evt.CreatedAt <= _lastRoundStateEvent.CreatedAt)
+                    continue;
+                _lastRoundStateEvent = evt;
 
-            _lastRoundState = Deserialize<RoundStateResponse>(evt.Content);
-            _lastRoundStateTask.TrySetResult();
+                _lastRoundState = Deserialize<RoundStateResponse>(evt.Content);
+                _lastRoundStateTask.TrySetResult();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex);
+            }
+            
 
         }
     }
@@ -213,7 +222,7 @@ public class NostrWabiSabiApiClient : IWabiSabiApiRequestHandler, IHostedService
 
     public async Task<RoundStateResponse> GetStatusAsync(RoundStateRequest request, CancellationToken cancellationToken)
     {
-        await _lastRoundStateTask.Task;
+        await _lastRoundStateTask.Task.WithAwaitCancellationAsync(cancellationToken);
         return _lastRoundState;
     }
 
