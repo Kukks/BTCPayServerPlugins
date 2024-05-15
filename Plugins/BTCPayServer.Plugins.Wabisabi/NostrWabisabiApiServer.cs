@@ -28,7 +28,7 @@ namespace BTCPayServer.Plugins.Wabisabi;
 
 public class NostrWabisabiApiServer : IHostedService
 {
-    public static int RoundStateKind = 15750;
+    public static int RoundStateKind = 15751;
     public static int CommunicationKind = 25750;
     private readonly Arena _arena;
     private WabisabiCoordinatorSettings _coordinatorSettings;

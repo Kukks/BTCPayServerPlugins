@@ -100,7 +100,7 @@ public class Nostr
                     ExtensionData = new Dictionary<string, JsonElement>()
                     {
                         ["#type"] = JsonSerializer.SerializeToElement(new[] {TypeTagValue}),
-                        ["#network"] = JsonSerializer.SerializeToElement(new[] {network, currentNetwork.Name.ToLower()})
+                        // ["#network"] = JsonSerializer.SerializeToElement(new[] {network, currentNetwork.Name.ToLower()})
                     },
                     Limit = 1000
                 }
