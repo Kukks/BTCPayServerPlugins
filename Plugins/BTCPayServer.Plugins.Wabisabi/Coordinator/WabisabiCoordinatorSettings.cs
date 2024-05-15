@@ -11,7 +11,7 @@ public class WabisabiCoordinatorSettings
     public bool Enabled { get; set; } = false;
     
     public string NostrIdentity { get; set; }
-    public Uri NostrRelay { get; set; } = new Uri("wss://kukks.org/nostr");
+    public Uri NostrRelay { get; set; } = new Uri("wss://relay.primal.net");
     
     public List<DiscoveredCoordinator> DiscoveredCoordinators { get; set; } = new();
 
