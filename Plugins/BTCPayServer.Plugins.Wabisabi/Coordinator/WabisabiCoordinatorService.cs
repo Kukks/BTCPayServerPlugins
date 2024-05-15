@@ -268,6 +268,7 @@ public class WabisabiCoordinatorService : PeriodicRunner
         var network = _clientProvider.GetExplorerClient("BTC").Network.NBitcoinNetwork;
         var s = await GetSettings();
        
+        Uri uri = s.UriToAdvertise;
         if (s.Enabled && !string.IsNullOrEmpty(s.NostrIdentity) && s.NostrRelay is not null &&
             s.UriToAdvertise is not null)
         {
@@ -276,29 +277,44 @@ public class WabisabiCoordinatorService : PeriodicRunner
             if(s.UriToAdvertise.Scheme.StartsWith("http", StringComparison.InvariantCultureIgnoreCase))
             {
                 //make sure the end is with plugins/wabisabi-coordinator/
-                var uri = new UriBuilder(s.UriToAdvertise);
+                var uriB = new UriBuilder(uri);
                 
-                uri.Path = uri.Path.Replace("plugins/wabisabi-coordinator/", "").TrimEnd('/') + "/plugins/wabisabi-coordinator/";
-                
+                uriB.Path = uriB.Path.Replace("plugins/wabisabi-coordinator", "").TrimEnd('/') + "/plugins/wabisabi-coordinator/";
+                uri= uriB.Uri;
             }
+            
             //verify the url
             IWasabiHttpClientFactory factory = null;
-            if (s.UriToAdvertise.Scheme == "nostr" &&
-                     s.UriToAdvertise.Host.FromNIP19Note() is NIP19.NosteProfileNote nostrProfileNote)
+            if (uri.Scheme == "nostr" &&
+                uri.AbsolutePath.FromNIP19Note() is NIP19.NosteProfileNote nostrProfileNote)
             {
                  factory = new NostrWabisabiClientFactory(null, nostrProfileNote);
                  
             }
             else
             {
-                factory = new WasabiHttpClientFactory(null, () => s.UriToAdvertise);
+                factory = new WasabiHttpClientFactory(null, () => uri);
             }
 
             try
             {
 
-                var handler = factory.NewWabiSabiApiRequestHandler(Mode.SingleCircuitPerLifetime);
-                var resp = await handler.GetStatusAsync(RoundStateRequest.Empty, cancel);
+                if (factory is IHostedService hs)
+                {
+                    await hs.StartAsync(cancel);
+                }
+                var handler = factory.NewWabiSabiApiRequestHandler(Mode.DefaultCircuit);
+               
+                var cts = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+                cts.CancelAfter(TimeSpan.FromSeconds(10));
+                var resp = await handler.GetStatusAsync(RoundStateRequest.Empty,  cts.Token);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not connect to the coordinator at {0}", uri);
+                await Task.Delay(TimeSpan.FromMinutes(1), cancel);
+                TriggerRound();
+                return;
             }
             finally
             {
@@ -309,13 +325,13 @@ public class WabisabiCoordinatorService : PeriodicRunner
             }
 
           
-            _logger.LogInformation("Publishing coordinator discovery event with url {0}", s.UriToAdvertise);
+            _logger.LogInformation("Publishing coordinator discovery event with url {0}", uri);
             
             
             await Nostr.Publish(s.NostrRelay,
                 new[]
                 {
-                    await Nostr.CreateCoordinatorDiscoveryEvent(network, k, s.UriToAdvertise,
+                    await Nostr.CreateCoordinatorDiscoveryEvent(network, k, uri,
                         s.CoordinatorDescription)
                 },s.UriToAdvertise.IsOnion()?  _socks5HttpClientHandler: null, cancel);
         }

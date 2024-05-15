@@ -108,35 +108,37 @@ namespace BTCPayServer.Plugins.Wabisabi
             vm.FeeRateMedianTimeFrameHours = Math.Max(0, vm.FeeRateMedianTimeFrameHours);
             ModelState.Clear();
 
+            var coordx = string.Join(string.Empty,pieces.Skip(1).ToArray());
             WabisabiCoordinatorSettings coordSettings;
             switch (actualCommand)
             {
                 case "reset":
                     var newS = new WabisabiStoreSettings();
                     newS.Settings = vm.Settings;
-                    await _WabisabiService.SetWabisabiForStore(storeId, vm, commandIndex);
+                    await _WabisabiService.SetWabisabiForStore(storeId, vm, coordx);
                     TempData["SuccessMessage"] = $"Advanced settings reset to default";
                     return RedirectToAction(nameof(UpdateWabisabiStoreSettings), new {storeId});
                 case "accept-terms":
                     
-                    var coord = vm.Settings.SingleOrDefault(settings => settings.Coordinator == commandIndex);
+                    var coord = vm.Settings.SingleOrDefault(settings => settings.Coordinator == coordx);
                     coord.RoundWhenEnabled = null;
                     
-                    await _WabisabiService.SetWabisabiForStore(storeId, vm, commandIndex);
-                    TempData["SuccessMessage"] = $"{commandIndex} terms accepted";
+                    await _WabisabiService.SetWabisabiForStore(storeId, vm, coordx);
+                    TempData["SuccessMessage"] = $"{coordx} terms accepted";
                     return RedirectToAction(nameof(UpdateWabisabiStoreSettings), new {storeId});
                 case "remove-coordinator":
                     if (!(await _authorizationService.AuthorizeAsync(User, null,
                             new PolicyRequirement(Policies.CanModifyServerSettings))).Succeeded)
                     { return View(vm);
                     }
+
                     coordSettings = await _wabisabiCoordinatorService.GetSettings();
                     if (coordSettings.DiscoveredCoordinators.RemoveAll(discoveredCoordinator =>
-                            discoveredCoordinator.Name == commandIndex) > 0)
+                            discoveredCoordinator.Name == coordx) > 0)
                     {
-                        TempData["SuccessMessage"] = $"Coordinator {commandIndex} stopped and removed";
+                        TempData["SuccessMessage"] = $"Coordinator {coordx} stopped and removed";
                         await _wabisabiCoordinatorService.UpdateSettings(coordSettings);
-                        await _instanceManager.RemoveCoordinator(commandIndex);
+                        await _instanceManager.RemoveCoordinator(coordx);
                         return RedirectToAction(nameof(UpdateWabisabiStoreSettings), new {storeId});
                     }
                     else

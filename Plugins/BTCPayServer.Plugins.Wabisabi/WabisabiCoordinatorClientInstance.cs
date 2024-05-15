@@ -194,7 +194,7 @@ public class NostrWabisabiClientFactory: IWasabiHttpClientFactory, IHostedServic
 
     public IWabiSabiApiRequestHandler NewWabiSabiApiRequestHandler(Mode mode, ICircuit circuit = null)
     {
-        if (mode == Mode.DefaultCircuit || _socks5HttpClientHandler.Proxy is null)
+        if (mode == Mode.DefaultCircuit || _socks5HttpClientHandler?.Proxy is null)
         {
             circuit = DefaultCircuit.Instance;
         }
@@ -209,10 +209,16 @@ public class NostrWabisabiClientFactory: IWasabiHttpClientFactory, IHostedServic
         var result =  _clients.GetOrAdd(namedCircuit.Name, name =>
         {
             var result = new NostrWabiSabiApiClient(new Uri(_nostrProfileNote.Relays.First()),
-                _socks5HttpClientHandler.Proxy as WebProxy, NostrExtensions.ParsePubKey(_nostrProfileNote.PubKey),
+                _socks5HttpClientHandler?.Proxy as WebProxy, NostrExtensions.ParsePubKey(_nostrProfileNote.PubKey),
                 namedCircuit);
+            if (_started)
+            {
+                
+                result.StartAsync(CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
+            }
             return result;
         });
+        
         return result;
     }
 }
@@ -287,7 +293,7 @@ public class WabisabiCoordinatorClientInstance:IHostedService
 
         }
         else if (coordinator.Scheme == "nostr" &&
-                 coordinator.Host.FromNIP19Note() is NIP19.NosteProfileNote nostrProfileNote)
+                 coordinator.AbsolutePath.TrimEnd('/').FromNIP19Note() is NIP19.NosteProfileNote nostrProfileNote)
         {
             var factory = new NostrWabisabiClientFactory(socks5HttpClientHandler, nostrProfileNote);
             WasabiHttpClientFactory = factory;

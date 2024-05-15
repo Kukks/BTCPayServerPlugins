@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -31,7 +32,7 @@ public class NostrWabiSabiApiClient : IWabiSabiApiRequestHandler, IHostedService
     private readonly ECXOnlyPubKey _coordinatorKey;
     private readonly INamedCircuit _circuit;
     private string _coordinatorKeyHex => _coordinatorKey.ToHex();
-    private readonly string _coordinatorFilterId;
+    // private readonly string _coordinatorFilterId;
 
     public NostrWabiSabiApiClient(Uri relay, WebProxy webProxy , ECXOnlyPubKey coordinatorKey, INamedCircuit? circuit)
     {
@@ -39,65 +40,78 @@ public class NostrWabiSabiApiClient : IWabiSabiApiRequestHandler, IHostedService
         _webProxy = webProxy;
         _coordinatorKey = coordinatorKey;
         _circuit = circuit;
-        _coordinatorFilterId = new Guid().ToString();
+        // _coordinatorFilterId = new Guid().ToString();
     }
 
 
+    private CancellationTokenSource _cts;
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         if (!_circuit.IsActive)
         {
             Dispose();
         }
-
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         if (_circuit is OneOffCircuit)
         {
             return;
             // we dont bootstrap, we do it on demand for a request instead
         }
         
-        await Init(cancellationToken, _circuit);
+        _ = Init(_cts.Token, _circuit);
     }
 
+    
     private async Task Init(CancellationToken cancellationToken, INamedCircuit circuit)
     {
-        _client = CreateClient(_relay, _webProxy, circuit);
-
-        _ = _client.ListenForMessages();
-        var filter = new NostrSubscriptionFilter()
+        while (cancellationToken.IsCancellationRequested == false)
         {
-            Authors = new[] {_coordinatorKey.ToHex()},
-            Kinds = new[] {RoundStateKind, CommunicationKind},
-            Since = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromHours(1)),
-            Limit = 0
-        };
-        await _client.CreateSubscription(_coordinatorFilterId, new[] {filter}, cancellationToken);
-        _client.EventsReceived += EventsReceived;
+            _client = CreateClient(_relay, _webProxy, circuit);
 
-        await _client.ConnectAndWaitUntilConnected(cancellationToken);
-        _circuit.IsolationIdChanged += (_, _) =>
-        {
-            _client.Dispose();
-            _ = StartAsync(CancellationToken.None);
-        };
-    }
+            await _client.ConnectAndWaitUntilConnected(cancellationToken);
 
-    private RoundStateResponse _lastRoundState { get; set; }
-    private TaskCompletionSource _lastRoundStateTask = new();
-
-
-    private void EventsReceived(object sender, (string subscriptionId, NostrEvent[] events) e)
-    {
-        if (e.subscriptionId == _coordinatorFilterId)
-        {
-            var roundState = e.events.Where(evt => evt.Kind == RoundStateKind).MaxBy(@event => @event.CreatedAt);
-            if (roundState != null)
+            _circuit.IsolationIdChanged += (_, _) =>
             {
-                _lastRoundState = Deserialize<RoundStateResponse>(roundState.Content);
-                _lastRoundStateTask.TrySetResult();
-            }
+                Dispose();
+                _ = StartAsync(CancellationToken.None);
+            };
+
+
+            var subscriptions = _client.SubscribeForEvents(new[]
+            {
+                new NostrSubscriptionFilter()
+                {
+                    Authors = new[] {_coordinatorKey.ToHex()},
+                    Kinds = new[] {RoundStateKind},
+                    Limit = 1
+                }
+            }, false, cancellationToken);
+
+            await HandleStateEvents(subscriptions);
+
         }
     }
+
+    private async Task HandleStateEvents(IAsyncEnumerable<NostrEvent> subscriptions)
+    {
+        await foreach (var evt in subscriptions)
+        {
+            if (evt.Kind != RoundStateKind)
+                continue;
+            if (_lastRoundStateEvent is not null && evt.CreatedAt <= _lastRoundStateEvent.CreatedAt)
+                continue;
+            _lastRoundStateEvent = evt;
+
+            _lastRoundState = Deserialize<RoundStateResponse>(evt.Content);
+            _lastRoundStateTask.TrySetResult();
+
+        }
+    }
+
+    private NostrEvent _lastRoundStateEvent { get; set; }
+    private RoundStateResponse _lastRoundState { get; set; }
+    private readonly TaskCompletionSource _lastRoundStateTask = new();
+    
 
     private async Task SendAndWaitForReply<TRequest>(RemoteAction action, TRequest request,
         CancellationToken cancellationToken)
@@ -129,37 +143,19 @@ public class NostrWabiSabiApiClient : IWabiSabiApiRequestHandler, IHostedService
                 Request = request
             }),
             PublicKey = pubkey.ToHex(),
-            Kind = 4,
+            Kind = CommunicationKind,
             CreatedAt = DateTimeOffset.Now
         };
         evt.SetTag("p", _coordinatorKeyHex);
 
-        await evt.EncryptNip04EventAsync(newKey);
-        evt.Kind = CommunicationKind;
-        await evt.ComputeIdAndSignAsync(newKey);
-        var tcs = new TaskCompletionSource<NostrEvent>(cancellationToken);
-
-        void OnClientEventsReceived(object sender, (string subscriptionId, NostrEvent[] events) e)
-        {
-            foreach (var nostrEvent in e.events)
-            {
-                if (nostrEvent.PublicKey != _coordinatorKeyHex) continue;
-                var replyToEvent = evt.GetTaggedData("e");
-                var replyToUser = evt.GetTaggedData("p");
-                if (replyToEvent.All(s => s != evt.Id) || replyToUser.All(s => s != evt.PublicKey)) continue;
-                if (!nostrEvent.Verify()) continue;
-                _client.EventsReceived -= OnClientEventsReceived;
-                tcs.TrySetResult(nostrEvent);
-                break;
-            }
-        }
-
-        _client.EventsReceived += OnClientEventsReceived;
+        await evt.EncryptNip04EventAsync(newKey, null, true);
+        evt = await evt.ComputeIdAndSignAsync(newKey, false);
+        
         try
         {
-            var replyEvent = await tcs.Task;
-            replyEvent.Kind = 4;
-            var response = await replyEvent.DecryptNip04EventAsync(newKey);
+            
+            var replyEvent = await _client.SendEventAndWaitForReply(evt, cancellationToken);
+            var response = await replyEvent.DecryptNip04EventAsync(newKey, null, true);
             var jobj = JObject.Parse(response);
             if (jobj.TryGetValue("error", out var errorJson))
             {
@@ -205,7 +201,6 @@ public class NostrWabiSabiApiClient : IWabiSabiApiRequestHandler, IHostedService
         }
         catch (OperationCanceledException e)
         {
-            _client.EventsReceived -= OnClientEventsReceived;
             _circuit.IncrementIsolationId();
             throw;
         }
@@ -283,6 +278,10 @@ public class NostrWabiSabiApiClient : IWabiSabiApiRequestHandler, IHostedService
     public void Dispose()
     {
         _client?.Dispose();
+        _cts?.Cancel();
+        _client = null;
+        _cts = null;
+        
     }
 
     public static NostrClient CreateClient(Uri relay, WebProxy webProxy,  INamedCircuit namedCircuit )
