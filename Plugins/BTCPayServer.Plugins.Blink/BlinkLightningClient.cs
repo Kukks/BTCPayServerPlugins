@@ -525,6 +525,7 @@ query GetNetworkAndDefaultWallet {
         {
             "mainnet" => Network.Main,
             "testnet" => Network.TestNet,
+            "signet" => Network.TestNet,
             "regtest" => Network.RegTest,
             _ => throw new ArgumentOutOfRangeException()
         };
