@@ -4,7 +4,7 @@
 
 Allows you to enable lightning on your stores using [Breez SDK](https://breez.technology/sdk/), powered by [Blockstream Greenlight](https://blockstream.com/lightning/greenlight/).
 
-Breez SDK and Greenlight enables you to have a non-custodial lightning experience, without hosting any of of the infrastructure yourself.
+Breez SDK and Greenlight enables you to have a non-custodial lightning experience, without hosting any of the infrastructure yourself.
 
 Additionally, Breez SDK comes with built-in liquidity and channel automation, reducing the complexity of managing your lightning node.
 
