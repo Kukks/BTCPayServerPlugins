@@ -16,14 +16,16 @@ namespace BTCPayServer.Plugins.NIP05;
 
 public class NostrWalletConnectLightningClient : ILightningClient
 {
+    private readonly NostrClientPool _nostrClientPool;
     private readonly Uri _uri;
     private readonly Network _network;
     private readonly (string[] Commands, string[] Notifications) _commands;
     private readonly (ECXOnlyPubKey pubkey, ECPrivKey secret, Uri[] relays, string lud16) _connectParams;
 
-    public NostrWalletConnectLightningClient(Uri uri, Network network,
+    public NostrWalletConnectLightningClient(NostrClientPool nostrClientPool, Uri uri, Network network,
         (string[] Commands, string[] Notifications) commands)
     {
+        _nostrClientPool = nostrClientPool;
         _uri = uri;
         _network = network;
         _commands = commands;
@@ -77,7 +79,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
     public async Task<LightningInvoice> GetInvoice(uint256 paymentHash,
         CancellationToken cancellation = new CancellationToken())
     {
-        var (nostrClient, usage) = await NostrClientPool.GetClientAndConnect(_uri.ToString(), cancellation);
+        var (nostrClient, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cancellation);
 
         using (usage)
         {
@@ -99,7 +101,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
     public async Task<LightningInvoice[]> ListInvoices(ListInvoicesParams request,
         CancellationToken cancellation = new CancellationToken())
     {
-        var (client, usage) = await NostrClientPool.GetClientAndConnect(_uri.ToString(), cancellation);
+        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cancellation);
 
         using (usage)
         {
@@ -154,7 +156,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
     public async Task<LightningPayment> GetPayment(string paymentHash,
         CancellationToken cancellation = new CancellationToken())
     {
-        var (client, usage) = await NostrClientPool.GetClientAndConnect(_uri.ToString(), cancellation);
+        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cancellation);
 
         using (usage)
         {
@@ -175,7 +177,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
     public async Task<LightningPayment[]> ListPayments(ListPaymentsParams request,
         CancellationToken cancellation = new CancellationToken())
     {
-        var (client, usage) = await NostrClientPool.GetClientAndConnect(_uri.ToString(), cancellation);
+        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays,  cancellation);
 
         using (usage)
         {
@@ -200,7 +202,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
     public async Task<LightningInvoice> CreateInvoice(CreateInvoiceParams createInvoiceRequest,
         CancellationToken cancellation = new CancellationToken())
     {
-        var (client, usage) = await NostrClientPool.GetClientAndConnect(_uri.ToString(), cancellation);
+        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays,  cancellation);
 
         using (usage)
         {
@@ -221,7 +223,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
 
     public async Task<ILightningInvoiceListener> Listen(CancellationToken cancellation = new CancellationToken())
     {
-        var x = await NostrClientPool.GetClientAndConnect(_uri.ToString(), cancellation);
+        var x = await _nostrClientPool.GetClientAndConnect(_connectParams.relays,  cancellation);
         if (_commands.Notifications?.Contains("payment_received") is true)
         {
             return new NotificationListener(_network, x, _connectParams);
@@ -361,7 +363,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
 
     public async Task<LightningNodeBalance> GetBalance(CancellationToken cancellation = new CancellationToken())
     {
-        var (client, usage) = await NostrClientPool.GetClientAndConnect(_uri.ToString(), cancellation);
+        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays,  cancellation);
 
         using (usage)
         {
@@ -389,7 +391,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
     {
         try
         {
-            var (client, usage) = await NostrClientPool.GetClientAndConnect(_uri.ToString(), cancellation);
+            var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays,  cancellation);
 
             using (usage)
             {

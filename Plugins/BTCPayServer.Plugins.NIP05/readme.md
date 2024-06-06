@@ -1,6 +1,10 @@
 # BTCPay Server NIP05 Support
 
-This plugin allows your BTCPay Server to support the [Nostr](https://github.com/nostr-protocol/nostr)[ NIP05 protocol](https://github.com/nostr-protocol/nips/blob/master/05.md) to verify accounts.
+This plugin allows your BTCPay Server to support 
+
+* [Nostr](https://github.com/nostr-protocol/nostr)[ NIP05 protocol](https://github.com/nostr-protocol/nips/blob/master/05.md) to verify accounts.
+* [Nostr](https://github.com/nostr-protocol/nostr)[ NIP57 protocol](https://github.com/nostr-protocol/nips/blob/master/57.md) to support Zaps.
+* [Nostr](https://github.com/nostr-protocol/nostr)[ NIP47 protocol](https://github.com/nostr-protocol/nips/blob/master/47.md) to accept payments to your NWC enabled lightning wallet.
 
 ## Usage
 

@@ -4,6 +4,8 @@ using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
 using BTCPayServer.Lightning;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using NNostr.Client;
 
 namespace BTCPayServer.Plugins.NIP05
 {
@@ -22,6 +24,7 @@ namespace BTCPayServer.Plugins.NIP05
 
             applicationBuilder.AddSingleton<IPluginHookFilter, LnurlDescriptionFilter>();
             applicationBuilder.AddSingleton<IPluginHookFilter, LnurlFilter>();
+            applicationBuilder.TryAddSingleton<NostrClientPool>();
             applicationBuilder.AddSingleton<Zapper>();
             applicationBuilder.AddHostedService(sp => sp.GetRequiredService<Zapper>());
             applicationBuilder.AddSingleton<NostrWalletConnectLightningConnectionStringHandler>();

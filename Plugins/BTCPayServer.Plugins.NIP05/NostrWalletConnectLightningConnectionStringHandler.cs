@@ -4,13 +4,19 @@ using System.Linq;
 using System.Threading;
 using BTCPayServer.Lightning;
 using NBitcoin;
+using NNostr.Client;
 using NNostr.Client.Protocols;
 
 namespace BTCPayServer.Plugins.NIP05;
 
 public class NostrWalletConnectLightningConnectionStringHandler : ILightningConnectionStringHandler
 {
-    
+    private readonly NostrClientPool _nostrClientPool;
+
+    public NostrWalletConnectLightningConnectionStringHandler(NostrClientPool nostrClientPool)
+    {
+        _nostrClientPool = nostrClientPool;
+    }
     public ILightningClient? Create(string connectionString, Network network, out string? error)
     {
         
@@ -27,7 +33,7 @@ public class NostrWalletConnectLightningConnectionStringHandler : ILightningConn
             Uri.TryCreate(connectionString, UriKind.Absolute, out var uri);
             var connectParams = NIP47.ParseUri(uri); var cts = new CancellationTokenSource();
             cts.CancelAfter(TimeSpan.FromSeconds(10));
-            var (client, disposable) = NostrClientPool.GetClientAndConnect(connectionString, cts.Token).ConfigureAwait(false).GetAwaiter().GetResult();
+            var (client, disposable) = _nostrClientPool.GetClientAndConnect(connectParams.relays,  cts.Token).ConfigureAwait(false).GetAwaiter().GetResult();
             using (disposable)
             {
                 var commands = client.FetchNIP47AvailableCommands(connectParams.Item1, cancellationToken: cts.Token)
@@ -55,7 +61,7 @@ public class NostrWalletConnectLightningConnectionStringHandler : ILightningConn
                 }
 
                 error = null;
-                return new NostrWalletConnectLightningClient(uri, network, commands.Value);
+                return new NostrWalletConnectLightningClient(_nostrClientPool, uri, network, commands.Value);
             }
         }
         catch (Exception e)

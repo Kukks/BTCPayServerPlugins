@@ -15,33 +15,11 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using NBitcoin;
-using NBitcoin.Secp256k1;
-using Newtonsoft.Json;
 using NNostr.Client;
 using JsonSerializer = System.Text.Json.JsonSerializer;
 
 namespace BTCPayServer.Plugins.NIP05;
 
-public class ZapperSettings
-{
-    public ZapperSettings(string ZapperPrivateKey)
-    {
-        this.ZapperPrivateKey = ZapperPrivateKey;
-    }
-
-    public ZapperSettings()
-    {
-        
-    }
-
-    [JsonIgnore]
-    public ECPrivKey ZappingKey => NostrExtensions.ParseKey(ZapperPrivateKey);
-    [JsonIgnore]
-    public ECXOnlyPubKey ZappingPublicKey => ZappingKey.CreateXOnlyPubKey();
-    [JsonIgnore]
-    public string ZappingPublicKeyHex => ZappingPublicKey.ToHex();
-    public string ZapperPrivateKey { get; set; }
-}
 public class Zapper : IHostedService
 {
     record PendingZapEvent(string[] relays, NostrEvent nostrEvent);
@@ -54,7 +32,7 @@ public class Zapper : IHostedService
     private readonly InvoiceRepository _invoiceRepository;
     private IEventAggregatorSubscription _subscription;
     private readonly ConcurrentBag<PendingZapEvent> _pendingZapEvents = new();
-    private readonly NNostr.Client.NostrClientPool _nostrClientPool;
+    private readonly NostrClientPool _nostrClientPool;
 
     public async Task<ZapperSettings> GetSettings()
     {
@@ -78,7 +56,8 @@ public class Zapper : IHostedService
         IMemoryCache memoryCache, 
         ILogger<Zapper> logger, 
         SettingsRepository settingsRepository, 
-        InvoiceRepository invoiceRepository)
+        InvoiceRepository invoiceRepository,
+        NostrClientPool nostrClientPool)
     {
         _eventAggregator = eventAggregator;
         _nip5Controller = nip5Controller;
@@ -86,7 +65,7 @@ public class Zapper : IHostedService
         _logger = logger;
         _settingsRepository = settingsRepository;
         _invoiceRepository = invoiceRepository;
-        _nostrClientPool = new NNostr.Client.NostrClientPool();
+        _nostrClientPool = nostrClientPool;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
