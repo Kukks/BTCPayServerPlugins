@@ -54,6 +54,7 @@ public class Zapper : IHostedService
     private readonly InvoiceRepository _invoiceRepository;
     private IEventAggregatorSubscription _subscription;
     private readonly ConcurrentBag<PendingZapEvent> _pendingZapEvents = new();
+    private readonly NNostr.Client.NostrClientPool _nostrClientPool;
 
     public async Task<ZapperSettings> GetSettings()
     {
@@ -85,6 +86,7 @@ public class Zapper : IHostedService
         _logger = logger;
         _settingsRepository = settingsRepository;
         _invoiceRepository = invoiceRepository;
+        _nostrClientPool = new NNostr.Client.NostrClientPool();
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -123,13 +125,14 @@ public class Zapper : IHostedService
                             _logger.LogInformation($"Zapping {relay.Value.Length} to {relay.Key}");
                             var cts = new CancellationTokenSource();
                             cts.CancelAfter(TimeSpan.FromSeconds(30));
-                            using var c = new NostrClient(new Uri(relay.Key));
-                            await c.Connect(cts.Token);
-                            await c.SendEventsAndWaitUntilReceived(relay.Value, cts.Token);
-                            await c.Disconnect();
+                            var pool= await 
+                                _nostrClientPool.GetClientAndConnect(new []{new Uri(relay.Key)}, cts.Token);
+                            using var c = pool.Item2;
+                            await pool.Item1.SendEventsAndWaitUntilReceived(relay.Value, cts.Token);
                         }
                         catch (Exception e)
                         {
+                            _logger.LogError(e, $"Error zapping {relay.Value.Length} events to {relay.Key}");
                         }
                     }));
                 }
@@ -185,31 +188,31 @@ public class Zapper : IHostedService
         var relays = zapRequestEvent.Tags.Where(tag => tag.TagIdentifier == "relays").SelectMany(tag => tag.Data).ToArray();
         
         var tags = zapRequestEvent.Tags.Where(a => a.TagIdentifier.Length == 1).ToList();
-        tags.Add(new()
-        {
-            TagIdentifier = "bolt11",
-            Data = new() {pmd.BOLT11}
-        });
 
-        tags.Add(new()
+
+        tags.AddRange(new[]
         {
-            TagIdentifier = "description",
-            Data = new() {zapRequest}
+            new NostrEventTag
+            {
+                TagIdentifier = "bolt11",
+                Data = new() {pmd.BOLT11}
+            },
+
+            new NostrEventTag()
+            {
+                TagIdentifier = "description",
+                Data = new() {zapRequest}
+            }
         });
 
         var userNostrSettings = await _nip5Controller.GetForStore(arg.Invoice.StoreId);
-        var key = userNostrSettings?.PrivateKey is not null
+        var key = !string.IsNullOrEmpty(userNostrSettings?.PrivateKey)
             ? NostrExtensions.ParseKey(userNostrSettings?.PrivateKey)
             : settings.ZappingKey; 
         
-        var pubkey = userNostrSettings?.PubKey is not null
-            ? userNostrSettings?.PubKey
-            : settings.ZappingPublicKeyHex; 
         var zapReceipt = new NostrEvent()
         {
             Kind = 9735,
-            CreatedAt = DateTimeOffset.UtcNow,
-            PublicKey = pubkey,
             Content = zapRequestEvent.Content,
             Tags = tags
         };
