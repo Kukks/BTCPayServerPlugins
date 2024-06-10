@@ -13,7 +13,7 @@
     <PropertyGroup>
         <Product>Coinjoin</Product>
         <Description>Allows you to integrate your btcpayserver store with coinjoins.</Description>
-        <Version>1.0.84</Version>
+        <Version>1.0.85</Version>
 <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
 

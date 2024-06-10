@@ -355,7 +355,7 @@ namespace BTCPayServer.Plugins.Wabisabi
             {
                 if (spendViewModel.SelectedCoins?.Any() is true)
                 {
-                    coins = (CoinsView) coins.FilterBy(coin =>
+                    coins = (CoinsView) coins.Where(coin =>
                         spendViewModel.SelectedCoins.Contains(coin.Outpoint.ToString()));
                 }
             }
@@ -422,11 +422,12 @@ namespace BTCPayServer.Plugins.Wabisabi
             if (labels?.Any() is true)
             {
 
-                var directLinkCoins = coins.FilterBy(coin => coin.HdPubKey.Labels.Any(labels.Contains)).Available();
+                var directLinkCoins =
+                    coins.Where(coin => coin.HdPubKey.Labels.Any(labels.Contains) && coin.IsAvailable());
                 
                 selectedCoins.AddRange(directLinkCoins.Select(coin => coin.Coin));
                 
-                if (directLinkCoins.TotalAmount().ToDecimal(MoneyUnit.BTC) > amount)
+                if (directLinkCoins.Sum(coin => coin.Amount.ToDecimal(MoneyUnit.BTC)) > amount)
                 {
                     //select enough to be able to spend the amount requested
                     var result = directLinkCoins.ToShuffled(new InsecureRandom()).Aggregate(
@@ -451,7 +452,7 @@ namespace BTCPayServer.Plugins.Wabisabi
             coinSelect:
             var selectedCoinSum = selectedCoins.Sum(coin => ((Money)coin.Amount).ToDecimal(MoneyUnit.BTC));
             var remaining = amount - selectedCoinSum;
-            var remainingCoins = coins.FilterBy(coin => !selectedCoins.Contains(coin.Coin)).Available().ToList();
+            var remainingCoins = coins.Where(coin => !selectedCoins.Contains(coin.Coin) && coin.IsAvailable()).ToList();
             if (remaining > 0 && remainingCoins.Any())
             {
                 //try to select the closest coin to the remaining amount while also prioritizing privacy

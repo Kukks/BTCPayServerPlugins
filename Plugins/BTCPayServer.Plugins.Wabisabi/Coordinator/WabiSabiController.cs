@@ -46,9 +46,7 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 		var medians = CoinJoinFeeRateStatStore.GetDefaultMedians();
 		var affiliateInformation = AffiliationManager.GetAffiliateInformation();
 		var ret = new RoundStateResponse(response.RoundStates, medians, affiliateInformation);
-
-		var duration = DateTimeOffset.UtcNow - before;
-		RequestTimeStatista.Instance.Add("status", duration);
+		
 		return ret;
 	}
 
@@ -61,8 +59,6 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 		var before = DateTimeOffset.UtcNow;
 		var ret = await IdempotencyRequestCache.GetCachedResponseAsync(request, action: Arena.ConfirmConnectionAsync, linkedCts.Token);
 
-		var duration = DateTimeOffset.UtcNow - before;
-		RequestTimeStatista.Instance.Add("connection-confirmation", duration);
 		return ret;
 	}
 
@@ -74,9 +70,6 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 
 		var before = DateTimeOffset.UtcNow;
 		InputRegistrationResponse ret = await IdempotencyRequestCache.GetCachedResponseAsync(request, Arena.RegisterInputAsync, linkedCts.Token);
-
-		var duration = DateTimeOffset.UtcNow - before;
-		RequestTimeStatista.Instance.Add("input-registration", duration);
 		return ret;
 	}
 
@@ -89,8 +82,6 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 		var before = DateTimeOffset.UtcNow;
 		await IdempotencyRequestCache.GetCachedResponseAsync(request, action: Arena.RegisterOutputCoreAsync, linkedCts.Token);
 
-		var duration = DateTimeOffset.UtcNow - before;
-		RequestTimeStatista.Instance.Add("output-registration", duration);
 	}
 
 	[HttpPost("credential-issuance")]
@@ -102,8 +93,6 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 		var before = DateTimeOffset.UtcNow;
 		var ret = await IdempotencyRequestCache.GetCachedResponseAsync(request, action: Arena.ReissuanceAsync, linkedCts.Token);
 
-		var duration = DateTimeOffset.UtcNow - before;
-		RequestTimeStatista.Instance.Add("credential-issuance", duration);
 		return ret;
 	}
 
@@ -112,9 +101,6 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 	{
 		var before = DateTimeOffset.UtcNow;
 		await Arena.RemoveInputAsync(request, cancellableToken);
-
-		var duration = DateTimeOffset.UtcNow - before;
-		RequestTimeStatista.Instance.Add("input-unregistration", duration);
 	}
 
 	[HttpPost("transaction-signature")]
@@ -123,8 +109,6 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 		var before = DateTimeOffset.UtcNow;
 		await Arena.SignTransactionAsync(request, cancellableToken);
 
-		var duration = DateTimeOffset.UtcNow - before;
-		RequestTimeStatista.Instance.Add("transaction-signature", duration);
 	}
 
 	[HttpPost("ready-to-sign")]
@@ -132,9 +116,6 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 	{
 		var before = DateTimeOffset.UtcNow;
 		await Arena.ReadyToSignAsync(request, cancellableToken);
-
-		var duration = DateTimeOffset.UtcNow - before;
-		RequestTimeStatista.Instance.Add("ready-to-sign", duration);
 	}
 
 	/// <summary>

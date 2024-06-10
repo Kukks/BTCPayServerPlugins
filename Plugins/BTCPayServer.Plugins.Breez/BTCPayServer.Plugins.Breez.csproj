@@ -9,7 +9,7 @@
     <PropertyGroup>
         <Product>Breez / Greenlight</Product>
         <Description>Lightweight lightning baby!</Description>
-        <Version>1.0.1</Version>
+        <Version>1.0.2</Version>
 <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->
@@ -34,7 +34,7 @@
         <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
     </ItemGroup>
     <ItemGroup>
-      <PackageReference Include="Breez.Sdk" Version="0.4.0" />
+      <PackageReference Include="Breez.Sdk" Version="0.4.1" />
     </ItemGroup>
 </Project>
 

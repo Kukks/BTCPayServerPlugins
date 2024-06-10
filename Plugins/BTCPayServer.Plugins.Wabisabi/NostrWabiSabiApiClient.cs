@@ -222,7 +222,7 @@ public class NostrWabiSabiApiClient : IWabiSabiApiRequestHandler, IHostedService
 
     public async Task<RoundStateResponse> GetStatusAsync(RoundStateRequest request, CancellationToken cancellationToken)
     {
-        await _lastRoundStateTask.Task.WithAwaitCancellationAsync(cancellationToken);
+        await _lastRoundStateTask.Task.WithCancellation(cancellationToken);
         return _lastRoundState;
     }
 
