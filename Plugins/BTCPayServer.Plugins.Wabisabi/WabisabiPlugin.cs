@@ -36,6 +36,7 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
         var utxoLocker = new LocalisedUTXOLocker();
         applicationBuilder.AddHostedService(provider =>
             provider.GetRequiredService<WabisabiCoordinatorClientInstanceManager>());
+        applicationBuilder.AddSingleton<WabisabiCoordinatorClientInstanceManager>();
         applicationBuilder.AddSingleton<WabisabiService>();
         applicationBuilder.AddSingleton<WalletProvider>(provider => new(
             provider,
