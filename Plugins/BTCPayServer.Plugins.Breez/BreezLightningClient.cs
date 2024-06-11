@@ -107,7 +107,7 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
 
         return new LightningInvoice()
         {
-            Amount = LightMoney.MilliSatoshis(p.amountMsat),
+            Amount = LightMoney.MilliSatoshis(p.amountMsat + p.feeMsat),
             Id = lnPaymentDetails.data.paymentHash,
             Preimage = lnPaymentDetails.data.paymentPreimage,
             PaymentHash = lnPaymentDetails.data.paymentHash,
