@@ -24,6 +24,7 @@
     {
         storeId = Context.GetImplicitStoreId();
     }
+
     var sdk = BreezService.GetClient(storeId)?.Sdk;
     if (sdk is null)
         return;
@@ -34,11 +35,11 @@
 }
 
 <datalist id="fees">
-    <option value="@f.fastestFee">Fastest fee</option>
-    <option value="@f.halfHourFee">Half hour fee</option>
-    <option value="@f.hourFee">Hour fee</option>
-    <option value="@f.economyFee">Economic fee</option>
-    <option value="@f.minimumFee">Minimum fee</option>
+    <option value="@f.fastestFee">Fastest fee (@f.fastestFee sat/vB)</option>
+    <option value="@f.halfHourFee">Half hour fee (@f.halfHourFee sat/vB)</option>
+    <option value="@f.hourFee">Hour fee (@f.hourFee sat/vB)</option>
+    <option value="@f.economyFee">Economic fee (@f.economyFee sat/vB)</option>
+    <option value="@f.minimumFee">Minimum fee (@f.minimumFee sat/vB)</option>
 </datalist>
 <datalist list="addresses">
     @if (deriv is not null)
@@ -56,7 +57,6 @@
                 </h3>
                 <div class="d-flex gap-3 mt-3 mt-sm-0">
 
-                    <button type="submit" class="btn btn-primary">Create</button>
                 </div>
             </div>
             <div asp-validation-summary="ModelOnly" class="text-danger"></div>
@@ -71,10 +71,12 @@
             <div class="form-group">
                 <label for="amount" class="form-label" data-required>Amount (sats)</label>
                 <input type="number" min="@swapOutRec.min" max="@swapOutRec.max" id="amount" name="amount" class="form-control" required/>
+                <p class="text-muted">Minimum: @swapOutRec.min, Maximum: @swapOutRec.max</p>
             </div>
             <input type="hidden" name="feesHash" value="@swapOutRec.feesHash"/>
 
 
+            <button type="submit" class="btn btn-primary d-none">Create</button>
             @if (inProgressSwaps?.Any() is true)
             {
                 <table class="table">

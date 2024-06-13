@@ -45,20 +45,15 @@
 }
 
 <datalist id="fees">
-    <option value="@f.fastestFee">Fastest fee</option>
-    <option value="@f.halfHourFee">Half hour fee</option>
-    <option value="@f.hourFee">Hour fee</option>
-    <option value="@f.economyFee">Economic fee</option>
-    <option value="@f.minimumFee">Minimum fee</option>
+    <option value="@f.fastestFee">Fastest fee (@f.fastestFee sat/vB)</option>
+    <option value="@f.halfHourFee">Half hour fee (@f.halfHourFee sat/vB)</option>
+    <option value="@f.hourFee">Hour fee (@f.hourFee sat/vB)</option>
+    <option value="@f.economyFee">Economic fee (@f.economyFee sat/vB)</option>
+    <option value="@f.minimumFee">Minimum fee (@f.minimumFee sat/vB)</option>
 </datalist>
 
-<div class="row mb-4">
+<div class="row mb-4 mt-4">
     <div class="col-12">
-        <div class="d-flex align-items-center justify-content-between mb-3">
-            <h3 class="mb-0">
-                <span>@ViewData["Title"]</span>
-            </h3>
-        </div>
 
         @if (inProgressSwap is not null)
         {
@@ -71,7 +66,7 @@
                         <vc:truncate-center text="@inProgressSwap.bitcoinAddress" padding="15" elastic="true" classes="form-control-plaintext" id="Address"/>
                         <label for="Address">Address</label>
                     </div>
-                    <div>
+                    <div class="w-100">
                         <span class="text-muted">Please send an amount between <br/> @Money.Satoshis(inProgressSwap.minAllowedDeposit).ToDecimal(MoneyUnit.BTC) and @Money.Satoshis(inProgressSwap.maxAllowedDeposit).ToDecimal(MoneyUnit.BTC)BTC </span>
                         @if (deriv is not null)
                         {

@@ -41,7 +41,6 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 	[HttpPost("status")]
 	public async Task<RoundStateResponse> GetStatusAsync(RoundStateRequest request, CancellationToken cancellationToken)
 	{
-		var before = DateTimeOffset.UtcNow;
 		var response = await Arena.GetStatusAsync(request, cancellationToken);
 		var medians = CoinJoinFeeRateStatStore.GetDefaultMedians();
 		var affiliateInformation = AffiliationManager.GetAffiliateInformation();
@@ -55,8 +54,6 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 	{
 		using CancellationTokenSource timeoutCts = new(RequestTimeout);
 		using CancellationTokenSource linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, cancellationToken);
-
-		var before = DateTimeOffset.UtcNow;
 		var ret = await IdempotencyRequestCache.GetCachedResponseAsync(request, action: Arena.ConfirmConnectionAsync, linkedCts.Token);
 
 		return ret;
@@ -68,7 +65,6 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 		using CancellationTokenSource timeoutCts = new(RequestTimeout);
 		using CancellationTokenSource linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, cancellationToken);
 
-		var before = DateTimeOffset.UtcNow;
 		InputRegistrationResponse ret = await IdempotencyRequestCache.GetCachedResponseAsync(request, Arena.RegisterInputAsync, linkedCts.Token);
 		return ret;
 	}
@@ -79,7 +75,6 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 		using CancellationTokenSource timeoutCts = new(RequestTimeout);
 		using CancellationTokenSource linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, cancellationToken);
 
-		var before = DateTimeOffset.UtcNow;
 		await IdempotencyRequestCache.GetCachedResponseAsync(request, action: Arena.RegisterOutputCoreAsync, linkedCts.Token);
 
 	}
@@ -90,7 +85,6 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 		using CancellationTokenSource timeoutCts = new(RequestTimeout);
 		using CancellationTokenSource linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, cancellationToken);
 
-		var before = DateTimeOffset.UtcNow;
 		var ret = await IdempotencyRequestCache.GetCachedResponseAsync(request, action: Arena.ReissuanceAsync, linkedCts.Token);
 
 		return ret;
@@ -99,14 +93,12 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 	[HttpPost("input-unregistration")]
 	public async Task RemoveInputAsync(InputsRemovalRequest request, CancellationToken cancellableToken)
 	{
-		var before = DateTimeOffset.UtcNow;
 		await Arena.RemoveInputAsync(request, cancellableToken);
 	}
 
 	[HttpPost("transaction-signature")]
 	public async Task SignTransactionAsync(TransactionSignaturesRequest request, CancellationToken cancellableToken)
 	{
-		var before = DateTimeOffset.UtcNow;
 		await Arena.SignTransactionAsync(request, cancellableToken);
 
 	}
@@ -114,7 +106,6 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 	[HttpPost("ready-to-sign")]
 	public async Task ReadyToSignAsync(ReadyToSignRequestRequest request, CancellationToken cancellableToken)
 	{
-		var before = DateTimeOffset.UtcNow;
 		await Arena.ReadyToSignAsync(request, cancellableToken);
 	}
 
