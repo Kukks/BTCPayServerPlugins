@@ -40,6 +40,8 @@ namespace WalletWasabi.Backend.Controllers;
 
 public class WabisabiCoordinatorService : PeriodicRunner
 {
+    private readonly BTCPayNetworkProvider _networkProvider;
+    private readonly IFeeProviderFactory _feeProviderFactory;
     private readonly ISettingsRepository _settingsRepository;
     private readonly IOptions<DataDirectories> _dataDirectories;
     private readonly IExplorerClientProvider _clientProvider;
@@ -54,13 +56,21 @@ public class WabisabiCoordinatorService : PeriodicRunner
     private HostedServices HostedServices { get; } = new();
     public WabiSabiCoordinator WabiSabiCoordinator { get; private set; }
 
-    public WabisabiCoordinatorService(ISettingsRepository settingsRepository,
-        IOptions<DataDirectories> dataDirectories, IExplorerClientProvider clientProvider, IMemoryCache memoryCache,
+    public WabisabiCoordinatorService(
+        BTCPayNetworkProvider networkProvider,
+        IFeeProviderFactory feeProviderFactory,
+        ISettingsRepository settingsRepository,
+        IOptions<DataDirectories> dataDirectories,
+        IExplorerClientProvider clientProvider, 
+        IMemoryCache memoryCache,
         WabisabiCoordinatorClientInstanceManager instanceManager,
         IHttpClientFactory httpClientFactory,
         IServiceProvider serviceProvider,
-        ILogger<WabisabiCoordinatorService> logger, WabiSabiConfig.CoordinatorScriptResolver coordinatorScriptResolver) : base(TimeSpan.FromMinutes(15))
+        ILogger<WabisabiCoordinatorService> logger,
+        WabiSabiConfig.CoordinatorScriptResolver coordinatorScriptResolver) : base(TimeSpan.FromMinutes(15))
     {
+        _networkProvider = networkProvider;
+        _feeProviderFactory = feeProviderFactory;
         _settingsRepository = settingsRepository;
         _dataDirectories = dataDirectories;
         _clientProvider = clientProvider;
@@ -128,9 +138,11 @@ public class WabisabiCoordinatorService : PeriodicRunner
     {
         private readonly ExplorerClient _explorerClient;
         private readonly Stopwatch _uptime;
+        private readonly IFeeProvider _feeProvider;
 
-        public BtcPayRpcClient(RPCClient rpc, IMemoryCache cache, ExplorerClient explorerClient) : base(rpc, cache)
+        public BtcPayRpcClient(IFeeProvider feeProvider, RPCClient rpc, IMemoryCache cache, ExplorerClient explorerClient) : base(rpc, cache)
         {
+            _feeProvider = feeProvider;
             _explorerClient = explorerClient;
             _uptime = Stopwatch.StartNew();
         }
@@ -180,8 +192,11 @@ public class WabisabiCoordinatorService : PeriodicRunner
                 cacheKey,
                 action: async (_, cancellationToken) =>
                 {
-                    var result = await _explorerClient.GetFeeRateAsync(confirmationTarget, new FeeRate(100m), cancellationToken);
-                    return new EstimateSmartFeeResponse() {FeeRate = result.FeeRate, Blocks = result.BlockCount};
+                    
+                    var rate = await _feeProvider.GetFeeRateAsync(confirmationTarget);
+                    
+                    // var result = await _explorerClient.GetFeeRateAsync(confirmationTarget, new FeeRate(100m), cancellationToken);
+                    return new EstimateSmartFeeResponse() {FeeRate = rate};
                 },
                 options: CacheOptionsWithExpirationToken(size: 1, expireInSeconds: 60),
                 cancellationToken).ConfigureAwait(false);
@@ -211,12 +226,13 @@ public class WabisabiCoordinatorService : PeriodicRunner
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
         var explorerClient = _clientProvider.GetExplorerClient("BTC");
+        var network = _networkProvider.GetNetwork<BTCPayNetwork>("BTC");
         var coordinatorParameters =
             new CoordinatorParameters(Path.Combine(_dataDirectories.Value.DataDir, "Plugins", "Coinjoin"));
         var coinJoinIdStore =
             CoinJoinIdStore.Create( coordinatorParameters.CoinJoinIdStoreFilePath);
         var coinJoinScriptStore = CoinJoinScriptStore.LoadFromFile(coordinatorParameters.CoinJoinScriptStoreFilePath);
-        var rpc = new BtcPayRpcClient(explorerClient.RPCClient, _memoryCache, explorerClient);
+        var rpc = new BtcPayRpcClient(_feeProviderFactory.CreateFeeProvider(network),explorerClient.RPCClient, _memoryCache, explorerClient);
 
         WabiSabiCoordinator = new WabiSabiCoordinator(coordinatorParameters, rpc, coinJoinIdStore, coinJoinScriptStore,
             _httpClientFactory, _coordinatorScriptResolver);
