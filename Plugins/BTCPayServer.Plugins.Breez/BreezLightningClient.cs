@@ -22,6 +22,8 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
     private readonly NBitcoin.Network _network;
     public readonly string PaymentKey;
 
+    public ConcurrentQueue<(DateTimeOffset timestamp, string log)> Events { get; set; } = new();
+
     public BreezLightningClient(string inviteCode, string apiKey, string workingDir, NBitcoin.Network network,
         Mnemonic mnemonic, string paymentKey)
     {
@@ -60,6 +62,19 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
 
     public void OnEvent(BreezEvent e)
     {
+        var msg = e switch
+        {
+            BreezEvent.BackupFailed backupFailed => $"{e.GetType().Name}: {backupFailed.details.error}",
+            BreezEvent.InvoicePaid invoicePaid => $"{e.GetType().Name}: {invoicePaid.details.paymentHash}",
+            BreezEvent.PaymentFailed paymentFailed => $"{e.GetType().Name}: {paymentFailed.details.error} {paymentFailed.details.invoice?.paymentHash}",
+            BreezEvent.PaymentSucceed paymentSucceed => $"{e.GetType().Name}: {paymentSucceed.details.id}",
+            BreezEvent.SwapUpdated swapUpdated => $"{e.GetType().Name}: {swapUpdated.details.status} {ConvertHelper.ToHexString(swapUpdated.details.paymentHash.ToArray())} {swapUpdated.details.bitcoinAddress}",
+            _ => e.GetType().Name
+        };
+
+        Events.Enqueue((DateTimeOffset.Now, msg));
+        if(Events.Count > 100)
+            Events.TryDequeue(out _);
         EventReceived?.Invoke(this, e);
     }
 

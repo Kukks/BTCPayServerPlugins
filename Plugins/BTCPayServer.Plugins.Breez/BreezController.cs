@@ -74,6 +74,18 @@ public class BreezController : Controller
 
         return View((object) storeId);
     }
+    [HttpGet("logs")]
+    [Authorize(Policy = Policies.CanViewStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
+    public async Task<IActionResult> Logs(string storeId)
+    {
+        var client = _breezService.GetClient(storeId);
+        if (client is null)
+        {
+            return RedirectToAction(nameof(Configure), new {storeId});
+        }
+
+        return View( client.Events);
+    }
 
     [HttpGet("sweep")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]

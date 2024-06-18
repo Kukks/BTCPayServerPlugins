@@ -13,7 +13,8 @@
         StoreDashboardViewModel dashboardModel => dashboardModel.StoreId,
         _ => Context.GetImplicitStoreId()
     };
-    var sdk = BreezService.GetClient(storeId)?.Sdk;
+    var client = BreezService.GetClient(storeId);
+    var sdk = client?.Sdk;
 }
 
 <div class="sticky-header-setup"></div>
@@ -30,7 +31,11 @@
                 <a permission="@Policies.CanModifyStoreSettings" asp-action="SwapOut" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "SwapOut")">Swap Out</a>
 
                 <a permission="@Policies.CanModifyStoreSettings" asp-action="Configure" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "Configure")">Configuration</a>
-            </div>
+           @if (client.Events.Any())
+                {
+                    <a permission="@Policies.CanViewStoreSettings" asp-action="Logs" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("Breez", null, "Logs")">Logs</a>
+                }
+                </div>
         </nav>
     }
 </div>

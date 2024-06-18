@@ -1,0 +1,46 @@
+﻿@using BTCPayServer
+@model System.Collections.Concurrent.ConcurrentQueue<(DateTimeOffset timestamp, string log)>
+@{
+    var storeId = Context.GetCurrentStoreId();
+
+    ViewData.SetActivePage("Breez", "Logs", "Logs");
+}
+
+<div class="row mb-4">
+    <div class="col-12">
+        @if (!Model.Any())
+        {
+            <p class="text-secondary mt-3 mb-0">
+                There are no recent logs.
+            </p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover  w-100">
+                    <thead>
+                    <tr>
+                        <th >Timestamp</th>
+                        <th >Log</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var log in Model)
+                    {
+                        <tr>
+                            <td>
+                                <span >@log.timestamp.ToTimeAgo()</span>
+                            </td>
+
+                            <td>
+                                <span class="text-break">@log.log</span>
+                            </td>
+
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>

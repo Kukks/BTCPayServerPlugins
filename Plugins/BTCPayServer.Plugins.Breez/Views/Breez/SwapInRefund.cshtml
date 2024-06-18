@@ -1,14 +1,18 @@
-﻿@using BTCPayServer.Abstractions.Extensions
+﻿@using BTCPayServer
+@using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Plugins.Breez
 @using BTCPayServer.Security
+@using Microsoft.AspNetCore.Mvc.TagHelpers
 @using Microsoft.AspNetCore.Routing
 @model string
 @inject BreezService BreezService
+@inject BTCPayNetworkProvider BtcPayNetworkProvider
 @{
     var storeId = Context.GetImplicitStoreId();
     var address = Context.GetRouteValue("address").ToString();
     ViewData.SetActivePage("Breez", "Create Swapin Refund", "SwapIn");
 
+    var deriv = Context.GetStoreData().GetDerivationSchemeSettings(BtcPayNetworkProvider, "BTC");
     var sdk = BreezService.GetClient(storeId)?.Sdk;
     var f = sdk.RecommendedFees();
 }
@@ -20,7 +24,12 @@
     <option value="@f.economyFee">Economic fee (@f.economyFee sat/vB)</option>
     <option value="@f.minimumFee">Minimum fee (@f.minimumFee sat/vB)</option>
 </datalist>
-
+<datalist list="addresses">
+    @if (deriv is not null)
+    {
+        <option value="store"> Store wallet</option>
+    }
+</datalist>
 
 <form method="post" asp-action="SwapInRefund" asp-route-storeId="@storeId" asp-route-address="@address">
     <div class="row mb-4">
@@ -40,7 +49,7 @@
             <div asp-validation-summary="All" class="text-danger"></div>
             <div class="form-group">
                 <label for="refundAddress" class="form-label" data-required>Refund address</label>
-                <input type="text" id="refundAddress" name="refundAddress" class="form-control" required/>
+                <input type="text" id="refundAddress" name="refundAddress" class="form-control" list="addresses" required/>
             </div>
             <div class="form-group">
                 <label for="satPerByte" class="form-label" data-required>Fees</label>
