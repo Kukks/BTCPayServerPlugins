@@ -1,0 +1,230 @@
+﻿{
+    "paths": {
+        "/api/v1/apps/subscriptions/{appId}": {
+            "parameters": [
+                {
+                    "name": "appId",
+                    "in": "path",
+                    "required": true,
+                    "description": "The ID of the subscription app",
+                    "schema": {
+                        "type": "string"
+                    }
+                }
+            ],
+            "get": {
+                "operationId": "Subscriptions_GetSubscriptionApp",
+                "summary": "Get a subscription app and all of its details",
+                "responses": {
+                    "200": {
+                        "description": "Subscription details",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SubscriptionAppSettings"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "The subscription was not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    }
+                },
+                "tags": [
+                    "Subscriptions"
+                ],
+                "security": [
+                    {
+                        "API_Key": [
+                            "btcpay.store.canmodifystoresettings"
+                        ],
+                        "Basic": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/apps/subscriptions/{appId}/{subscriptionId}": {
+            "parameters": [
+                {
+                    "name": "appId",
+                    "in": "path",
+                    "required": true,
+                    "description": "The ID of the subscription app",
+                    "schema": {
+                        "type": "string"
+                    }
+                },
+                {
+                    "name": "subscriptionId",
+                    "in": "path",
+                    "required": true,
+                    "description": "The ID of the subscription",
+                    "schema": {
+                        "type": "string"
+                    }
+                }
+            ],
+            "get": {
+                "operationId": "Subscriptions_GetSubscriptionOfApp",
+                "summary": "Get a subscription of a subscription app",
+                "responses": {
+                    "200": {
+                        "description": "Subscription details",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Subscription"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "The subscription was not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProblemDetails"
+                                }
+                            }
+                        }
+                    }
+                },
+                "tags": [
+                    "Subscriptions (Public)"
+                ],
+                "security": [ ]
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+
+            "SubscriptionDurationType": {
+                "type": "string",
+                "description": "",
+                "x-enumNames": [
+                    "Day",
+                    "Month"
+                ],
+                "enum": [
+                    "Day",
+                    "Month"
+                ]
+            },
+            "SubscriptionStatus": {
+                "type": "string",
+                "description": "",
+                "x-enumNames": [
+                    "Active",
+                    "Inactive"
+                ],
+                "enum": [
+                    "Active",
+                    "Inactive"
+                ]
+            },
+
+            "SubscriptionPayment": {
+                "type": "object",
+                "properties": {
+                    "paymentRequestId": {
+                        "type": "string",
+                        "description": "The payment request Id that handles this payment."
+                    },
+
+                    "periodStart": {
+                        "description": "What period starts with this payment",
+                        "allOf": [ { "$ref": "#/components/schemas/UnixTimestamp" } ]
+                    },
+                    "periodEnd": {
+                        "description": "What period ends with this payment",
+                        "allOf": [ { "$ref": "#/components/schemas/UnixTimestamp" } ]
+                    },
+                    "settled": {
+                        "type": "boolean",
+                        "description": "Whether the payment has been settled"
+                    }
+                }
+            },
+            "Subscription": {
+                "type": "object",
+                "properties": {
+                    "email": {
+                        "type": "string",
+                        "description": "Email of the subscription user"
+                    },
+                    "status": {
+                        "$ref": "#/components/schemas/SubscriptionStatus"
+                    },
+                    "start": {
+                        "description": "When the subscription was first activated",
+                        "allOf": [ { "$ref": "#/components/schemas/UnixTimestamp" } ]
+                    },
+                    "payments": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/SubscriptionPayment"
+                        }
+                    }
+                }
+            },"SubscriptionSet": {
+                "type": "object",
+                "additionalProperties": {
+
+                    "$ref": "#/components/schemas/Subscription"
+                }
+            },
+            "SubscriptionAppSettings": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "Description of the subscription app"
+                    },
+                    "duration": {
+                        "type": "number",
+                        "description": "Duration of the subscription (type of duration is defined in the `durationType` field)"
+                    },
+                    "durationType": {
+                        "$ref": "#/components/schemas/SubscriptionDurationType"
+                    },
+                    "formId": {
+                        "type": "string",
+                        "description": "Form ID to request customer data",
+                        "nullable": true
+                    },
+                    "price": {
+                        "type": "string",
+                        "description": "The price of the subscription"
+                    },
+                    "currency": {
+                        "type": "string",
+                        "description": "The currency of the subscription"
+                    },
+                    "subscriptions": {
+                        "$ref": "#/components/schemas/SubscriptionSet"
+                    }
+                }
+                
+
+            }
+        },
+        "tags": [
+            {
+                "name": "Subscriptions",
+                "description": "Subscriptions operations"
+            } , {
+                "name": "Subscriptions (Public)",
+                "description": "Subscriptions public endpoints"
+            }
+        ]
+    }
+}

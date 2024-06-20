@@ -33,6 +33,23 @@ public class GreenfieldSubscriptionsController : ControllerBase
 
         var ss = app.GetSettings<SubscriptionAppSettings>();
         return Ok(ss);
+    }    
+    [HttpGet("~/api/v1/apps/subscriptions/{appId}/{subscriptionId}")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetSubscriptionId(string appId, string subscriptionId)
+    {
+        var app = await _appService.GetApp(appId, SubscriptionApp.AppType, includeArchived: true);
+        if (app == null)
+        {
+            return AppNotFound();
+        }
+
+        var ss = app.GetSettings<SubscriptionAppSettings>();
+        if (!ss.Subscriptions.TryGetValue(subscriptionId, out var subscriber))
+        {
+            return this.CreateAPIError(404, "subscription-not-found", "The subscription with specified ID was not found");
+        }
+        return Ok(subscriber);
     }
 
     private IActionResult AppNotFound()
