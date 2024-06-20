@@ -132,11 +132,46 @@ public class WabisabiCoordinatorClientInstanceManager:IHostedService
                 ? url
                 : url + "/";
         }
-           
+        
+        var coordinator = url is null ? null : new Uri(url);
+
+
+        IWasabiHttpClientFactory wasabiHttpClientFactory;
+        if (name == "local" || coordinator is null)
+        {
+          var controller =   _provider.GetService<WabiSabiController>();
+          if(controller is null)
+              return;
+          wasabiHttpClientFactory = new LocalWabisabiClientFactory( controller);
+
+        }
+        else if (coordinator.Scheme == "nostr" &&
+                coordinator.AbsolutePath.TrimEnd('/').FromNIP19Note() is NIP19.NosteProfileNote nostrProfileNote)
+            {
+                var socks5HttpClientHandler = _provider.GetRequiredService<Socks5HttpClientHandler>();
+            
+                var factory = new NostrWabisabiClientFactory(socks5HttpClientHandler, nostrProfileNote);
+                wasabiHttpClientFactory = factory;
+            }
+        else
+        {
+            var config = _provider.GetService<IConfiguration>();
+            var socksEndpoint = config.GetValue<string>("socksendpoint");
+            EndPointParser.TryParse(socksEndpoint, 9050, out var torEndpoint);
+            if (torEndpoint is not null && torEndpoint is DnsEndPoint dnsEndPoint)
+            {
+                torEndpoint = new IPEndPoint(Dns.GetHostAddresses(dnsEndPoint.Host).First(), dnsEndPoint.Port);
+            }
+
+            
+            wasabiHttpClientFactory = new WasabiHttpClientFactory(torEndpoint, () => coordinator);
+        }
+
+
         var instance = new WabisabiCoordinatorClientInstance(
             displayName,
-            name, url is null? null: new Uri(url), _provider.GetService<ILoggerFactory>(), _provider, UTXOLocker,
-            _provider.GetService<WalletProvider>(), termsConditions, description,_provider.GetRequiredService<Socks5HttpClientHandler>());
+            name, url is null? null: new Uri(url), wasabiHttpClientFactory,_provider.GetService<ILoggerFactory>(), _provider, UTXOLocker,
+            _provider.GetService<WalletProvider>(), termsConditions, description);
         if (HostedServices.TryAdd(instance.CoordinatorName, instance))
         {
             if(started)
@@ -254,28 +289,22 @@ public class WabisabiCoordinatorClientInstance:IHostedService
     public WasabiCoordinatorStatusFetcher WasabiCoordinatorStatusFetcher { get; set; }
     public CoinJoinManager CoinJoinManager { get; set; }
     public string Description { get; set; }
-    private readonly WalletWasabi.Services.HostedServices _hostedServices = new();
+    public readonly WalletWasabi.Services.HostedServices _hostedServices = new();
 
-    public WabisabiCoordinatorClientInstance(string coordinatorDisplayName,
+    public WabisabiCoordinatorClientInstance(
+        string coordinatorDisplayName,
         string coordinatorName,
         Uri coordinator,
+        IWasabiHttpClientFactory wasabiHttpClientFactory,
         ILoggerFactory loggerFactory,
         IServiceProvider serviceProvider,
         IUTXOLocker utxoLocker,
-        WalletProvider walletProvider, string termsConditions, string description,
-        Socks5HttpClientHandler socks5HttpClientHandler, string coordinatorIdentifier = "CoinJoinCoordinatorIdentifier"
+        WalletProvider walletProvider, string termsConditions, string description, string coordinatorIdentifier = "CoinJoinCoordinatorIdentifier"
     )
     {
 
         _utxoLocker = utxoLocker;
-        var config = serviceProvider.GetService<IConfiguration>();
-        var socksEndpoint = config.GetValue<string>("socksendpoint");
-        EndPointParser.TryParse(socksEndpoint, 9050, out var torEndpoint);
-        if (torEndpoint is not null && torEndpoint is DnsEndPoint dnsEndPoint)
-        {
-            torEndpoint = new IPEndPoint(Dns.GetHostAddresses(dnsEndPoint.Host).First(), dnsEndPoint.Port);
-        }
-
+        
         CoordinatorDisplayName = coordinatorDisplayName;
         CoordinatorName = coordinatorName;
         Coordinator = coordinator;
@@ -286,25 +315,10 @@ public class WabisabiCoordinatorClientInstance:IHostedService
         IWabiSabiApiRequestHandler sharedWabisabiClient = null;
 
         var roundStateUpdaterCircuit = new PersonCircuit();
-
-        if (coordinatorName == "local")
-        {
-            WasabiHttpClientFactory = new LocalWabisabiClientFactory( serviceProvider.GetRequiredService<WabiSabiController>());
-
-        }
-        else if (coordinator.Scheme == "nostr" &&
-                 coordinator.AbsolutePath.TrimEnd('/').FromNIP19Note() is NIP19.NosteProfileNote nostrProfileNote)
-        {
-            var factory = new NostrWabisabiClientFactory(socks5HttpClientHandler, nostrProfileNote);
-            WasabiHttpClientFactory = factory;
-            _hostedServices.Register<NostrWabisabiClientFactory>(() => factory, "NostrWabisabiClientFactory");
-        }
-        else
-        {
-            WasabiHttpClientFactory = new WasabiHttpClientFactory(torEndpoint, () => Coordinator);
-
-            
-        }
+        WasabiHttpClientFactory = wasabiHttpClientFactory;
+        if(wasabiHttpClientFactory is IHostedService hostedService)
+            _hostedServices.Register<IHostedService>(() => hostedService, hostedService.GetType().Name);
+        
         
         sharedWabisabiClient =
             WasabiHttpClientFactory.NewWabiSabiApiRequestHandler(Mode.SingleCircuitPerLifetime,
