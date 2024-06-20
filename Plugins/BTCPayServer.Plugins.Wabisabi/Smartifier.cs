@@ -190,7 +190,17 @@ public class Smartifier
             var smartCoin = await Coins.GetOrAdd(coin.OutPoint, async point =>
             {
                 utxoLabels.TryGetValue(coin.OutPoint, out var labels);
-                var pubKey = DerivationScheme.GetChild(coin.KeyPath).GetExtPubKeys().First().PubKey;
+                PubKey pubKey;
+                try
+                {
+                    pubKey = DerivationScheme.GetChild(coin.KeyPath).GetExtPubKeys().First().PubKey;
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, $"REPORT THIS CRASH! Derivnull? {DerivationScheme is null}, coinpath?{coin.KeyPath is null} ");
+                   
+                    throw;
+                }
                 //if there is no account key path, it most likely means this is a watch only wallet. Fake the key path
                 var kp = _accountKeyPath?.Derive(coin.KeyPath).KeyPath ?? new KeyPath(0,0,0,0,0);
 
