@@ -12,10 +12,13 @@ namespace WalletWasabi.Backend.Controllers;
 public class WasabiLeechController : Controller
 {
     private readonly WabisabiCoordinatorClientInstanceManager _coordinatorClientInstanceManager;
+    private readonly WabisabiCoordinatorService _wabisabiCoordinatorService;
 
-    public WasabiLeechController(WabisabiCoordinatorClientInstanceManager coordinatorClientInstanceManager)
+    public WasabiLeechController(WabisabiCoordinatorClientInstanceManager coordinatorClientInstanceManager,
+        WabisabiCoordinatorService wabisabiCoordinatorService)
     {
         _coordinatorClientInstanceManager = coordinatorClientInstanceManager;
+        _wabisabiCoordinatorService = wabisabiCoordinatorService;
     }
 
     [HttpGet("api/v4/Wasabi/legaldocuments")]
@@ -32,14 +35,22 @@ public class WasabiLeechController : Controller
     [Route("{*key}")]
     public async Task<IActionResult> Forward(string key, CancellationToken cancellationToken)
     {
-        if (!_coordinatorClientInstanceManager.HostedServices.TryGetValue("zksnacks", out var coordinator))
-            return BadRequest();
+        if (!_wabisabiCoordinatorService.Started)
+            return NotFound();
 
+        var settings = await _wabisabiCoordinatorService.GetSettings();
 
-        var b = new UriBuilder(coordinator.Coordinator);
-        b.Path = key;
-        b.Query = Request.QueryString.ToString();
+        if (settings.ForwardEndpoint is not null)
+        {
+            var b = new UriBuilder(settings.ForwardEndpoint)
+            {
+                Path = key,
+                Query = Request.QueryString.ToString()
+            };
 
-        return RedirectPreserveMethod(b.ToString());
+            return RedirectPreserveMethod(b.ToString());
+        }
+
+        return NotFound();
     }
 }

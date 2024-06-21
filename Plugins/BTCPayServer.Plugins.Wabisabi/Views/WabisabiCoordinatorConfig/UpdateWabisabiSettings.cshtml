@@ -47,6 +47,11 @@
                 <textarea rows="10" cols="40" class="form-control " asp-for="TermsConditions" >
         </textarea>
             </div>
+            <div class="form-group pt-3">
+                <label class="form-label" for="config">Coordinator endpoint redirect</label>
+                <input asp-for="ForwardEndpoint" type="url" class="form-control"/>
+                <p>When someone enters your coordinator endpoint, forward to this url (except for coinjoin endpoints).</p>
+            </div>
         </div>
  
         <div class="col-xxl-constrain col-xl-4">

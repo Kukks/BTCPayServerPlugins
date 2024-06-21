@@ -9,7 +9,7 @@ namespace WalletWasabi.Backend.Controllers;
 public class WabisabiCoordinatorSettings
 {
     public bool Enabled { get; set; } = false;
-    
+    public Uri ForwardEndpoint { get; set; } = new Uri("https://wasabiwallet.io/");
     public string NostrIdentity { get; set; }
     public Uri NostrRelay { get; set; } = new Uri("wss://relay.primal.net");
     
