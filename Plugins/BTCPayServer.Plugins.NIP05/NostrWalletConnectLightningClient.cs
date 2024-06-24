@@ -11,6 +11,7 @@ using NBitcoin;
 using NBitcoin.Secp256k1;
 using NNostr.Client;
 using NNostr.Client.Protocols;
+using SHA256 = System.Security.Cryptography.SHA256;
 
 namespace BTCPayServer.Plugins.NIP05;
 
@@ -122,10 +123,10 @@ public class NostrWalletConnectLightningClient : ILightningClient
 
     private LightningPayment? ToLightningPayment(NIP47.Nip47Transaction tx)
     {
-        if (tx.Type != "outgoing")
-        {
-            return null;
-        }
+        // if (tx.Type != "outgoing")
+        // {
+        //     return null;
+        // }
 
         var isPaid = tx.SettledAt.HasValue || !string.IsNullOrEmpty(tx.Preimage);
         var invoice = BOLT11PaymentRequest.Parse(tx.Invoice, _network);
@@ -415,7 +416,19 @@ public class NostrWalletConnectLightningClient : ILightningClient
                                 ? Convert.ToDecimal(payParams.Amount.MilliSatoshi)
                                 : null,
                         }, cancellation);
-                var lp = ToLightningPayment(response);
+                
+                var payHash = response.PaymentHash??
+                              payParams?.PaymentHash?.ToString()?? 
+                                (response.Preimage is not null? 
+                                  ConvertHelper.ToHexString(SHA256.HashData(Convert.FromHexString(response.Preimage))): 
+                                  BOLT11PaymentRequest.Parse(bolt11, _network).PaymentHash.ToString());
+
+                var tx = await client.SendNIP47Request<NIP47.Nip47Transaction>(_connectParams.pubkey, _connectParams.secret,
+                    new NIP47          .LookupInvoiceRequest()
+                    {
+                        PaymentHash = payHash
+                    }, cancellation);
+                var lp = ToLightningPayment(tx)!;
                 return new PayResponse(lp.Status == LightningPaymentStatus.Complete ? PayResult.Ok : PayResult.Error,
                     new PayDetails()
                     {
@@ -426,7 +439,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
                         FeeAmount = lp.Fee
                     });
             }
-        }
+        } 
         catch (Exception e)
         {
             return new PayResponse()
