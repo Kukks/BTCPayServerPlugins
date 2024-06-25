@@ -31,7 +31,8 @@ public class NostrWalletConnectLightningConnectionStringHandler : ILightningConn
         try
         {
             Uri.TryCreate(connectionString, UriKind.Absolute, out var uri);
-            var connectParams = NIP47.ParseUri(uri); var cts = new CancellationTokenSource();
+            var connectParams = NIP47.ParseUri(uri); 
+            var cts = new CancellationTokenSource();
             cts.CancelAfter(TimeSpan.FromSeconds(10));
             var (client, disposable) = _nostrClientPool.GetClientAndConnect(connectParams.relays,  cts.Token).ConfigureAwait(false).GetAwaiter().GetResult();
             using (disposable)
@@ -59,14 +60,23 @@ public class NostrWalletConnectLightningConnectionStringHandler : ILightningConn
                         $"The network of the wallet ({walletNetwork}) does not match the network of the server ({network.ChainName})";
                     return null;
                 }
+                if (response?.Methods is null || requiredCommands.Any(c => !response.Methods.Contains(c)))
+                {
+                    error =
+                        "No commands available or not all required commands are available (get_info, make_invoice, lookup_invoice, list_transactions)";
+                    return null;
+                }
+
+                (string[] Commands, string[] Notifications) values = (response.Methods ?? commands.Value.Commands,
+                    response.Notifications ?? commands.Value.Notifications);
 
                 error = null;
-                return new NostrWalletConnectLightningClient(_nostrClientPool, uri, network, commands.Value);
+                return new NostrWalletConnectLightningClient(_nostrClientPool, uri, network, values);
             }
         }
         catch (Exception e)
         {
-            error = "Invalid nostr wallet connect uri";
+            error = "Invalid nostr wallet connect uri: " + e.Message;
             return null;
         }
     }

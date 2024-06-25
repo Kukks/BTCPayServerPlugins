@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
@@ -17,6 +18,8 @@ namespace BTCPayServer.Plugins.NIP05;
 
 public class NostrWalletConnectLightningClient : ILightningClient
 {
+    
+    [Display] public string DisplayLabel => $"Nostr Wallet Connect {_connectParams.lud16} {_connectParams.relays.First()} ";
     private readonly NostrClientPool _nostrClientPool;
     private readonly Uri _uri;
     private readonly Network _network;
@@ -40,7 +43,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
 
 
     public async Task<LightningInvoice> GetInvoice(string invoiceId,
-        CancellationToken cancellation = new CancellationToken())
+        CancellationToken cancellation = new())
     {
         return await GetInvoice(uint256.Parse(invoiceId), cancellation);
     }
@@ -78,9 +81,11 @@ public class NostrWalletConnectLightningClient : ILightningClient
 
 
     public async Task<LightningInvoice> GetInvoice(uint256 paymentHash,
-        CancellationToken cancellation = new CancellationToken())
+        CancellationToken cancellation = new())
     {
-        var (nostrClient, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cancellation);
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        cts.CancelAfter(TimeSpan.FromSeconds(10));
+        var (nostrClient, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cts.Token);
 
         using (usage)
         {
@@ -89,12 +94,12 @@ public class NostrWalletConnectLightningClient : ILightningClient
                 new NIP47.LookupInvoiceRequest()
                 {
                     PaymentHash = paymentHash.ToString()
-                }, cancellation);
+                }, cts.Token);
             return ToLightningInvoice(tx, _network)!;
         }
     }
 
-    public async Task<LightningInvoice[]> ListInvoices(CancellationToken cancellation = new CancellationToken())
+    public async Task<LightningInvoice[]> ListInvoices(CancellationToken cancellation = new())
     {
         return await ListInvoices(new ListInvoicesParams(), cancellation);
     }
@@ -102,8 +107,10 @@ public class NostrWalletConnectLightningClient : ILightningClient
     public async Task<LightningInvoice[]> ListInvoices(ListInvoicesParams request,
         CancellationToken cancellation = new CancellationToken())
     {
-        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cancellation);
 
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        cts.CancelAfter(TimeSpan.FromSeconds(10));
+        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cts.Token);
         using (usage)
         {
             var response = await client.SendNIP47Request<NIP47.ListTransactionsResponse>(_connectParams.pubkey,
@@ -113,7 +120,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
                     Type = "incoming",
                     Offset = (int) (request.OffsetIndex ?? 0),
                     Unpaid = request.PendingOnly ?? false,
-                }, cancellation);
+                }, cts.Token);
 
             return response.Transactions.Select(transaction => ToLightningInvoice(transaction, _network))
                 .Where(i => i is not null).ToArray()!;
@@ -155,59 +162,65 @@ public class NostrWalletConnectLightningClient : ILightningClient
 
 
     public async Task<LightningPayment> GetPayment(string paymentHash,
-        CancellationToken cancellation = new CancellationToken())
+        CancellationToken cancellation = new())
     {
-        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cancellation);
-
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        cts.CancelAfter(TimeSpan.FromSeconds(10));
+        var (nostrClient, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cts.Token);
         using (usage)
         {
-            var tx = await client.SendNIP47Request<NIP47.Nip47Transaction>(_connectParams.pubkey, _connectParams.secret,
+            var tx = await nostrClient.SendNIP47Request<NIP47.Nip47Transaction>(_connectParams.pubkey, _connectParams.secret,
                 new NIP47.LookupInvoiceRequest()
                 {
                     PaymentHash = paymentHash
-                }, cancellation);
+                }, cts.Token);
             return ToLightningPayment(tx)!;
         }
     }
 
-    public async Task<LightningPayment[]> ListPayments(CancellationToken cancellation = new CancellationToken())
+    public async Task<LightningPayment[]> ListPayments(CancellationToken cancellation = new())
     {
         return await ListPayments(new ListPaymentsParams(), cancellation);
     }
 
     public async Task<LightningPayment[]> ListPayments(ListPaymentsParams request,
-        CancellationToken cancellation = new CancellationToken())
+        CancellationToken cancellation = new())
     {
-        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays,  cancellation);
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        cts.CancelAfter(TimeSpan.FromSeconds(10));
+        var (nostrClient, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cts.Token);
 
         using (usage)
         {
-            var response = await client.SendNIP47Request<NIP47.ListTransactionsResponse>(_connectParams.pubkey,
+            var response = await nostrClient.SendNIP47Request<NIP47.ListTransactionsResponse>(_connectParams.pubkey,
                 _connectParams.secret,
                 new NIP47.ListTransactionsRequest()
                 {
                     Type = "outgoing",
                     Offset = (int) (request.OffsetIndex ?? 0),
                     Unpaid = request.IncludePending ?? false,
-                }, cancellation);
+                }, cts.Token);
             return response.Transactions.Select(ToLightningPayment).Where(i => i is not null).ToArray()!;
         }
     }
 
     public async Task<LightningInvoice> CreateInvoice(LightMoney amount, string description, TimeSpan expiry,
-        CancellationToken cancellation = new CancellationToken())
+        CancellationToken cancellation = new())
     {
         return await CreateInvoice(new CreateInvoiceParams(amount, description, expiry), cancellation);
     }
 
     public async Task<LightningInvoice> CreateInvoice(CreateInvoiceParams createInvoiceRequest,
-        CancellationToken cancellation = new CancellationToken())
+        CancellationToken cancellation = new())
     {
-        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays,  cancellation);
+        
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        cts.CancelAfter(TimeSpan.FromSeconds(10));
+        var (nostrClient, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cts.Token);
 
         using (usage)
         {
-            var response = await client.SendNIP47Request<NIP47.Nip47Transaction>(_connectParams.pubkey,
+            var response = await nostrClient.SendNIP47Request<NIP47.Nip47Transaction>(_connectParams.pubkey,
                 _connectParams.secret,
                 new NIP47.MakeInvoiceRequest()
                 {
@@ -217,12 +230,12 @@ public class NostrWalletConnectLightningClient : ILightningClient
                         : createInvoiceRequest.Description,
                     DescriptionHash = createInvoiceRequest.DescriptionHash?.ToString(),
                     ExpirySeconds = (int) createInvoiceRequest.Expiry.TotalSeconds,
-                }, cancellation);
+                }, cts.Token);
             return ToLightningInvoice(response, _network)!;
         }
     }
 
-    public async Task<ILightningInvoiceListener> Listen(CancellationToken cancellation = new CancellationToken())
+    public async Task<ILightningInvoiceListener> Listen(CancellationToken cancellation = new())
     {
         var x = await _nostrClientPool.GetClientAndConnect(_connectParams.relays,  cancellation);
         if (_commands.Notifications?.Contains("payment_received") is true)
@@ -357,20 +370,22 @@ public class NostrWalletConnectLightningClient : ILightningClient
         }
     }
 
-    public async Task<LightningNodeInformation> GetInfo(CancellationToken cancellation = new CancellationToken())
+    public async Task<LightningNodeInformation> GetInfo(CancellationToken cancellation = new())
     {
         throw new NotSupportedException();
     }
 
-    public async Task<LightningNodeBalance> GetBalance(CancellationToken cancellation = new CancellationToken())
+    public async Task<LightningNodeBalance> GetBalance(CancellationToken cancellation = new())
     {
-        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays,  cancellation);
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays,  cts.Token);
 
         using (usage)
         {
             var response = await client.SendNIP47Request<NIP47.GetBalanceResponse>(_connectParams.pubkey,
                 _connectParams.secret,
-                new NIP47.NIP47Request("get_balance"), cancellation);
+                new NIP47.NIP47Request("get_balance"),  cts.Token);
             return new LightningNodeBalance()
             {
                 OffchainBalance = new OffchainBalance()
@@ -382,21 +397,24 @@ public class NostrWalletConnectLightningClient : ILightningClient
     }
 
     public async Task<PayResponse> Pay(PayInvoiceParams payParams,
-        CancellationToken cancellation = new CancellationToken())
+        CancellationToken cancellation = new())
     {
         return await Pay(null, new PayInvoiceParams(), cancellation);
     }
 
     public async Task<PayResponse> Pay(string bolt11, PayInvoiceParams payParams,
-        CancellationToken cancellation = new CancellationToken())
+        CancellationToken cancellation = new())
     {
         try
         {
-            var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays,  cancellation);
+            
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays,  cts.Token);
 
             using (usage)
             {
-                var response = await client.SendNIP47Request<NIP47.Nip47Transaction>(_connectParams.pubkey,
+                var response = await client.SendNIP47Request<NIP47.PayInvoiceResponse>(_connectParams.pubkey,
                     _connectParams.secret,
                     bolt11 is null
                         ? new NIP47.PayKeysendRequest()
@@ -415,10 +433,9 @@ public class NostrWalletConnectLightningClient : ILightningClient
                             Amount = payParams.Amount?.MilliSatoshi is not null
                                 ? Convert.ToDecimal(payParams.Amount.MilliSatoshi)
                                 : null,
-                        }, cancellation);
+                        }, cts.Token);
                 
-                var payHash = response.PaymentHash??
-                              payParams?.PaymentHash?.ToString()?? 
+                var payHash = payParams?.PaymentHash?.ToString()?? 
                                 (response.Preimage is not null? 
                                   ConvertHelper.ToHexString(SHA256.HashData(Convert.FromHexString(response.Preimage))): 
                                   BOLT11PaymentRequest.Parse(bolt11, _network).PaymentHash.ToString());
@@ -427,7 +444,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
                     new NIP47          .LookupInvoiceRequest()
                     {
                         PaymentHash = payHash
-                    }, cancellation);
+                    }, cts.Token);
                 var lp = ToLightningPayment(tx)!;
                 return new PayResponse(lp.Status == LightningPaymentStatus.Complete ? PayResult.Ok : PayResult.Error,
                     new PayDetails()
@@ -450,34 +467,34 @@ public class NostrWalletConnectLightningClient : ILightningClient
         }
     }
 
-    public async Task<PayResponse> Pay(string bolt11, CancellationToken cancellation = new CancellationToken())
+    public async Task<PayResponse> Pay(string bolt11, CancellationToken cancellation = new())
     {
         return await Pay(bolt11, new PayInvoiceParams(), cancellation);
     }
 
     public async Task<OpenChannelResponse> OpenChannel(OpenChannelRequest openChannelRequest,
-        CancellationToken cancellation = new CancellationToken())
+        CancellationToken cancellation = new())
     {
         throw new NotSupportedException();
     }
 
-    public async Task<BitcoinAddress> GetDepositAddress(CancellationToken cancellation = new CancellationToken())
+    public async Task<BitcoinAddress> GetDepositAddress(CancellationToken cancellation = new())
     {
         throw new NotSupportedException();
     }
 
     public async Task<ConnectionResult> ConnectTo(NodeInfo nodeInfo,
-        CancellationToken cancellation = new CancellationToken())
+        CancellationToken cancellation = new())
     {
         throw new NotSupportedException();
     }
 
-    public async Task CancelInvoice(string invoiceId, CancellationToken cancellation = new CancellationToken())
+    public async Task CancelInvoice(string invoiceId, CancellationToken cancellation = new())
     {
         throw new NotSupportedException();
     }
 
-    public async Task<LightningChannel[]> ListChannels(CancellationToken cancellation = new CancellationToken())
+    public async Task<LightningChannel[]> ListChannels(CancellationToken cancellation = new())
     {
         throw new NotSupportedException();
     }
