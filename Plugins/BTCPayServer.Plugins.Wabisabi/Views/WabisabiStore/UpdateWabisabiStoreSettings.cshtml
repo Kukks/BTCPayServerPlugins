@@ -8,6 +8,7 @@
 @using BTCPayServer.Services.Stores
 @using Microsoft.AspNetCore.Mvc.TagHelpers
 @using WalletWasabi.Backend.Controllers
+@using WalletWasabi.Blockchain.Analysis
 @using WalletWasabi.Wallets
 @model BTCPayServer.Plugins.Wabisabi.WabisabiStoreSettings
 @inject WabisabiCoordinatorClientInstanceManager WabisabiCoordinatorClientInstanceManager
@@ -96,218 +97,238 @@
 </style>
 
 <div class="@(anyEnabled ? "" : "d-none") card card-body coordinator-settings">
-    @if (Model.Active && anyEnabled)
-    {
-        <div class="position-absolute w-100 h-100 text-center rounded" id="blocker" style=" left: 0; top: 0; z-index: 1">
-            <h4 class="d-none pt-4">Settings cannot be changed while active</h4>
+@if (Model.Active && anyEnabled)
+{
+    <div class="position-absolute w-100 h-100 text-center rounded" id="blocker" style=" left: 0; top: 0; z-index: 1">
+        <h4 class="d-none pt-4">Settings cannot be changed while active</h4>
 
+    </div>
+}
+<div class="row">
+    <div class="col-sm-12 col-md-6">
+        <div class="form-check">
+            <input class="form-check-input plebModeRadio"
+                   type="radio" asp-for="PlebMode" value="true">
+            <label class="form-check-label" asp-for="PlebMode">
+                Pleb mode
+            </label>
+            <p class="text-muted">I just want to coinjoin.</p>
         </div>
-    }
+    </div>
+    <div class="col-sm-12 col-md-6">
+        <div class="form-check">
+            <input class="form-check-input plebModeRadio" asp-for="PlebMode" type="radio"value="false">
+            <label class="form-check-label" asp-for="PlebMode">
+                Scientist mode
+            </label>
+            <p class="text-muted">The world is broken and I need to be vigilant about my bitcoin practices.</p>
+        </div>
+    </div>
+</div>
+<div id="advanced" class="@(Model.PlebMode ? "d-none" : "")">
+    <button type="submit" name="command" value="reset" class="btn btn-link">Reset to defaults </button>
+
+    <div class="row">
+
+        <div class="col-sm-12 col-md-6">
+            <div class="form-group">
+
+                <label asp-for="AnonymitySetTarget" class="form-label">Anon score target</label>
+                <input type="number" class="form-control" asp-for="AnonymitySetTarget" placeholder="target anon score" min="0">
+
+                <p class="text-muted">Scores your coinjoined utxos based on how many other utxos in the coinjoin (and other previous coinjoin rounds) had the same value.<br/> Anonset score computation is not an exact science, and when using coordinators with massive liquidity, is not that important as all rounds (past, present, future) contribute to your privacy.</p>
+            </div>
+        </div>
+        <div class="col-sm-12 col-md-6">
+            <div class="form-group  form-check">
+                <label asp-for="ConsiderEntryProximity" class="form-check-label">Consider entry proximity</label>
+                <input asp-for="ConsiderEntryProximity" type="checkbox" class="form-check-input"/>
+                <p class="text-muted">Coins which have been mixed but are only one hop away from the original coinjoin transaction won't be considered private. This helps break linking assumptions when coins are spent.</p>
+            </div>
+        </div>
+    </div>
+
+
+    <div class="row">
+
+        <div class="col-sm-12 col-md-6">
+            <div class="form-group  ">
+                <label asp-for="FeeRateMedianTimeFrameHours" class="form-label">Mining fee limits in hours</label>
+                <div class="input-group">
+                    <input type="number" class="form-control" asp-for="FeeRateMedianTimeFrameHours" placeholder="hours" min="0">
+                    <span class="input-group-text">hours</span>
+                </div>
+                <p class="text-muted">Only coinjoin if the mining fee is below the median of the specified past number of hours. Set to 0 to ignore</p>
+            </div>
+        </div>
+
+        <div class="col-sm-12 col-md-6">
+            <div class="form-group  ">
+                <label asp-for="ExplicitHighestFeeTarget" class="form-label">Highest feerate allowed</label>
+                <div class="input-group">
+                    <input type="number" class="form-control" asp-for="ExplicitHighestFeeTarget" placeholder="sat/b" min="1">
+
+                    <span class="input-group-text">sat/b</span>
+                </div>
+                <p class="text-muted">Only coinjoin if the mining fee is below this feerate</p>
+            </div>
+        </div>
+    </div>
+
+
     <div class="row">
         <div class="col-sm-12 col-md-6">
-            <div class="form-check">
-                <input class="form-check-input plebModeRadio"
-                       type="radio" asp-for="PlebMode" value="true">
-                <label class="form-check-label" asp-for="PlebMode">
-                    Pleb mode
-                </label>
-                <p class="text-muted">I just want to coinjoin.</p>
+            <div class="form-group  ">
+                <label asp-for="ConsolidationMode" class="form-check-label">Coinsolidation mode</label>
+                <select asp-for="ConsolidationMode" class="form-select">
+                    <option value="@ConsolidationModeType.Never">Never</option>
+                    <option value="@ConsolidationModeType.Always">Always</option>
+                    <option value="@ConsolidationModeType.WhenLowFee">When the mining fee is low</option>
+                    <option value="@ConsolidationModeType.WhenLowFeeAndManyUTXO">When the mining fee is low and you have too many UTXOs</option>
+                </select>
+                <p class="text-muted">Feed as many coins to the coinjoin as possible.</p>
+                <p class="text-muted">NOTE: When choosing WhenLowFeeAndManyUTXO, if you have over @BTCPayWallet.HighAmountOfCoins coins, coinjoins will happen regardless if your wallet is full private, to consolidate your wallet to a smaller utxo set.</p>
             </div>
         </div>
         <div class="col-sm-12 col-md-6">
-            <div class="form-check">
-                <input class="form-check-input plebModeRadio" asp-for="PlebMode" type="radio"value="false">
-                <label class="form-check-label" asp-for="PlebMode">
-                    Scientist mode
-                </label>
-                <p class="text-muted">The world is broken and I need to be vigilant about my bitcoin practices.</p>
+            <div class="form-group  ">
+                <label asp-for="LowFeeTarget" class="form-label">Mining low fee threshold</label>
+                <div class="input-group">
+                    <input type="number" class="form-control" asp-for="LowFeeTarget" placeholder="sat/b" min="1">
+
+                    <span class="input-group-text">sat/b</span>
+                </div>
+                <p class="text-muted">Consider it low fees when it is below this threshold</p>
             </div>
         </div>
     </div>
-    <div id="advanced" class="@(Model.PlebMode ? "d-none" : "")">
-        <button type="submit" name="command" value="reset" class="btn btn-link">Reset to defaults </button>
 
-        <div class="row">
 
-            <div class="col-sm-12 col-md-6">
-                <div class="form-group">
+    <div class="row">
+        <div class="col-sm-12 col-md-6">
+            <div class="form-group">
 
-                    <label asp-for="AnonymitySetTarget" class="form-label">Anon score target</label>
-                    <input type="number" class="form-control" asp-for="AnonymitySetTarget" placeholder="target anon score" min="0">
-
-                    <p class="text-muted">Scores your coinjoined utxos based on how many other utxos in the coinjoin (and other previous coinjoin rounds) had the same value.<br/> Anonset score computation is not an exact science, and when using coordinators with massive liquidity, is not that important as all rounds (past, present, future) contribute to your privacy.</p>
-                </div>
-            </div>
-            <div class="col-sm-12 col-md-6">
-                <div class="form-group  form-check">
-                    <label asp-for="ConsiderEntryProximity" class="form-check-label">Consider entry proximity</label>
-                    <input asp-for="ConsiderEntryProximity" type="checkbox" class="form-check-input"/>
-                    <p class="text-muted">Coins which have been mixed but are only one hop away from the original coinjoin transaction won't be considered private. This helps break linking assumptions when coins are spent.</p>
-                </div>
+                <label asp-for="MinimumDenominationAmount" class="form-label">Minimum denomination (in sats)</label>
+                <input type="number" class="form-control" asp-for="MinimumDenominationAmount" placeholder="sats" min="0">
+                <p class="text-muted">Do no use any of the standard denominations below this amount (creates change (which will get remixed) but prevent tiny utxos)</p>
             </div>
         </div>
+        <div class="col-sm-12 col-md-6">
+            <div class="form-group">
 
-
-        <div class="row">
-
-            <div class="col-sm-12 col-md-6">
-                <div class="form-group  ">
-                    <label asp-for="FeeRateMedianTimeFrameHours" class="form-label">Mining fee limits in hours</label>
-                    <div class="input-group">
-                        <input type="number" class="form-control" asp-for="FeeRateMedianTimeFrameHours" placeholder="hours" min="0">
-                        <span class="input-group-text">hours</span>
-                    </div>
-                    <p class="text-muted">Only coinjoin if the mining fee is below the median of the specified past number of hours. Set to 0 to ignore</p>
-                </div>
-            </div>
-
-            <div class="col-sm-12 col-md-6">
-                <div class="form-group  ">
-                    <label asp-for="ExplicitHighestFeeTarget" class="form-label">Highest feerate allowed</label>
-                    <div class="input-group">
-                        <input type="number" class="form-control" asp-for="ExplicitHighestFeeTarget" placeholder="sat/b" min="1">
-
-                        <span class="input-group-text">sat/b</span>
-                    </div>
-                    <p class="text-muted">Only coinjoin if the mining fee is below this feerate</p>
-                </div>
-            </div>
-        </div>
-
-
-        <div class="row">
-            <div class="col-sm-12 col-md-6">
-                <div class="form-group  ">
-                    <label asp-for="ConsolidationMode" class="form-check-label">Coinsolidation mode</label>
-                    <select asp-for="ConsolidationMode" class="form-select">
-                        <option value="@ConsolidationModeType.Never">Never</option>
-                        <option value="@ConsolidationModeType.Always">Always</option>
-                        <option value="@ConsolidationModeType.WhenLowFee">When the mining fee is low</option>
-                        <option value="@ConsolidationModeType.WhenLowFeeAndManyUTXO">When the mining fee is low and you have too many UTXOs</option>
-                    </select>
-                    <p class="text-muted">Feed as many coins to the coinjoin as possible.</p>
-                    <p class="text-muted">NOTE: When choosing WhenLowFeeAndManyUTXO, if you have over @BTCPayWallet.HighAmountOfCoins coins, coinjoins will happen regardless if your wallet is full private, to consolidate your wallet to a smaller utxo set.</p>
-                </div>
-            </div>
-            <div class="col-sm-12 col-md-6">
-                <div class="form-group  ">
-                    <label asp-for="LowFeeTarget" class="form-label">Mining low fee threshold</label>
-                    <div class="input-group">
-                        <input type="number" class="form-control" asp-for="LowFeeTarget" placeholder="sat/b" min="1">
-
-                        <span class="input-group-text">sat/b</span>
-                    </div>
-                    <p class="text-muted">Consider it low fees when it is below this threshold</p>
-                </div>
-            </div>
-        </div>
-        <div class="form-group">
-
-            <label asp-for="MinimumDenominationAmount" class="form-label">Minimum denomination (in sats)</label>
-            <input type="number" class="form-control" asp-for="MinimumDenominationAmount" placeholder="sats" min="0">
-            <p class="text-muted">Do no use any of the standard denominations below this amount (creates change (which will get remixed) but prevent tiny utxos)</p>
-        </div>
-        <div class="form-group form-check">
-            <label asp-for="RedCoinIsolation" class="form-check-label">Cautious coinjoin entry mode </label>
-            <input asp-for="RedCoinIsolation" type="checkbox" class="form-check-input"/>
-            <p class="text-muted">Only allow a single non-private coin into a coinjoin.</p>
-        </div>
-
-        <div class="row">
-            <div class="col-sm-12 col-md-6">
-                <div class="form-group form-check">
-                    <label asp-for="BatchPayments" class="form-check-label">Batch payments</label>
-                    <input asp-for="BatchPayments" type="checkbox" class="form-check-input"/>
-                    <p class="text-muted">Batch your pending payments (on-chain payouts awaiting payment) inside coinjoins.</p>
-                </div>
-            </div>
-            <div class="col-sm-12 col-md-6">
-                <div class="form-group form-check">
-                    <label asp-for="ParanoidPayments" class="form-check-label">Paranoid payments</label>
-                    <input asp-for="ParanoidPayments" type="checkbox" class="form-check-input"/>
-                    <p class="text-muted">Only batch payments with fully private coins.</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="form-group">
-            <label asp-for="CrossMixBetweenCoordinatorsMode" class="form-label">Mix funds between different coordinators</label>
-            <select asp-for="CrossMixBetweenCoordinatorsMode" class="form-select">
-                <option value="@WabisabiStoreSettings.CrossMixMode.WhenFree">Cross mix when free</option>
-                <option value="@WabisabiStoreSettings.CrossMixMode.Always">Always cross mix</option>
-                <option value="@WabisabiStoreSettings.CrossMixMode.Never">Never cross mix</option>
-            </select>
-            <p class="text-muted">Whether to allow mixed coins to be mixed within different coordinators for greater privacy (Warning: This will make your coins to lose the free remix within the same coordinator)</p>
-        </div>
-        <div class="form-group">
-            <label asp-for="ExtraJoinProbability" class="form-label">Continuous Coinjoin</label>
-            <div class="input-group">
-                <input asp-for="ExtraJoinProbability" type="number" min="0" max="100" step="any" class="form-control"/>
-
-                <span class="input-group-text">% * 0.01 </span>
-            </div>
-            <p class="text-muted">Percentage (100 = 1% reality) probability of joining a round even if you have no payments to batch and all coins are private, prevents timing analysis. (Warning: a high probability will quickly eat up your balance in mining fees) </p>
-        </div>
-        <div class="form-group ">
-            <label asp-for="MixToOtherWallet" class="form-check-label">Send to other wallet</label>
-            <select asp-for="MixToOtherWallet" asp-items="selectStores" class="form-select"></select>
-            <p class="text-muted">Send coins that have been created in a coinjoin in a standard denomination to another wallet</p>
-        </div>
-        <div class="row">
-
-            <div class="col-sm-12 col-md-6">
-                <div class="list-group  form-group">
-                    <div class="list-group-item font-weight-bold">Only mix coins with these labels</div>
-                    @if (Model.InputLabelsAllowed?.Any() is not true)
+                <label asp-for="AllowedDenominations" class="form-label">Allowed denominations (in sats)</label>
+                <select asp-for="AllowedDenominations" class="form-select" multiple="multiple">
+                    @foreach (var denomination in BlockchainAnalyzer.StdDenoms)
                     {
-                        <div class="list-group-item">No label filter applied</div>
+                        <option value="@denomination">@denomination sats</option>
                     }
-                    else
-                    {
-                        @for (var xIndex = 0; xIndex < Model.InputLabelsAllowed.Count; xIndex++)
-                        {
-                            <div class="list-group-item">
-                                <div class="input-group input-group-sm">
-                                    <input asp-for="InputLabelsAllowed[xIndex]" type="text" class="form-control"/>
-                                    <button name="command" value="include-label-remove:@Model.InputLabelsAllowed[xIndex]" type="submit" class="btn btn-secondary btn-sm">Remove</button>
-                                </div>
-                            </div>
-                        }
-                    }
-                    <div class="list-group-item">
-                        <button name="command" value="include-label-add" type="submit" class="btn btn-secondary btn-sm">Add</button>
-                    </div>
-                </div>
-            </div>
-            <div class="col-sm-12 col-md-6">
-                <div class="list-group  form-group">
-                    <div class="list-group-item font-weight-bold">Only mix coins without these labels</div>
-                    @if (Model.InputLabelsExcluded?.Any() is not true)
-                    {
-                        <div class="list-group-item">No label filter applied</div>
-                    }
-                    else
-                    {
-                        @for (var xIndex = 0; xIndex < Model.InputLabelsExcluded.Count; xIndex++)
-                        {
-                            <div class="list-group-item">
-
-                                <div class="input-group input-group-sm">
-                                    <input asp-for="InputLabelsExcluded[xIndex]" type="text" class="form-control"/>
-                                    <button name="command" value="exclude-label-remove:@Model.InputLabelsExcluded[xIndex]" type="submit" class="btn btn-secondary btn-sm">Remove</button>
-                                </div>
-                            </div>
-                        }
-                    }
-                    <div class="list-group-item">
-                        <button name="command" value="exclude-label-add" type="submit" class="btn btn-secondary btn-sm">Add</button>
-                    </div>
-                </div>
+                </select>
+                <p>DO NOT USE UNLESS YOU KNOW WHAT YOU ARE DOING</p>
+                <p class="text-muted">Only generate outputs of these denoms. Leave blank to ignore. Generates change. You must match other user's settings to gain any anonymity.</p>
             </div>
         </div>
-
-
     </div>
+    <div class="form-group form-check">
+        <label asp-for="RedCoinIsolation" class="form-check-label">Cautious coinjoin entry mode </label>
+        <input asp-for="RedCoinIsolation" type="checkbox" class="form-check-input"/>
+        <p class="text-muted">Only allow a single non-private coin into a coinjoin.</p>
+    </div>
+
+    <div class="row">
+        <div class="col-sm-12 col-md-6">
+            <div class="form-group form-check">
+                <label asp-for="BatchPayments" class="form-check-label">Batch payments</label>
+                <input asp-for="BatchPayments" type="checkbox" class="form-check-input"/>
+                <p class="text-muted">Batch your pending payments (on-chain payouts awaiting payment) inside coinjoins.</p>
+            </div>
+        </div>
+        <div class="col-sm-12 col-md-6">
+            <div class="form-group form-check">
+                <label asp-for="ParanoidPayments" class="form-check-label">Paranoid payments</label>
+                <input asp-for="ParanoidPayments" type="checkbox" class="form-check-input"/>
+                <p class="text-muted">Only batch payments with fully private coins.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label asp-for="CrossMixBetweenCoordinatorsMode" class="form-label">Mix funds between different coordinators</label>
+        <select asp-for="CrossMixBetweenCoordinatorsMode" class="form-select">
+            <option value="@WabisabiStoreSettings.CrossMixMode.WhenFree">Cross mix when free</option>
+            <option value="@WabisabiStoreSettings.CrossMixMode.Always">Always cross mix</option>
+            <option value="@WabisabiStoreSettings.CrossMixMode.Never">Never cross mix</option>
+        </select>
+        <p class="text-muted">Whether to allow mixed coins to be mixed within different coordinators for greater privacy (Warning: This will make your coins to lose the free remix within the same coordinator)</p>
+    </div>
+    <div class="form-group">
+        <label asp-for="ExtraJoinProbability" class="form-label">Continuous Coinjoin</label>
+        <div class="input-group">
+            <input asp-for="ExtraJoinProbability" type="number" min="0" max="100" step="any" class="form-control"/>
+
+            <span class="input-group-text">% * 0.01 </span>
+        </div>
+        <p class="text-muted">Percentage (100 = 1% reality) probability of joining a round even if you have no payments to batch and all coins are private, prevents timing analysis. (Warning: a high probability will quickly eat up your balance in mining fees) </p>
+    </div>
+    <div class="form-group ">
+        <label asp-for="MixToOtherWallet" class="form-check-label">Send to other wallet</label>
+        <select asp-for="MixToOtherWallet" asp-items="selectStores" class="form-select"></select>
+        <p class="text-muted">Send coins that have been created in a coinjoin in a standard denomination to another wallet</p>
+    </div>
+    <div class="row">
+
+        <div class="col-sm-12 col-md-6">
+            <div class="list-group  form-group">
+                <div class="list-group-item font-weight-bold">Only mix coins with these labels</div>
+                @if (Model.InputLabelsAllowed?.Any() is not true)
+                {
+                    <div class="list-group-item">No label filter applied</div>
+                }
+                else
+                {
+                    @for (var xIndex = 0; xIndex < Model.InputLabelsAllowed.Count; xIndex++)
+                    {
+                        <div class="list-group-item">
+                            <div class="input-group input-group-sm">
+                                <input asp-for="InputLabelsAllowed[xIndex]" type="text" class="form-control"/>
+                                <button name="command" value="include-label-remove:@Model.InputLabelsAllowed[xIndex]" type="submit" class="btn btn-secondary btn-sm">Remove</button>
+                            </div>
+                        </div>
+                    }
+                }
+                <div class="list-group-item">
+                    <button name="command" value="include-label-add" type="submit" class="btn btn-secondary btn-sm">Add</button>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-12 col-md-6">
+            <div class="list-group  form-group">
+                <div class="list-group-item font-weight-bold">Only mix coins without these labels</div>
+                @if (Model.InputLabelsExcluded?.Any() is not true)
+                {
+                    <div class="list-group-item">No label filter applied</div>
+                }
+                else
+                {
+                    @for (var xIndex = 0; xIndex < Model.InputLabelsExcluded.Count; xIndex++)
+                    {
+                        <div class="list-group-item">
+
+                            <div class="input-group input-group-sm">
+                                <input asp-for="InputLabelsExcluded[xIndex]" type="text" class="form-control"/>
+                                <button name="command" value="exclude-label-remove:@Model.InputLabelsExcluded[xIndex]" type="submit" class="btn btn-secondary btn-sm">Remove</button>
+                            </div>
+                        </div>
+                    }
+                }
+                <div class="list-group-item">
+                    <button name="command" value="exclude-label-add" type="submit" class="btn btn-secondary btn-sm">Add</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+</div>
 </div>
 
 @for (var index = 0; index < Model.Settings.Count; index++)

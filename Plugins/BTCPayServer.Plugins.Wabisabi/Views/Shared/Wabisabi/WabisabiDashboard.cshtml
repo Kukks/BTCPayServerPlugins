@@ -371,7 +371,7 @@ updateInProgressAnimation(myChart);
 
                                 RoundState currentRound = null;
                                 CoinJoinTracker tracker = null;
-                                if (coordinator.CoinJoinManager.TrackedCoinJoins?.TryGetValue(wallet.WalletName, out tracker) is true &&
+                                if (coordinator.CoinJoinManager.TrackedCoinJoins?.TryGetValue(wallet.WalletId, out tracker) is true &&
                                     tracker?.CoinJoinClient?.CurrentRoundId is { } &&
                                     tracker?.CoinJoinClient?.RoundStatusUpdater?.RoundStates?.TryGetValue(tracker?.CoinJoinClient?.CurrentRoundId, out currentRound) is true)
                                 {
@@ -397,7 +397,7 @@ updateInProgressAnimation(myChart);
                                         else if (coordinator.WasabiCoordinatorStatusFetcher.Connected)
                                         {
                                             var roundParameters = coordinator.RoundStateUpdater.RoundStates.LastOrDefault(pair => pair.Value.BlameOf == uint256.Zero).Value?.CoinjoinState.Parameters;
-                                            coordinator.CoinJoinManager.TrackedWallets.TryGetValue(wallet.WalletName, out var trackedWallet);
+                                            coordinator.CoinJoinManager.TrackedWallets.TryGetValue(wallet.WalletId, out var trackedWallet);
                                             if(trackedWallet is {} && setting.RoundWhenEnabled is not null && roundParameters is not null && !BTCPayWallet.IsRoundOk(roundParameters, setting))
                                             {
                                                 <a asp-controller="WabisabiStore" asp-action="UpdateWabisabiStoreSettings" asp-route-storeId="@storeId" class="h6 text-danger">
@@ -416,7 +416,7 @@ updateInProgressAnimation(myChart);
                                     @{
                                         if (coordinator.CoinPrison is not null)
                                         {
-                                            var bannedCoins = coins.Where(coin => coordinator.CoinPrison.TryGetOrRemoveBannedCoin(coin.Outpoint, out _));
+                                            var bannedCoins = coins.Where(coin => coordinator.CoinPrison.TryGetOrRemoveBannedCoin(coin, out _));
                                             @if (bannedCoins.Any())
                                             {
                                                 <div class="text-muted">@bannedCoins.Count() banned coins(for disrupting rounds)</div>
@@ -520,6 +520,7 @@ updateInProgressAnimation(myChart);
                                                 <thead>
                                                 <tr>
                                                     <th>Time</th>
+                                                    <th>Coordinator</th>
                                                     <th>Message</th>
                                                 </tr>
                                                 </thead>
@@ -530,6 +531,9 @@ updateInProgressAnimation(myChart);
                                                     <tr class="text-@cssClass">
                                                         <td>
                                                             <small class="text-muted" data-timeago-unixms="@evt.time.ToUnixTimeMilliseconds()">@evt.time.ToTimeAgo()</small>
+                                                        </td>
+                                                        <td>
+                                                            <pre>@evt.coordinator</pre>
                                                         </td>
                                                         <td>
                                                             <pre>@evt.message</pre>

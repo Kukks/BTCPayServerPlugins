@@ -27,6 +27,7 @@ using WalletWasabi.Backend.Controllers;
 using WalletWasabi.Blockchain.TransactionBuilding;
 using WalletWasabi.Blockchain.TransactionOutputs;
 using WalletWasabi.Extensions;
+using WalletWasabi.WabiSabi.Client;
 
 namespace BTCPayServer.Plugins.Wabisabi
 {
@@ -244,7 +245,8 @@ namespace BTCPayServer.Plugins.Wabisabi
             {
                 coordSettings.DiscoveredCoordinators.Add(viewModel);
                 await _wabisabiCoordinatorService.UpdateSettings(coordSettings);
-                _instanceManager.AddCoordinator(viewModel.Name, viewModel.Name, provider => viewModel.Uri, viewModel.Description);
+                var config = new CoinJoinConfiguration();
+                _instanceManager.AddCoordinator(viewModel.Name, viewModel.Name, provider => viewModel.Uri, null,viewModel.Description, config);
 
                 TempData["SuccessMessage"] = $"Coordinator {viewModel.Name } added and started";
             }

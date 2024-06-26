@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using NBitcoin;
 using WalletWasabi.Blockchain.Analysis;
@@ -17,6 +18,7 @@ using WalletWasabi.Models;
 using WalletWasabi.WabiSabi;
 using WalletWasabi.WabiSabi.Backend.Rounds;
 using WalletWasabi.WabiSabi.Client;
+using WalletWasabi.WabiSabi.Client.CoinJoin.Client;
 using WalletWasabi.WabiSabi.Client.StatusChangedEvents;
 using WalletWasabi.WabiSabi.Models;
 using WalletWasabi.WabiSabi.Models.MultipartyTransaction;
@@ -35,28 +37,24 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
     }
 
     public async
-        Task<(
-            ImmutableList<SmartCoin> selected,
-            Func<IEnumerable<AliceClient>, Task<bool>> acceptableRegistered,
-            Func<
-                ImmutableArray<AliceClient>,
-                (IEnumerable<TxOut> outputTxOuts, Dictionary<TxOut, PendingPayment> batchedPayments),
-                TransactionWithPrecomputedData,
-                RoundState,
-                Task<bool>> acceptableOutputs
-            )>
+        Task<(ImmutableList<SmartCoin> selected, Func<IEnumerable<AliceClient>, Task<bool>> acceptableRegistered, Func<
+            ImmutableArray<AliceClient>, (IEnumerable<TxOut> outputTxOuts, Dictionary<TxOut, PendingPayment>
+            batchedPayments), TransactionWithPrecomputedData, RoundState, Task<bool>> acceptableOutputs)>
         SelectCoinsAsync((IEnumerable<SmartCoin> Candidates, IEnumerable<SmartCoin> Ineligible) coinCandidates,
-            UtxoSelectionParameters utxoSelectionParameters, Money liquidityClue, SecureRandom secureRandom)
+            RoundParameters roundParameters, Money liquidityClue, SecureRandom secureRandom, string coordinatorName)
     {
-        SmartCoin[] FilterCoinsMore(IEnumerable<SmartCoin> coins)
+        var log = new StringBuilder();
+        try
+        {
+SmartCoin[] FilterCoinsMore(IEnumerable<SmartCoin> coins)
         {
             return coins
-                .Where(coin => utxoSelectionParameters.AllowedInputScriptTypes.Contains(coin.ScriptType))
-                .Where(coin => utxoSelectionParameters.AllowedInputAmounts.Contains(coin.Amount))
+                .Where(coin => roundParameters.AllowedInputTypes.Contains(coin.ScriptType))
+                .Where(coin => roundParameters.AllowedInputAmounts.Contains(coin.Amount))
                 .Where(coin =>
                 {
-                    var effV = coin.EffectiveValue(utxoSelectionParameters.MiningFeeRate,
-                        utxoSelectionParameters.CoordinationFeeRate);
+                    var effV = coin.EffectiveValue(roundParameters.MiningFeeRate,
+                        roundParameters.CoordinationFeeRate);
                     var percentageLeft = (effV.ToDecimal(MoneyUnit.BTC) / coin.Amount.ToDecimal(MoneyUnit.BTC));
                     // filter out low value coins where 50% of the value would be eaten up by fees
                     return effV > Money.Zero && percentageLeft >= 0.5m;
@@ -69,7 +67,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                     {
                         return true;
                     }
-                    if (!coin.HdPubKey.Labels.Contains("coinjoin") || coin.HdPubKey.Labels.Contains(utxoSelectionParameters.CoordinatorName))
+                    if (!coin.HdPubKey.Labels.Contains("coinjoin") || coin.HdPubKey.Labels.Contains(coordinatorName))
                     {
                         return true;
                     }
@@ -78,7 +76,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                         _wallet.WabisabiStoreSettings.CrossMixBetweenCoordinatorsMode ==
                         WabisabiStoreSettings.CrossMixMode.WhenFree)
                     {
-                        return coin.Amount <= utxoSelectionParameters.CoordinationFeeRate.PlebsDontPayThreshold;
+                        return coin.Amount <= roundParameters.CoordinationFeeRate.PlebsDontPayThreshold;
                     }
 
                     return false;
@@ -93,7 +91,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
         
         var payments =
             (_wallet.BatchPayments
-                ? await _wallet.DestinationProvider.GetPendingPaymentsAsync(utxoSelectionParameters)
+                ? await _wallet.DestinationProvider.GetPendingPaymentsAsync(roundParameters)
                 : Array.Empty<PendingPayment>()).ToArray();
         
         var maxPerType = new Dictionary<AnonsetType, int>();
@@ -113,7 +111,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             maxPerType.TryAdd(AnonsetType.Red, 1);
         }
 
-        var isLowFee = utxoSelectionParameters.MiningFeeRate.SatoshiPerByte <= _wallet.LowFeeTarget;
+        var isLowFee = roundParameters.MiningFeeRate.SatoshiPerByte <= _wallet.LowFeeTarget;
         var consolidationMode = _wallet.ConsolidationMode switch
         {
             ConsolidationModeType.Always => true,
@@ -122,19 +120,19 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             ConsolidationModeType.WhenLowFeeAndManyUTXO => isLowFee && candidates.Count() > BTCPayWallet.HighAmountOfCoins,
             _ => throw new ArgumentOutOfRangeException()
         };
-        var mixReasons = await _wallet.ShouldMix(utxoSelectionParameters.CoordinatorName, isLowFee, payments.Any());
+        var mixReasons = await _wallet.ShouldMix(coordinatorName, isLowFee, payments.Any());
         if (!mixReasons.Any())
         {
             throw new CoinJoinClientException(CoinjoinError.NoCoinsEligibleToMix, "ShouldMix returned false, so we will not mix");
         }
         else
         {
-            _wallet.LogDebug($"ShouldMix returned true for {mixReasons.Length} reasons: {string.Join(", ", mixReasons)}");
+            log.AppendLine($"ShouldMix returned true for {mixReasons.Length} reasons: {string.Join(", ", mixReasons)}");
         }
         Dictionary<AnonsetType, int> idealMinimumPerType = new Dictionary<AnonsetType, int>()
             {{AnonsetType.Red, 1}, {AnonsetType.Orange, 1}, {AnonsetType.Green, 1}};
 
-        var solution = await SelectCoinsInternal(utxoSelectionParameters, candidates,payments,
+        var solution = await SelectCoinsInternal(log,coordinatorName,roundParameters, candidates,payments,
             Random.Shared.Next(20, 31),
             maxPerType,
             idealMinimumPerType,
@@ -158,7 +156,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
             throw new CoinJoinClientException(CoinjoinError.NoCoinsEligibleToMix, "ShouldMix returned true only for consolidation, but less than 10 coins were found, so we will not mix");
         }
         
-        _wallet.LogTrace(solution.ToString());
+        log.AppendLine(solution.ToString());
 
         async Task<bool> AcceptableRegistered(IEnumerable<AliceClient> coins)
         {
@@ -183,7 +181,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                 var effectiveSumOfRegisteredCoins = coins.Sum(coin => coin.EffectiveValue);
                 var canHandleAPayment = solution.HandledPayments.Any(payment =>
                 {
-                    var cost = payment.ToTxOut().EffectiveCost(utxoSelectionParameters.MiningFeeRate) + payment.Value;
+                    var cost = payment.ToTxOut().EffectiveCost(roundParameters.MiningFeeRate) + payment.Value;
                     return effectiveSumOfRegisteredCoins >= cost;
                 });
                 if (!canHandleAPayment)
@@ -204,7 +202,7 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
 
             if (remainingMixReasons.Count != mixReasons.Length)
             {
-                _wallet.LogDebug($"Some mix reasons were removed due to the difference in registered coins: {string.Join(", ", mixReasons.Except(remainingMixReasons))}. Remaining: {string.Join(", ", remainingMixReasons)}");
+                log.AppendLine($"Some mix reasons were removed due to the difference in registered coins: {string.Join(", ", mixReasons.Except(remainingMixReasons))}. Remaining: {string.Join(", ", remainingMixReasons)}");
             }
 
             return remainingMixReasons.Any();
@@ -267,9 +265,20 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
         }
 
         return (solution.Coins.ToImmutableList(), AcceptableRegistered , AcceptableOutputs);
+        
+        }
+        finally
+        {
+            if(log.Length > 0)
+                _wallet.LogInfo(coordinatorName, $"coinselection: {log}");
+            
+        }
     }
 
-    private async Task<SubsetSolution> SelectCoinsInternal(UtxoSelectionParameters utxoSelectionParameters,
+    private async Task<SubsetSolution> SelectCoinsInternal(
+        StringBuilder log,
+    string coordinatorName,
+    RoundParameters utxoSelectionParameters,
         IEnumerable<SmartCoin> coins,
         IEnumerable<PendingPayment> pendingPayments,
         int maxCoins,
@@ -392,14 +401,14 @@ public class BTCPayCoinjoinCoinSelector : IRoundCoinSelector
                
                 if (chance <= rand)
                 {
-                    if (_wallet.MinimumDenominationAmount is not null &&
-                        Money.Coins(solution.LeftoverValue).Satoshi < _wallet.MinimumDenominationAmount)
+                    var minDenomAmount = Math.Min(_wallet.MinimumDenominationAmount ?? 0, _wallet.AllowedDenominations?.Any() is true? _wallet.AllowedDenominations.Min(): 0);
+                    if (minDenomAmount > 0 && 
+                        Money.Coins(solution.LeftoverValue).Satoshi < minDenomAmount)
                     {
-                        _wallet.LogDebug(
-                            $"coin selection: leftover value {solution.LeftoverValue} is less than minimum denomination amount {_wallet.MinimumDenominationAmount} so we will try to add more coins");
+                        log.AppendLine($"leftover value {solution.LeftoverValue} is less than minimum denomination amount {minDenomAmount} so we will try to add more coins");
                         continue;
                     }
-                    _wallet.LogDebug($"coin selection: no payments left but at {solution.Coins.Count()} coins. random chance to add another coin if: {chance} > {rand} (random 0-100) continue: {chance > rand}");
+                    log.AppendLine($"no payments left but at {solution.Coins.Count()} coins. random chance to add another coin if: {chance} > {rand} (random 0-100) continue: {chance > rand}");
                     break;
                 }
                 
@@ -473,9 +482,9 @@ public enum AnonsetType
 
 public class SubsetSolution
 {
-    private readonly UtxoSelectionParameters _utxoSelectionParameters;
+    private readonly RoundParameters _utxoSelectionParameters;
 
-    public SubsetSolution(int totalPaymentsGross, IWallet wallet, UtxoSelectionParameters utxoSelectionParameters)
+    public SubsetSolution(int totalPaymentsGross, IWallet wallet, RoundParameters utxoSelectionParameters)
     {
         _utxoSelectionParameters = utxoSelectionParameters;
         TotalPaymentsGross = totalPaymentsGross;

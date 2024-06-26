@@ -31,6 +31,7 @@ public class WabisabiStoreSettings
     public CrossMixMode CrossMixBetweenCoordinatorsMode { get; set; } = CrossMixMode.WhenFree;
     public int FeeRateMedianTimeFrameHours { get; set; }
     public long MinimumDenominationAmount { get; set; } = 10000;
+    public long[] AllowedDenominations { get; set; }
     public int ExplicitHighestFeeTarget { get; set; } = BTCPayWallet.DefaultExplicitHighestFeeTarget;
     public int LowFeeTarget { get; set; } = BTCPayWallet.DefaultLowFeeTarget;
 

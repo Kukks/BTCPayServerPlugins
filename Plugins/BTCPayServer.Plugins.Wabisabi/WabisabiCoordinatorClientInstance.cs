@@ -104,7 +104,7 @@ public class WabisabiCoordinatorClientInstanceManager:IHostedService
 
     
     public  void AddCoordinator(string displayName, string name,
-        Func<IServiceProvider, Uri> fetcher, string termsConditions = null, string description = null)
+        Func<IServiceProvider, Uri> fetcher, string termsConditions = null, string description = null, CoinJoinConfiguration configuration = null)
     {
         if (termsConditions is null && name == "zksnacks")
         {
@@ -171,7 +171,7 @@ public class WabisabiCoordinatorClientInstanceManager:IHostedService
         var instance = new WabisabiCoordinatorClientInstance(
             displayName,
             name, url is null? null: new Uri(url), wasabiHttpClientFactory,_provider.GetService<ILoggerFactory>(), _provider, UTXOLocker,
-            _provider.GetService<WalletProvider>(), termsConditions, description);
+            _provider.GetService<WalletProvider>(), termsConditions, description, configuration);
         if (HostedServices.TryAdd(instance.CoordinatorName, instance))
         {
             if(started)
@@ -299,8 +299,7 @@ public class WabisabiCoordinatorClientInstance:IHostedService
         ILoggerFactory loggerFactory,
         IServiceProvider serviceProvider,
         IUTXOLocker utxoLocker,
-        WalletProvider walletProvider, string termsConditions, string description, string coordinatorIdentifier = "CoinJoinCoordinatorIdentifier"
-    )
+        WalletProvider walletProvider, string termsConditions, string description, CoinJoinConfiguration config)
     {
 
         _utxoLocker = utxoLocker;
@@ -348,7 +347,7 @@ public class WabisabiCoordinatorClientInstance:IHostedService
         
         CoinJoinManager = new CoinJoinManager(coordinatorName, WalletProvider, RoundStateUpdater,
             WasabiHttpClientFactory,
-            WasabiCoordinatorStatusFetcher, coordinatorIdentifier, CoinPrison);
+            WasabiCoordinatorStatusFetcher, config, CoinPrison);
         CoinJoinManager.StatusChanged += OnStatusChanged;
         
         _hostedServices.Register<RoundStateUpdater>(() => RoundStateUpdater, "RoundStateUpdater");

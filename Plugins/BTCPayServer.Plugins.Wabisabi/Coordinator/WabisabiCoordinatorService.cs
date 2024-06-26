@@ -33,6 +33,7 @@ using WalletWasabi.WabiSabi;
 using WalletWasabi.WabiSabi.Backend;
 using WalletWasabi.WabiSabi.Backend.Rounds.CoinJoinStorage;
 using WalletWasabi.WabiSabi.Backend.Statistics;
+using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.WabiSabi.Models;
 using WalletWasabi.WebClients.Wasabi;
 
@@ -266,7 +267,14 @@ public class WabisabiCoordinatorService : PeriodicRunner
         {
             instance.WasabiCoordinatorStatusFetcher.OverrideConnected = null;
         }
-        _instanceManager.AddCoordinator("Local Coordinator", "local", _ => null, cachedSettings.TermsConditions, cachedSettings.CoordinatorDescription);
+        
+        var coinjoinConfig = new CoinJoinConfiguration(WabiSabiCoordinator.Config.CoordinatorIdentifier, 10m, 100m);
+        _instanceManager.AddCoordinator("Local Coordinator", 
+            "local", _ => null, 
+            cachedSettings.TermsConditions, 
+            cachedSettings.CoordinatorDescription,
+            coinjoinConfig
+            );
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)

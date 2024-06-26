@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Client.Models;
@@ -21,6 +23,7 @@ using NBXplorer.DerivationStrategy;
 using NBXplorer.Models;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using WabiSabi.Crypto.Randomness;
 using WalletWasabi.Blockchain.Analysis;
 using WalletWasabi.Blockchain.Analysis.Clustering;
 using WalletWasabi.Blockchain.Keys;
@@ -69,6 +72,8 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         StoreRepository storeRepository,
         IMemoryCache memoryCache)
     {
+        WalletId = new WalletWasabi.Wallets.WalletId(new Guid(SHA256.HashData(Encoding.UTF8.GetBytes(storeId)).Take(16)
+            .ToArray()));
         KeyChain = keyChain;
         _walletRepository = walletRepository;
         _btcPayNetworkProvider = btcPayNetworkProvider;
@@ -88,8 +93,8 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     }
 
     public string StoreId { get; set; }
-    public List<(DateTimeOffset time, Microsoft.Extensions.Logging.LogLevel level , string message)> LastLogs { get; private set; } = new();
-    public void Log(LogLevel logLevel, string logMessage, string callerFilePath = "", string callerMemberName = "",
+    public List<(DateTimeOffset time, Microsoft.Extensions.Logging.LogLevel level, string coordinator, string message)> LastLogs { get; private set; } = new();
+    public void Log(LogLevel logLevel, string logMessage, string coordinator, string callerFilePath = "", string callerMemberName = "",
         int callerLineNumber = -1)
     {
         var ll = logLevel switch
@@ -103,14 +108,20 @@ public class BTCPayWallet : IWallet, IDestinationProvider
             _ => throw new ArgumentOutOfRangeException(nameof(logLevel))
         };
         if(LastLogs.FirstOrDefault().message != logMessage)
-            LastLogs.Insert(0, (DateTimeOffset.Now, ll, logMessage) );
+            LastLogs.Insert(0, (DateTimeOffset.Now, ll, coordinator, logMessage) );
         if (LastLogs.Count >= 500)
             LastLogs.RemoveLast();
-        
+        if (coordinator != null)
+        {
+            logMessage = $"[{coordinator}] {logMessage}";
+        }
         _logger.Log(ll, logMessage, callerFilePath, callerMemberName, callerLineNumber);
     }
 
     public string WalletName => StoreId;
+
+    public WalletWasabi.Wallets.WalletId WalletId { get; }
+
     public bool IsUnderPlebStop => !WabisabiStoreSettings.Active;
 
     bool IWallet.IsMixable(string coordinator)
@@ -122,6 +133,10 @@ public class BTCPayWallet : IWallet, IDestinationProvider
 
     public IKeyChain KeyChain { get; }
     public IDestinationProvider DestinationProvider => this;
+    public OutputProvider GetOutputProvider(string coordinatorName)
+    {
+        return new OutputProvider(this, SecureRandom.Instance);
+    }
 
     public int AnonScoreTarget => WabisabiStoreSettings.PlebMode? 5:  WabisabiStoreSettings.AnonymitySetTarget;
     public ConsolidationModeType ConsolidationMode => 
@@ -140,6 +155,9 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     public bool RedCoinIsolation => !WabisabiStoreSettings.PlebMode &&WabisabiStoreSettings.RedCoinIsolation;
     public bool BatchPayments => WabisabiStoreSettings.PlebMode || WabisabiStoreSettings.BatchPayments;
     public long? MinimumDenominationAmount => WabisabiStoreSettings.PlebMode? 10000 : WabisabiStoreSettings.MinimumDenominationAmount;
+
+    public long[]? AllowedDenominations =>
+        WabisabiStoreSettings.PlebMode ? null : WabisabiStoreSettings.AllowedDenominations;
 
  
     
@@ -217,8 +235,8 @@ public class BTCPayWallet : IWallet, IDestinationProvider
 
     public double GetPrivacyPercentage(CoinsView coins, int privateThreshold)
     {
-        var privateAmount = coins.FilterBy(x => x.IsPrivate(this)).TotalAmount();
-        var normalAmount = coins.FilterBy(x => !x.IsPrivate(this)).TotalAmount();
+        var privateAmount = new CoinsView(coins.Where(x => x.IsPrivate(this))).TotalAmount();
+        var normalAmount = new CoinsView(coins.Where(x => !x.IsPrivate(this))).TotalAmount();
 
         var privateDecimalAmount = privateAmount.ToDecimal(MoneyUnit.BTC);
         var normalDecimalAmount = normalAmount.ToDecimal(MoneyUnit.BTC);
@@ -339,7 +357,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         }
         catch (Exception e)
         {
-            this.LogError($"Could not compute coin candidate: {e.Message}");
+            this.LogError(coordinatorName,$"Could not compute coin candidate: {e.Message}");
             return Array.Empty<SmartCoin>();
         }
     }
@@ -543,7 +561,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
                 }
                 catch (Exception e)
                 {
-                    this.LogError($"Failed to analyze anonsets of tx {smartTx.GetHash()}");
+                    this.LogError(coordinatorName,$"Failed to analyze anonsets of tx {smartTx.GetHash()}");
                 }
 
 
@@ -649,7 +667,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
 
                 stopwatch.Stop();
 
-                this.LogInfo($"Registered coinjoin result for {StoreId} in {stopwatch.Elapsed}");
+                this.LogInfo(coordinatorName,$"Registered coinjoin result for {StoreId} in {stopwatch.Elapsed}");
                 _memoryCache.Remove(WabisabiService.GetCacheKey(StoreId) + "cjhistory");
 
                 break;
@@ -657,7 +675,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
             catch (Exception e)
             {
 
-                this.LogError( "Could not save coinjoin progress! " + e.Message);
+                this.LogError(coordinatorName,"Could not save coinjoin progress! " + e.Message);
                 // ignored
 
             }
@@ -691,7 +709,7 @@ public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count,
             _btcPayWallet.ReserveAddressAsync(StoreId ,DerivationScheme, "coinjoin"))).ContinueWith(task => task.Result.Select(information => information.Address));
     }
 
-    public async Task<IEnumerable<PendingPayment>> GetPendingPaymentsAsync( UtxoSelectionParameters roundParameters)
+    public async Task<IEnumerable<PendingPayment>> GetPendingPaymentsAsync(RoundParameters roundParameters)
     {
         
         
@@ -715,11 +733,6 @@ public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count,
 
                var payoutBlob = data.GetBlob(_btcPayNetworkJsonSerializerSettings);
                var value = new Money(payoutBlob.CryptoAmount.Value, MoneyUnit.BTC);
-               if (!roundParameters.AllowedOutputAmounts.Contains(value) ||
-                   !roundParameters.AllowedOutputScriptTypes.Contains(bitcoinLikeClaimDestination.Address.ScriptPubKey.GetScriptType()))
-               {
-                   return null;
-               }
                return new PendingPayment()
                {
                    Identifier = data.Id,
@@ -738,9 +751,9 @@ public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count,
         }
     }
 
-    public Task<ScriptType> GetScriptTypeAsync()
+    public Task<ScriptType[]> GetScriptTypeAsync()
     {
-        return Task.FromResult(DerivationScheme.GetDerivation(0).ScriptPubKey.GetScriptType());
+        return Task.FromResult(new []{DerivationScheme.GetDerivation(0).ScriptPubKey.GetScriptType()});
     }
 
     private Action<(uint256 roundId, uint256 transactionId, int outputIndex)> PaymentSucceeded(string payoutId)

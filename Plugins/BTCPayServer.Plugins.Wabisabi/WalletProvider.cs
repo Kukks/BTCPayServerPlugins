@@ -28,7 +28,7 @@ namespace BTCPayServer.Plugins.Wabisabi;
 
 public class WalletProvider : PeriodicRunner,IWalletProvider
 {
-    private Dictionary<string, WabisabiStoreSettings>? _cachedSettings;
+    private ConcurrentDictionary<string, WabisabiStoreSettings>? _cachedSettings;
     private readonly IServiceProvider _serviceProvider;
     private readonly StoreRepository _storeRepository;
     private readonly IExplorerClientProvider _explorerClientProvider;
@@ -255,8 +255,8 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     {
         Task.Run(async () =>
         {
-            _cachedSettings =
-                await _storeRepository.GetSettingsAsync<WabisabiStoreSettings>(nameof(WabisabiStoreSettings));
+            _cachedSettings = new ConcurrentDictionary<string, WabisabiStoreSettings>(
+                (await _storeRepository.GetSettingsAsync<WabisabiStoreSettings>(nameof(WabisabiStoreSettings))));
             _initialLoad.SetResult();
         }, cancellationToken);
         _disposables.Add(_eventAggregator.SubscribeAsync<StoreRemovedEvent>(async @event =>

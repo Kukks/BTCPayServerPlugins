@@ -49,4 +49,5 @@ public class DiscoveredCoordinator
     public string Name { get; set; }
     public string Relay { get; set; }
     public string Description { get; set; }
+    public string? CoinjoinIdentifier { get; set; }
 }
