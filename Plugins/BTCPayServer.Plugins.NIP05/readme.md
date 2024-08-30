@@ -9,9 +9,9 @@ This plugin allows your BTCPay Server to support
 ## Usage
 
 * Install the plugin
-* On a store you have owner access to, click on the new "NIP05" side navigation menu item
+* On a store you have owner access to, click on the new "Nostr" side navigation menu item
 * Specify a name and public key.
-NOTE: You will not be able to select the same name across different stores. The public key is in hex format and not `npub...`
+NOTE: You will not be able to select the same name across different stores. The public key is in hex format and not `npub...` ([convert here](https://nostrcheck.me/converter/))
 * Optionally include a set of relays that you primarily use so that client can discover your events more easily.
 
 * Alternatively, you can import this data by using one of the Nostr browser extensions such as Alby or Nos2x 
