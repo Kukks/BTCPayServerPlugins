@@ -139,6 +139,9 @@ public class Smartifier
 
         foreach (var coin in coins)
         {
+            if(coin.KeyPath is null){
+                continue;
+            }
             var tx = await SmartTransactions.GetOrAdd(coin.OutPoint.Hash, async uint256 =>
             {
                 var unsmartTx = await GetTransactionInfo(coin.OutPoint.Hash);
