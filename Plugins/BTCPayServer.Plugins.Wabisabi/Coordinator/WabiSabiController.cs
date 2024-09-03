@@ -4,7 +4,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
-using WalletWasabi.Affiliation;
 using WalletWasabi.Backend.Filters;
 using WalletWasabi.Cache;
 using WalletWasabi.WabiSabi.Backend.PostRequests;
@@ -24,27 +23,24 @@ namespace WalletWasabi.Backend.Controllers;
 [Produces("application/json")]
 public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 {
-	public WabiSabiController(IdempotencyRequestCache idempotencyRequestCache, Arena arena, CoinJoinFeeRateStatStore coinJoinFeeRateStatStore, AffiliationManager affiliationManager)
+	public WabiSabiController(IdempotencyRequestCache idempotencyRequestCache, Arena arena, CoinJoinFeeRateStatStore coinJoinFeeRateStatStore)
 	{
 		IdempotencyRequestCache = idempotencyRequestCache;
 		Arena = arena;
 		CoinJoinFeeRateStatStore = coinJoinFeeRateStatStore;
-		AffiliationManager = affiliationManager;
 	}
 
 	private static TimeSpan RequestTimeout { get; } = TimeSpan.FromMinutes(5);
 	private IdempotencyRequestCache IdempotencyRequestCache { get; }
 	private Arena Arena { get; }
 	private CoinJoinFeeRateStatStore CoinJoinFeeRateStatStore { get; }
-	private AffiliationManager AffiliationManager { get; }
 
 	[HttpPost("status")]
 	public async Task<RoundStateResponse> GetStatusAsync(RoundStateRequest request, CancellationToken cancellationToken)
 	{
 		var response = await Arena.GetStatusAsync(request, cancellationToken);
 		var medians = CoinJoinFeeRateStatStore.GetDefaultMedians();
-		var affiliateInformation = AffiliationManager.GetAffiliateInformation();
-		var ret = new RoundStateResponse(response.RoundStates, medians, affiliateInformation);
+		var ret = new RoundStateResponse(response.RoundStates, medians);
 		
 		return ret;
 	}

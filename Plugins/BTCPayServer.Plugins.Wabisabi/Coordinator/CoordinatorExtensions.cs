@@ -24,7 +24,7 @@ public static class CoordinatorExtensions
                 return null;
             }
             return new WabiSabiController(s.IdempotencyRequestCache, s.WabiSabiCoordinator.Arena,
-                s.WabiSabiCoordinator.CoinJoinFeeRateStatStore, s.WabiSabiCoordinator.AffiliationManager);
+                s.WabiSabiCoordinator.CoinJoinFeeRateStatStore);
         });
         services.AddHostedService((sp) => sp.GetRequiredService<WabisabiCoordinatorService>());
 

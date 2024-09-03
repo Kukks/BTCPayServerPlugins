@@ -50,15 +50,6 @@ namespace BTCPayServer.Plugins.Wabisabi
                     nameof(WabisabiStoreSettings));
                 res ??= new WabisabiStoreSettings();
                 res.Settings = res.Settings.Where(settings => _ids.Contains(settings.Coordinator)).ToList();
-                res.Settings.ForEach(settings =>
-                {
-                    if (settings.RoundWhenEnabled != null &&
-                        string.IsNullOrEmpty(settings.RoundWhenEnabled.PlebsDontPayThreshold))
-                    {
-                        settings.RoundWhenEnabled.PlebsDontPayThreshold = "1000000";
-                    }
-                });
-                
                 
                 await EnablePayoutProcessorBasedOnSettings(storeId, res);
                 return res;
@@ -126,8 +117,6 @@ namespace BTCPayServer.Plugins.Wabisabi
                             ? new LastCoordinatorRoundConfig()
                             {
                                 CoordinationFeeRate = roundParameters.CoordinationFeeRate.Rate,
-                                PlebsDontPayThreshold = roundParameters.CoordinationFeeRate
-                                    .PlebsDontPayThreshold.Satoshi.ToString(),
                                 MinInputCountByRound = roundParameters.MinInputCountByRound,
                             }
                             : null;

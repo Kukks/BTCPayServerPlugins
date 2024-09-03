@@ -6,7 +6,6 @@ using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using NLog;
 using WabiSabi.Crypto;
-using WalletWasabi.Affiliation;
 using WalletWasabi.WabiSabi;
 using WalletWasabi.WabiSabi.Backend.Models;
 using WalletWasabi.WabiSabi.Models;
@@ -38,14 +37,6 @@ public class ExceptionTranslateAttribute : ExceptionFilterAttribute
             WabiSabiCryptoException e => new JsonResult(new Error(
                 Type: ProtocolConstants.ProtocolViolationType,
                 ErrorCode: WabiSabiProtocolErrorCode.CryptoException.ToString(),
-                Description: e.Message,
-                ExceptionData: EmptyExceptionData.Instance), serializerSettings)
-            {
-                StatusCode = (int) HttpStatusCode.InternalServerError
-            },
-            AffiliationException e => new JsonResult(new Error(
-                Type: AffiliationConstants.RequestSecrecyViolationType,
-                ErrorCode: "undefined",
                 Description: e.Message,
                 ExceptionData: EmptyExceptionData.Instance), serializerSettings)
             {

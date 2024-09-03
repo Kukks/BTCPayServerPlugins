@@ -72,12 +72,6 @@ SmartCoin[] FilterCoinsMore(IEnumerable<SmartCoin> coins)
                         return true;
                     }
 
-                    if (_wallet.WabisabiStoreSettings.PlebMode ||
-                        _wallet.WabisabiStoreSettings.CrossMixBetweenCoordinatorsMode ==
-                        WabisabiStoreSettings.CrossMixMode.WhenFree)
-                    {
-                        return coin.Amount <= roundParameters.CoordinationFeeRate.PlebsDontPayThreshold;
-                    }
 
                     return false;
                     

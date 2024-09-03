@@ -379,7 +379,7 @@
                                             <tr>
                                                 <th scope="row">Fee charged</th>
                                                 @{
-                                                    var fee = $"{roundParameters.CoordinationFeeRate.Rate * 100}% + Free remixing {(roundParameters.CoordinationFeeRate.PlebsDontPayThreshold <= 0 ? string.Empty : $"+ Free under {roundParameters.CoordinationFeeRate.PlebsDontPayThreshold.ToDecimal(MoneyUnit.BTC)} BTC")}";
+                                                    var fee = $"{roundParameters.CoordinationFeeRate.Rate * 100}%";
                                                 }
                                                 <td>
                                                     @(fee)
@@ -450,7 +450,6 @@
                 @if (Model.Settings[index].RoundWhenEnabled is not null)
                 {
                     <input type="hidden" asp-for="Settings[index].RoundWhenEnabled.CoordinationFeeRate"/>
-                    <input type="hidden" asp-for="Settings[index].RoundWhenEnabled.PlebsDontPayThreshold"/>
                     <input type="hidden" asp-for="Settings[index].RoundWhenEnabled.MinInputCountByRound"/>
                 }
 

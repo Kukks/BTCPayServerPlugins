@@ -31,7 +31,6 @@ using WalletWasabi.Services;
 using WalletWasabi.Tor.Socks5.Pool.Circuits;
 using WalletWasabi.WabiSabi;
 using WalletWasabi.WabiSabi.Backend;
-using WalletWasabi.WabiSabi.Backend.Rounds.CoinJoinStorage;
 using WalletWasabi.WabiSabi.Backend.Statistics;
 using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.WabiSabi.Models;
@@ -230,12 +229,10 @@ public class WabisabiCoordinatorService : PeriodicRunner
         var network = _networkProvider.GetNetwork<BTCPayNetwork>("BTC");
         var coordinatorParameters =
             new CoordinatorParameters(Path.Combine(_dataDirectories.Value.DataDir, "Plugins", "Coinjoin"));
-        var coinJoinIdStore =
-            CoinJoinIdStore.Create( coordinatorParameters.CoinJoinIdStoreFilePath);
         var coinJoinScriptStore = CoinJoinScriptStore.LoadFromFile(coordinatorParameters.CoinJoinScriptStoreFilePath);
         var rpc = new BtcPayRpcClient(_feeProviderFactory.CreateFeeProvider(network),explorerClient.RPCClient, _memoryCache, explorerClient);
 
-        WabiSabiCoordinator = new WabiSabiCoordinator(coordinatorParameters, rpc, coinJoinIdStore, coinJoinScriptStore,
+        WabiSabiCoordinator = new WabiSabiCoordinator(coordinatorParameters, rpc, coinJoinScriptStore,
             _httpClientFactory, _coordinatorScriptResolver);
         HostedServices.Register<WabiSabiCoordinator>(() => WabiSabiCoordinator, "WabiSabi Coordinator");
         
@@ -267,8 +264,8 @@ public class WabisabiCoordinatorService : PeriodicRunner
         {
             instance.WasabiCoordinatorStatusFetcher.OverrideConnected = null;
         }
-        
-        var coinjoinConfig = new CoinJoinConfiguration(WabiSabiCoordinator.Config.CoordinatorIdentifier, 10m, 100m);
+       
+        var coinjoinConfig = new CoinJoinConfiguration(WabiSabiCoordinator.Config.CoordinatorIdentifier,150m,  WabiSabiCoordinator.Config.MinInputCountByRound, false);
         _instanceManager.AddCoordinator("Local Coordinator", 
             "local", _ => null, 
             cachedSettings.TermsConditions, 

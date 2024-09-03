@@ -286,8 +286,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         {
             return coordSettings.RoundWhenEnabled is not null &&
                    roundParameters.CoordinationFeeRate.Rate <= coordSettings.RoundWhenEnabled.CoordinationFeeRate &&
-                   roundParameters.CoordinationFeeRate.PlebsDontPayThreshold <=
-                   coordSettings.RoundWhenEnabled.PlebsDontPayThresholdM &&
+
                    roundParameters.MinInputCountByRound <= coordSettings.RoundWhenEnabled.MinInputCountByRound;
         }
         catch (Exception e)
