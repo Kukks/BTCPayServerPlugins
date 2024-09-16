@@ -48,10 +48,10 @@
 
             </div>
             <div class="form-group">
-                <label asp-for="PrivateKey" class="form-label">Private key for zaps</label>
+                <label asp-for="PrivateKey" class="form-label">Private key for zaps, if you want to prove you issued a receipt</label>
                 <input asp-for="PrivateKey" class="form-control" type="password" value="@Model.PrivateKey"/>
                 <span asp-validation-for="PrivateKey" class="text-danger"></span>
-                <p class="text-muted pt-2">OPTIONALLY, provide the private key to your pubkey so that zaps are signed directly by you as proof of receipt. Supports hex and nsec. Will be converted to hex once saved. </p>
+                <p class="text-muted pt-2">OPTIONALLY, provide the private key to your pubkey so that zaps are signed directly by you as proof of receipt. Otherwise receipts are signed by a random private key that you cannot prove you signed. Supports hex and nsec. Will be converted to hex once saved.</p>
             </div>
             <table class="table table-responsive col-12">
                 <thead>
