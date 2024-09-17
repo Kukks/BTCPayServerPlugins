@@ -26,13 +26,13 @@
 
     <partial name="_StatusMessage"/>
 
-    <p class="alert alert-info">For Zaps, just <a class="alert-link" asp-action="EditLightningAddress" asp-controller="UILNURL" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()">enable a lightning address</a>. None of the nostr settings on this page are needed for zaps anymore.</p>
+    <p class="alert alert-info">For Zaps, just <a class="alert-link" asp-action="EditLightningAddress" asp-controller="UILNURL" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()">enable a lightning address</a>. At least one lightning address must exist to receive zaps, even when nostr enabled here. None of the nostr settings on this page are needed for zaps anymore.</p>
 
     <div class="row">
         <div class="col-xl-8 col-xxl-constrain">
             <div class="form-group">
                 <div class="form-group pt-2">
-                    <label asp-for="Name" class="form-label"></label>
+                    <label asp-for="Name (does not need to be same as for a lightning address)" class="form-label"></label>
                     <div class="input-group">
                         <input asp-for="Name" class="form-control"/>
                         <span class="input-group-text">@@@Context.Request.Host.ToUriComponent()@Context.Request.PathBase</span>
