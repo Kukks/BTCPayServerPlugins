@@ -416,7 +416,7 @@ updateInProgressAnimation(myChart);
                                     @{
                                         if (coordinator.CoinPrison is not null)
                                         {
-                                            var bannedCoins = coins.Where(coin => coordinator.CoinPrison.TryGetOrRemoveBannedCoin(coin, out _));
+                                            var bannedCoins = coins.Where(coin => coordinator.CoinPrison.IsBanned(coin.Outpoint)).ToArray();
                                             @if (bannedCoins.Any())
                                             {
                                                 <div class="text-muted">@bannedCoins.Count() banned coins(for disrupting rounds)</div>

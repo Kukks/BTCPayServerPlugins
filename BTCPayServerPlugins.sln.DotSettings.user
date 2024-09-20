@@ -5,9 +5,15 @@
 	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003ABlockchain_002Fd_003ATransactionOutputs_002Ff_003ASmartCoin_002Ecs/@EntryIndexedValue">ExplicitlyExcluded</s:String>
 	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003AWabiSabi_002Fd_003AClient_002Ff_003ACoinJoinClient_002Ecs/@EntryIndexedValue">ForceIncluded</s:String>
 	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003AWabiSabi_002Fd_003AClient_002Ff_003ACoinJoinManager_002Ecs/@EntryIndexedValue">ForceIncluded</s:String>
-	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003AWabiSabi_002Fd_003AClient_002Ff_003ACoinJoinTracker_002Ecs/@EntryIndexedValue">ExplicitlyExcluded</s:String>
+	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003AWabiSabi_002Fd_003AClient_002Ff_003ACoinJoinTracker_002Ecs/@EntryIndexedValue">ForceIncluded</s:String>
 	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003AWabiSabi_002Fd_003AClient_002Ff_003ACoinJoinTrackerFactory_002Ecs/@EntryIndexedValue">ExplicitlyExcluded</s:String>
 	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003AWallets_002Ff_003AWallet_002Ecs/@EntryIndexedValue">ForceIncluded</s:String>
+	<s:String x:Key="/Default/Environment/AssemblyExplorer/XmlDocument/@EntryValue">&lt;AssemblyExplorer&gt;&#xD;
+  &lt;Assembly Path="C:\Git\BTCPayServerPlugins\Plugins\BTCPayServer.Plugins.NIP05\bin\Debug\net8.0\NNostr.Client.dll" /&gt;&#xD;
+&lt;/AssemblyExplorer&gt;</s:String>
+	<s:String x:Key="/Default/Environment/Hierarchy/Build/BuildTool/CustomBuildToolPath/@EntryValue">C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe</s:String>
+	<s:String x:Key="/Default/Environment/Hierarchy/Build/BuildTool/DotNetCliExePath/@EntryValue">C:\Program Files\dotnet\dotnet.exe</s:String>
+	<s:Int64 x:Key="/Default/Environment/Hierarchy/Build/BuildTool/MsbuildVersion/@EntryValue">1114112</s:Int64>
 	<s:String x:Key="/Default/Environment/UnitTesting/UnitTestSessionStore/Sessions/=cedf4985_002D652b_002D4803_002D9af5_002D7e2c856d885a/@EntryIndexedValue">&lt;SessionState ContinuousTestingMode="0" IsActive="True" Name="EnsureNewLightningInvoiceOnPartialPayment" xmlns="urn:schemas-jetbrains-com:jetbrains-ut-session"&gt;&#xD;
   &lt;TestAncestor&gt;&#xD;
     &lt;TestId&gt;xUnit::4146B6DF-7BEE-4BD0-B6B1-77E7630A1B81::net8.0::BTCPayServer.Tests.UnitTest1.EnsureNewLightningInvoiceOnPartialPayment&lt;/TestId&gt;&#xD;

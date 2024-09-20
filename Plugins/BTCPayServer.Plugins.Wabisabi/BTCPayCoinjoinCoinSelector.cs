@@ -53,8 +53,7 @@ SmartCoin[] FilterCoinsMore(IEnumerable<SmartCoin> coins)
                 .Where(coin => roundParameters.AllowedInputAmounts.Contains(coin.Amount))
                 .Where(coin =>
                 {
-                    var effV = coin.EffectiveValue(roundParameters.MiningFeeRate,
-                        roundParameters.CoordinationFeeRate);
+                    var effV = coin.EffectiveValue(roundParameters.MiningFeeRate);
                     var percentageLeft = (effV.ToDecimal(MoneyUnit.BTC) / coin.Amount.ToDecimal(MoneyUnit.BTC));
                     // filter out low value coins where 50% of the value would be eaten up by fees
                     return effV > Money.Zero && percentageLeft >= 0.5m;
@@ -283,8 +282,7 @@ SmartCoin[] FilterCoinsMore(IEnumerable<SmartCoin> coins)
         //attempt to shift coins that comes from the same tx AND also attempt to shift coins based on percentage probability
         var remainingCoins = SlightlyShiftOrder(RandomizeCoins(
             coins.OrderBy(coin => coin.CoinColor(_wallet)).ThenByDescending(x =>
-                    x.EffectiveValue(utxoSelectionParameters.MiningFeeRate,
-                        utxoSelectionParameters.CoordinationFeeRate))
+                    x.EffectiveValue(utxoSelectionParameters.MiningFeeRate))
                 .ToList(), liquidityClue), 10);
         var remainingPendingPayments = new List<PendingPayment>(pendingPayments);
         var solution = new SubsetSolution(remainingPendingPayments.Count, _wallet,
@@ -487,8 +485,7 @@ public class SubsetSolution
     public List<SmartCoin> Coins { get; set; } = new();
     public List<PendingPayment> HandledPayments { get; set; } = new();
 
-    public decimal TotalValue => Coins.Sum(coin =>
-        coin.EffectiveValue(_utxoSelectionParameters.MiningFeeRate, _utxoSelectionParameters.CoordinationFeeRate)
+    public decimal TotalValue => Coins.Sum(coin => coin.EffectiveValue(_utxoSelectionParameters.MiningFeeRate)
             .ToDecimal(MoneyUnit.BTC));
 
     public Dictionary<AnonsetType, SmartCoin[]> SortedCoins =>
