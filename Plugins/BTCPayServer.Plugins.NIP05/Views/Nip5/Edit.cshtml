@@ -26,13 +26,13 @@
 
     <partial name="_StatusMessage"/>
 
-    <p class="alert alert-info">For Zaps, just <a class="alert-link" asp-action="EditLightningAddress" asp-controller="UILNURL" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()">enable a lightning address</a>. None of the nostr settings on this page are needed for zaps anymore.</p>
+    <p class="alert alert-info">For Zaps, just <a class="alert-link" asp-action="EditLightningAddress" asp-controller="UILNURL" asp-route-storeId="@ScopeProvider.GetCurrentStoreId()">enable a lightning address</a>. At least one lightning address must exist to receive zaps, even when nostr enabled here. None of the nostr settings on this page are needed for zaps anymore.</p>
 
     <div class="row">
         <div class="col-xl-8 col-xxl-constrain">
             <div class="form-group">
                 <div class="form-group pt-2">
-                    <label asp-for="Name" class="form-label"></label>
+                    <label asp-for="Name (does not need to be same as for a lightning address)" class="form-label"></label>
                     <div class="input-group">
                         <input asp-for="Name" class="form-control"/>
                         <span class="input-group-text">@@@Context.Request.Host.ToUriComponent()@Context.Request.PathBase</span>
@@ -48,10 +48,10 @@
 
             </div>
             <div class="form-group">
-                <label asp-for="PrivateKey" class="form-label">Private key for zaps</label>
+                <label asp-for="PrivateKey" class="form-label">Private key for zaps, if you want to prove you issued a receipt</label>
                 <input asp-for="PrivateKey" class="form-control" type="password" value="@Model.PrivateKey"/>
                 <span asp-validation-for="PrivateKey" class="text-danger"></span>
-                <p class="text-muted pt-2">OPTIONALLY, provide the private key to your pubkey so that zaps are signed directly by you as proof of receipt. Supports hex and nsec. Will be converted to hex once saved. </p>
+                <p class="text-muted pt-2">OPTIONALLY, provide the private key to your pubkey so that zaps are signed directly by you as proof of receipt. Otherwise receipts are signed by a random private key that you cannot prove you signed. Supports hex and nsec. Will be converted to hex once saved.</p>
             </div>
             <table class="table table-responsive col-12">
                 <thead>
