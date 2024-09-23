@@ -139,7 +139,7 @@ public class Smartifier
 
         foreach (var coin in coins)
         {
-            if(coin.KeyPath is null){
+            if(coin?.KeyPath is null || coin.OutPoint is null ){
                 continue;
             }
             var tx = await SmartTransactions.GetOrAdd(coin.OutPoint.Hash, async uint256 =>

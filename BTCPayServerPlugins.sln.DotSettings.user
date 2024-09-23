@@ -1,6 +1,7 @@
 ﻿<wpf:ResourceDictionary xml:space="preserve" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:s="clr-namespace:System;assembly=mscorlib" xmlns:ss="urn:shemas-jetbrains-com:settings-storage-xaml" xmlns:wpf="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
 	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=0D438B7D_002DF996_002D4BF3_002D8F54_002D02CB9DF120D8_002Ff_003ABTCPayCoinjoinCoinSelector_002Ecs/@EntryIndexedValue">ForceIncluded</s:String>
 	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=0D438B7D_002DF996_002D4BF3_002D8F54_002D02CB9DF120D8_002Ff_003ABTCPayWallet_002Ecs/@EntryIndexedValue">ForceIncluded</s:String>
+	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=7020124F_002D9FFC_002D4AC3_002D8F3D_002DAAB8E0240759_002Ff_003ABreez_002ESdk_002ELiquid_002Ecs_002Fl_003A_002E_002E_003F_002E_002E_003FUsers_003Fevilk_003FAppData_003FRoaming_003FJetBrains_003FRider2024_002E2_003Fresharper_002Dhost_003FDecompilerCache_003Fmetadata_003F4dbc7b5c57d04ec8a063235af9eb203a3fc00_003F58_003F0584d9dc_003FBreez_002ESdk_002ELiquid_002Ecs/@EntryIndexedValue">ForceIncluded</s:String>
 	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003ABlockchain_002Fd_003ATransactionOutputs_002Ff_003ACoinsView_002Ecs/@EntryIndexedValue">ExplicitlyExcluded</s:String>
 	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003ABlockchain_002Fd_003ATransactionOutputs_002Ff_003ASmartCoin_002Ecs/@EntryIndexedValue">ExplicitlyExcluded</s:String>
 	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003AWabiSabi_002Fd_003AClient_002Ff_003ACoinJoinClient_002Ecs/@EntryIndexedValue">ForceIncluded</s:String>
@@ -10,6 +11,7 @@
 	<s:String x:Key="/Default/CodeInspection/ExcludedFiles/FilesAndFoldersToSkip2/=D1D1116C_002D38F9_002D4EA3_002DAC65_002DA75FEA82E5C8_002Fd_003AWallets_002Ff_003AWallet_002Ecs/@EntryIndexedValue">ForceIncluded</s:String>
 	<s:String x:Key="/Default/Environment/AssemblyExplorer/XmlDocument/@EntryValue">&lt;AssemblyExplorer&gt;&#xD;
   &lt;Assembly Path="C:\Git\BTCPayServerPlugins\Plugins\BTCPayServer.Plugins.NIP05\bin\Debug\net8.0\NNostr.Client.dll" /&gt;&#xD;
+  &lt;Assembly Path="C:\Users\evilk\.nuget\packages\breez.sdk.liquid\0.3.0\lib\net6.0\Breez.Sdk.Liquid.dll" /&gt;&#xD;
 &lt;/AssemblyExplorer&gt;</s:String>
 	<s:String x:Key="/Default/Environment/Hierarchy/Build/BuildTool/CustomBuildToolPath/@EntryValue">C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe</s:String>
 	<s:String x:Key="/Default/Environment/Hierarchy/Build/BuildTool/DotNetCliExePath/@EntryValue">C:\Program Files\dotnet\dotnet.exe</s:String>
