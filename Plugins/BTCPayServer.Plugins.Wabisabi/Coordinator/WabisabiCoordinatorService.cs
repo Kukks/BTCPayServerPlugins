@@ -268,9 +268,9 @@ public class WabisabiCoordinatorService : PeriodicRunner
         var coinjoinConfig = new CoinJoinConfiguration(WabiSabiCoordinator.Config.CoordinatorIdentifier,150m,  WabiSabiCoordinator.Config.MinInputCountByRound, false);
         _instanceManager.AddCoordinator("Local Coordinator", 
             "local", _ => null, 
+            coinjoinConfig,
             cachedSettings.TermsConditions, 
-            cachedSettings.CoordinatorDescription,
-            coinjoinConfig
+            cachedSettings.CoordinatorDescription
             );
     }
 

@@ -104,7 +104,7 @@ public class WabisabiCoordinatorClientInstanceManager:IHostedService
 
     
     public  void AddCoordinator(string displayName, string name,
-        Func<IServiceProvider, Uri> fetcher, string termsConditions = null, string description = null, CoinJoinConfiguration configuration = null)
+        Func<IServiceProvider, Uri> fetcher, CoinJoinConfiguration configuration, string termsConditions = null, string description = null)
     {
         if (termsConditions is null && name == "zksnacks")
         {
