@@ -245,8 +245,7 @@ namespace BTCPayServer.Plugins.Wabisabi
             {
                 coordSettings.DiscoveredCoordinators.Add(viewModel);
                 await _wabisabiCoordinatorService.UpdateSettings(coordSettings);
-                var config = new CoinJoinConfiguration("CoinJoinCoordinatorIdentifier",150m,  1, false);
-                _instanceManager.AddCoordinator(viewModel.Name, viewModel.Name, provider => viewModel.Uri, config,null,viewModel.Description);
+                _instanceManager.AddCoordinator(viewModel.Name, viewModel.Name, provider => viewModel.Uri, null,null,viewModel.Description);
 
                 TempData["SuccessMessage"] = $"Coordinator {viewModel.Name } added and started";
             }
