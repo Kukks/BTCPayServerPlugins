@@ -9,6 +9,7 @@ using BTCPayServer.Client.Models;
 using BTCPayServer.Data;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Payments;
+using BTCPayServer.Payouts;
 using BTCPayServer.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -26,7 +27,7 @@ namespace BTCPayServer.Plugins.SideShift
     {
         private readonly SideShiftService _sideShiftService;
         private readonly IHttpClientFactory _httpClientFactory;
-        private readonly IEnumerable<IPayoutHandler> _payoutHandlers;
+        private readonly PayoutMethodHandlerDictionary _payoutMethodHandlerDictionary;
         private readonly PullPaymentHostedService _pullPaymentHostedService;
         private readonly BTCPayNetworkJsonSerializerSettings _serializerSettings;
         private readonly ApplicationDbContextFactory _dbContextFactory;
@@ -34,13 +35,13 @@ namespace BTCPayServer.Plugins.SideShift
         public SideShiftController(
             SideShiftService sideShiftService,
             IHttpClientFactory httpClientFactory,
-            IEnumerable<IPayoutHandler> payoutHandlers,
+           PayoutMethodHandlerDictionary payoutMethodHandlerDictionary,
             PullPaymentHostedService pullPaymentHostedService,
             BTCPayNetworkJsonSerializerSettings serializerSettings, ApplicationDbContextFactory dbContextFactory)
         {
             _sideShiftService = sideShiftService;
             _httpClientFactory = httpClientFactory;
-            _payoutHandlers = payoutHandlers;
+            _payoutMethodHandlerDictionary = payoutMethodHandlerDictionary;
             _pullPaymentHostedService = pullPaymentHostedService;
             _serializerSettings = serializerSettings;
             _dbContextFactory = dbContextFactory;
@@ -111,19 +112,23 @@ namespace BTCPayServer.Plugins.SideShift
                 ModelState.AddModelError(nameof(request.Amount), "Amount must be specified");
             }
 
-            if (!PaymentMethodId.TryParse(request.PaymentMethod, out var pmi))
+            if (!PayoutMethodId.TryParse(request.PayoutMethodId, out var pmi))
             {
-                ModelState.AddModelError(nameof(request.PaymentMethod), "Invalid payment method");
+                ModelState.AddModelError(nameof(request.PayoutMethodId), "Invalid payout method");
             }
             else
             {
-                handler = _payoutHandlers.FindPayoutHandler(pmi);
-                if (handler == null)
+                if (!_payoutMethodHandlerDictionary.TryGetValue(pmi, out handler))
                 {
-                    ModelState.AddModelError(nameof(request.PaymentMethod), "Invalid payment method");
+                    ModelState.AddModelError(nameof(request.PayoutMethodId), "Invalid payment method");
                 }
             }
-
+            var isLN = pmi.ToString().EndsWith("-" +PayoutTypes.LN.Id);
+            if (isLN)
+            {
+                
+                ModelState.AddModelError(nameof(request.PayoutMethodId), "SideShift does not support Lightning payouts");
+            }
             if (!ModelState.IsValid)
             {
                 return this.CreateValidationError(ModelState);
@@ -166,13 +171,13 @@ namespace BTCPayServer.Plugins.SideShift
             // shiftResponse.EnsureSuccessStatusCode();
             // var shift = await shiftResponse.Content.ReadAsAsync<ShiftResponse>();
 
+           var cryptoCode = pmi.ToString().Split('-')[0];
             var shiftResponse = await client.PostAsJsonAsync("https://sideshift.ai/api/v2/shifts/variable", new
                 {
                     settleAddress = request.Destination,
                     affiliateId = "qg0OrfHJV",
                     settleMemo = request.Memo,
-                    depositCoin = pmi.CryptoCode,
-                    depositNetwork = pmi.PaymentType == LightningPaymentType.Instance ? "lightning" : null,
+                    depositCoin = cryptoCode,
                     settleCoin = request.ShiftCurrency,
                     settleNetwork = request.ShiftNetwork,
                 }
@@ -188,20 +193,20 @@ namespace BTCPayServer.Plugins.SideShift
 
             
             var destination =
-                await handler.ParseAndValidateClaimDestination(pmi, shift.depositAddress, ppBlob,
+                await handler.ParseAndValidateClaimDestination(shift.depositAddress, ppBlob,
                     CancellationToken.None);
 
             var claim = await _pullPaymentHostedService.Claim(new ClaimRequest()
             {
                 PullPaymentId = pullPaymentId,
                 Destination = destination.destination,
-                PaymentMethodId = pmi,
+                PayoutMethodId = pmi,
                 Value = request.Amount
             });
             if (claim.Result == ClaimRequest.ClaimResult.Ok)
             {
                 await using var ctx = _dbContextFactory.CreateContext();
-                ppBlob.Description += $"<br/>The payout of {claim.PayoutData.Destination} will be forwarded to SideShift.ai for further conversion. Please go to <a href=\"https://sideshift.ai/orders/{shift.id}?openSupport=true\">the order page</a> for support.";
+                ppBlob.Description += $"<br/>The payout of {destination.destination} will be forwarded to SideShift.ai for further conversion. Please go to <a href=\"https://sideshift.ai/orders/{shift.id}?openSupport=true\">the order page</a> for support.";
                 pp.SetBlob(ppBlob);
                 ctx.Attach(pp).State = EntityState.Modified;
                 await ctx.SaveChangesAsync();
@@ -242,19 +247,21 @@ namespace BTCPayServer.Plugins.SideShift
         private Client.Models.PayoutData ToModel(Data.PayoutData p)
         {
             var blob = p.GetBlob(_serializerSettings);
-            var model = new Client.Models.PayoutData
+            var model = new Client.Models.PayoutData()
             {
                 Id = p.Id,
                 PullPaymentId = p.PullPaymentDataId,
                 Date = p.Date,
-                Amount = blob.Amount,
-                PaymentMethodAmount = blob.CryptoAmount,
+                OriginalCurrency = p.OriginalCurrency,
+                OriginalAmount = p.OriginalAmount,
+                PayoutCurrency = p.Currency,
+                PayoutAmount = p.Amount,
                 Revision = blob.Revision,
                 State = p.State,
+                PayoutMethodId = p.PayoutMethodId,
+                PaymentProof = p.GetProofBlobJson(),
                 Destination = blob.Destination,
-                PaymentMethod = p.PaymentMethodId,
-                CryptoCode = p.GetPaymentMethodId().CryptoCode,
-                PaymentProof = p.GetProofBlobJson()
+                Metadata = blob.Metadata?? new JObject(),
             };
             return model;
         }

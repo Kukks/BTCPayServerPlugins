@@ -1,17 +1,13 @@
-﻿@using BTCPayServer
-@using BTCPayServer.Abstractions.Extensions
+﻿@using BTCPayServer.Components.TruncateCenter
 @using BTCPayServer.Payments
-@using BTCPayServer.Plugins.Wabisabi
 @using BTCPayServer.Services
 @using NBitcoin
 @using WalletWasabi.Blockchain.Analysis
 @model List<BTCPayServer.Plugins.Wabisabi.BTCPayWallet.CoinjoinData>
-@inject BTCPayNetworkProvider BtcPayNetworkProvider
 @inject TransactionLinkProviders TransactionLinkProviders
 @{
-    var network = BtcPayNetworkProvider.BTC;
-    var pmi = new PaymentMethodId( network.CryptoCode, PaymentTypes.BTCLike);
-   
+    
+    var pmi = PaymentTypes.CHAIN.GetPaymentMethodId("BTC");
 }
 
 <div class="table-responsive" style="  transform: rotateX(180deg);">

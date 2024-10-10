@@ -20,5 +20,5 @@ public class PrismDestination
     public string Destination { get; set; }
     public decimal? Reserve { get; set; }
     public long? SatThreshold { get; set; }
-    public string? PaymentMethodId { get; set; }
+    public string? PayoutMethodId { get; set; }
 }

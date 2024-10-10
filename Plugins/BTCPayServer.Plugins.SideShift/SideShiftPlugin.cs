@@ -8,8 +8,8 @@ namespace BTCPayServer.Plugins.SideShift
     public class SideShiftPlugin : BaseBTCPayServerPlugin
     {
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
-        {
-            new() {Identifier = nameof(BTCPayServer), Condition = ">=1.12.0"}
+        {            new() { Identifier = nameof(BTCPayServer), Condition = ">=2.0.0" }
+
         };
 
         public override void Execute(IServiceCollection applicationBuilder)
@@ -38,11 +38,6 @@ namespace BTCPayServer.Plugins.SideShift
                 "checkout-lightning-post-tabs"));
             applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/CheckoutEnd",
                 "checkout-end"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/PrismEnhance",
-                "prism-edit"));
-            applicationBuilder.AddSingleton<IPluginHookFilter, PrismDestinationValidate>();
-            applicationBuilder.AddSingleton<IPluginHookFilter, PrismClaimCreate>();
-            applicationBuilder.AddSingleton<IPluginHookFilter, PrismEditFilter>();
             base.Execute(applicationBuilder);
         }
     }

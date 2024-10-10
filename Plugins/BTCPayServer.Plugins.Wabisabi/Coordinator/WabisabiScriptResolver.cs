@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using BTCPayServer.Services.Wallets;
 using NBitcoin;
@@ -17,16 +18,19 @@ public class WabisabiScriptResolver: WabiSabiConfig.CoordinatorScriptResolver
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly StoreRepository _storeRepository;
+    private readonly PaymentMethodHandlerDictionary _paymentMethodHandlerDictionary;
     private readonly BTCPayNetworkProvider _networkProvider;
     private readonly BTCPayWalletProvider _walletProvider;
 
     public WabisabiScriptResolver(IHttpClientFactory httpClientFactory, 
         StoreRepository storeRepository, 
+        PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
         BTCPayNetworkProvider networkProvider, 
         BTCPayWalletProvider walletProvider) 
     {
         _httpClientFactory = httpClientFactory;
         _storeRepository = storeRepository;
+        _paymentMethodHandlerDictionary = paymentMethodHandlerDictionary;
         _networkProvider = networkProvider;
         _walletProvider = walletProvider;
     }
@@ -61,7 +65,7 @@ public class WabisabiScriptResolver: WabiSabiConfig.CoordinatorScriptResolver
                 var store = await _storeRepository.FindStore(value);
                 var cryptoCode = _networkProvider.GetAll().OfType<BTCPayNetwork>()
                     .First(payNetwork => payNetwork.NBitcoinNetwork == network);
-                var dss = store.GetDerivationSchemeSettings(_networkProvider, cryptoCode.CryptoCode);
+                var dss = store.GetDerivationSchemeSettings(_paymentMethodHandlerDictionary, cryptoCode.CryptoCode);
                 var w = _walletProvider.GetWallet(cryptoCode.CryptoCode);
                 var kpi = await w.ReserveAddressAsync(store.Id, dss.AccountDerivation, "wabisabi coordinator");
                 return kpi.ScriptPubKey;

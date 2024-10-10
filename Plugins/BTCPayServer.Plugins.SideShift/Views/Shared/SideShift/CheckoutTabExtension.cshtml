@@ -1,6 +1,6 @@
 @using BTCPayServer.Plugins.SideShift
 @inject SideShiftService SideShiftService
-@model BTCPayServer.Models.InvoicingModels.PaymentModel
+@model BTCPayServer.Models.InvoicingModels.CheckoutModel
 @{
     var settings = await SideShiftService.GetSideShiftForInvoice(Model.InvoiceId, Model.StoreId);
     if (settings?.Enabled is true)

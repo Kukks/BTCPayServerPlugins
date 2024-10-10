@@ -3,8 +3,10 @@
 @using NBitcoin
 @using System.Security.Claims
 @using BTCPayServer
+@using BTCPayServer.Abstractions.TagHelpers
 @using BTCPayServer.Client
 @using BTCPayServer.Configuration
+@using BTCPayServer.Services.Invoices
 @using BTCPayServer.Services.Stores
 @using Microsoft.AspNetCore.Mvc.TagHelpers
 @using WalletWasabi.Backend.Controllers
@@ -17,6 +19,7 @@
 @inject WalletProvider WalletProvider
 @inject BTCPayNetworkProvider BtcPayNetworkProvider
 @inject BTCPayServerOptions BtcPayServerOptions
+@inject PaymentMethodHandlerDictionary PaymentMethodHandlerDictionary
 @{
     var liteMode = Context.Items.TryGetValue("cjlite", out _);
 
@@ -27,7 +30,7 @@
     ScriptPubKeyType? scriptType;
 
     var stores = (await StoreRepository.GetStoresByUserId(userid))
-        .ToDictionary(s => s.Id, s => (s, s.GetDerivationSchemeSettings(BtcPayNetworkProvider, "BTC")));
+        .ToDictionary(s => s.Id, s => (s, s.GetDerivationSchemeSettings(PaymentMethodHandlerDictionary,"BTC")));
 
     stores.TryGetValue(storeId, out var thisStore);
     scriptType = thisStore.Item2?.AccountDerivation.ScriptPubKeyType();

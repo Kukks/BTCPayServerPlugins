@@ -70,7 +70,7 @@ namespace BTCPayServer.Plugins.DataErasure
                             StoreId = new[] {setting.Key},
                             Skip = skip,
                             Take = 100
-                        });
+                        }, cancellationToken);
                         foreach (var invoice in invoices)
                         {
                             //replace all buyer info with "erased"

@@ -1,7 +1,5 @@
 ﻿@using Breez.Sdk
 @using BTCPayServer
-@using BTCPayServer.Abstractions.Extensions
-@using BTCPayServer.Abstractions.Contracts
 @using BTCPayServer.Client
 @using BTCPayServer.Components.QRCode
 @using BTCPayServer.Components.TruncateCenter
@@ -10,13 +8,15 @@
 @using BTCPayServer.Plugins.Breez
 @using BTCPayServer.Security
 @using BTCPayServer.Services
+@using BTCPayServer.Services.Invoices
 @using Microsoft.AspNetCore.Mvc.TagHelpers
 @using NBitcoin
 @inject BreezService BreezService
-@inject BTCPayNetworkProvider BtcPayNetworkProvider
 @inject TransactionLinkProviders TransactionLinkProviders
+@inject PaymentMethodHandlerDictionary PaymentMethodHandlerDictionary
 @{
     ViewData.SetActivePage("Breez", "Swap In", "SwapIn");
+    var pmi = PaymentTypes.CHAIN.GetPaymentMethodId("BTC");
     string storeId = Model switch
     {
         string s => s,
@@ -38,10 +38,9 @@
     }
 
     var refundables = sdk.ListRefundables();
-    var deriv = Context.GetStoreData().GetDerivationSchemeSettings(BtcPayNetworkProvider, "BTC");
+    var deriv = Context.GetStoreData().GetDerivationSchemeSettings(PaymentMethodHandlerDictionary, "BTC");
     var ni = sdk.NodeInfo();
     var f = sdk.RecommendedFees();
-    var pmi = new PaymentMethodId("BTC", PaymentTypes.BTCLike);
 }
 
 <datalist id="fees">

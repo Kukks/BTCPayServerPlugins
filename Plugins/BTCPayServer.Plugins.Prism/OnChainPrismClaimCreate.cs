@@ -1,10 +1,9 @@
 ﻿using System;
-using System.Collections;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Data;
 using BTCPayServer.HostedServices;
-using BTCPayServer.Payments;
+using BTCPayServer.Payouts;
 using NBitcoin;
 using NBXplorer.DerivationStrategy;
 
@@ -35,7 +34,7 @@ public class OnChainPrismClaimCreate : IPluginHookFilter
         {
             claimRequest.Destination =
                 new AddressClaimDestination(BitcoinAddress.Create(destStr, network.NBitcoinNetwork));
-            claimRequest.PaymentMethodId = new PaymentMethodId("BTC", BitcoinPaymentType.Instance);
+            claimRequest.PayoutMethodId = PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
             return args;
         }
         catch (Exception)
@@ -48,7 +47,7 @@ public class OnChainPrismClaimCreate : IPluginHookFilter
 
                 claimRequest.Destination =
                     new AddressClaimDestination(add.Address);
-                claimRequest.PaymentMethodId = new PaymentMethodId("BTC", BitcoinPaymentType.Instance);
+                claimRequest.PayoutMethodId = PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
             }
             catch (Exception exception)
             {

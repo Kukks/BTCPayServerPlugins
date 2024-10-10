@@ -5,11 +5,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Events;
-using BTCPayServer.Models.InvoicingModels;
 using BTCPayServer.Payments;
 using BTCPayServer.Services;
 using BTCPayServer.Services.Invoices;
-using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -23,7 +21,8 @@ namespace BTCPayServer.Plugins.NIP05;
 public class Zapper : IHostedService
 {
     record PendingZapEvent(string[] relays, NostrEvent nostrEvent);
-        
+
+    private readonly PaymentMethodHandlerDictionary _paymentMethodHandlerDictionary;
     private readonly EventAggregator _eventAggregator;
     private readonly Nip5Controller _nip5Controller;
     private readonly IMemoryCache _memoryCache;
@@ -51,7 +50,9 @@ public class Zapper : IHostedService
     }
 
 
-    public Zapper(EventAggregator eventAggregator, 
+    public Zapper(
+        PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
+        EventAggregator eventAggregator, 
         Nip5Controller nip5Controller, 
         IMemoryCache memoryCache, 
         ILogger<Zapper> logger, 
@@ -59,6 +60,7 @@ public class Zapper : IHostedService
         InvoiceRepository invoiceRepository,
         NostrClientPool nostrClientPool)
     {
+        _paymentMethodHandlerDictionary = paymentMethodHandlerDictionary;
         _eventAggregator = eventAggregator;
         _nip5Controller = nip5Controller;
         _memoryCache = memoryCache;
@@ -150,7 +152,8 @@ public class Zapper : IHostedService
     {
         if (arg.EventCode != InvoiceEventCode.Completed && arg.EventCode != InvoiceEventCode.MarkedCompleted)
             return;
-        var pm = arg.Invoice.GetPaymentMethod(new PaymentMethodId("BTC", LNURLPayPaymentType.Instance));
+        var pmi = PaymentTypes.LNURL.GetPaymentMethodId("BTC");
+        var pm = arg.Invoice.GetPaymentPrompt(pmi);
         if (pm is null)
         {
             return;
@@ -159,8 +162,7 @@ public class Zapper : IHostedService
         {
             return;
         }
-
-        var pmd = (LNURLPayPaymentMethodDetails) pm.GetPaymentMethodDetails();
+        
         var settings = await GetSettings();
         
         var zapRequestEvent = JsonSerializer.Deserialize<NostrEvent>(zapRequest);
@@ -168,13 +170,13 @@ public class Zapper : IHostedService
         
         var tags = zapRequestEvent.Tags.Where(a => a.TagIdentifier.Length == 1).ToList();
 
-
+        
         tags.AddRange(new[]
         {
             new NostrEventTag
             {
                 TagIdentifier = "bolt11",
-                Data = new() {pmd.BOLT11}
+                Data = new() {pm.Destination}
             },
 
             new NostrEventTag()

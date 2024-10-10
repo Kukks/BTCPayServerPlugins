@@ -21,19 +21,15 @@ public class PostgresReportProvider : ReportProvider
     public DynamicReportsSettings.DynamicReportSetting Setting { get; set; }
 
     private readonly ApplicationDbContextFactory _dbContextFactory;
-    private readonly IOptions<DatabaseOptions> _options;
     private readonly IHttpContextAccessor _httpContextAccessor;
-    public PostgresReportProvider( ApplicationDbContextFactory dbContextFactory, 
-        IOptions<DatabaseOptions> options, IHttpContextAccessor httpContextAccessor)
+    public PostgresReportProvider( ApplicationDbContextFactory dbContextFactory, IHttpContextAccessor httpContextAccessor)
     {
         _dbContextFactory = dbContextFactory;
-        _options = options;
         _httpContextAccessor = httpContextAccessor;
     }
     public override bool IsAvailable()
     {
-        return _options.Value.DatabaseType == DatabaseType.Postgres &&
-            Setting.AllowForNonAdmins || _httpContextAccessor.HttpContext?.User.IsInRole(Roles.ServerAdmin) is true;
+        return Setting.AllowForNonAdmins || _httpContextAccessor.HttpContext?.User.IsInRole(Roles.ServerAdmin) is true;
     }
     public override async Task Query(QueryContext queryContext, CancellationToken cancellation)
     {
