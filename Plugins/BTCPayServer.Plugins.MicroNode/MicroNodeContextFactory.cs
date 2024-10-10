@@ -1,23 +1,29 @@
-﻿using BTCPayServer.Abstractions.Contracts;
+﻿using System;
+using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
-using Laraue.EfCoreTriggers.PostgreSql.Extensions;
+using BTCPayServer.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Infrastructure;
 
 namespace BTCPayServer.Plugins.MicroNode;
 
 public class MicroNodeContextFactory : BaseDbContextFactory<MicroNodeContext>
 {
-    public MicroNodeContextFactory(IOptions<DatabaseOptions> options) : base(options, "BTCPayServer.Plugins.MicroNode")
+    private readonly ILoggerFactory _loggerFactory;
+
+    public MicroNodeContextFactory(IOptions<DatabaseOptions> options,  ILoggerFactory loggerFactory) : base(options, "BTCPayServer.Plugins.MicroNode")
     {
+        _loggerFactory = loggerFactory;
     }
 
-    public override MicroNodeContext CreateContext()
+    public override MicroNodeContext CreateContext(Action<NpgsqlDbContextOptionsBuilder> npgsqlOptionsAction = null)
     {
         var builder = new DbContextOptionsBuilder<MicroNodeContext>();
-        ConfigureBuilder(builder);
-        builder.UsePostgreSqlTriggers();
-        
+        builder.UseLoggerFactory(_loggerFactory);
+        builder.AddInterceptors(MigrationInterceptor.Instance);
+        ConfigureBuilder(builder, npgsqlOptionsAction);
         return new MicroNodeContext(builder.Options);
     }
 }

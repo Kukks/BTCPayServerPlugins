@@ -9,7 +9,7 @@
     <PropertyGroup>
         <Product>Bringin</Product>
         <Description>Euro Offramp</Description>
-        <Version>1.0.1</Version>
+        <Version>1.0.2</Version>
 <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->
@@ -41,6 +41,6 @@
 
 
     <ItemGroup>
-      <PackageReference Include="AsyncKeyedLock" Version="6.3.4" />
+      <PackageReference Include="AsyncKeyedLock" Version="7.0.1" />
     </ItemGroup>
 </Project>

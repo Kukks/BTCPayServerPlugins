@@ -2,9 +2,10 @@
 @using BTCPayServer.Models.StoreViewModels
 @using BTCPayServer.Plugins.Breez
 @using BTCPayServer.Security
+@using BTCPayServer.Services.Invoices
 @using Microsoft.AspNetCore.Mvc.TagHelpers
 @inject BreezService BreezService
-@inject BTCPayNetworkProvider BtcPayNetworkProvider
+@inject PaymentMethodHandlerDictionary PaymentMethodHandlerDictionary
 @{
     Layout = "_Layout";
     ViewData.SetActivePage("Breez", "Sweep", "Sweep");
@@ -24,7 +25,7 @@
     var sdk = BreezService.GetClient(storeId)?.Sdk;
     if (sdk is null)
         return;
-    var deriv = Context.GetStoreData().GetDerivationSchemeSettings(BtcPayNetworkProvider, "BTC");
+    var deriv = Context.GetStoreData().GetDerivationSchemeSettings(PaymentMethodHandlerDictionary, "BTC");
     var f = sdk.RecommendedFees();
 }
 <datalist id="fees">

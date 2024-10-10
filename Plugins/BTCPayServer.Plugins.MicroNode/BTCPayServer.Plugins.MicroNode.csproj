@@ -34,7 +34,7 @@
     <ItemGroup>
         <EmbeddedResource Include="Resources\**" />    
         <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
-        <PackageReference Include="AsyncKeyedLock" Version="6.4.2" />
+        <PackageReference Include="AsyncKeyedLock" Version="7.0.1" />
         <PackageReference Include="FlexLabs.EntityFrameworkCore.Upsert" Version="8.0.0" />
         <PackageReference Include="Laraue.EfCoreTriggers.PostgreSql" Version="8.0.3" />
         <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="4.10.0" />

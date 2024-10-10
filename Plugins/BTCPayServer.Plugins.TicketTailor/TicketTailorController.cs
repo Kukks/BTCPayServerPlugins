@@ -12,6 +12,7 @@ using BTCPayServer.Client.Models;
 using BTCPayServer.Controllers;
 using BTCPayServer.Data;
 using BTCPayServer.Models;
+using BTCPayServer.Services;
 using BTCPayServer.Services.Apps;
 using BTCPayServer.Services.Invoices;
 using Microsoft.AspNetCore.Authorization;
@@ -28,6 +29,7 @@ namespace BTCPayServer.Plugins.TicketTailor
     {
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly TicketTailorService _ticketTailorService;
+        private readonly UriResolver _uriResolver;
         private readonly AppService _appService;
         private readonly ApplicationDbContextFactory _contextFactory;
         private readonly InvoiceRepository _invoiceRepository;
@@ -35,6 +37,7 @@ namespace BTCPayServer.Plugins.TicketTailor
 
         public TicketTailorController(IHttpClientFactory httpClientFactory,
             TicketTailorService ticketTailorService,
+            UriResolver uriResolver,
             AppService appService,
             ApplicationDbContextFactory contextFactory,
             InvoiceRepository invoiceRepository,
@@ -42,6 +45,7 @@ namespace BTCPayServer.Plugins.TicketTailor
         {
             _httpClientFactory = httpClientFactory;
             _ticketTailorService = ticketTailorService;
+            _uriResolver = uriResolver;
             _appService = appService;
             _contextFactory = contextFactory;
             _invoiceRepository = invoiceRepository;
@@ -87,7 +91,7 @@ namespace BTCPayServer.Plugins.TicketTailor
                     return View(new TicketTailorViewModel()
                     {
                         Event = evt, Settings = config,
-                        StoreBranding = new StoreBrandingViewModel(app.StoreData.GetStoreBlob())
+                        StoreBranding =  await StoreBrandingViewModel.CreateAsync(Request, _uriResolver, app.StoreData.GetStoreBlob())
                     });
                 }
             }
@@ -270,7 +274,6 @@ namespace BTCPayServer.Plugins.TicketTailor
                             AdditionalSearchTerms = new[] {"tickettailor", hold.Value.Item1.Id, evt.Id, AppService.GetAppSearchTerm(app)},
                             Checkout =
                             {
-                                RequiresRefundEmail = true,
                                 RedirectAutomatically = price > 0,
                                 RedirectURL = redirectUrl,
                             },
@@ -292,13 +295,13 @@ namespace BTCPayServer.Plugins.TicketTailor
                             
                         }, app.StoreData, HttpContext.Request.GetAbsoluteRoot(),new List<string> { AppService.GetAppInternalTag(appId) }, CancellationToken.None);
 
-                    while (inv.Price == 0 && inv.Status == InvoiceStatusLegacy.New)
+                    while (inv.Price == 0 && inv.Status == InvoiceStatus.New)
                     {
-                        if (inv.Status == InvoiceStatusLegacy.New)
+                        if (inv.Status == InvoiceStatus.New)
                             inv = await _invoiceRepository.GetInvoice(inv.Id);
                     }
 
-                    return inv.Status.ToModernStatus() == InvoiceStatus.Settled
+                    return inv.Status == InvoiceStatus.Settled
                         ? RedirectToAction("Receipt", new {invoiceId = inv.Id})
                         : RedirectToAction("Checkout", "UIInvoice", new {invoiceId = inv.Id});
                 }
@@ -342,13 +345,13 @@ namespace BTCPayServer.Plugins.TicketTailor
                 var appId = AppService.GetAppInternalTags(inv).First();
                 
                 var result = new TicketReceiptPage() {InvoiceId = invoiceId};
-                result.Status = inv.Status.ToModernStatus();
+                result.Status = inv.Status;
                 if (result.Status == InvoiceStatus.Settled &&
                     inv.Metadata.AdditionalData.TryGetValue("ticketIds", out var ticketIds))
                 {
                     await SetTicketTailorTicketResult(appId, result, ticketIds.Values<string>());
                 }
-                else if (inv.Status.ToModernStatus() == InvoiceStatus.Settled)
+                else if (inv.Status == InvoiceStatus.Settled)
                 {
                     await _ticketTailorService.CheckAndIssueTicket(inv.Id);
                 }

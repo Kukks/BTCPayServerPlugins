@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Payments;
+using BTCPayServer.Payouts;
 using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json.Linq;
 
@@ -30,7 +31,7 @@ public class OpenSatsDestinationValidator : IPluginHookFilter
             
             var parts = args1.ToLowerInvariant().Split(":", StringSplitOptions.RemoveEmptyEntries);
             var project = "general_fund";
-            var paymentMethod = new PaymentMethodId("BTC", PaymentTypes.LightningLike);
+            var paymentMethod = PayoutTypes.LN.GetPayoutMethodId("BTC");
             if (parts.Length > 1)
             {
                 project = parts[1];
@@ -38,12 +39,11 @@ public class OpenSatsDestinationValidator : IPluginHookFilter
 
             if (parts.Length > 2)
             {
-                paymentMethod = PaymentMethodId.Parse(parts[2]);
+                paymentMethod = PayoutMethodId.Parse(parts[2]);
             }
-            
-            
-            var handler = _serviceProvider.GetServices<IPayoutHandler>().FindPayoutHandler(paymentMethod);
-            if (handler is null)
+
+
+            if (_serviceProvider.GetService<PayoutMethodHandlerDictionary>().TryGetValue(paymentMethod, out var handler))
             {
                 result.Success = false;
             }
@@ -63,7 +63,7 @@ public class OpenSatsDestinationValidator : IPluginHookFilter
             var invoiceBtcpayModel = JObject.Parse(await httpClient.GetStringAsync(invoiceUrl).ConfigureAwait(false));
             var destination = invoiceBtcpayModel.Value<string>("btcAddress");
            
-            var claimDestination = await handler.ParseClaimDestination(paymentMethod,destination, CancellationToken.None);
+            var claimDestination = await handler.ParseClaimDestination(destination, CancellationToken.None);
             if (claimDestination.destination is null)
             {
 
@@ -72,7 +72,7 @@ public class OpenSatsDestinationValidator : IPluginHookFilter
            
 
             result.Success = true;
-            result.PaymentMethod = paymentMethod;
+            result.PayoutMethodId = paymentMethod;
             return result;
         }
         catch (Exception e)

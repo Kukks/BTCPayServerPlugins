@@ -101,8 +101,7 @@ public class TicketTailorService : EventHostedServiceBase, IWebhookProvider
                                                 !new[]
                                                 {
                                                     InvoiceStatus.Settled, InvoiceStatus.Expired, InvoiceStatus.Invalid
-                                                }.Contains(invoiceEvent.Invoice.GetInvoiceState().Status
-                                                    .ToModernStatus()):
+                                                }.Contains(invoiceEvent.Invoice.GetInvoiceState().Status):
                 return;
             case InvoiceEvent invoiceEvent:
 
@@ -157,7 +156,7 @@ public class TicketTailorService : EventHostedServiceBase, IWebhookProvider
                 return;
             }
 
-            if (new[] {InvoiceStatus.Invalid, InvoiceStatus.Expired}.Contains(invoice.Status.ToModernStatus()))
+            if (new[] {InvoiceStatus.Invalid, InvoiceStatus.Expired}.Contains(invoice.Status))
             {
 
                 if (invoice.Metadata.AdditionalData.TryGetValue("holdId", out var jHoldIdx) &&
@@ -178,7 +177,7 @@ public class TicketTailorService : EventHostedServiceBase, IWebhookProvider
                 return;
             }
 
-            if (invoice.Status.ToModernStatus() != InvoiceStatus.Settled)
+            if (invoice.Status != InvoiceStatus.Settled)
             {
                 return;
             }

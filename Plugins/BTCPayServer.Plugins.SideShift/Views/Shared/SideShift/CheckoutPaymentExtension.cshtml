@@ -2,19 +2,18 @@
 @using BTCPayServer.Payments
 @inject BTCPayServer.Security.ContentSecurityPolicies csp
 @inject SideShiftService SideShiftService
-@model BTCPayServer.Models.InvoicingModels.PaymentModel 
+@model BTCPayServer.Models.InvoicingModels.CheckoutModel 
 @{
     var settings = await SideShiftService.GetSideShiftForInvoice(Model.InvoiceId, Model.StoreId);
-    var preferredTargetPaymentMethodId = "";
+    PaymentMethodId preferredTargetPaymentMethodId = null;
     if(!PaymentMethodId.TryParse(settings?.PreferredTargetPaymentMethodId, out var preferredPMI))
     {
         preferredTargetPaymentMethodId = null;
     }
     else
     {
-        preferredTargetPaymentMethodId = Model.AvailableCryptos.FirstOrDefault(crypto =>
-            crypto.PaymentMethodId == settings.PreferredTargetPaymentMethodId ||
-            (crypto.CryptoCode == preferredPMI.CryptoCode && crypto.PaymentMethodId.EndsWith(LNURLPayPaymentType.Instance.GetId()) || crypto.PaymentMethodId.EndsWith(LightningPaymentType.Instance.GetId())))?.PaymentMethodId;
+        preferredTargetPaymentMethodId = Model.AvailablePaymentMethods.FirstOrDefault(crypto =>
+            crypto.PaymentMethodId == preferredPMI )?.PaymentMethodId;
     }
 }
 @if (settings?.Enabled is true)
@@ -25,7 +24,8 @@
     <template id="side-shift-checkout-template">
         <div class="payment-box">
             <p v-html="content"></p>
-            <button type="button" v-on:click="openDialog" class="btn btn-primary rounded-pill w-100">{{$t("Pay with SideShift")}}</button>
+            <p v-if="!settleMethodId" class="text-danger">Lightning is not supported via Sideshift. Select another payment method first, then come back.</p>
+            <button v-if="settleMethodId" type="button" v-on:click="openDialog" class="btn btn-primary rounded-pill w-100">{{$t("Pay with SideShift", {crryptoCode: settleMethodId})}}</button>
         </div>
     </template>
     <script>
@@ -48,7 +48,7 @@
                 },200)
                 
                 if(this.preferredToCurrency && this.model.paymentMethodId !== this.preferredToCurrency){
-                    if (this.model.onChainWithLnInvoiceFallback && this.model.paymentMethodId === "BTC"){
+                    if (this.model.onChainWithLnInvoiceFallback && this.model.paymentMethodId === "BTC-CHAIN"){
                        return;
                     }
                     this.$parent.paymentMethodId = this.preferredToCurrency;
@@ -58,16 +58,7 @@
                 
             },
             computed: {
-                lightning () {
-                    if (!this.model.onChainWithLnInvoiceFallback || this.model.paymentMethodId !== "BTC"){
-                        return null;
-                    }
-                    const index = this.model.invoiceBitcoinUrl.indexOf("lightning=");
-                    if (index === -1){
-                        return null;
-                    }
-                    return this.model.invoiceBitcoinUrl.slice(index + "lightning=".length);
-                },
+    
                 content () {
                     return this.$i18n.i18next.t("conversion_body", this.model).replace(/\n/ig, '<br>');
                 },
@@ -76,16 +67,16 @@
                 },
                 settleMethodId () {
                     
-                    const toCurrency = this.currency.toLowerCase();
+                    const toCurrency = this.currency.toUpperCase();
                     
                     if (toCurrency === "lbtc") {
                         return 'liquid';
                     } else if (toCurrency === "usdt") {
                         return "usdtla";
-                    } else if (toCurrency.endsWith('lightninglike') || toCurrency.endsWith('lnurlpay') || this.lightning) {
-                        return "ln";
+                    } else if (toCurrency.endsWith('LN') || toCurrency.endsWith('LNURL')) {
+                        return null;
                     } else {
-                        return toCurrency.replace('_btclike', '').replace('_monerolike', '').replace('_zcashlike', '').toLowerCase();
+                        return toCurrency.replace('-CHAIN', '').replace('_CHAIN', '').toLowerCase();
                     }
                 },
                 type () {
@@ -96,16 +87,19 @@
                 amountDue () {
                     return this.model.isUnsetTopUp
                         ? undefined
-                        : this.model.btcDue * (1 + (@settings.AmountMarkupPercentage / 100));
+                        : this.model.due * (1 + (@settings.AmountMarkupPercentage / 100));
                 }
             },
             methods: {
                 openDialog () {
+                    if (!this.settleMethodId){
+                        return;
+                    }
                     window.__SIDESHIFT__ = {
                         parentAffiliateId: "qg0OrfHJV",
                         defaultDepositMethodId: this.explicitId || undefined,
                         defaultSettleMethodId: this.settleMethodId,
-                        settleAddress: this.lightning || this.model.btcAddress,
+                        settleAddress: this.model.address,
                         settleAmount: this.amountDue,
                         type: this.type
                     };

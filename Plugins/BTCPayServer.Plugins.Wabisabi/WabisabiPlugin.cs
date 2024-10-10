@@ -9,6 +9,8 @@ using BTCPayServer.Common;
 using BTCPayServer.Data;
 using BTCPayServer.Payments;
 using BTCPayServer.PayoutProcessors;
+using BTCPayServer.Payouts;
+using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -29,7 +31,7 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
 {
     public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
     {
-        new() { Identifier = nameof(BTCPayServer), Condition = ">=1.13.2" }
+        new() { Identifier = nameof(BTCPayServer), Condition = ">=2.0.0" }
     };
     public override void Execute(IServiceCollection applicationBuilder)
     {
@@ -47,6 +49,7 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
             provider.GetRequiredService<EventAggregator>(),
             provider.GetRequiredService<ILogger<WalletProvider>>(),
             provider.GetRequiredService<BTCPayNetworkProvider>(),
+            provider.GetRequiredService<PaymentMethodHandlerDictionary>(),
             provider.GetRequiredService<IMemoryCache>()
         ));
         applicationBuilder.AddWabisabiCoordinator();
@@ -80,9 +83,9 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
         }
         public string Processor { get; } = "Wabisabi";
         public string FriendlyName { get; } = "Coinjoin";
-        public string ConfigureLink(string storeId, PaymentMethodId paymentMethodId, HttpRequest request)
+        public string ConfigureLink(string storeId, PayoutMethodId payoutMethodId, HttpRequest request)
         {
-           return  _linkGenerator.GetUriByAction(
+            return  _linkGenerator.GetUriByAction(
                 nameof(WabisabiStoreController.UpdateWabisabiStoreSettings),
                 "WabisabiStore",
                 new { storeId},
@@ -90,11 +93,12 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
                 request.Host,
                 request.PathBase);
         }
-    
-        public IEnumerable<PaymentMethodId> GetSupportedPaymentMethods()
+
+        public IEnumerable<PayoutMethodId> GetSupportedPayoutMethods()
         {
-            return new[] {new PaymentMethodId("BTC", BitcoinPaymentType.Instance)};
+            return new[] { PayoutTypes.CHAIN.GetPayoutMethodId("BTC")};
         }
+    
 
         public async Task<IHostedService> ConstructProcessor(PayoutProcessorData settings)
         {

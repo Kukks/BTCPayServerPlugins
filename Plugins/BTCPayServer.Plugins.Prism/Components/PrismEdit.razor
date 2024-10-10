@@ -4,6 +4,7 @@
 @using BTCPayServer.HostedServices
 @using BTCPayServer.Payments
 @using BTCPayServer.PayoutProcessors
+@using BTCPayServer.Payouts
 @using Microsoft.AspNetCore.Http
 @using Microsoft.AspNetCore.Routing
 @using Microsoft.Extensions.Logging
@@ -28,7 +29,7 @@ else
 {
     <datalist id="users">
         <option value="*">Catch-all lightning payments made against invoices in your store (excluding when other prisms are configured that capture those payments.)</option>
-        <option value="*@BitcoinPaymentType.Instance.ToStringNormalized()">Catch-all on-chain payments made against invoices in your store</option>
+        <option value="*@PaymentTypes.CHAIN.ToString()">Catch-all on-chain payments made against invoices in your store</option>
         <option value="*All">Catch-all any payments made against invoices in your store</option>
 
         @foreach (var user in Users)
@@ -201,8 +202,8 @@ else
 
     public bool Loading { get; set; } = true;
     public List<LightningAddressData> Users { get; set; } = new();
-    public PaymentMethodId pmi { get; set; } = new("BTC", LightningPaymentType.Instance);
-    public PaymentMethodId pmichain { get; set; } = new("BTC", PaymentTypes.BTCLike);
+    public PayoutMethodId pmi { get; set; } = PayoutTypes.LN.GetPayoutMethodId("BTC");
+    public PayoutMethodId pmichain { get; set; } = PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
     public bool NoPayoutProcessors { get; set; }
 
     private string PrismEditButtonsFilter { get; set; }
@@ -224,7 +225,7 @@ else
             var fetchProcessors = PayoutProcessorService.GetProcessors(new PayoutProcessorService.PayoutProcessorQuery()
             {
                 Stores = new[] {StoreId},
-                PaymentMethods = new[] {pmi.ToString(), pmichain.ToString()}
+                PayoutMethods = new[] {pmi, pmichain}
             });
 
             var tasks = new Task[]
@@ -243,8 +244,8 @@ else
             EditContext.OnFieldChanged += FieldChanged;
             SatBreaker.PrismUpdated += SatBreakerOnPrismUpdated;
             //set NoPayoutProcessors to true if there are no configured payout processores for pmi and pmichain 
-            NoPayoutProcessors = PayoutProcessorFactories.Any(factory => factory.GetSupportedPaymentMethods().Contains(pmi)) && (await fetchProcessors).All(data =>
-                !new[] {pmi, pmichain}.Contains(data.GetPaymentMethodId()));
+            NoPayoutProcessors = PayoutProcessorFactories.Any(factory => factory.GetSupportedPayoutMethods().Contains(pmi)) && (await fetchProcessors).All(data =>
+                !new[] {pmi, pmichain}.Contains(data.GetPayoutMethodId()));
 
             Loading = false;
             await InvokeAsync(StateHasChanged);

@@ -12,6 +12,7 @@ namespace BTCPayServer.Plugins.DataErasure
     public class DataErasureController : Controller
     {
         private readonly DataErasureService _dataErasureService;
+
         public DataErasureController(DataErasureService dataErasureService)
         {
             _dataErasureService = dataErasureService;
@@ -31,10 +32,11 @@ namespace BTCPayServer.Plugins.DataErasure
         {
             if (_dataErasureService.IsRunning)
             {
-                TempData["ErrorMessage"] = "Data erasure is currently running and cannot be changed. Please try again later.";
+                TempData["ErrorMessage"] =
+                    "Data erasure is currently running and cannot be changed. Please try again later.";
             }
 
-            
+
             if (vm.Enabled)
             {
                 if (!ModelState.IsValid)
@@ -46,7 +48,11 @@ namespace BTCPayServer.Plugins.DataErasure
 
             switch (command)
             {
-                    
+                case "cleardate":
+                    await _dataErasureService.Set(storeId, vm, true);
+
+                    TempData["SuccessMessage"] = "Data erasure settings modified and date cleared";
+                    return RedirectToAction(nameof(Update), new {storeId});
                 case "save":
                     await _dataErasureService.Set(storeId, vm);
                     TempData["SuccessMessage"] = "Data erasure settings modified";

@@ -1,18 +1,12 @@
 ﻿using System;
-using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
-using BTCPayServer.Abstractions.Custodians;
-using BTCPayServer.Abstractions.Extensions;
-using BTCPayServer.Data;
 using BTCPayServer.HostedServices;
-using BTCPayServer.Payments;
-using Microsoft.EntityFrameworkCore;
+using BTCPayServer.Payouts;
 using Microsoft.Extensions.DependencyInjection;
-using NBitcoin;
 using Newtonsoft.Json.Linq;
 
 namespace BTCPayServer.Plugins.Prism;
@@ -38,10 +32,10 @@ public class OpenSatsPrismClaimCreate : IPluginHookFilter
 
         try
         {
-
+           
             var parts = args1.Split(":", StringSplitOptions.RemoveEmptyEntries);
             var project = "opensats";
-            var paymentMethod = new PaymentMethodId("BTC", PaymentTypes.LightningLike);
+            var paymentMethod = PayoutTypes.LN.GetPayoutMethodId("BTC");
             if (parts.Length > 1)
             {
                 project = parts[1];
@@ -49,11 +43,11 @@ public class OpenSatsPrismClaimCreate : IPluginHookFilter
 
             if (parts.Length > 2)
             {
-                paymentMethod = PaymentMethodId.Parse(parts[2]);
+                paymentMethod = PayoutMethodId.Parse(parts[2]);
             }
             
             
-            var handler = _serviceProvider.GetServices<IPayoutHandler>().FindPayoutHandler(paymentMethod);
+           _serviceProvider.GetService<PayoutMethodHandlerDictionary>().TryGetValue(paymentMethod, out var handler);
             if (handler is null)
             {
                 return null;
@@ -75,7 +69,7 @@ public class OpenSatsPrismClaimCreate : IPluginHookFilter
             var destination = invoiceBtcpayModel.Value<string>("btcAddress");
             var receiptLink = invoiceBtcpayModel.Value<string>("receiptLink");
            
-            var claimDestination = await handler.ParseClaimDestination(paymentMethod,destination, CancellationToken.None);
+            var claimDestination = await handler.ParseClaimDestination(destination, CancellationToken.None);
             if (claimDestination.destination is null)
             {
 
@@ -88,7 +82,7 @@ public class OpenSatsPrismClaimCreate : IPluginHookFilter
             });
 
             claimRequest.Destination = claimDestination.destination;
-            claimRequest.PaymentMethodId = paymentMethod;
+            claimRequest.PayoutMethodId = paymentMethod;
 
             return claimRequest;
 

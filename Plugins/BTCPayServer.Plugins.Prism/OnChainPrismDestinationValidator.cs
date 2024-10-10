@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Data;
 using BTCPayServer.Payments;
+using BTCPayServer.Payouts;
 using NBitcoin;
 using NBXplorer;
 
@@ -34,7 +35,7 @@ public class OnChainPrismDestinationValidator : IPluginHookFilter
             return Task.FromResult<object>(new PrismDestinationValidationResult()
             {
                 Success = true,
-                PaymentMethod = new PaymentMethodId("BTC", PaymentTypes.BTCLike)
+                PayoutMethodId = PayoutTypes.CHAIN.GetPayoutMethodId("BTC")
             });
         }
         catch (Exception e)
@@ -46,7 +47,7 @@ public class OnChainPrismDestinationValidator : IPluginHookFilter
                 return Task.FromResult<object>(new PrismDestinationValidationResult()
                 {
                     Success = true,
-                    PaymentMethod = new PaymentMethodId("BTC", PaymentTypes.BTCLike)
+                    PayoutMethodId =PayoutTypes.CHAIN.GetPayoutMethodId("BTC")
                 });
             }
             catch (Exception)

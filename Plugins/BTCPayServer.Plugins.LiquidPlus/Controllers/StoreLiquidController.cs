@@ -10,7 +10,10 @@ using BTCPayServer.Abstractions.Extensions;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Client;
 using BTCPayServer.Common;
+using BTCPayServer.Data;
 using BTCPayServer.Plugins.Altcoins;
+using BTCPayServer.Services.Invoices;
+using BTCPayServer.Services.Stores;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
@@ -25,20 +28,24 @@ namespace BTCPayServer.Plugins.LiquidPlus.Controllers
     [AutoValidateAntiforgeryToken]
     public class StoreLiquidController : Controller
     {
+        private readonly PaymentMethodHandlerDictionary _paymentMethodHandlerDictionary;
+        private readonly StoreRepository _storeRepository;
         private readonly BTCPayNetworkProvider _btcPayNetworkProvider;
-        private readonly BTCPayServerClient _client;
         private readonly IExplorerClientProvider _explorerClientProvider;
 
-        public StoreLiquidController(BTCPayNetworkProvider btcPayNetworkProvider,
-            BTCPayServerClient client, IExplorerClientProvider explorerClientProvider)
+        public StoreLiquidController(PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
+            StoreRepository storeRepository, BTCPayNetworkProvider btcPayNetworkProvider,
+            IExplorerClientProvider explorerClientProvider)
         {
+            _paymentMethodHandlerDictionary = paymentMethodHandlerDictionary;
+            _storeRepository = storeRepository;
             _btcPayNetworkProvider = btcPayNetworkProvider;
-            _client = client;
             _explorerClientProvider = explorerClientProvider;
         }
 
         [HttpGet("stores/{storeId}/liquid")]
-        public async Task<IActionResult> GenerateLiquidScript(string storeId, Dictionary<string, BitcoinExtKey> bitcoinExtKeys = null)
+        public async Task<IActionResult> GenerateLiquidScript(string storeId,
+            Dictionary<string, BitcoinExtKey> bitcoinExtKeys = null)
         {
             Dictionary<string, string> generated = new Dictionary<string, string>();
             var allNetworks = _btcPayNetworkProvider.GetAll().OfType<ElementsBTCPayNetwork>()
@@ -48,13 +55,20 @@ namespace BTCPayServer.Plugins.LiquidPlus.Controllers
                 .ToArray()
                 .Distinct();
             Dictionary<string, BitcoinExtKey> privKeys = bitcoinExtKeys ?? new Dictionary<string, BitcoinExtKey>();
-            
-            
-            var paymentMethods = (await _client.GetStoreOnChainPaymentMethods(storeId))
-                .Where(settings => allNetworkCodes.Contains(settings.CryptoCode))
-                .GroupBy(data => _btcPayNetworkProvider.GetNetwork<ElementsBTCPayNetwork>(data.CryptoCode).NetworkCryptoCode);
 
-            if (paymentMethods.Any() is false)
+            var store = await _storeRepository.FindStore(storeId);
+            var pms = store
+                .GetPaymentMethodConfigs<DerivationSchemeSettings>(_paymentMethodHandlerDictionary)
+                .Select(pair => (PaymentMethodId: pair.Key, DerivationSchemeSettings: pair.Value,
+                    CryptoCode: pair.Key.ToString().Split("-")[0])).ToArray();
+
+            var paymentMethodsGroupedByNetworkCode =
+                pms
+                    .Where(settings => allNetworkCodes.Contains(settings.CryptoCode))
+                    .GroupBy(data =>
+                        _btcPayNetworkProvider.GetNetwork<ElementsBTCPayNetwork>(data.CryptoCode).NetworkCryptoCode);
+
+            if (paymentMethodsGroupedByNetworkCode.Any() is false)
             {
                 TempData.SetStatusMessageModel(new StatusMessageModel()
                 {
@@ -63,12 +77,12 @@ namespace BTCPayServer.Plugins.LiquidPlus.Controllers
                 });
                 return View(new GenerateLiquidImportScripts());
             }
-            
-            foreach (var der in paymentMethods)
+
+            foreach (var der in paymentMethodsGroupedByNetworkCode)
             {
                 var network = _btcPayNetworkProvider.GetNetwork<ElementsBTCPayNetwork>(der.Key);
                 var nbxnet = network.NBXplorerNetwork;
-               
+
                 var sb = new StringBuilder();
 
                 var explorerClient = _explorerClientProvider.GetExplorerClient(der.Key);
@@ -79,12 +93,12 @@ namespace BTCPayServer.Plugins.LiquidPlus.Controllers
                     generated.Add(der.Key, sb.ToString());
                     continue;
                 }
-                var derivationSchemesForNetwork = der.GroupBy(data => data.DerivationScheme);
-                
+
+                var derivationSchemesForNetwork = der.GroupBy(data => data.DerivationSchemeSettings);
+
                 foreach (var paymentMethodDerivationScheme in derivationSchemesForNetwork)
                 {
-                    var derivatonScheme =
-                        nbxnet.DerivationStrategyFactory.Parse(paymentMethodDerivationScheme.Key);
+                    var derivatonScheme = paymentMethodDerivationScheme.Key.AccountDerivation;
                     var sameWalletCryptoCodes = paymentMethodDerivationScheme.Select(data => data.CryptoCode).ToArray();
                     var matchedExistingKey = privKeys.Where(pair => sameWalletCryptoCodes.Contains(pair.Key));
                     BitcoinExtKey key = null;
@@ -94,22 +108,20 @@ namespace BTCPayServer.Plugins.LiquidPlus.Controllers
                     }
                     else
                     {
-
                         key = await explorerClient.GetMetadataAsync<BitcoinExtKey>(derivatonScheme,
                             WellknownMetadataKeys.AccountHDKey);
                     }
 
                     if (key != null)
                     {
-                        
                         foreach (var paymentMethodData in paymentMethodDerivationScheme)
-                    {
-                        privKeys.TryAdd(paymentMethodData.CryptoCode, key);
-                    }
+                        {
+                            privKeys.TryAdd(paymentMethodData.CryptoCode, key);
+                        }
                     }
 
                     var utxos = await explorerClient.GetUTXOsAsync(derivatonScheme, CancellationToken.None);
-                    
+
                     foreach (var utxo in utxos.GetUnspentUTXOs())
                     {
                         var addr = nbxnet.CreateAddress(derivatonScheme, utxo.KeyPath, utxo.ScriptPubKey);
@@ -139,21 +151,21 @@ namespace BTCPayServer.Plugins.LiquidPlus.Controllers
                 {
                     sb.AppendLine("elements-cli stop");
                     sb.AppendLine("elementsd -rescan");
-                    
                 }
+
                 generated.Add(der.Key, sb.ToString());
             }
 
             return View(new GenerateLiquidImportScripts()
             {
-                Wallets = paymentMethods.SelectMany(settings =>
-                    settings.Select(data => 
-                    new GenerateLiquidImportScripts.GenerateLiquidImportScriptWalletKeyVm()
-                    {
-                        CryptoCode = data.CryptoCode,
-                        KeyPresent = privKeys.ContainsKey(data.CryptoCode),
-                        ManualKey = null
-                    }).ToArray()).ToArray(),
+                Wallets = paymentMethodsGroupedByNetworkCode.SelectMany(settings =>
+                    settings.Select(data =>
+                        new GenerateLiquidImportScripts.GenerateLiquidImportScriptWalletKeyVm()
+                        {
+                            CryptoCode = data.CryptoCode,
+                            KeyPresent = privKeys.ContainsKey(data.CryptoCode),
+                            ManualKey = null
+                        }).ToArray()).ToArray(),
                 Scripts = generated
             });
         }
@@ -199,10 +211,9 @@ namespace BTCPayServer.Plugins.LiquidPlus.Controllers
                     continue;
                 }
 
+                var der = HttpContext.GetStoreData()
+                    .GetDerivationSchemeSettings(_paymentMethodHandlerDictionary, wallet.CryptoCode).AccountDerivation;
 
-
-                var der = n.NBXplorerNetwork.DerivationStrategyFactory.Parse(
-                    (await _client.GetStoreOnChainPaymentMethod(storeId, wallet.CryptoCode)).DerivationScheme);
                 if (der.GetExtPubKeys().Count() > 1)
                 {
                     vm.AddModelError(scripts => scripts.Wallets[index].ManualKey, "cannot handle multsig", this);
@@ -250,7 +261,8 @@ namespace BTCPayServer.Plugins.LiquidPlus.Controllers
 
             return await GenerateLiquidScript(storeId, privKeys);
         }
-public class GenerateLiquidImportScripts
+
+        public class GenerateLiquidImportScripts
         {
             public class GenerateLiquidImportScriptWalletKeyVm
             {
@@ -266,6 +278,7 @@ public class GenerateLiquidImportScripts
         }
     }
 }
+
 namespace XX
 {
     public static class ModelStateExtensions
@@ -275,7 +288,9 @@ namespace XX
             string message,
             ControllerBase controller)
         {
-            var provider = (ModelExpressionProvider)controller.HttpContext.RequestServices.GetService(typeof(ModelExpressionProvider));
+            var provider =
+                (ModelExpressionProvider) controller.HttpContext.RequestServices.GetService(
+                    typeof(ModelExpressionProvider));
             var key = provider.GetExpressionText(ex);
             controller.ModelState.AddModelError(key, message);
         }

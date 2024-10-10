@@ -48,10 +48,10 @@ public class AppMigrate : IStartupTask
             await using var ctx = _contextFactory.CreateContext();
             var invoices = await ctx.Invoices
                 .Include(data => data.InvoiceSearchData)
-                .Where(data => data.StoreDataId == setting.Key && data.OrderId == "tickettailor").ToListAsync(cancellationToken: cancellationToken);
+                .Where(data => data.StoreDataId == setting.Key && data.InvoiceSearchData.Any(searchData => searchData.Value == "tickettailor")).ToListAsync(cancellationToken: cancellationToken);
             foreach (var invoice in invoices)
             { 
-                var entity = invoice.GetBlob(_btcPayNetworkProvider);
+                var entity = invoice.GetBlob();
                 entity.Metadata.SetAdditionalData("appId", app.Id);
                 entity.InternalTags.Add(AppService.GetAppInternalTag(app.Id));
                 InvoiceRepository.AddToTextSearch(ctx, invoice, AppService.GetAppSearchTerm(app) );

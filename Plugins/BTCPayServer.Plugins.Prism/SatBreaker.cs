@@ -13,6 +13,7 @@ using BTCPayServer.HostedServices;
 using BTCPayServer.Lightning;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Lightning;
+using BTCPayServer.Payouts;
 using BTCPayServer.Services;
 using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
@@ -47,13 +48,13 @@ namespace BTCPayServer.Plugins.Prism
     {
         private readonly StoreRepository _storeRepository;
         private readonly ILogger<SatBreaker> _logger;
-        private readonly LightningAddressService _lightningAddressService;
         private readonly PullPaymentHostedService _pullPaymentHostedService;
-        private readonly LightningLikePayoutHandler _lightningLikePayoutHandler;
         private readonly BTCPayNetworkProvider _btcPayNetworkProvider;
         private readonly LightningClientFactoryService _lightningClientFactoryService;
         private readonly IOptions<LightningNetworkOptions> _lightningNetworkOptions;
         private readonly BTCPayNetworkJsonSerializerSettings _btcPayNetworkJsonSerializerSettings;
+        private readonly PaymentMethodHandlerDictionary _paymentMethodHandlerDictionary;
+        private readonly PayoutMethodHandlerDictionary _payoutMethodHandlerDictionary;
         private readonly IPluginHookService _pluginHookService;
         private Dictionary<string, PrismSettings> _prismSettings;
 
@@ -62,24 +63,24 @@ namespace BTCPayServer.Plugins.Prism
         public SatBreaker(StoreRepository storeRepository,
             EventAggregator eventAggregator,
             ILogger<SatBreaker> logger,
-            LightningAddressService lightningAddressService,
             PullPaymentHostedService pullPaymentHostedService,
-            LightningLikePayoutHandler lightningLikePayoutHandler,
             BTCPayNetworkProvider btcPayNetworkProvider,
             LightningClientFactoryService lightningClientFactoryService,
             IOptions<LightningNetworkOptions> lightningNetworkOptions,
             BTCPayNetworkJsonSerializerSettings btcPayNetworkJsonSerializerSettings,
+            PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
+            PayoutMethodHandlerDictionary payoutMethodHandlerDictionary,
             IPluginHookService pluginHookService) : base(eventAggregator, logger)
         {
             _storeRepository = storeRepository;
             _logger = logger;
-            _lightningAddressService = lightningAddressService;
             _pullPaymentHostedService = pullPaymentHostedService;
-            _lightningLikePayoutHandler = lightningLikePayoutHandler;
             _btcPayNetworkProvider = btcPayNetworkProvider;
             _lightningClientFactoryService = lightningClientFactoryService;
             _lightningNetworkOptions = lightningNetworkOptions;
             _btcPayNetworkJsonSerializerSettings = btcPayNetworkJsonSerializerSettings;
+            _paymentMethodHandlerDictionary = paymentMethodHandlerDictionary;
+            _payoutMethodHandlerDictionary = payoutMethodHandlerDictionary;
             _pluginHookService = pluginHookService;
         }
 
@@ -145,20 +146,28 @@ namespace BTCPayServer.Plugins.Prism
                     {
                         continue;
                     }
-
+                    
                     foreach (var payout in storePayouts)
                     {
+                        
                         if (!pendingPayouts.TryGetValue(payout.Id, out var pendingPayout))
                         {
                             continue;
                         }
+                        
+                        if(payout.GetPayoutMethodId() is not { } payoutMethodId)
+                            continue;
 
+                        if (!_payoutMethodHandlerDictionary.TryGetValue(payoutMethodId, out var handler))
+                        {
+                            continue;
+                        }
                         long toCredit = 0;
                         switch (payout.State)
                         {
                             case PayoutState.Completed:
-
-                                var proof = _lightningLikePayoutHandler.ParseProof(payout) as PayoutLightningBlob;
+                                
+                                var proof = handler.ParseProof(payout) as PayoutLightningBlob;
 
                                 long? feePaid = null;
                                 if (!string.IsNullOrEmpty(proof?.PaymentHash))
@@ -168,10 +177,10 @@ namespace BTCPayServer.Plugins.Prism
                                         var store = await _storeRepository.FindStore(payout.StoreDataId);
 
                                         var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>("BTC");
-                                        var id = new PaymentMethodId("BTC", LightningPaymentType.Instance);
-                                        var existing = store.GetSupportedPaymentMethods(_btcPayNetworkProvider)
-                                            .OfType<LightningSupportedPaymentMethod>()
-                                            .FirstOrDefault(d => d.PaymentId == id);
+                                        var id = PaymentTypes.LN.GetPaymentMethodId("BTC");
+                                        var existing =
+                                            store.GetPaymentMethodConfig<LightningPaymentMethodConfig>(id,
+                                                _paymentMethodHandlerDictionary);
                                         if (existing?.GetExternalLightningUrl() is { } connectionString)
                                         {
                                             lnClient = _lightningClientFactoryService.Create(connectionString,
@@ -313,29 +322,34 @@ namespace BTCPayServer.Plugins.Prism
         private (Split, LightMoney)[] DetermineMatches(PrismSettings prismSettings, InvoiceEntity entity)
         {
             //first check the primary thing - ln address
-            var explicitPMI = new PaymentMethodId("BTC", LNURLPayPaymentType.Instance);
-            var pm = entity.GetPaymentMethod(explicitPMI);
-            var pmd = pm?.GetPaymentMethodDetails() as LNURLPayPaymentMethodDetails;
-            List<(Split, LightMoney)> result = new();
+            var explicitPMI = PaymentTypes.LNURL.GetPaymentMethodId("BTC");
+            var pm = entity.GetPaymentPrompt(explicitPMI);
             
-            var payments = entity.GetPayments(true).GroupBy(paymentEntity => paymentEntity.GetPaymentMethodId()).ToArray();
-            if (pmd?.ConsumedLightningAddress is not null)
+            var payments = entity.GetPayments(true).GroupBy(paymentEntity => paymentEntity.PaymentMethodId).ToArray();
+            List<(Split, LightMoney)> result = new();
+            if(_paymentMethodHandlerDictionary.TryGetValue(explicitPMI, out var handler) && pm is not null)
             {
-                var address = pmd.ConsumedLightningAddress.Split("@")[0];
-                var matchedExplicit = prismSettings.Splits.FirstOrDefault(s =>
-                    s.Source.Equals(address, StringComparison.InvariantCultureIgnoreCase));
-
-                if (matchedExplicit is not null)
+                var pmd = handler.ParsePaymentPromptDetails(pm.Details) as LNURLPayPaymentMethodDetails;
+                
+            
+                if (pmd?.ConsumedLightningAddress is not null)
                 {
-                   var explicitPayments = payments.FirstOrDefault(grouping =>
-                        grouping.Key == explicitPMI)?.Sum(paymentEntity => paymentEntity.PaidAmount.Net);
-                   payments = payments.Where(grouping => grouping.Key != explicitPMI).ToArray();
+                    var address = pmd.ConsumedLightningAddress.Split("@")[0];
+                    var matchedExplicit = prismSettings.Splits.FirstOrDefault(s =>
+                        s.Source.Equals(address, StringComparison.InvariantCultureIgnoreCase));
 
-                   if (explicitPayments > 0)
-                   {
-                       result.Add((matchedExplicit, LightMoney.FromUnit(explicitPayments.Value, LightMoneyUnit.BTC)));
-                   }
-                }
+                    if (matchedExplicit is not null)
+                    {
+                        var explicitPayments = payments.FirstOrDefault(grouping =>
+                            grouping.Key == explicitPMI)?.Sum(paymentEntity => paymentEntity.PaidAmount.Net);
+                        payments = payments.Where(grouping => grouping.Key != explicitPMI).ToArray();
+
+                        if (explicitPayments > 0)
+                        {
+                            result.Add((matchedExplicit, LightMoney.FromUnit(explicitPayments.Value, LightMoneyUnit.BTC)));
+                        }
+                    }
+                } 
             }
             
             var catchAlls = prismSettings.Splits.Where(split => split.Source.StartsWith("*")).Select(split =>
@@ -346,20 +360,25 @@ namespace BTCPayServer.Plugins.Prism
                 switch (split.Source)
                 {
                     case "*":
-                        pmi = new PaymentMethodId("BTC", PaymentTypes.LightningLike);
+                        pmi = PaymentTypes.LN.GetPaymentMethodId("BTC");
                         break;
                     case "*All":
                         break;
-                    case var s when PaymentTypes.TryParse(s.Substring(1), out var pType):
-                        
-                        pmi = new PaymentMethodId("BTC", pType);
+                    case var s when s.StartsWith("*") && s.Substring(1) ==PaymentTypes.CHAIN.ToString():
+                        pmi = PaymentTypes.CHAIN.GetPaymentMethodId("BTC");
+                        break;
+                    case var s2 when s2.StartsWith("*") && s2.Substring(1) ==PaymentTypes.LN.ToString():
+                        pmi = PaymentTypes.LN.GetPaymentMethodId("BTC");
+                        break;
+                    case var s3 when s3.StartsWith("*") && s3.Substring(1) ==PaymentTypes.LNURL.ToString():
+                        pmi = PaymentTypes.LNURL.GetPaymentMethodId("BTC");
                         break;
                     case var s when !PaymentMethodId.TryParse(s.Substring(1), out pmi):
                         valid = false;
                         break;
                 }
 
-                if (pmi is not null && pmi.CryptoCode != "BTC")
+                if (pmi is not null && !pmi.ToString().StartsWith("BTC-"))
                 {
                     valid = false;
                 }
@@ -367,6 +386,7 @@ namespace BTCPayServer.Plugins.Prism
                 return (pmi, valid, split);
             }).Where(tuple => tuple.valid).ToDictionary(split => split.pmi, split => split.split);
 
+            
             while(payments.Any() || catchAlls.Any())
             {
                 decimal paymentSum;
@@ -511,9 +531,9 @@ namespace BTCPayServer.Plugins.Prism
                     continue;
                 }
 
-                var pmi = string.IsNullOrEmpty(destinationSettings?.PaymentMethodId) ||
-                          !PaymentMethodId.TryParse(destinationSettings?.PaymentMethodId, out var pmi2)
-                    ? new PaymentMethodId("BTC", LightningPaymentType.Instance)
+                var pmi = string.IsNullOrEmpty(destinationSettings?.PayoutMethodId) ||
+                          !PayoutMethodId.TryParse(destinationSettings?.PayoutMethodId, out var pmi2)
+                    ? PayoutTypes.LN.GetPayoutMethodId("BTC")
                     : pmi2;
 
                 var source = "Prism";
@@ -526,7 +546,7 @@ namespace BTCPayServer.Plugins.Prism
                     Destination = new PrismPlaceholderClaimDestination(destinationSettings?.Destination ?? destination),
                     PreApprove = true,
                     StoreId = storeId,
-                    PaymentMethodId = pmi,
+                    PayoutMethodId = pmi,
                     Value = Money.Satoshis(payoutAmount).ToDecimal(MoneyUnit.BTC),
                     Metadata = JObject.FromObject(new
                     {

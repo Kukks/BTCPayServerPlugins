@@ -1,10 +1,15 @@
+@using BTCPayServer.Abstractions.TagHelpers
+@using BTCPayServer.Payments
 @using BTCPayServer.Plugins.FixedFloat
 @inject FixedFloatService FixedFloatService
-@model BTCPayServer.Models.InvoicingModels.PaymentModel 
+@model BTCPayServer.Models.InvoicingModels.CheckoutModel 
 @{
     var storeId = Model.StoreId;
     var settings = await FixedFloatService.GetFixedFloatForStore(storeId);
-    var preferredTargetPaymentMethodId = string.IsNullOrEmpty(settings?.PreferredTargetPaymentMethodId) ? null : Model.AvailableCryptos.Any(crypto => crypto.PaymentMethodId == settings.PreferredTargetPaymentMethodId) ? settings.PreferredTargetPaymentMethodId : null;
+    var preferredTargetPaymentMethodId =  
+        string.IsNullOrEmpty(settings?.PreferredTargetPaymentMethodId) ? null :
+        Model.AvailablePaymentMethods.Any(crypto => crypto.PaymentMethodId.ToString() == PaymentMethodId.TryParse(settings.PreferredTargetPaymentMethodId)?.ToString()) ? 
+            settings.PreferredTargetPaymentMethodId : null;
 }
 @if (settings?.Enabled is true)
 {
@@ -41,7 +46,7 @@
                     const result =  this.$parent.paymentMethodId === "FixedFloat";
                     
                     if(this.preferredToCurrency && this.model.paymentMethodId !== this.preferredToCurrency){
-                        if (this.model.onChainWithLnInvoiceFallback && this.model.paymentMethodId === "BTC"){
+                        if (this.model.onChainWithLnInvoiceFallback && this.model.paymentMethodId === "BTC-CHAIN"){
                             return result;
                         }
                         this.$parent.paymentMethodId = this.preferredToCurrency;
@@ -53,7 +58,7 @@
                     return result;
                 },
                 lightning () {
-                    if (!this.model.onChainWithLnInvoiceFallback || this.model.paymentMethodId !== "BTC"){
+                    if (!this.model.onChainWithLnInvoiceFallback || this.model.paymentMethodId !== "BTC-CHAIN"){
                         return null;
                     }
                     const index = this.model.invoiceBitcoinUrl.indexOf("lightning=");
@@ -63,9 +68,9 @@
                     return this.model.invoiceBitcoinUrl.slice(index + "lightning=".length);
                 },
                 url () {
-                    
-                    const address=  this.lightning || this.model.btcAddress;
-                    return "https://widget.fixedfloat.com/?" +
+                    debugger;
+                    const address=  this.lightning || this.model.address;
+                    return "https://widget.ff.io/?" +
                         `to=${this.settleMethodId}` + 
                         "&lockReceive=true&ref=fkbyt39c" +
                         `&address=${address}` +
@@ -76,9 +81,9 @@
                     return this.model.paymentMethodId;
                 },
                 settleMethodId () {
-                    return this.currency.endsWith('LightningLike') || this.currency.endsWith('LNURLPay') || this.lightning
+                    return this.currency.endsWith('LN') || this.currency.endsWith('LNURL') || this.lightning
                         ? 'BTCLN'
-                        : this.currency.replace('_BTCLike', '').replace('_MoneroLike', '').replace('_ZcashLike', '').toUpperCase();
+                        : this.currency.replace('-CHAIN', '').replace('_CHAIN', '').toUpperCase();
                 },
                 explicitQuery (){
                     const isExplicit = !!this.explicitId;
@@ -91,7 +96,7 @@
                         : `&lockType=true&hideType=true&lockAmount=true&toAmount=${this.amountDue}`;
                 },
                 amountDue () {
-                    return this.model.btcDue * (1 + (markupPercentage / 100));
+                    return this.model.due * (1 + (markupPercentage / 100));
                 }
             }
         });

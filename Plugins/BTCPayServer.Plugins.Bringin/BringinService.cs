@@ -17,6 +17,7 @@ using BTCPayServer.Events;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Lightning;
 using BTCPayServer.Payments;
+using BTCPayServer.Payouts;
 using BTCPayServer.Services;
 using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.Logging;
@@ -139,13 +140,15 @@ public class BringinService : EventHostedServiceBase
                         invoiceEvent when bringinStoreSettings.Enabled:
 
                         var pmPayments = invoiceEvent.Invoice.GetPayments("BTC", true)
-                            .GroupBy(payment => payment.GetPaymentMethodId());
+                            .GroupBy(payment => payment.PaymentMethodId);
                         var update = false;
                         foreach (var pmPayment in pmPayments)
                         {
                             var methodId = pmPayment.Key;
-                            if (methodId.PaymentType == PaymentTypes.LNURLPay)
-                                methodId = new PaymentMethodId(methodId.CryptoCode, PaymentTypes.LightningLike);
+                            if (methodId == PaymentTypes.LNURL.GetPaymentMethodId("BTC"))
+                            {
+                                methodId = PaymentTypes.LN.GetPaymentMethodId("BTC");
+                            }
                             if (!bringinStoreSettings.MethodSettings.TryGetValue(methodId.ToString(),
                                     out var methodSettings))
                             {
@@ -153,7 +156,7 @@ public class BringinService : EventHostedServiceBase
                             }
 
                             methodSettings.CurrentBalance +=
-                                pmPayment.Sum(payment => payment.GetCryptoPaymentData().GetValue());
+                                pmPayment.Sum(payment => payment.Value);
                             update = true;
                         }
 
@@ -190,14 +193,14 @@ public class BringinService : EventHostedServiceBase
 
         foreach (var methodSetting in bringinStoreSetting.MethodSettings)
         {
-            var pmi = PaymentMethodId.TryParse(methodSetting.Key);
+            var pmi = PayoutMethodId.TryParse(methodSetting.Key);
             if (pmi is null)
             {
                 continue;
             }
-
+            var isOnChain = PayoutTypes.CHAIN.GetPayoutMethodId("BTC") == pmi;
             // if there is a pending payout, try and cancel it if this is onchain as we want to save needless tx fees
-            if (methodSetting.Value.PendingPayouts.Count > 0 && pmi.PaymentType == BitcoinPaymentType.Instance)
+            if (methodSetting.Value.PendingPayouts.Count > 0 && isOnChain)
             {
                 var cancelResult = await _pullPaymentHostedService.Cancel(
                     new PullPaymentHostedService.CancelRequest(methodSetting.Value.PendingPayouts.ToArray(),
@@ -252,16 +255,16 @@ public class BringinService : EventHostedServiceBase
         return result;
     }
     
-    public async Task<string?> CreateOrder(string storeId, PaymentMethodId paymentMethodId, Money amountBtc, bool payout)
+    public async Task<string?> CreateOrder(string storeId, PayoutMethodId paymentMethodId, Money amountBtc, bool payout)
     {
-        if (SupportedMethods.All(supportedMethod => supportedMethod.PaymentMethod != paymentMethodId))
+        if (SupportedMethods.All(supportedMethod => supportedMethod.PayoutMethod != paymentMethodId))
         {
-            throw new NotSupportedException($"{paymentMethodId.ToPrettyString()} Payment method not supported");
+            throw new NotSupportedException($"{paymentMethodId} Payment method not supported");
            
         }
         var settings = _settings[storeId];
         
-        var bringinClient = settings.CreateClient(_httpClientFactory, _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>(paymentMethodId.CryptoCode).NBitcoinNetwork);
+        var bringinClient = settings.CreateClient(_httpClientFactory, _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>("BTC").NBitcoinNetwork);
         
         
         var host = await Dns.GetHostEntryAsync(Dns.GetHostName(), CancellationToken.None);
@@ -270,7 +273,7 @@ public class BringinService : EventHostedServiceBase
 
         
         
-        var supportedMethod = SupportedMethods.First(supportedMethod => supportedMethod.PaymentMethod == paymentMethodId);
+        var supportedMethod = SupportedMethods.First(supportedMethod => supportedMethod.PayoutMethod == paymentMethodId);
         //check if amount is enough
         if (supportedMethod.FiatMinimumAmount > 0)
         {
@@ -297,13 +300,13 @@ public class BringinService : EventHostedServiceBase
         {
             return order.Invoice?? order.DepositAddress;
         }
-        var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>(paymentMethodId.CryptoCode);
+        var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>("BTC");
         
         var destination = !string.IsNullOrEmpty(order.Invoice)?  (IClaimDestination) new BoltInvoiceClaimDestination(order.Invoice, BOLT11PaymentRequest.Parse(order.Invoice, network.NBitcoinNetwork)):
             new AddressClaimDestination(BitcoinAddress.Create(order.DepositAddress, network.NBitcoinNetwork));
         var claim = await _pullPaymentHostedService.Claim(new ClaimRequest()
         {
-            PaymentMethodId = paymentMethodId,
+            PayoutMethodId = paymentMethodId,
             StoreId = storeId,
             Destination = destination,
             Value = orderMoney.ToUnit(MoneyUnit.BTC),
@@ -363,17 +366,17 @@ public class BringinService : EventHostedServiceBase
         {
             case PayoutState.Completed:
                 // remove from pending payouts list in a setting
-                return _settings[payout.StoreDataId].MethodSettings[payout.GetPaymentMethodId().ToString()]
+                return _settings[payout.StoreDataId].MethodSettings[payout.GetPayoutMethodId().ToString()]
                     .PendingPayouts.Remove(payout.Id);
             case PayoutState.Cancelled:
                 // remove from pending payouts list in a setting and add to a balance
-                var result = _settings[payout.StoreDataId].MethodSettings[payout.GetPaymentMethodId().ToString()]
+                var result = _settings[payout.StoreDataId].MethodSettings[payout.GetPayoutMethodId().ToString()]
                     .PendingPayouts.Remove(payout.Id);
-                var pmi = payout.GetPaymentMethodId();
+                var pmi = payout.GetPayoutMethodId();
                 if (_settings[payout.StoreDataId].MethodSettings
                     .TryGetValue(pmi.ToString(), out var methodSettings))
                 {
-                    methodSettings.CurrentBalance += payout.GetBlob(_btcPayNetworkJsonSerializerSettings).Amount;
+                    methodSettings.CurrentBalance += payout.Amount ?? payout.OriginalAmount;
                     result = true;
                 }
 
@@ -389,12 +392,12 @@ public class BringinService : EventHostedServiceBase
         return _settings.TryGetValue(storeId, out var bringinStoreSettings) ? bringinStoreSettings : null;
     }
 
-    public record SupportedMethodOptions(PaymentMethodId PaymentMethod, bool FiatMinimum, decimal FiatMinimumAmount, string bringinMethod);
+    public record SupportedMethodOptions(PayoutMethodId PayoutMethod, bool FiatMinimum, decimal FiatMinimumAmount, string bringinMethod);
 
     public static readonly SupportedMethodOptions[] SupportedMethods = new[]
     {
-        new SupportedMethodOptions(new PaymentMethodId("BTC", LightningPaymentType.Instance), true, 22, "LIGHTNING"),
-        new SupportedMethodOptions(new PaymentMethodId("BTC", BitcoinPaymentType.Instance), true, 22, "ON_CHAIN"),
+        new SupportedMethodOptions(PayoutTypes.LN.GetPayoutMethodId("BTC"), true, 22, "LIGHTNING"),
+        new SupportedMethodOptions(PayoutTypes.CHAIN.GetPayoutMethodId("BTC"), true, 22, "ON_CHAIN"),
     };
 
     private ConcurrentDictionary<string, (IDisposable, BringinStoreSettings, DateTimeOffset Expiry)> _editModes = new();
@@ -412,9 +415,9 @@ public class BringinService : EventHostedServiceBase
             // add or remove any missing methods in result
             foreach (var supportedMethod in SupportedMethods)
             {
-                if (!result.MethodSettings.ContainsKey(supportedMethod.PaymentMethod.ToString()))
+                if (!result.MethodSettings.ContainsKey(supportedMethod.PayoutMethod.ToString()))
                 {
-                    result.MethodSettings.Add(supportedMethod.PaymentMethod.ToString(),
+                    result.MethodSettings.Add(supportedMethod.PayoutMethod.ToString(),
                         new BringinStoreSettings.PaymentMethodSettings()
                         {
                             FiatThreshold = supportedMethod.FiatMinimum,
@@ -424,7 +427,7 @@ public class BringinService : EventHostedServiceBase
             }
 
             result.MethodSettings = result.MethodSettings.Where(pair =>
-                    SupportedMethods.Any(supportedMethod => supportedMethod.PaymentMethod.ToString() == pair.Key))
+                    SupportedMethods.Any(supportedMethod => supportedMethod.PayoutMethod.ToString() == pair.Key))
                 .ToDictionary(pair => pair.Key, pair => pair.Value);
             isNew = true;
             return (storeLock, result, DateTimeOffset.Now.AddMinutes(5));

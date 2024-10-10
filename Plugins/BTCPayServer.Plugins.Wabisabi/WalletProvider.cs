@@ -12,7 +12,9 @@ using BTCPayServer.Data;
 using BTCPayServer.Events;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Payments.PayJoin;
+using BTCPayServer.Payouts;
 using BTCPayServer.Services;
+using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,6 +39,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
     private readonly EventAggregator _eventAggregator;
     private readonly ILogger<WalletProvider> _logger;
     private readonly BTCPayNetworkProvider _networkProvider;
+    private readonly PaymentMethodHandlerDictionary _paymentMethodHandlerDictionary;
     private readonly IMemoryCache _memoryCache;
     
     public readonly  ConcurrentDictionary<string, Lazy<Task<BTCPayWallet>>> LoadedWallets = new();
@@ -53,6 +56,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
         EventAggregator eventAggregator,
         ILogger<WalletProvider> logger,
         BTCPayNetworkProvider networkProvider,
+        PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
         IMemoryCache memoryCache) : base(TimeSpan.FromMinutes(5))
     {
         UtxoLocker = utxoLocker;
@@ -63,6 +67,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
         _eventAggregator = eventAggregator;
         _logger = logger;
         _networkProvider = networkProvider;
+        _paymentMethodHandlerDictionary = paymentMethodHandlerDictionary;
         _memoryCache = memoryCache;
     }
     public async Task<BTCPayWallet?> GetWalletAsync(string name)
@@ -75,15 +80,16 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
                 return null;
             }
             var store = await _storeRepository.FindStore(name);
-            var paymentMethod = store?.GetDerivationSchemeSettings(_networkProvider, "BTC");
+            var paymentMethod = store?.GetDerivationSchemeSettings(_paymentMethodHandlerDictionary, "BTC");
             if (paymentMethod is null)
             {
                 return null;
             }
 
+            var pmi = Payments.PaymentTypes.CHAIN.GetPaymentMethodId("BTC");
             var explorerClient = _explorerClientProvider.GetExplorerClient("BTC");
             var isHotWallet = paymentMethod.IsHotWallet;
-            var enabled = store.GetEnabledPaymentIds(_networkProvider).Contains(paymentMethod.PaymentId);
+            var enabled = store.GetEnabledPaymentIds().Contains(pmi);
             var derivationStrategy = paymentMethod.AccountDerivation;
             BTCPayKeyChain keychain;
             var accountKeyPath = paymentMethod.AccountKeySettings.FirstOrDefault()?.GetRootedKeyPath();
@@ -114,6 +120,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
 
 
             return new BTCPayWallet(
+                _serviceProvider.GetRequiredService<PaymentMethodHandlerDictionary>(),
                 _serviceProvider.GetRequiredService<WalletRepository>(),
                 _serviceProvider.GetRequiredService<BTCPayNetworkProvider>(),
                 _serviceProvider.GetRequiredService<BitcoinLikePayoutHandler>(),
@@ -164,7 +171,7 @@ public class WalletProvider : PeriodicRunner,IWalletProvider
             {
                 PayoutState.InProgress
             },
-            PaymentMethods = new[] {"BTC"},
+            PayoutMethods = new[] {PayoutTypes.CHAIN.GetPayoutMethodId("BTC").ToString()},
             Stores = storeIds
         });
         var inProgressPayouts = payouts

@@ -1,4 +1,5 @@
-﻿@using BTCPayServer.Plugins.SideShift
+﻿@using BTCPayServer.Payouts
+@using BTCPayServer.Plugins.SideShift
 @model BTCPayServer.Models.ViewPullPaymentModel
 @inject SideShiftService SideShiftService
 @{
@@ -14,7 +15,8 @@
         return;
     }
 
-    var potentialPaymentMethods = Model.PaymentMethods;//.Where(id => id.CryptoCode.Equals(Model.Currency, StringComparison.OrdinalIgnoreCase)).ToList();
+    var potentialPaymentMethods = Model.PayoutMethodIds.ToList();//.Where(id => id.CryptoCode.Equals(Model.Currency, StringComparison.OrdinalIgnoreCase)).ToList();
+    potentialPaymentMethods.Remove(PayoutTypes.LN.GetPayoutMethodId("BTC"));
     if (Model.IsPending && potentialPaymentMethods.Any())
     {
         <script>
@@ -26,7 +28,7 @@
                                              memo = tuple.HasMemo,
                                              network = tuple.Network
                                          }));
-            const ssPaymentMethods = @Json.Serialize(potentialPaymentMethods.Select(id => new { id = id.ToString(), name= id.ToPrettyString()}));
+            const ssPaymentMethods = @Json.Serialize(potentialPaymentMethods.Select(id => new { id = id.ToString(), name= id.ToString()}));
             document.addEventListener("DOMContentLoaded", ev => {
                 const ssButton = document.createElement("button");
                 ssButton.type= "button";
@@ -142,7 +144,7 @@
                             <select id="sspmi" class="form-select">
                                 @foreach (var opt in potentialPaymentMethods)
                                 {
-                                    <option value="@opt.ToString()">@opt.ToPrettyString()</option>
+                                    <option value="@opt.ToString()">@opt.ToString()</option>
                                 }
                             </select>
                         </div>

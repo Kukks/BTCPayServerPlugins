@@ -2,15 +2,17 @@
 @using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Data
 @using BTCPayServer.Plugins.FixedFloat
+@using BTCPayServer.Services.Invoices
 @using BTCPayServer.Services.Stores
 @using Microsoft.AspNetCore.Mvc.TagHelpers
 @model BTCPayServer.Plugins.FixedFloat.FixedFloatSettings
 @inject BTCPayNetworkProvider BTCPayNetworkProvider
+@inject PaymentMethodHandlerDictionary PaymentMethodHandlerDictionary
 @{
     ViewData.SetActivePage("FixedFloat", "FixedFloat", "FixedFloat");
     var store = Context.GetStoreData();
-    var allowedPaymentMethods = store.GetEnabledPaymentIds(BTCPayNetworkProvider)
-        .Select(pmi => new SelectListItem(pmi.ToPrettyString(), pmi.ToString()))
+    var allowedPaymentMethods = store.GetEnabledPaymentIds()
+        .Select(pmi => new SelectListItem(pmi.ToString(), pmi.ToString()))
         .Prepend(new SelectListItem("Any", ""));
 }
 

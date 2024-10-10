@@ -36,9 +36,24 @@
                 <input asp-for="DaysToKeep" type="number" class="form-control"/>
 
             </div>
+            <div class="form-group">
+                <div class="d-flex align-items-center">
+                    <input asp-for="EntirelyEraseInvoice" type="checkbox" class="btcpay-toggle me-2"/>
+                    <label asp-for="EntirelyEraseInvoice" class="form-label mb-0 me-1">Remove entire invoice from records (instead of just buyer data)</label>
+                 
+                </div>
+                <div class="alert alert-warning">
+                    <p>
+                        Deleting entire invoices may cause issues with integrations and accounting. Only use this option if you are sure you want to remove the invoice entirely.
+                    </p>
+                </div>
+            </div>
             @if (Model.LastRunCutoff != null)
             {
                 <div>Cleared data up to @Model.LastRunCutoff.Value.ToString("g")</div>
+                <div class="form-group">
+                    <button name="command" type="submit" value="cleardate" class="btn btn-danger">Start over</button>
+                </div>
             }
 
         </div>

@@ -12,7 +12,7 @@
     <PropertyGroup>
       <Product>Liquid+</Product>
       <Description>Enhanced support for the liquid network.</Description>
-      <Version>1.1.4</Version>
+      <Version>1.1.5</Version>
 <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
 

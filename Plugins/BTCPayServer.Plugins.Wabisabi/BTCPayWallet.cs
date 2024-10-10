@@ -11,7 +11,9 @@ using BTCPayServer.Data;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.PayJoin;
+using BTCPayServer.Payouts;
 using BTCPayServer.Services;
+using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using BTCPayServer.Services.Wallets;
 using LinqKit;
@@ -37,12 +39,14 @@ using WalletWasabi.WabiSabi.Backend.Rounds;
 using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.Wallets;
 using LogLevel = WalletWasabi.Logging.LogLevel;
+using SecureRandom = WalletWasabi.Crypto.Randomness.SecureRandom;
 
 namespace BTCPayServer.Plugins.Wabisabi;
 
 
 public class BTCPayWallet : IWallet, IDestinationProvider 
 {
+    private readonly PaymentMethodHandlerDictionary _paymentMethodHandlerDictionary;
     private readonly WalletRepository _walletRepository;
     private readonly BTCPayNetworkProvider _btcPayNetworkProvider;
     private readonly BitcoinLikePayoutHandler _bitcoinLikePayoutHandler;
@@ -56,6 +60,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     public static readonly BlockchainAnalyzer BlockchainAnalyzer = new();
 
     public BTCPayWallet(
+        PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
         WalletRepository walletRepository,
         BTCPayNetworkProvider btcPayNetworkProvider,
         BitcoinLikePayoutHandler bitcoinLikePayoutHandler,
@@ -75,6 +80,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         WalletId = new WalletWasabi.Wallets.WalletId(new Guid(SHA256.HashData(Encoding.UTF8.GetBytes(storeId)).Take(16)
             .ToArray()));
         KeyChain = keyChain;
+        _paymentMethodHandlerDictionary = paymentMethodHandlerDictionary;
         _walletRepository = walletRepository;
         _btcPayNetworkProvider = btcPayNetworkProvider;
         _bitcoinLikePayoutHandler = bitcoinLikePayoutHandler;
@@ -495,7 +501,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
                 if (storeIdForutxo != StoreId)
                 {
                     var s = await _storeRepository.FindStore(storeIdForutxo);
-                    var scheme = s.GetDerivationSchemeSettings(_btcPayNetworkProvider, "BTC");
+                    var scheme = s.GetDerivationSchemeSettings(_paymentMethodHandlerDictionary, "BTC");
                     utxoDerivationScheme = scheme.AccountDerivation;
                 }
 
@@ -689,7 +695,7 @@ public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count,
             try
             {
                 var mixStore = await  _storeRepository.FindStore(WabisabiStoreSettings.MixToOtherWallet);
-                var pm =  mixStore.GetDerivationSchemeSettings(_btcPayNetworkProvider, "BTC");
+                var pm =  mixStore.GetDerivationSchemeSettings(_paymentMethodHandlerDictionary, "BTC");
                 
                 
                if (pm?.AccountDerivation?.ScriptPubKeyType() == DerivationScheme.ScriptPubKeyType())
@@ -718,20 +724,19 @@ public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count,
            {
                States = new [] {PayoutState.AwaitingPayment},
                Stores = new []{StoreId},
-               PaymentMethods = new []{"BTC"}
+               PayoutMethods = new []{ PayoutTypes.CHAIN.GetPayoutMethodId("BTC").ToString()}
            })).Select(async data =>
            {
                
-               var  claim = await _bitcoinLikePayoutHandler.ParseClaimDestination(new PaymentMethodId("BTC", BitcoinPaymentType.Instance),
-                   data.Destination, CancellationToken.None);
+               var payoutBlob = data.GetBlob(_btcPayNetworkJsonSerializerSettings);
+               var  claim = await _bitcoinLikePayoutHandler.ParseClaimDestination(payoutBlob.Destination, CancellationToken.None);
 
-               if (!string.IsNullOrEmpty(claim.error) || claim.destination is not IBitcoinLikeClaimDestination bitcoinLikeClaimDestination )
+               if (!string.IsNullOrEmpty(claim.error) || claim.destination is not IBitcoinLikeClaimDestination bitcoinLikeClaimDestination || data.Amount is null)
                {
                    return null;
                }
 
-               var payoutBlob = data.GetBlob(_btcPayNetworkJsonSerializerSettings);
-               var value = new Money(payoutBlob.CryptoAmount.Value, MoneyUnit.BTC);
+               var value = new Money(data.Amount.Value, MoneyUnit.BTC);
                return new PendingPayment()
                {
                    Identifier = data.Id,
