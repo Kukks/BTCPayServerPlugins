@@ -6,10 +6,10 @@
 @inject UserManager<ApplicationUser> UserManager
 @inject UserService UserService
 @{
-    var userId = UserManager.GetUserId(User);
+    var user = await UserManager.GetUserAsync(User);
     var files = (await StoredFileRepository.GetFiles(new StoredFileRepository.FilesQuery()
     {
-        UserIds = await UserService.IsAdminUser(userId) ? Array.Empty<string>() : new[] {userId},
+        UserIds = await UserService.IsAdminUser(user) ? Array.Empty<string>() : new[] {user.Id},
     })).Select(file => new SelectListItem(file.FileName, file.Id)).Prepend(new SelectListItem("No file", ""));
 }
 <template v-if="editingItem">

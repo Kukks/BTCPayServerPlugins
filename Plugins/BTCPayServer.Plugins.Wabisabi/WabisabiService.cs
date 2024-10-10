@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Data;
 using BTCPayServer.PayoutProcessors;
+using BTCPayServer.Payouts;
 using BTCPayServer.Services;
 using Microsoft.Extensions.Caching.Memory;
 using Newtonsoft.Json.Linq;
@@ -92,7 +93,7 @@ namespace BTCPayServer.Plugins.Wabisabi
                     Id = existingProcessor?.Id,
                     Processor = "Wabisabi",
                     StoreId = storeId,
-                    PaymentMethod = "BTC",
+                    PayoutMethodId = PayoutTypes.CHAIN.GetPayoutMethodId("BTC").ToString(),
                 }: null
             });
         }

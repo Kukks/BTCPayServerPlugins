@@ -2,6 +2,7 @@
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Payments;
+using BTCPayServer.Payouts;
 
 namespace BTCPayServer.Plugins.Prism;
 
@@ -19,7 +20,7 @@ public class LNURLPrismDestinationValidator : IPluginHookFilter
             return Task.FromResult<object>(new PrismDestinationValidationResult()
             {
                 Success = true,
-                PaymentMethod = new PaymentMethodId("BTC", PaymentTypes.LNURLPay)
+                PayoutMethodId = PayoutTypes.LN.GetPayoutMethodId("BTC")
             });
         }
         catch (Exception e)
@@ -30,7 +31,7 @@ public class LNURLPrismDestinationValidator : IPluginHookFilter
                 return Task.FromResult<object>(new PrismDestinationValidationResult()
                 {
                     Success = true,
-                    PaymentMethod = new PaymentMethodId("BTC", PaymentTypes.LNURLPay)
+                    PayoutMethodId =PayoutTypes.LN.GetPayoutMethodId("BTC")
                 });
             }
             catch (Exception)
@@ -45,5 +46,5 @@ public class LNURLPrismDestinationValidator : IPluginHookFilter
 public class PrismDestinationValidationResult
 {
     public bool Success { get; set; }
-    public PaymentMethodId PaymentMethod { get; set; }
+    public PayoutMethodId PayoutMethodId { get; set; }
 }

@@ -15,7 +15,9 @@ using BTCPayServer.HostedServices;
 using BTCPayServer.Lightning;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Lightning;
+using BTCPayServer.Payouts;
 using BTCPayServer.Services;
+using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,6 +36,7 @@ public class MicroNodeService : EventHostedServiceBase
     private readonly ILogger<MicroNodeService> _logger;
     private readonly PullPaymentHostedService _pullPaymentHostedService;
     private readonly IOptions<LightningNetworkOptions> _lightningNetworkOptions;
+    private readonly PaymentMethodHandlerDictionary _paymentMethodHandlerDictionary;
     private static readonly ConcurrentDictionary<string, long> ExpectedCounter = new();
     private readonly TaskCompletionSource _init = new();
     private Dictionary<string, MicroNodeSettings> _ownerSettings;
@@ -53,6 +56,7 @@ public class MicroNodeService : EventHostedServiceBase
         EventAggregator eventAggregator,
         PullPaymentHostedService pullPaymentHostedService,
         IOptions<LightningNetworkOptions> lightningNetworkOptions,
+        PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
         IServiceProvider serviceProvider) : base(eventAggregator, logger)
     {
         _network = btcPayNetworkProvider.BTC;
@@ -63,6 +67,7 @@ public class MicroNodeService : EventHostedServiceBase
         _logger = logger;
         _pullPaymentHostedService = pullPaymentHostedService;
         _lightningNetworkOptions = lightningNetworkOptions;
+        _paymentMethodHandlerDictionary = paymentMethodHandlerDictionary;
         _serviceProvider = serviceProvider;
     }
 
@@ -124,17 +129,20 @@ public class MicroNodeService : EventHostedServiceBase
         {
             var b = payout.GetBlob(_btcPayNetworkJsonSerializerSettings);
 
-            List<MicroTransaction> res = new();
-            res.Add(new MicroTransaction()
-            {
-                Id = payout.Id,
-                AccountId = key,
-                Amount = -LightMoney.Coins(b.CryptoAmount.Value).MilliSatoshi,
-                Accounted = payout.State != PayoutState.Cancelled,
-                Active = payout.State is PayoutState.AwaitingApproval or PayoutState.AwaitingPayment
-                    or PayoutState.InProgress,
-                Type = "Payout"
-            });
+            List<MicroTransaction> res =
+            [
+                new()
+                {
+                    Id = payout.Id,
+                    AccountId = key,
+                    Amount = -LightMoney.Coins(payout.Amount!.Value).MilliSatoshi,
+                    Accounted = payout.State != PayoutState.Cancelled,
+                    Active = payout.State is PayoutState.AwaitingApproval or PayoutState.AwaitingPayment
+                        or PayoutState.InProgress,
+                    Type = "Payout"
+                }
+
+            ];
 
             if (b.Metadata?.TryGetValue("Fee", out var microNode) is true && microNode.Value<decimal>() is { } payoutFee) 
             {
@@ -230,7 +238,7 @@ public class MicroNodeService : EventHostedServiceBase
         await using var ctx = _microNodeContextFactory.CreateContext();
         for (int i = 0; i < 5; i++)
         {
-            var account = await ctx.MicroAccounts.FindAsync(key);
+            var account = await ctx.MicroAccounts.FindAsync(key, cancellation);
             if (account is null)
             {
                 return null;
@@ -336,9 +344,9 @@ public class MicroNodeService : EventHostedServiceBase
             return null;
         }
 
-        var lightningConnectionString = store.GetSupportedPaymentMethods(_btcPayNetworkProvider)
-            .OfType<LightningSupportedPaymentMethod>()
-            .FirstOrDefault(method => method.CryptoCode == _network.CryptoCode)?.CreateLightningClient(_network,
+        var pmi = PaymentTypes.LN.GetPaymentMethodId(_network.CryptoCode);
+        var lightningConnectionString = store.GetPaymentMethodConfig<LightningPaymentMethodConfig>(pmi, _paymentMethodHandlerDictionary)
+            ?.CreateLightningClient(_network,
                 _lightningNetworkOptions.Value, _serviceProvider.GetService<LightningClientFactoryService>());
         return lightningConnectionString;
     }
@@ -616,7 +624,7 @@ public class MicroNodeService : EventHostedServiceBase
                             StoreId = masterClients.Key,
                             Destination = new LNURLPayClaimDestinaton(destination),
                             PreApprove = true,
-                            PaymentMethodId = new PaymentMethodId("BTC", LightningPaymentType.Instance),
+                            PayoutMethodId = PayoutTypes.LN.GetPayoutMethodId("BTC"),
                             Metadata = JObject.FromObject(new
                             {
                                 Source = $"MicroNode on store {storeId.Key}"
@@ -667,7 +675,7 @@ public class MicroNodeService : EventHostedServiceBase
         await base.StopAsync(cancellationToken);
     }
 
-    private ConcurrentDictionary<string, string> _keyToMasterStoreId = new();
+    private readonly ConcurrentDictionary<string, string> _keyToMasterStoreId = new();
 
     public async Task Set(string storeId, MicroNodeStoreSettings? settings, string? masterStoreId = null)
     {

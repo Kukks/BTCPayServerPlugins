@@ -10,7 +10,7 @@
         <PropertyGroup>
             <Product>Bitcoin Whitepaper</Product>
             <Description>This makes the Bitcoin whitepaper available on your BTCPay Server.</Description>
-            <Version>1.0.4</Version>
+            <Version>1.0.5</Version>
 <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         </PropertyGroup>
         <!-- Plugin development properties -->

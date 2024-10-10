@@ -9,7 +9,7 @@
     <PropertyGroup>
         <Product>FixedFloat</Product>
         <Description>Allows you to embed a FixedFloat conversion screen to allow customers to pay with altcoins.</Description>
-        <Version>1.1.7</Version>
+        <Version>1.1.8</Version>
 <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->

@@ -22,7 +22,7 @@ namespace BTCPayServer.Plugins.LiquidPlus
     {
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
         {
-            new() {Identifier = nameof(BTCPayServer), Condition = ">=1.12.0"}
+            new() {Identifier = nameof(BTCPayServer), Condition = ">=2.0.0"}
         };
 
         public override void Execute(IServiceCollection applicationBuilder)
@@ -31,11 +31,11 @@ namespace BTCPayServer.Plugins.LiquidPlus
             if (services.BootstrapServices.GetRequiredService<NBXplorerNetworkProvider>()
                     .GetFromCryptoCode("LBTC") is null || !services.BootstrapServices.GetRequiredService<SelectedChains>().Contains("LBTC"))
                 return;
-            services.AddSingleton<IUIExtension>(new UIExtension("LiquidNav", "store-integrations-nav"));
-            services.AddSingleton<IUIExtension>(new UIExtension("OnChainWalletSetupLiquidExtension",
-                "onchain-wallet-setup-post-body"));
-            services.AddSingleton<IUIExtension>(new UIExtension("CustomLiquidAssetsNavExtension", "server-nav"));
-            services.AddSingleton<IUIExtension>(new UIExtension("StoreNavLiquidExtension", "store-nav"));
+            services.AddUIExtension("store-integrations-nav", "LiquidNav");
+            services.AddUIExtension("onchain-wallet-setup-post-body", "OnChainWalletSetupLiquidExtension");
+            services.AddUIExtension("server-nav", "CustomLiquidAssetsNavExtension");
+            services.AddUIExtension("store-nav", "StoreNavLiquidExtension");
+            
             services.AddSingleton<CustomLiquidAssetsRepository>();
 
 
@@ -53,12 +53,11 @@ namespace BTCPayServer.Plugins.LiquidPlus
                         CryptoCode: "LBTC"
                     })
                 .ImplementationInstance;
+            
+            var pmi = PaymentTypes.CHAIN.GetPaymentMethodId("LBTC");
             var tlProvider = (TransactionLinkProviders.Entry) services.Single(descriptor =>
                     descriptor.ServiceType == typeof(TransactionLinkProviders.Entry) &&
-                    descriptor.ImplementationInstance is TransactionLinkProviders.Entry
-                    {
-                        PaymentMethodId: {CryptoCode: "LBTC"}
-                    })
+                    descriptor.ImplementationInstance is TransactionLinkProviders.Entry entry && entry.PaymentMethodId == pmi)
                 .ImplementationInstance;
             settings.Items.ForEach(configuration =>
 
@@ -80,7 +79,6 @@ namespace BTCPayServer.Plugins.LiquidPlus
                     NetworkCryptoCode = template.NetworkCryptoCode,
                     DefaultSettings = template.DefaultSettings,
                     ElectrumMapping = template.ElectrumMapping,
-                    BlockExplorerLink = template.BlockExplorerLink,
                     ReadonlyWallet = template.ReadonlyWallet,
                     SupportLightning = false,
                     SupportPayJoin = false,
@@ -92,7 +90,7 @@ namespace BTCPayServer.Plugins.LiquidPlus
                     VaultSupported = template.VaultSupported,
                     MaxTrackedConfirmation = template.MaxTrackedConfirmation,
                     SupportRBF = template.SupportRBF
-                }).AddTransactionLinkProvider(new PaymentMethodId(code, PaymentTypes.BTCLike), tlProvider.Provider);
+                }).AddTransactionLinkProvider(code, tlProvider.Provider);
             });
         }
     }

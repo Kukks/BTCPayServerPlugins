@@ -1,10 +1,13 @@
 @using BTCPayServer.Plugins.FixedFloat
 @inject FixedFloatService FixedFloatService
-@model BTCPayServer.Models.InvoicingModels.PaymentModel 
+@model BTCPayServer.Models.InvoicingModels.CheckoutModel 
 @{
     var storeId = Model.StoreId;
     var settings = await FixedFloatService.GetFixedFloatForStore(storeId);
-    var preferredTargetPaymentMethodId = string.IsNullOrEmpty(settings?.PreferredTargetPaymentMethodId) ? null : Model.AvailableCryptos.Any(crypto => crypto.PaymentMethodId == settings.PreferredTargetPaymentMethodId) ? settings.PreferredTargetPaymentMethodId : null;
+    var preferredTargetPaymentMethodId = 
+        string.IsNullOrEmpty(settings?.PreferredTargetPaymentMethodId) ? null :
+        Model.AvailablePaymentMethods.Any(crypto => crypto.PaymentMethodId.ToString() == settings.PreferredTargetPaymentMethodId) ? 
+            settings.PreferredTargetPaymentMethodId : null;
 }
 @if (settings?.Enabled is true)
 {

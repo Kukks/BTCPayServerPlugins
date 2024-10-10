@@ -1,18 +1,18 @@
 ﻿@using BTCPayServer
-@using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Plugins.Breez
 @using BTCPayServer.Security
+@using BTCPayServer.Services.Invoices
 @using Microsoft.AspNetCore.Mvc.TagHelpers
 @using Microsoft.AspNetCore.Routing
 @model string
 @inject BreezService BreezService
-@inject BTCPayNetworkProvider BtcPayNetworkProvider
+@inject PaymentMethodHandlerDictionary PaymentMethodHandlerDictionary
 @{
     var storeId = Context.GetImplicitStoreId();
     var address = Context.GetRouteValue("address").ToString();
     ViewData.SetActivePage("Breez", "Create Swapin Refund", "SwapIn");
 
-    var deriv = Context.GetStoreData().GetDerivationSchemeSettings(BtcPayNetworkProvider, "BTC");
+    var deriv = Context.GetStoreData().GetDerivationSchemeSettings(PaymentMethodHandlerDictionary, "BTC");
     var sdk = BreezService.GetClient(storeId)?.Sdk;
     var f = sdk.RecommendedFees();
 }

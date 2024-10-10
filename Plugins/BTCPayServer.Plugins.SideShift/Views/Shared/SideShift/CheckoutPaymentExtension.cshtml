@@ -2,19 +2,18 @@
 @using BTCPayServer.Payments
 @inject BTCPayServer.Security.ContentSecurityPolicies csp
 @inject SideShiftService SideShiftService
-@model BTCPayServer.Models.InvoicingModels.PaymentModel 
+@model BTCPayServer.Models.InvoicingModels.CheckoutModel 
 @{
     var settings = await SideShiftService.GetSideShiftForInvoice(Model.InvoiceId, Model.StoreId);
-    var preferredTargetPaymentMethodId = "";
+    PaymentMethodId preferredTargetPaymentMethodId = null;
     if(!PaymentMethodId.TryParse(settings?.PreferredTargetPaymentMethodId, out var preferredPMI))
     {
         preferredTargetPaymentMethodId = null;
     }
     else
     {
-        preferredTargetPaymentMethodId = Model.AvailableCryptos.FirstOrDefault(crypto =>
-            crypto.PaymentMethodId == settings.PreferredTargetPaymentMethodId ||
-            (crypto.CryptoCode == preferredPMI.CryptoCode && crypto.PaymentMethodId.EndsWith(LNURLPayPaymentType.Instance.GetId()) || crypto.PaymentMethodId.EndsWith(LightningPaymentType.Instance.GetId())))?.PaymentMethodId;
+        preferredTargetPaymentMethodId = Model.AvailablePaymentMethods.FirstOrDefault(crypto =>
+            crypto.PaymentMethodId == preferredPMI )?.PaymentMethodId;
     }
 }
 @if (settings?.Enabled is true)

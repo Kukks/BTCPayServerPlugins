@@ -11,6 +11,7 @@ using BTCPayServer.Events;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Lightning;
+using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -23,6 +24,7 @@ public class BreezService:EventHostedServiceBase
     private readonly StoreRepository _storeRepository;
     private readonly IOptions<DataDirectories> _dataDirectories;
     private readonly BTCPayNetworkProvider _btcPayNetworkProvider;
+    private readonly PaymentMethodHandlerDictionary _paymentMethodHandlerDictionary;
     private readonly ILogger _logger;
     private Dictionary<string, BreezSettings> _settings;
     private Dictionary<string, BreezLightningClient> _clients = new();
@@ -32,11 +34,13 @@ public class BreezService:EventHostedServiceBase
         StoreRepository storeRepository,
         IOptions<DataDirectories> dataDirectories, 
         BTCPayNetworkProvider btcPayNetworkProvider, 
+        PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
         ILogger<BreezService> logger) : base(eventAggregator, logger)
     {
         _storeRepository = storeRepository;
         _dataDirectories = dataDirectories;
         _btcPayNetworkProvider = btcPayNetworkProvider;
+        _paymentMethodHandlerDictionary = paymentMethodHandlerDictionary;
         _logger = logger;
     }
 
@@ -133,13 +137,13 @@ public class BreezService:EventHostedServiceBase
         {
             _settings.Remove(storeId, out var oldSettings );
             var data = await _storeRepository.FindStore(storeId);
-            var existing = data?.GetSupportedPaymentMethods(_btcPayNetworkProvider)
-                .OfType<LightningSupportedPaymentMethod>().FirstOrDefault(method =>
-                    method.CryptoCode == "BTC" && method.PaymentId.PaymentType == LightningPaymentType.Instance);
+            var pmi = PaymentTypes.LN.GetPaymentMethodId("BTC");
+            var existing =
+                data?.GetPaymentMethodConfig<LightningPaymentMethodConfig>(pmi, _paymentMethodHandlerDictionary);
             var isBreez = existing?.GetExternalLightningUrl() == $"type=breez;key={oldSettings.PaymentKey}";
             if (isBreez)
             {
-                data.SetSupportedPaymentMethod(new PaymentMethodId("BTC", LightningPaymentType.Instance), null );
+                data.SetPaymentMethodConfig(_paymentMethodHandlerDictionary[pmi], null );
                 await _storeRepository.UpdateStore(data);
             }
             Directory.Delete(GetWorkDir(storeId), true);
