@@ -48,7 +48,6 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
             utxoLocker,
             provider.GetRequiredService<EventAggregator>(),
             provider.GetRequiredService<ILogger<WalletProvider>>(),
-            provider.GetRequiredService<BTCPayNetworkProvider>(),
             provider.GetRequiredService<PaymentMethodHandlerDictionary>(),
             provider.GetRequiredService<IMemoryCache>()
         ));

@@ -49,7 +49,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     private readonly PaymentMethodHandlerDictionary _paymentMethodHandlerDictionary;
     private readonly WalletRepository _walletRepository;
     private readonly BTCPayNetworkProvider _btcPayNetworkProvider;
-    private readonly BitcoinLikePayoutHandler _bitcoinLikePayoutHandler;
+    private readonly IPayoutHandler _bitcoinLikePayoutHandler;
     private readonly BTCPayNetworkJsonSerializerSettings _btcPayNetworkJsonSerializerSettings;
     private readonly Services.Wallets.BTCPayWallet _btcPayWallet;
     private readonly PullPaymentHostedService _pullPaymentHostedService;
@@ -63,7 +63,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
         WalletRepository walletRepository,
         BTCPayNetworkProvider btcPayNetworkProvider,
-        BitcoinLikePayoutHandler bitcoinLikePayoutHandler,
+        IPayoutHandler bitcoinLikePayoutHandler,
         BTCPayNetworkJsonSerializerSettings btcPayNetworkJsonSerializerSettings,
         Services.Wallets.BTCPayWallet btcPayWallet,
         PullPaymentHostedService pullPaymentHostedService,

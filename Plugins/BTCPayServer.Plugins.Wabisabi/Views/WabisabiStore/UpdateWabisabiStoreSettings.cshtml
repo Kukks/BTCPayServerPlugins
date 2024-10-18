@@ -2,6 +2,7 @@
 @using BTCPayServer.Abstractions.Contracts
 @using NBitcoin
 @using System.Security.Claims
+@using System.Web.NBitcoin
 @using BTCPayServer
 @using BTCPayServer.Abstractions.TagHelpers
 @using BTCPayServer.Client
@@ -343,6 +344,8 @@
     {
         continue;
     }
+    
+    var safeName = HttpUtility.UrlEncode(s.Coordinator);
 
     <div class="card  mt-3">
         <div class="card-header d-flex justify-content-between">
@@ -350,7 +353,7 @@
                 <div class="d-flex">
 
                     <h3>@coordinator.CoordinatorDisplayName</h3>
-                    @if (coordinator.CoordinatorName != "local" && coordinator.CoordinatorName != "zksnacks")
+                    @if (coordinator.CoordinatorName != "local")
                     {
                         <button name="command" type="submit" value="remove-coordinator:@(coordinator.CoordinatorName)" class="btn btn-link txt-danger" permission="@Policies.CanModifyServerSettings">Remove</button>
                     }
@@ -369,7 +372,7 @@
                         var round = coordinator.RoundStateUpdater.RoundStates.Last(pair => pair.Value.BlameOf == uint256.Zero).Value;
                         var roundParameters = round.CoinjoinState.Parameters;
 
-                        <div class="modal modal-lg fade" id="config-@s.Coordinator">
+                        <div class="modal modal-lg fade" id="config-@safeName">
                             <div class="modal-dialog">
                                 <div class="modal-content">
                                     <div class="modal-header">
@@ -426,7 +429,7 @@
                             </div>
                         </div>
                         <a class="px-2 cursor-pointer"
-                           data-bs-toggle="modal" data-bs-target="#config-@s.Coordinator">
+                           data-bs-toggle="modal" data-bs-target="#config-@safeName">
                             Coordinator Config
                         </a>
                         @if (Model.Settings[index].RoundWhenEnabled is not null && !BTCPayWallet.IsRoundOk(roundParameters, Model.Settings[index]))
@@ -436,7 +439,7 @@
                     }
 
                     <a class="px-2 w-100 cursor-pointer"
-                       data-bs-toggle="modal" data-bs-target="#terms-@s.Coordinator"
+                       data-bs-toggle="modal" data-bs-target="#terms-@safeName"
                        style="
                                             right: 0;
                                             text-align: right;
@@ -465,7 +468,7 @@
             </div>
 
         </div>
-        <div class="modal modal-lg fade" id="terms-@s.Coordinator">
+        <div class="modal modal-lg fade" id="terms-@safeName">
             <div class="modal-dialog">
                 <div class="modal-content">
                     <div class="modal-header">
