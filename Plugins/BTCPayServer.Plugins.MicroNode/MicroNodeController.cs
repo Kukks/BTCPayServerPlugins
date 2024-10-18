@@ -8,6 +8,7 @@ using BTCPayServer.Client;
 using BTCPayServer.Data;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Lightning;
+using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,14 +18,17 @@ namespace BTCPayServer.Plugins.MicroNode;
 [Route("plugins/micronode")]
 public class MicroNodeController : Controller
 {
+    private readonly PaymentMethodHandlerDictionary _paymentMethodHandlerDictionary;
     private readonly MicroNodeService _microNodeService;
     private readonly StoreRepository _storeRepository;
     private readonly BTCPayNetworkProvider _networkProvider;
     private readonly IAuthorizationService _authorizationService;
 
-    public MicroNodeController(MicroNodeService microNodeService, StoreRepository storeRepository,
+    public MicroNodeController(
+        PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,MicroNodeService microNodeService, StoreRepository storeRepository,
         BTCPayNetworkProvider networkProvider, IAuthorizationService authorizationService)
     {
+        _paymentMethodHandlerDictionary = paymentMethodHandlerDictionary;
         _microNodeService = microNodeService;
         _storeRepository = storeRepository;
         _networkProvider = networkProvider;
@@ -66,11 +70,8 @@ public class MicroNodeController : Controller
             ModelState.AddModelError("masterStoreId", "Master cannot be the same as this store");
             return View(settings);
         }
-        
-        var existing = store.GetSupportedPaymentMethods(_networkProvider).OfType<LightningSupportedPaymentMethod>()
-            .FirstOrDefault(method =>
-                method.PaymentId.PaymentType == LightningPaymentType.Instance &&
-                method.PaymentId.CryptoCode == network.CryptoCode);
+        var pmi = PaymentTypes.LN.GetPaymentMethodId(network.CryptoCode);
+        var existing = store.GetPaymentMethodConfig<LightningPaymentMethodConfig>(pmi, _paymentMethodHandlerDictionary);
         var isSet = settings?.Key is not null;
         settings ??= new MicroNodeStoreSettings();
         settings.Key ??= Guid.NewGuid().ToString();
@@ -118,12 +119,10 @@ public class MicroNodeController : Controller
                 }
 
 
-                existing ??= new LightningSupportedPaymentMethod()
-                {
-                    CryptoCode = "BTC"
-                };
+                existing ??= new();
                 existing.SetLightningUrl(mlc);
-                store.SetSupportedPaymentMethod(existing);
+                
+                store.SetPaymentMethodConfig(_paymentMethodHandlerDictionary[pmi], existing);
 
 
                 await _microNodeService.Set(storeId, settings, masterStoreId);
@@ -145,7 +144,7 @@ public class MicroNodeController : Controller
 
                 if (isStoreSetToThisMicro)
                 {
-                    store.SetSupportedPaymentMethod(existing.PaymentId, null);
+                    store.SetPaymentMethodConfig(_paymentMethodHandlerDictionary[pmi], null);
                     await _storeRepository.UpdateStore(store);
                 }
 

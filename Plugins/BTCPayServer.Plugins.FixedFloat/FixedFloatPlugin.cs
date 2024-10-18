@@ -9,29 +9,16 @@ namespace BTCPayServer.Plugins.FixedFloat
     {
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
         {
-            new() { Identifier = nameof(BTCPayServer), Condition = ">=1.12.0" }
+            new() { Identifier = nameof(BTCPayServer), Condition = ">=2.0.0" }
+
         };
         public override void Execute(IServiceCollection applicationBuilder)
         {
             applicationBuilder.AddSingleton<FixedFloatService>();
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("FixedFloat/FixedFloatNav",
-                "store-integrations-nav"));
-            // Checkout v2
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("FixedFloat/CheckoutPaymentMethodExtension",
-                "checkout-payment-method"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("FixedFloat/CheckoutPaymentExtension",
-                "checkout-payment"));
-            // Checkout Classic
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("FixedFloat/CheckoutContentExtension",
-                "checkout-bitcoin-post-content"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("FixedFloat/CheckoutContentExtension",
-                "checkout-lightning-post-content"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("FixedFloat/CheckoutTabExtension",
-                "checkout-bitcoin-post-tabs"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("FixedFloat/CheckoutTabExtension",
-                "checkout-lightning-post-tabs"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("FixedFloat/CheckoutEnd",
-                "checkout-end"));
+            applicationBuilder.AddUIExtension("store-integrations-nav", "FixedFloat/FixedFloatNav");
+            applicationBuilder.AddUIExtension("checkout-payment-method", "FixedFloat/CheckoutPaymentMethodExtension");
+            applicationBuilder.AddUIExtension("checkout-payment", "FixedFloat/CheckoutPaymentExtension");
+
             base.Execute(applicationBuilder);
         }
     }

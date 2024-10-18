@@ -10,7 +10,7 @@
     <PropertyGroup>
         <Product>Subscriptions</Product>
         <Description>Offer and manage subscriptions through BTCPay Server</Description>
-        <Version>1.0.1</Version>
+        <Version>1.0.2</Version>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->

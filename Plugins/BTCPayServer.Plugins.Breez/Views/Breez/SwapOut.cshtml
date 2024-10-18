@@ -1,11 +1,12 @@
 ﻿@using Breez.Sdk
 @using BTCPayServer
-@using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Models.StoreViewModels
 @using BTCPayServer.Plugins.Breez
 @using BTCPayServer.Security
+@using BTCPayServer.Services.Invoices
+@using Microsoft.AspNetCore.Mvc.TagHelpers
 @inject BreezService BreezService
-@inject BTCPayNetworkProvider BtcPayNetworkProvider
+@inject PaymentMethodHandlerDictionary PaymentMethodHandlerDictionary
 
 
 @{
@@ -29,7 +30,7 @@
     if (sdk is null)
         return;
     var inProgressSwaps = sdk.InProgressReverseSwaps();
-    var deriv = Context.GetStoreData().GetDerivationSchemeSettings(BtcPayNetworkProvider, "BTC");
+    var deriv = Context.GetStoreData().GetDerivationSchemeSettings(PaymentMethodHandlerDictionary, "BTC");
     var f = sdk.RecommendedFees();
     var swapOutRec = sdk.FetchReverseSwapFees(new ReverseSwapFeesRequest());
 }

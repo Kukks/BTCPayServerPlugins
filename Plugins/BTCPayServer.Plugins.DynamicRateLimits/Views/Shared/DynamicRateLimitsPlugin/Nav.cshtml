@@ -1,7 +1,13 @@
+@using BTCPayServer.Client
 @using BTCPayServer.Plugins.DynamicRateLimits
+@using Microsoft.AspNetCore.Mvc.TagHelpers
 @{
-    var isActive = ViewContext.RouteData.Values.TryGetValue("Controller", out var controller) &&  controller is not null && 
+    var isActive = ViewContext.RouteData.Values.TryGetValue("Controller", out var controller) && controller is not null &&
                    nameof(DynamicRatesLimiterController).StartsWith(controller?.ToString(), StringComparison.InvariantCultureIgnoreCase);
 }
 
-<a class="nav-link @(isActive ? "active" : string.Empty)" asp-action="Update" asp-controller="DynamicRatesLimiter">Rate Limits</a>
+
+<li class="nav-item nav-item-sub" permission="@Policies.CanModifyServerSettings">
+
+    <a class="nav-link @(isActive ? "active" : string.Empty)" asp-action="Update" asp-controller="DynamicRatesLimiter">Rate Limits</a>
+</li>

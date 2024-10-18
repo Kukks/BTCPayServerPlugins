@@ -1,14 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using BTCPayServer;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Extensions;
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Data;
 using BTCPayServer.Models;
-using BTCPayServer.Plugins.Subscriptions;
+using BTCPayServer.Services;
 using BTCPayServer.Services.Apps;
 using BTCPayServer.Services.PaymentRequests;
 using Microsoft.AspNetCore.Authorization;
@@ -23,13 +22,16 @@ namespace BTCPayServer.Plugins.Subscriptions;
 public class SubscriptionController : Controller
 {
     private readonly AppService _appService;
+    private readonly UriResolver _uriResolver;
     private readonly PaymentRequestRepository _paymentRequestRepository;
     private readonly SubscriptionService _subscriptionService;
 
     public SubscriptionController(AppService appService,
+        UriResolver uriResolver,
         PaymentRequestRepository paymentRequestRepository, SubscriptionService subscriptionService)
     {
         _appService = appService;
+        _uriResolver = uriResolver;
         _paymentRequestRepository = paymentRequestRepository;
         _subscriptionService = subscriptionService;
     }
@@ -44,7 +46,7 @@ public class SubscriptionController : Controller
             return NotFound();
         var ss = app.GetSettings<SubscriptionAppSettings>();
         ss.SubscriptionName = app.Name;
-        ViewData["StoreBranding"] = new StoreBrandingViewModel(app.StoreData.GetStoreBlob());
+        ViewData["StoreBranding"] =await StoreBrandingViewModel.CreateAsync(Request, _uriResolver, app.StoreData.GetStoreBlob());
         return View(ss);
     }
 
@@ -62,8 +64,7 @@ public class SubscriptionController : Controller
         {
             return NotFound();
         }
-
-        ViewData["StoreBranding"] = new StoreBrandingViewModel(app.StoreData.GetStoreBlob());
+        ViewData["StoreBranding"] =await StoreBrandingViewModel.CreateAsync(Request, _uriResolver, app.StoreData.GetStoreBlob());
 
         return View(ss);
     }

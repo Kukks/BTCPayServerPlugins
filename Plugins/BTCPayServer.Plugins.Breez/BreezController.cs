@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
-using System.Linq;
 using System.Threading.Tasks;
 using Breez.Sdk;
 using BTCPayServer.Abstractions.Constants;
@@ -12,13 +11,13 @@ using BTCPayServer.Lightning;
 using BTCPayServer.Models;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Lightning;
+using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using BTCPayServer.Services.Wallets;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NBitcoin;
 using NBitcoin.DataEncoders;
-using NBXplorer.DerivationStrategy;
 
 namespace BTCPayServer.Plugins.Breez;
 
@@ -26,15 +25,19 @@ namespace BTCPayServer.Plugins.Breez;
 [Route("plugins/{storeId}/Breez")]
 public class BreezController : Controller
 {
+    private readonly PaymentMethodHandlerDictionary _paymentMethodHandlerDictionary;
     private readonly BTCPayNetworkProvider _btcPayNetworkProvider;
     private readonly BreezService _breezService;
     private readonly BTCPayWalletProvider _btcWalletProvider;
     private readonly StoreRepository _storeRepository;
 
-    public BreezController(BTCPayNetworkProvider btcPayNetworkProvider,
+    public BreezController(
+        PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
+        BTCPayNetworkProvider btcPayNetworkProvider,
         BreezService breezService,
         BTCPayWalletProvider btcWalletProvider, StoreRepository storeRepository)
     {
+        _paymentMethodHandlerDictionary = paymentMethodHandlerDictionary;
         _btcPayNetworkProvider = btcPayNetworkProvider;
         _breezService = breezService;
         _btcWalletProvider = btcWalletProvider;
@@ -113,7 +116,7 @@ public class BreezController : Controller
         if (address.Equals("store", StringComparison.InvariantCultureIgnoreCase))
         {
             var store = ControllerContext.HttpContext.GetStoreData()
-                .GetDerivationSchemeSettings(_btcPayNetworkProvider, "BTC");
+                .GetDerivationSchemeSettings(_paymentMethodHandlerDictionary, "BTC");
             var res = await _btcWalletProvider.GetWallet(storeId)
                 .ReserveAddressAsync(storeId, store.AccountDerivation, "Breez");
             address = res.Address.ToString();
@@ -264,7 +267,7 @@ public class BreezController : Controller
         if (address.Equals("store", StringComparison.InvariantCultureIgnoreCase))
         {
             var store = ControllerContext.HttpContext.GetStoreData()
-                .GetDerivationSchemeSettings(_btcPayNetworkProvider, "BTC");
+                .GetDerivationSchemeSettings(_paymentMethodHandlerDictionary, "BTC");
             var res = await _btcWalletProvider.GetWallet(storeId)
                 .ReserveAddressAsync(storeId, store.AccountDerivation, "Breez");
             address = res.Address.ToString();
@@ -342,10 +345,8 @@ public class BreezController : Controller
     public async Task<IActionResult> Configure(string storeId, string command, BreezSettings settings)
     {
         var store = HttpContext.GetStoreData();
-        var existing = store.GetSupportedPaymentMethods(_btcPayNetworkProvider).OfType<LightningSupportedPaymentMethod>()
-            .FirstOrDefault(method =>
-                method.PaymentId.PaymentType == LightningPaymentType.Instance &&
-                method.PaymentId.CryptoCode == "BTC");
+        var pmi = PaymentTypes.LN.GetPaymentMethodId("BTC");
+        var existing = store.GetPaymentMethodConfig<LightningPaymentMethodConfig>(pmi, _paymentMethodHandlerDictionary);
        
         if (command == "clear")
         {
@@ -355,7 +356,7 @@ public class BreezController : Controller
             var isStoreSetToThisMicro = existing?.GetExternalLightningUrl() == client?.ToString();
             if (client is not null && isStoreSetToThisMicro)
             {
-                store.SetSupportedPaymentMethod(existing.PaymentId, null);
+                store.SetPaymentMethodConfig(_paymentMethodHandlerDictionary[pmi], null);
                 await _storeRepository.UpdateStore(store);
             }
             return RedirectToAction(nameof(Configure), new {storeId});
@@ -422,18 +423,13 @@ public class BreezController : Controller
 
             if(existing is null)
             {
-                existing = new LightningSupportedPaymentMethod()
-                {
-                    CryptoCode = "BTC"
-                };
+
+                existing = new LightningPaymentMethodConfig();
                 var client = _breezService.GetClient(storeId);
                 existing.SetLightningUrl(client);
-                store.SetSupportedPaymentMethod(existing);
-                var lnurl = new LNURLPaySupportedPaymentMethod()
-                {
-                    CryptoCode = "BTC",
-                };
-                store.SetSupportedPaymentMethod(lnurl);
+                store.SetPaymentMethodConfig(_paymentMethodHandlerDictionary[pmi], existing);
+                var lnurlPMI = PaymentTypes.LNURL.GetPaymentMethodId("BTC");
+                store.SetPaymentMethodConfig(_paymentMethodHandlerDictionary[lnurlPMI], new LNURLPaymentMethodConfig());
                 await _storeRepository.UpdateStore(store);
             }
             

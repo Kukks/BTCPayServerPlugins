@@ -4,13 +4,14 @@
 @using BTCPayServer.Plugins.SideShift
 @using Microsoft.AspNetCore.Mvc.TagHelpers
 @model BTCPayServer.Plugins.SideShift.SideShiftSettings
-@inject BTCPayNetworkProvider BTCPayNetworkProvider
 @inject SideShiftService SideShiftService
 @{
     ViewData.SetActivePage("SideShift", "SideShift", "SideShift");
     var store = Context.GetStoreData();
-    var allowedPaymentMethods = store.GetEnabledPaymentIds(BTCPayNetworkProvider)
-        .Select(pmi => new SelectListItem(pmi.ToPrettyString(), pmi.ToString()))
+    var allowedPaymentMethods = store.GetEnabledPaymentIds()
+        .Where(id => !id.ToString().EndsWith("LN") && !id.ToString().EndsWith("LNURL"))
+        .Select(pmi => new SelectListItem(pmi.ToString(), pmi.ToString()))
+        
         .Prepend(new SelectListItem("Any", ""));
     var coins = await SideShiftService.GetDepositOptions();
     var allowedCoins = coins.OrderBy(coin => coin.ToString()).Select(c => new SelectListItem(c.ToString(), $"{c.CryptoCode}_{c.Network}"));

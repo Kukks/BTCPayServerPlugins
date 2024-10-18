@@ -1,6 +1,5 @@
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
-using BTCPayServer.Abstractions.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace BTCPayServer.Plugins.SideShift
@@ -8,41 +7,22 @@ namespace BTCPayServer.Plugins.SideShift
     public class SideShiftPlugin : BaseBTCPayServerPlugin
     {
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
-        {
-            new() {Identifier = nameof(BTCPayServer), Condition = ">=1.12.0"}
+        {            new() { Identifier = nameof(BTCPayServer), Condition = ">=2.0.0" }
+
         };
 
         public override void Execute(IServiceCollection applicationBuilder)
         {
             applicationBuilder.AddSingleton<SideShiftService>();
             applicationBuilder.AddHostedService(provider => provider.GetService<SideShiftService>());
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/SideShiftNav",
-                "store-integrations-nav"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/PullPaymentViewInsert",
-                "pullpayment-foot"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/StoreIntegrationSideShiftOption",
-                "store-integrations-list"));
+
+            applicationBuilder.AddUIExtension("store-integrations-nav","SideShift/SideShiftNav");
+            applicationBuilder.AddUIExtension("pullpayment-foot","SideShift/PullPaymentViewInsert");
+            applicationBuilder.AddUIExtension("store-integrations-list", "SideShift/StoreIntegrationSideShiftOption");
             // Checkout v2
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/CheckoutPaymentMethodExtension",
-                "checkout-payment-method"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/CheckoutPaymentExtension",
-                "checkout-payment"));
-            // Checkout Classic
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/CheckoutContentExtension",
-                "checkout-bitcoin-post-content"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/CheckoutContentExtension",
-                "checkout-lightning-post-content"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/CheckoutTabExtension",
-                "checkout-bitcoin-post-tabs"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/CheckoutTabExtension",
-                "checkout-lightning-post-tabs"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/CheckoutEnd",
-                "checkout-end"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("SideShift/PrismEnhance",
-                "prism-edit"));
-            applicationBuilder.AddSingleton<IPluginHookFilter, PrismDestinationValidate>();
-            applicationBuilder.AddSingleton<IPluginHookFilter, PrismClaimCreate>();
-            applicationBuilder.AddSingleton<IPluginHookFilter, PrismEditFilter>();
+            applicationBuilder.AddUIExtension("checkout-payment-method", "SideShift/CheckoutPaymentMethodExtension");
+            applicationBuilder.AddUIExtension("checkout-payment","SideShift/CheckoutPaymentExtension");
+           
             base.Execute(applicationBuilder);
         }
     }

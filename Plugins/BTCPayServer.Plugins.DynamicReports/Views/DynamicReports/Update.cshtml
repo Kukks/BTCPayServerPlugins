@@ -10,8 +10,6 @@
 @inject DynamicReportService DynamicReportService
 
 @{
-    Layout = "../Shared/_NavLayout.cshtml";
-    ViewData["NavPartialName"] = "../UIServer/_Nav";
     var storeId = ScopeProvider.GetCurrentStoreId();
     var reportName = Context.Request.Query["reportName"].ToString();
     reportName = string.IsNullOrEmpty(reportName) ? null : reportName;

@@ -16,9 +16,7 @@ namespace WalletWasabi.Backend.Controllers;
 [ApiController]
 [ExceptionTranslate]
 [LateResponseLoggerFilter]
-[WasabiSpecificJsonSerializerFilter]
 [AllowAnonymous]
-[UseWasabiJsonInputFormatter ]
 [Route("plugins/wabisabi-coordinator/wabisabi")]
 [Produces("application/json")]
 public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
@@ -34,6 +32,8 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 	private IdempotencyRequestCache IdempotencyRequestCache { get; }
 	private Arena Arena { get; }
 	private CoinJoinFeeRateStatStore CoinJoinFeeRateStatStore { get; }
+	
+
 
 	[HttpPost("status")]
 	public async Task<RoundStateResponse> GetStatusAsync(RoundStateRequest request, CancellationToken cancellationToken)
@@ -41,7 +41,6 @@ public class WabiSabiController : ControllerBase, IWabiSabiApiRequestHandler
 		var response = await Arena.GetStatusAsync(request, cancellationToken);
 		var medians = CoinJoinFeeRateStatStore.GetDefaultMedians();
 		var ret = new RoundStateResponse(response.RoundStates, medians);
-		
 		return ret;
 	}
 

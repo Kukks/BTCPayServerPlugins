@@ -252,7 +252,7 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
             OffchainBalance = new OffchainBalance()
             {
                 Local = LightMoney.MilliSatoshis(ni.channelsBalanceMsat),
-                Remote = LightMoney.MilliSatoshis(ni.inboundLiquidityMsats),
+                Remote = LightMoney.MilliSatoshis(ni.totalInboundLiquidityMsats),
             }
         };
     }
@@ -275,7 +275,7 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
             }
             else
             {
-                result = Sdk.SendPayment(new SendPaymentRequest(bolt11, (ulong?) payParams.Amount?.MilliSatoshi));
+                result = Sdk.SendPayment(new SendPaymentRequest(bolt11,false, (ulong?) payParams.Amount?.MilliSatoshi));
             }
 
             var details = result.payment.details as PaymentDetails.Ln;
