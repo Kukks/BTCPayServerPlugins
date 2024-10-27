@@ -15,13 +15,9 @@ public class FileSellerPlugin : BaseBTCPayServerPlugin
     public override void Execute(IServiceCollection applicationBuilder)
     {
         applicationBuilder.AddHostedService<FileSellerService>();
-        applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("FileSeller/Detect",
-            "header-nav"));
-        applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("FileSeller/Detect",
-            "checkout-end"));
-        applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("FileSeller/FileSellerTemplateEditorItemDetail",
-            "app-template-editor-item-detail"));
-
+        applicationBuilder.AddUIExtension("header-nav", "FileSeller/Detect");
+        applicationBuilder.AddUIExtension("checkout-end", "FileSeller/Detect");
+        applicationBuilder.AddUIExtension("app-template-editor-item-detail", "FileSeller/FileSellerTemplateEditorItemDetail");
 
         base.Execute(applicationBuilder);
     }

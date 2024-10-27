@@ -18,7 +18,7 @@ namespace BTCPayServer.Plugins.Blink
 
         public override void Execute(IServiceCollection applicationBuilder)
         {
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Blink/LNPaymentMethodSetupTab", "ln-payment-method-setup-tab"));
+            applicationBuilder.AddUIExtension("ln-payment-method-setup-tab", "Blink/LNPaymentMethodSetupTab");
             applicationBuilder.AddSingleton<ILightningConnectionStringHandler>(provider => provider.GetRequiredService<BlinkLightningConnectionStringHandler>());
             applicationBuilder.AddSingleton<BlinkLightningConnectionStringHandler>();
 

@@ -22,7 +22,7 @@ namespace BTCPayServer.Plugins.TicketTailor
             applicationBuilder.AddSingleton<IWebhookProvider>(o => o.GetRequiredService<TicketTailorService>());
             applicationBuilder.AddHostedService(s => s.GetRequiredService<TicketTailorService>());
 
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("TicketTailor/NavExtension", "header-nav"));
+            applicationBuilder.AddUIExtension("header-nav", "TicketTailor/NavExtension");
             applicationBuilder.AddSingleton<AppBaseType, TicketTailorApp>();
             base.Execute(applicationBuilder);
         }

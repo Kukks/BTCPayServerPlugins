@@ -21,16 +21,13 @@ namespace BTCPayServer.Plugins.Breez
             applicationBuilder.AddSingleton<IHostedService>(provider => provider.GetRequiredService<BreezService>());
             applicationBuilder.AddSingleton<BreezLightningConnectionStringHandler>();
             applicationBuilder.AddSingleton<ILightningConnectionStringHandler>(provider => provider.GetRequiredService<BreezLightningConnectionStringHandler>());
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Breez/BreezNav",
-                "store-integrations-nav"));
+            applicationBuilder.AddUIExtension("store-integrations-nav", "Breez/BreezNav");
             
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Breez/LNPaymentMethodSetupTabhead", "ln-payment-method-setup-tabhead"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Breez/LNPaymentMethodSetupTab", "ln-payment-method-setup-tab"));
+            applicationBuilder.AddUIExtension("ln-payment-method-setup-tabhead", "Breez/LNPaymentMethodSetupTabhead");
+            applicationBuilder.AddUIExtension("ln-payment-method-setup-tab", "Breez/LNPaymentMethodSetupTab");
 
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Breez/BreezNodeInfo",
-                "dashboard"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Breez/BreezPaymentsTable",
-                "dashboard"));
+            applicationBuilder.AddUIExtension("dashboard", "Breez/BreezNodeInfo");
+            applicationBuilder.AddUIExtension("dashboard", "Breez/BreezPaymentsTable");
             base.Execute(applicationBuilder);
         }
     }

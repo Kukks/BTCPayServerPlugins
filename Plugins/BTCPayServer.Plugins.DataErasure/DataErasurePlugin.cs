@@ -15,8 +15,7 @@ namespace BTCPayServer.Plugins.DataErasure
         {
             applicationBuilder.AddSingleton<DataErasureService>();
             applicationBuilder.AddHostedService( sp => sp.GetRequiredService<DataErasureService>());
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("DataErasure/DataErasureNav",
-                "store-integrations-nav"));
+            applicationBuilder.AddUIExtension("store-integrations-nav", "DataErasure/DataErasureNav");
             base.Execute(applicationBuilder);
         }
     }

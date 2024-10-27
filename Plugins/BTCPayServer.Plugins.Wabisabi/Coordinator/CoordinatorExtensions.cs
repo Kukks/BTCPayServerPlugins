@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Buffers;
+using BTCPayServer;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Services;
 using BTCPayServer.Configuration;
@@ -40,7 +41,7 @@ public static class CoordinatorExtensions
         });
         services.AddHostedService((sp) => sp.GetRequiredService<WabisabiCoordinatorService>());
 
-        services.AddSingleton<IUIExtension>(new UIExtension("Wabisabi/WabisabiServerNavvExtension", "server-nav"));
+        services.AddUIExtension("server-nav", "Wabisabi/WabisabiServerNavvExtension");
 
 
         services.AddHttpClient("wabisabi-coordinator-scripts-no-redirect.onion")

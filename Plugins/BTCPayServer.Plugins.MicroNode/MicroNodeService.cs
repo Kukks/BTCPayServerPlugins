@@ -620,7 +620,7 @@ public class MicroNodeService : EventHostedServiceBase
                         }
                         var payout = await _pullPaymentHostedService.Claim(new ClaimRequest()
                         {
-                            Value = LightMoney.MilliSatoshis(balance.MilliSatoshi).ToDecimal(LightMoneyUnit.BTC),
+                            ClaimedAmount = LightMoney.MilliSatoshis(balance.MilliSatoshi).ToDecimal(LightMoneyUnit.BTC),
                             StoreId = masterClients.Key,
                             Destination = new LNURLPayClaimDestinaton(destination),
                             PreApprove = true,
