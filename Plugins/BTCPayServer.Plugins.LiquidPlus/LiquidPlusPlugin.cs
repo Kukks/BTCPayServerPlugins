@@ -66,8 +66,11 @@ namespace BTCPayServer.Plugins.LiquidPlus
                     .Replace("-", "")
                     .Replace("_", "").ToUpperInvariant();
                 
-                if(code == "LBTC" || code == "USDT" || code == "ETB" || code == "LCAD")
+                if(code == "LBTC" || code == "USDT" || code == "LCAD")
                     return;
+                
+                
+                var pmi2 = PaymentTypes.CHAIN.GetPaymentMethodId(code);
                 services.AddBTCPayNetwork(new ElementsBTCPayNetwork()
                 {
                     CryptoCode = code,
@@ -90,7 +93,8 @@ namespace BTCPayServer.Plugins.LiquidPlus
                     VaultSupported = template.VaultSupported,
                     MaxTrackedConfirmation = template.MaxTrackedConfirmation,
                     SupportRBF = template.SupportRBF
-                }).AddTransactionLinkProvider(code, tlProvider.Provider);
+                });
+                services.AddSingleton(tlProvider with {PaymentMethodId = pmi2});
             });
         }
     }

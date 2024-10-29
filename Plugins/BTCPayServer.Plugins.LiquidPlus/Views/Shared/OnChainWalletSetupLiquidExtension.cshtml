@@ -20,11 +20,11 @@
 
     if (!walletSetupViewModel.Confirmation && walletSetupViewModel.Method == WalletSetupMethod.ImportOptions)
     {
-        <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            document.querySelectorAll(".list-group-item:not(#ImportSeedLink)").forEach(e => e.parentElement.remove());
-        });
-    </script>
+    @*     <script> *@
+    @*     document.addEventListener('DOMContentLoaded', () => { *@
+    @*         document.querySelectorAll(".list-group-item:not(#ImportSeedLink)").forEach(e => e.parentElement.remove()); *@
+    @*     }); *@
+    @* </script> *@
     }
     if (!walletSetupViewModel.Confirmation && walletSetupViewModel.Method is WalletSetupMethod.HotWallet or WalletSetupMethod.Seed)
     {

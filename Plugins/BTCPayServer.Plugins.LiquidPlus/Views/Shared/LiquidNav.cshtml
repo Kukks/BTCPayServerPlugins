@@ -1,12 +1,8 @@
-@using BTCPayServer
 @using BTCPayServer.Abstractions.Contracts
 @using BTCPayServer.Client
-@using BTCPayServer.Plugins.Altcoins
 @using BTCPayServer.Plugins.LiquidPlus.Controllers
 @using Microsoft.AspNetCore.Mvc.TagHelpers
-@using Microsoft.AspNetCore.Routing
 
-@inject BTCPayNetworkProvider BTCPayNetworkProvider;
 
 @inject IScopeProvider ScopeProvider
 @{
@@ -14,7 +10,7 @@
     var isActive = !string.IsNullOrEmpty(storeId) && ViewContext.RouteData.Values.TryGetValue("Controller", out var controller) &&  controller is not null && 
                    nameof(StoreLiquidController).StartsWith(controller?.ToString(), StringComparison.InvariantCultureIgnoreCase);
 }
-@if (!string.IsNullOrEmpty(storeId) && (BTCPayNetworkProvider.GetAll().OfType<ElementsBTCPayNetwork>().Any()))
+@if (!string.IsNullOrEmpty(storeId) )
 {
     <li class="nav-item" permission="@Policies.CanModifyStoreSettings">
         <a asp-route-storeId="@storeId" asp-action="GenerateLiquidScript" asp-controller="StoreLiquid" class="nav-link js-scroll-trigger @(isActive ? "active" : string.Empty)">

@@ -1,13 +1,7 @@
-@inject ContentSecurityPolicies contentSecurityPolicies
 @using BTCPayServer.Security
-@using NBitcoin
 @model BTCPayServer.Plugins.LiquidPlus.Models.CustomLiquidAssetsViewModel
 @{
-    Layout = "../Shared/_NavLayout.cshtml";
-    ViewData["NavPartialName"] = "../UIServer/_Nav";
     ViewData["Title"] = "Custom Liquid Assets";
-    var nonce = RandomUtils.GetUInt256().ToString().Substring(0, 32);
-    contentSecurityPolicies.Add("script-src", $"'nonce-{nonce}'");
 }
 @if (Model.PendingChanges)
 {
@@ -67,7 +61,7 @@
         <button id="import-liquid-asset-from-registry" type="button"  class="btn btn-secondary">Import from Blockstream Asset Registry</button>
         <button type="submit" class="btn btn-primary" name="command" value="Save">Save</button>
     </div>
-    <script type="text/javascript" nonce="@nonce">
+    <script type="text/javascript">
         document.getElementById("import-liquid-asset-from-registry").addEventListener("click", function (){
             var id = prompt("Enter the asset id");
             if (id){

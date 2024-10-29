@@ -201,7 +201,7 @@ namespace BTCPayServer.Plugins.SideShift
                 PullPaymentId = pullPaymentId,
                 Destination = destination.destination,
                 PayoutMethodId = pmi,
-                Value = request.Amount
+                ClaimedAmount = request.Amount
             });
             if (claim.Result == ClaimRequest.ClaimResult.Ok)
             {
