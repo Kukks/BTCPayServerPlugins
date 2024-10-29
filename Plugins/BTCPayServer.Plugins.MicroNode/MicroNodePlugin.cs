@@ -18,9 +18,9 @@ public class MicroNodePlugin:BaseBTCPayServerPlugin
     public override void Execute(IServiceCollection applicationBuilder)
     {
         
-        applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("MicroNode/MicroNodeNav", "header-nav"));
-        applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("MicroNode/LNPaymentMethodSetupTabhead", "ln-payment-method-setup-tabhead"));
-        applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("MicroNode/LNPaymentMethodSetupTab", "ln-payment-method-setup-tab"));
+        applicationBuilder.AddUIExtension("header-nav", "MicroNode/MicroNodeNav");
+        applicationBuilder.AddUIExtension("ln-payment-method-setup-tabhead", "MicroNode/LNPaymentMethodSetupTabhead");
+        applicationBuilder.AddUIExtension("ln-payment-method-setup-tab", "MicroNode/LNPaymentMethodSetupTab");
         // applicationBuilder.AddStartupTask<MicroNodeStartupTask>();
         applicationBuilder.AddSingleton<MicroNodeContextFactory>();
         applicationBuilder.AddDbContext<MicroNodeContext>((provider, o) =>

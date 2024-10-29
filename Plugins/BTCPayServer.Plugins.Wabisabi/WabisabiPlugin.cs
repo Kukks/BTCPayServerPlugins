@@ -55,14 +55,10 @@ public class WabisabiPlugin : BaseBTCPayServerPlugin
         applicationBuilder.AddSingleton<IWalletProvider>(provider => provider.GetRequiredService<WalletProvider>());
         applicationBuilder.AddHostedService(provider => provider.GetRequiredService<WalletProvider>());
         ;
-        applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Wabisabi/StoreIntegrationWabisabiOption",
-            "store-integrations-list"));
-        applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Wabisabi/WabisabiNav",
-            "store-integrations-nav"));
-        applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Wabisabi/WabisabiDashboard",
-            "dashboard"));
-        applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Wabisabi/WabisabiWalletSend",
-            "onchain-wallet-send"));
+        applicationBuilder.AddUIExtension("store-integrations-list", "Wabisabi/StoreIntegrationWabisabiOption");
+        applicationBuilder.AddUIExtension("store-integrations-nav", "Wabisabi/WabisabiNav");
+        applicationBuilder.AddUIExtension("dashboard", "Wabisabi/WabisabiDashboard");
+        applicationBuilder.AddUIExtension("onchain-wallet-send", "Wabisabi/WabisabiWalletSend");
 
         applicationBuilder.AddSingleton<IPayoutProcessorFactory, WabisabiPayoutProcessor>();
         Logger.SetMinimumLevel(LogLevel.Info);

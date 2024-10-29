@@ -16,8 +16,7 @@ public class DynamicReportsPlugin : BaseBTCPayServerPlugin
     {
         applicationBuilder.AddSingleton<DynamicReportService>();
         applicationBuilder.AddSingleton<IHostedService>(provider => provider.GetRequiredService<DynamicReportService>());
-        applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("DynamicReportsPlugin/Nav",
-            "server-nav"));
+        applicationBuilder.AddUIExtension("server-nav", "DynamicReportsPlugin/Nav");
         base.Execute(applicationBuilder);
     }
 }

@@ -21,8 +21,7 @@ public class BringinPlugin : BaseBTCPayServerPlugin
     {
         applicationBuilder.AddSingleton<BringinService>();
         applicationBuilder.AddSingleton<IHostedService, BringinService>(s => s.GetService<BringinService>());
-        applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Bringin/BringinDashboardWidget", "dashboard"));
-        applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Bringin/Nav",
-            "store-integrations-nav"));
+        applicationBuilder.AddUIExtension("dashboard", "Bringin/BringinDashboardWidget");
+        applicationBuilder.AddUIExtension("store-integrations-nav", "Bringin/Nav");
     }
 }

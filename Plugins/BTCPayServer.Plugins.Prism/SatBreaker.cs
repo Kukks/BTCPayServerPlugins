@@ -547,7 +547,7 @@ namespace BTCPayServer.Plugins.Prism
                     PreApprove = true,
                     StoreId = storeId,
                     PayoutMethodId = pmi,
-                    Value = Money.Satoshis(payoutAmount).ToDecimal(MoneyUnit.BTC),
+                    ClaimedAmount = Money.Satoshis(payoutAmount).ToDecimal(MoneyUnit.BTC),
                     Metadata = JObject.FromObject(new
                     {
                         Source = source 

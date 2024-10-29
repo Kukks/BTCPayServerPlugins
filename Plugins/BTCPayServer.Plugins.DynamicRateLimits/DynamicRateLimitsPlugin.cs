@@ -16,8 +16,7 @@ public class DynamicRateLimitsPlugin : BaseBTCPayServerPlugin
     {
         applicationBuilder.AddSingleton<DynamicRateLimitsService>();
         applicationBuilder.AddSingleton<IHostedService>(provider => provider.GetRequiredService<DynamicRateLimitsService>());
-        applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("DynamicRateLimitsPlugin/Nav",
-            "server-nav"));
+        applicationBuilder.AddUIExtension("server-nav", "DynamicRateLimitsPlugin/Nav");
         base.Execute(applicationBuilder);
     }
 }

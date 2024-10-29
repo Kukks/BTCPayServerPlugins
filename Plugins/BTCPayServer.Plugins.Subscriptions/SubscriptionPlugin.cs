@@ -26,7 +26,7 @@ namespace BTCPayServer.Plugins.Subscriptions
             applicationBuilder.AddSingleton<IWebhookProvider>(o => o.GetRequiredService<SubscriptionService>());
             applicationBuilder.AddHostedService(s => s.GetRequiredService<SubscriptionService>());
 
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Subscriptions/NavExtension", "header-nav"));
+            applicationBuilder.AddUIExtension("header-nav", "Subscriptions/NavExtension");
             applicationBuilder.AddSingleton<AppBaseType, SubscriptionApp>();
             base.Execute(applicationBuilder);
         }

@@ -309,7 +309,7 @@ public class BringinService : EventHostedServiceBase
             PayoutMethodId = paymentMethodId,
             StoreId = storeId,
             Destination = destination,
-            Value = orderMoney.ToUnit(MoneyUnit.BTC),
+            ClaimedAmount = orderMoney.ToUnit(MoneyUnit.BTC),
             PreApprove = true,
             Metadata = JObject.FromObject(new
             {

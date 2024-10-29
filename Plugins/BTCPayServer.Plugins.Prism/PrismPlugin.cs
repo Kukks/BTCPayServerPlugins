@@ -18,8 +18,7 @@ public class PrismPlugin : BaseBTCPayServerPlugin
     {   
         applicationBuilder.AddServerSideBlazor(o => o.DetailedErrors = true);
         
-        applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("PrismNav",
-            "store-integrations-nav"));
+        applicationBuilder.AddUIExtension("store-integrations-nav", "PrismNav");
         applicationBuilder.AddSingleton<SatBreaker>();
         applicationBuilder.AddHostedService(provider => provider.GetRequiredService<SatBreaker>());
         applicationBuilder.AddSingleton<IPluginHookFilter, OpenSatsDestinationValidator>();

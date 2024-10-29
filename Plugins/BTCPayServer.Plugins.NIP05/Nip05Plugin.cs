@@ -18,9 +18,8 @@ namespace BTCPayServer.Plugins.NIP05
 
         public override void Execute(IServiceCollection applicationBuilder)
         {
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("Nip05Nav",
-                "store-integrations-nav"));
-            applicationBuilder.AddSingleton<IUIExtension>(new UIExtension("NWC/LNPaymentMethodSetupTab", "ln-payment-method-setup-tab"));
+            applicationBuilder.AddUIExtension("store-integrations-nav", "Nip05Nav");
+            applicationBuilder.AddUIExtension("ln-payment-method-setup-tab", "NWC/LNPaymentMethodSetupTab");
 
             applicationBuilder.AddSingleton<IPluginHookFilter, LnurlDescriptionFilter>();
             applicationBuilder.AddSingleton<IPluginHookFilter, LnurlFilter>();
