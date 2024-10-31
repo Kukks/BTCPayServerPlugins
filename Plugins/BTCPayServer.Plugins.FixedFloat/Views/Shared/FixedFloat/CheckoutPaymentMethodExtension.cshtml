@@ -12,9 +12,13 @@
         {
             foreach (var explicitMethod in settings.ExplicitMethods)
             {
-                <a href="#@id" class="btcpay-pill m-0 payment-method" :class="{ active: pmId === '@id' && window.ffExplicitId === '@explicitMethod'}" v-on:click.prevent="()=>{ window.ffExplicitId = '@explicitMethod'; changePaymentMethod('@id'); }">
-                    @FixedFloatSettings.AllowedSendingOptions[explicitMethod]
-                </a>
+                if(FixedFloatSettings.AllowedSendingOptions.TryGetValue(explicitMethod, out var explicitMethodValue))
+                {
+                    <a href="#@explicitMethod" class="btcpay-pill m-0 payment-method" :class="{ active: pmId === '@explicitMethod' && window.ffExplicitId === '@explicitMethod'}" v-on:click.prevent="()=>{ window.ffExplicitId = '@explicitMethod'; changePaymentMethod('@explicitMethod'); }">
+                        @explicitMethodValue
+                    </a>
+                }
+            
             }
         }
         if (!settings.OnlyShowExplicitMethods || settings.ExplicitMethods?.Any() is not true)
