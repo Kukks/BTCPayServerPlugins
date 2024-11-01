@@ -18,7 +18,7 @@
                 var coinInfo = coins.FirstOrDefault(c => c.CryptoCode == coin && c.Network == network);
                 if(coinInfo is null)
                     continue;
-                <a href="#@id" class="btcpay-pill m-0 payment-method" :class="{ active: pmId === '@id' && window.ssExplicitId === '@coinInfo.Id'}" v-on:click.prevent="()=>{ window.ssExplicitId = '@coinInfo.Id'; changePaymentMethod('@id'); }">
+                <a href="#ss_@coinInfo.Id" class="btcpay-pill m-0 payment-method" :class="{ active: pmId === '@id' && window.ssExplicitId === '@coinInfo.Id'}" v-on:click.prevent="()=>{ window.ssExplicitId = '@coinInfo.Id'; changePaymentMethod('@id'); }">
                     @coinInfo.DisplayName @(coinInfo.DisplayName.Equals(coinInfo.Network, StringComparison.InvariantCultureIgnoreCase)? string.Empty: $"({coinInfo.Network})")
                 </a>
             }

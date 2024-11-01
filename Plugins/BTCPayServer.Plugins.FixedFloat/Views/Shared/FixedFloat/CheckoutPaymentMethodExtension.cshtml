@@ -5,28 +5,30 @@
     const string id = "FixedFloat";
     var storeId = Model.StoreId;
     var settings = await FixedFloatService.GetFixedFloatForStore(storeId);
-    
+
     if (settings?.Enabled is true)
     {
-        if (settings.ExplicitMethods?.Any() is true)
-        {
-            foreach (var explicitMethod in settings.ExplicitMethods)
+        
+        <div class="btcpay-pills d-flex flex-wrap align-items-center justify-content-center gap-2 pb-2">
+            @if (settings.ExplicitMethods?.Any() is true)
             {
-                if(FixedFloatSettings.AllowedSendingOptions.TryGetValue(explicitMethod, out var explicitMethodValue))
+                foreach (var explicitMethod in settings.ExplicitMethods)
                 {
-                    <a href="#@explicitMethod" class="btcpay-pill m-0 payment-method" :class="{ active: pmId === '@explicitMethod' && window.ffExplicitId === '@explicitMethod'}" v-on:click.prevent="()=>{ window.ffExplicitId = '@explicitMethod'; changePaymentMethod('@explicitMethod'); }">
-                        @explicitMethodValue
-                    </a>
+                    if (FixedFloatSettings.AllowedSendingOptions.TryGetValue(explicitMethod, out var explicitMethodValue))
+                    {
+                        <a href="#ff_@explicitMethod" class="btcpay-pill m-0 payment-method" :class="{ active: pmId === '@id' && window.ffExplicitId === 'ff_@explicitMethod'}" v-on:click.prevent="()=>{ window.ffExplicitId = 'ff_@explicitMethod'; changePaymentMethod('@id'); }">
+                            @explicitMethodValue
+                        </a>
+                    }
                 }
-            
             }
-        }
-        if (!settings.OnlyShowExplicitMethods || settings.ExplicitMethods?.Any() is not true)
-        {
-            <a href="#@id" class="btcpay-pill m-0 payment-method" :class="{ active: pmId === '@id' && !window.ffExplicitId  }" v-on:click.prevent="()=>{ window.ffExplicitId = null; changePaymentMethod('@id'); }">
-                @id
-            </a>
-        }
-     
+            @if (!settings.OnlyShowExplicitMethods || settings.ExplicitMethods?.Any() is not true)
+            {
+                <a href="#@id" class="btcpay-pill m-0 payment-method" :class="{ active: pmId === '@id' && !window.ffExplicitId  }" v-on:click.prevent="()=>{ window.ffExplicitId = null; changePaymentMethod('@id'); }">
+                    @id
+                </a>
+            }
+
+        </div>
     }
 }

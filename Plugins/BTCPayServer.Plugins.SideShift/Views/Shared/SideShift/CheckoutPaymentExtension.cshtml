@@ -25,7 +25,7 @@
         <div class="payment-box">
             <p v-html="content"></p>
             <p v-if="!settleMethodId" class="text-danger">Lightning is not supported via Sideshift. Select another payment method first, then come back.</p>
-            <button v-if="settleMethodId" type="button" v-on:click="openDialog" class="btn btn-primary rounded-pill w-100">{{$t("Pay with SideShift", {crryptoCode: settleMethodId})}}</button>
+            <button v-if="settleMethodId" type="button" v-on:click="openDialog" class="btn btn-primary rounded-pill w-100">{{$t("Pay with SideShift", {cryptoCode: settleMethodId})}}</button>
         </div>
     </template>
     <script>

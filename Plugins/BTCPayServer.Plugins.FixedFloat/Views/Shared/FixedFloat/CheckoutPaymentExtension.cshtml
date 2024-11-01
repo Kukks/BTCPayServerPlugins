@@ -87,7 +87,7 @@
                 },
                 explicitQuery (){
                     const isExplicit = !!this.explicitId;
-                    const explicitFrom = isExplicit ? this.explicitId: null;
+                    const explicitFrom = isExplicit ? this.explicitId.replace('ff_', ''): null;
                     return isExplicit? `&from=${explicitFrom}&lockSend=true` : '';
                 },
                 amountQuery () {
