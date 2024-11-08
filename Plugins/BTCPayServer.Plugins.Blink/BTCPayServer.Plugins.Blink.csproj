@@ -9,7 +9,7 @@
     <PropertyGroup>
         <Product>Blink</Product>
         <Description>Blink Lightning support</Description>
-        <Version>1.0.9</Version>
+        <Version>1.0.10</Version>
 <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         <RootNamespace>BTCPayServer.Plugins.Blink</RootNamespace>
     </PropertyGroup>
