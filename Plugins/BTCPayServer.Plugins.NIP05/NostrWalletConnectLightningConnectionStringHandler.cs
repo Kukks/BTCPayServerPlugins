@@ -27,7 +27,14 @@ public class NostrWalletConnectLightningConnectionStringHandler : ILightningConn
             return null;
         }
 
-        connectionString = connectionString.Replace("type=nwc;key=", "");
+        if (connectionString.StartsWith("type=nwc;key=", StringComparison.OrdinalIgnoreCase))
+        {
+            string scheme = "nostr+walletconnect:";
+            connectionString = connectionString.Replace("type=nwc;key=", "");
+            if (!connectionString.StartsWith(scheme, StringComparison.OrdinalIgnoreCase))
+                connectionString = scheme + connectionString;
+        }
+
         try
         {
             Uri.TryCreate(connectionString, UriKind.Absolute, out var uri);
