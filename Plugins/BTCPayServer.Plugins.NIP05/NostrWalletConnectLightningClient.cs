@@ -18,7 +18,7 @@ namespace BTCPayServer.Plugins.NIP05;
 
 public class NostrWalletConnectLightningClient : ILightningClient
 {
-    
+
     [Display] public string DisplayLabel => $"Nostr Wallet Connect {_connectParams.lud16} {_connectParams.relays.First()} ";
     private readonly NostrClientPool _nostrClientPool;
     private readonly Uri _uri;
@@ -63,7 +63,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
         var expired = !isPaid && expiresAt < DateTimeOffset.UtcNow;
         var s = tx.SettledAt is not null
             ? DateTimeOffset.FromUnixTimeSeconds(tx.SettledAt.Value)
-            : (DateTimeOffset?) null;
+            : (DateTimeOffset?)null;
         return new LightningInvoice()
         {
             PaymentHash = tx.PaymentHash,
@@ -118,7 +118,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
                 new NIP47.ListTransactionsRequest()
                 {
                     Type = "incoming",
-                    Offset = (int) (request.OffsetIndex ?? 0),
+                    Offset = (int)(request.OffsetIndex ?? 0),
                     Unpaid = request.PendingOnly ?? false,
                 }, cts.Token);
 
@@ -144,7 +144,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
         var expired = !isPaid && expiresAt < DateTimeOffset.UtcNow;
         var s = tx.SettledAt is not null
             ? DateTimeOffset.FromUnixTimeSeconds(tx.SettledAt.Value)
-            : (DateTimeOffset?) null;
+            : (DateTimeOffset?)null;
         return new LightningPayment()
         {
             PaymentHash = tx.PaymentHash,
@@ -169,11 +169,21 @@ public class NostrWalletConnectLightningClient : ILightningClient
         var (nostrClient, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cts.Token);
         using (usage)
         {
-            var tx = await nostrClient.SendNIP47Request<NIP47.Nip47Transaction>(_connectParams.pubkey, _connectParams.secret,
-                new NIP47.LookupInvoiceRequest()
-                {
-                    PaymentHash = paymentHash
-                }, cts.Token);
+            NIP47.Nip47Transaction tx;
+            try
+            {
+                tx = await nostrClient.SendNIP47Request<NIP47.Nip47Transaction>(_connectParams.pubkey, _connectParams.secret,
+                    new NIP47.LookupInvoiceRequest()
+                    {
+                        PaymentHash = paymentHash
+                    }, cts.Token);
+            }
+            // The standard says it returns NOT_FOUND error, but
+            // Alby returns INTERNAL error... Probably safer to catch all
+            catch (Exception)
+            {
+                return null;
+            }
             return ToLightningPayment(tx)!;
         }
     }
@@ -197,7 +207,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
                 new NIP47.ListTransactionsRequest()
                 {
                     Type = "outgoing",
-                    Offset = (int) (request.OffsetIndex ?? 0),
+                    Offset = (int)(request.OffsetIndex ?? 0),
                     Unpaid = request.IncludePending ?? false,
                 }, cts.Token);
             return response.Transactions.Select(ToLightningPayment).Where(i => i is not null).ToArray()!;
@@ -213,7 +223,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
     public async Task<LightningInvoice> CreateInvoice(CreateInvoiceParams createInvoiceRequest,
         CancellationToken cancellation = new())
     {
-        
+
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         cts.CancelAfter(TimeSpan.FromSeconds(10));
         var (nostrClient, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cts.Token);
@@ -229,7 +239,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
                         ? null
                         : createInvoiceRequest.Description,
                     DescriptionHash = createInvoiceRequest.DescriptionHash?.ToString(),
-                    ExpirySeconds = (int) createInvoiceRequest.Expiry.TotalSeconds,
+                    ExpirySeconds = (int)createInvoiceRequest.Expiry.TotalSeconds,
                 }, cts.Token);
             return ToLightningInvoice(response, _network)!;
         }
@@ -237,7 +247,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
 
     public async Task<ILightningInvoiceListener> Listen(CancellationToken cancellation = new())
     {
-        var x = await _nostrClientPool.GetClientAndConnect(_connectParams.relays,  cancellation);
+        var x = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cancellation);
         if (_commands.Notifications?.Contains("payment_received") is true)
         {
             return new NotificationListener(_network, x, _connectParams);
@@ -319,7 +329,7 @@ public class NostrWalletConnectLightningClient : ILightningClient
                 while (!_cts.IsCancellationRequested)
                 {
                     var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-                        cts.CancelAfter(TimeSpan.FromSeconds(10));
+                    cts.CancelAfter(TimeSpan.FromSeconds(10));
                     var paid = await _client.SendNIP47Request<NIP47.ListTransactionsResponse>(_connectparams.pubkey,
                         _connectparams.secret, new NIP47.ListTransactionsRequest()
                         {
@@ -327,22 +337,22 @@ public class NostrWalletConnectLightningClient : ILightningClient
                             // Unpaid = true, //seems like this is ignored... so we only get paid ones 
                             Limit = 300
                         }, cancellationToken: cts.Token);
-                    paid.Transactions = paid.Transactions.Where(i => i is {Type: "incoming", SettledAt: not null}).ToArray();
+                    paid.Transactions = paid.Transactions.Where(i => i is { Type: "incoming", SettledAt: not null }).ToArray();
                     if (_lastPaid is not null)
                     {
-                        
+
                         var paidInvoicesSinceLastPoll = paid.Transactions.Where(i =>
                             _lastPaid.Transactions.All(j => j.PaymentHash != i.PaymentHash)).Select(i =>
                             ToLightningInvoice(i, _network)!);
-                        
-                        
+
+
                         //all invoices which  are no longer in the unpaid list are paid
                         // var paidInvoicesSinceLastPoll = _lastPaid.Transactions
                         //     .Where(i => paid.Transactions.All(j => j.PaymentHash != i.PaymentHash))
                         //     .Select(i => ToLightningInvoice(i, _network)!);
                         foreach (var invoice in paidInvoicesSinceLastPoll)
                         {
-                            await queue.Writer.WriteAsync(invoice,_cts.Token);
+                            await queue.Writer.WriteAsync(invoice, _cts.Token);
                         }
                     }
 
@@ -379,13 +389,13 @@ public class NostrWalletConnectLightningClient : ILightningClient
     {
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         cts.CancelAfter(TimeSpan.FromSeconds(5));
-        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays,  cts.Token);
+        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cts.Token);
 
         using (usage)
         {
             var response = await client.SendNIP47Request<NIP47.GetBalanceResponse>(_connectParams.pubkey,
                 _connectParams.secret,
-                new NIP47.NIP47Request("get_balance"),  cts.Token);
+                new NIP47.NIP47Request("get_balance"), cts.Token);
             return new LightningNodeBalance()
             {
                 OffchainBalance = new OffchainBalance()
@@ -405,43 +415,45 @@ public class NostrWalletConnectLightningClient : ILightningClient
     public async Task<PayResponse> Pay(string bolt11, PayInvoiceParams payParams,
         CancellationToken cancellation = new())
     {
-        try
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        cts.CancelAfter(TimeSpan.FromSeconds(10));
+        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cts.Token);
+
+        using (usage)
         {
-            
-            var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
-            var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays,  cts.Token);
-
-            using (usage)
+            NIP47.INIP47Request request;
+            if (bolt11 is null)
             {
-                var response = await client.SendNIP47Request<NIP47.PayInvoiceResponse>(_connectParams.pubkey,
-                    _connectParams.secret,
-                    bolt11 is null
-                        ? new NIP47.PayKeysendRequest()
-                        {
-                            Amount = Convert.ToDecimal(payParams.Amount.MilliSatoshi),
-                            Pubkey = payParams.Destination.ToHex(),
-                            TlvRecords = payParams.CustomRecords?.Select(kv => new NIP47.TlvRecord()
-                            {
-                                Type = kv.Key.ToString(),
-                                Value = kv.Value
-                            }).ToArray()
-                        }
-                        : new NIP47.PayInvoiceRequest()
-                        {
-                            Invoice = bolt11,
-                            Amount = payParams.Amount?.MilliSatoshi is not null
-                                ? Convert.ToDecimal(payParams.Amount.MilliSatoshi)
-                                : null,
-                        }, cts.Token);
+                request = new NIP47.PayKeysendRequest()
+                {
+                    Amount = Convert.ToDecimal(payParams.Amount.MilliSatoshi),
+                    Pubkey = payParams.Destination.ToHex(),
+                    TlvRecords = payParams.CustomRecords?.Select(kv => new NIP47.TlvRecord()
+                    {
+                        Type = kv.Key.ToString(),
+                        Value = kv.Value
+                    }).ToArray()
+                };
                 
-                var payHash = payParams?.PaymentHash?.ToString()?? 
-                                (response.Preimage is not null? 
-                                  ConvertHelper.ToHexString(SHA256.HashData(Convert.FromHexString(response.Preimage))): 
-                                  BOLT11PaymentRequest.Parse(bolt11, _network).PaymentHash.ToString());
+            }
+            else
+            {
+                request = new NIP47.PayInvoiceRequest()
+                {
+                    Invoice = bolt11,
+                    Amount = payParams.Amount?.MilliSatoshi is not null
+                            ? Convert.ToDecimal(payParams.Amount.MilliSatoshi)
+                            : null,
+                };
 
+            }
+            var response = await client.SendNIP47Request<NIP47.PayInvoiceResponse>(_connectParams.pubkey, _connectParams.secret, request, cts.Token);
+            var payHash = ConvertHelper.ToHexString(SHA256.HashData(Convert.FromHexString(response.Preimage)));
+
+            try
+            {
                 var tx = await client.SendNIP47Request<NIP47.Nip47Transaction>(_connectParams.pubkey, _connectParams.secret,
-                    new NIP47          .LookupInvoiceRequest()
+                    new NIP47.LookupInvoiceRequest()
                     {
                         PaymentHash = payHash
                     }, cts.Token);
@@ -456,15 +468,18 @@ public class NostrWalletConnectLightningClient : ILightningClient
                         FeeAmount = lp.Fee
                     });
             }
-        } 
-        catch (Exception e)
-        {
-            return new PayResponse()
+            catch (Exception e)
             {
-                Result = PayResult.Error,
-                ErrorDetail = e.Message
-            };
+                return new PayResponse(PayResult.Ok, new PayDetails()
+                {
+                    Status = LightningPaymentStatus.Complete,
+                    PaymentHash = new uint256(payHash),
+                    Preimage = new uint256(response.Preimage),
+                })
+                { ErrorDetail = e.Message };
+            }
         }
+
     }
 
     public async Task<PayResponse> Pay(string bolt11, CancellationToken cancellation = new())
