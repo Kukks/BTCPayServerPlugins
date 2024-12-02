@@ -11,7 +11,7 @@
     <PropertyGroup>
         <Product>Nostr</Product>
         <Description>NIP5 addresses, Zap support, Nostr Wallet Connect Lightning support</Description>
-        <Version>1.1.15</Version>
+        <Version>1.1.16</Version>
 <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->

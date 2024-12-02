@@ -28,9 +28,19 @@ public class NostrWalletConnectLightningConnectionStringHandler : ILightningConn
         }
 
         connectionString = connectionString.Replace("type=nwc;key=", "");
+        if (!connectionString.StartsWith(NIP47.UriScheme, StringComparison.OrdinalIgnoreCase))
+        {
+            error = $"Invalid nostr wallet connect uri (must start with {NIP47.UriScheme})";
+            return null;
+        }
+
+        if (!Uri.TryCreate(connectionString, UriKind.Absolute, out var uri))
+        {
+            error = "Invalid nostr wallet connect uri";
+            return null;
+        }
         try
         {
-            Uri.TryCreate(connectionString, UriKind.Absolute, out var uri);
             var connectParams = NIP47.ParseUri(uri); 
             var cts = new CancellationTokenSource();
             cts.CancelAfter(TimeSpan.FromSeconds(10));
