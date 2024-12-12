@@ -68,8 +68,7 @@
                     return this.model.invoiceBitcoinUrl.slice(index + "lightning=".length);
                 },
                 url () {
-                    debugger;
-                    const address=  this.lightning || this.model.address;
+                    const address = this.lightning || this.model.address;
                     return "https://widget.ff.io/?" +
                         `to=${this.settleMethodId}` + 
                         "&lockReceive=true&ref=fkbyt39c" +
