@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using BTCPayServer.Lightning;
+using BTCPayServer.Payments.Lightning;
 using NBitcoin;
 using NBitcoin.Secp256k1;
 using NNostr.Client;
@@ -16,24 +17,28 @@ using SHA256 = System.Security.Cryptography.SHA256;
 
 namespace BTCPayServer.Plugins.NIP05;
 
-public class NostrWalletConnectLightningClient : ILightningClient
+public class NostrWalletConnectLightningClient : IExtendedLightningClient
 {
 
     [Display] public string DisplayLabel => $"Nostr Wallet Connect {_connectParams.lud16} {_connectParams.relays.First()} ";
-    private readonly NostrClientPool _nostrClientPool;
+
+	public string? DisplayName => "Nostr Wallet Connect (NwC)";
+
+	public Uri? ServerUri => _serverUri;
+
+	private readonly NostrClientPool _nostrClientPool;
     private readonly Uri _uri;
     private readonly Network _network;
-    private readonly (string[] Commands, string[] Notifications) _commands;
     private readonly (ECXOnlyPubKey pubkey, ECPrivKey secret, Uri[] relays, string lud16) _connectParams;
+	private readonly Uri? _serverUri;
 
-    public NostrWalletConnectLightningClient(NostrClientPool nostrClientPool, Uri uri, Network network,
-        (string[] Commands, string[] Notifications) commands)
+	public NostrWalletConnectLightningClient(NostrClientPool nostrClientPool, Uri uri, Network network)
     {
         _nostrClientPool = nostrClientPool;
         _uri = uri;
         _network = network;
-        _commands = commands;
         _connectParams = NIP47.ParseUri(uri);
+        _serverUri = _connectParams.relays.FirstOrDefault();
     }
 
     public override string ToString()
@@ -245,15 +250,19 @@ public class NostrWalletConnectLightningClient : ILightningClient
         }
     }
 
-    public async Task<ILightningInvoiceListener> Listen(CancellationToken cancellation = new())
+    public async Task<ILightningInvoiceListener> Listen(CancellationToken cancellation = default)
     {
         var x = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cancellation);
-        if (_commands.Notifications?.Contains("payment_received") is true)
+		var commands = await x.Item1.FetchNIP47AvailableCommands(_connectParams.Item1, cancellationToken: cancellation);
+        bool? hasNotification = commands?.Notifications?.Contains("payment_received");
+        if (hasNotification is false)
         {
-            return new NotificationListener(_network, x, _connectParams);
-        }
-
-        return new PollListener(_network, x, _connectParams);
+            var response = await x.Item1.SendNIP47Request<NIP47.GetInfoResponse>(_connectParams.pubkey, _connectParams.secret, new NIP47.GetInfoRequest(), cancellationToken: cancellation);
+			hasNotification = response?.Notifications?.Contains("payment_received");
+		}
+        return hasNotification is true
+			? new NotificationListener(_network, x, _connectParams)
+            : new PollListener(_network, x, _connectParams);
     }
 
 
@@ -513,4 +522,36 @@ public class NostrWalletConnectLightningClient : ILightningClient
     {
         throw new NotSupportedException();
     }
+
+	public async Task<ValidationResult?> Validate()
+	{
+		var cts = new CancellationTokenSource();
+		cts.CancelAfter(TimeSpan.FromSeconds(10));
+		var (client, disposable) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cts.Token).ConfigureAwait(false);
+        using (disposable)
+        {
+			var commands = await client.FetchNIP47AvailableCommands(_connectParams.Item1, cancellationToken: cts.Token);
+			var requiredCommands = new[] { "get_info", "make_invoice", "lookup_invoice", "list_transactions" };
+			if (commands?.Commands is null || requiredCommands.Any(c => !commands.Value.Commands.Contains(c)))
+			{
+				return new ValidationResult("No commands available or not all required commands are available (get_info, make_invoice, lookup_invoice, list_transactions)");
+			}
+
+			var response = await client
+					.SendNIP47Request<NIP47.GetInfoResponse>(_connectParams.pubkey, _connectParams.secret,
+						new NIP47.GetInfoRequest(), cancellationToken: cts.Token);
+
+			var walletNetwork = response.Network;
+			if (!_network.ChainName.ToString().Equals(walletNetwork,
+					StringComparison.InvariantCultureIgnoreCase))
+			{
+				return new ValidationResult($"The network of the wallet ({walletNetwork}) does not match the network of the server ({_network.ChainName})");
+			}
+			if (response?.Methods is null || requiredCommands.Any(c => !response.Methods.Contains(c)))
+			{
+				return new ValidationResult("No commands available or not all required commands are available (get_info, make_invoice, lookup_invoice, list_transactions)");
+			}
+		}
+        return ValidationResult.Success;
+	}
 }
