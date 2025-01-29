@@ -45,13 +45,13 @@ public class BreezService:EventHostedServiceBase
 
     protected override void SubscribeToEvents()
     {
-        Subscribe<StoreRemovedEvent>();
+        Subscribe<StoreEvent.Removed>();
         base.SubscribeToEvents();
     }
 
     protected override async Task ProcessEvent(object evt, CancellationToken cancellationToken)
     {
-        if (evt is StoreRemovedEvent storeRemovedEvent)
+        if (evt is StoreEvent.Removed storeRemovedEvent)
         {
             await Handle(storeRemovedEvent.StoreId, null);
             _settings.Remove(storeRemovedEvent.StoreId);

@@ -9,7 +9,7 @@
     <PropertyGroup>
         <Product>Bringin</Product>
         <Description>Euro Offramp</Description>
-        <Version>1.0.3</Version>
+        <Version>1.0.4</Version>
 <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->

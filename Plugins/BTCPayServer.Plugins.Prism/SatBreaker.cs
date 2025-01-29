@@ -103,7 +103,7 @@ namespace BTCPayServer.Plugins.Prism
             base.SubscribeToEvents();
             Subscribe<InvoiceEvent>();
             Subscribe<PayoutEvent>();
-            Subscribe<StoreRemovedEvent>();
+            Subscribe<StoreEvent.Removed>();
         }
 
         class CheckPayoutsEvt
@@ -439,7 +439,7 @@ namespace BTCPayServer.Plugins.Prism
 
                 switch (evt)
                 {
-                    case StoreRemovedEvent storeRemovedEvent:
+                    case StoreEvent.Removed storeRemovedEvent:
                         _prismSettings.Remove(storeRemovedEvent.StoreId);
                         return;
                     case InvoiceEvent invoiceEvent when

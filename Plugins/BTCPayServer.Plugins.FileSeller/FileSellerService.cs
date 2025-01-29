@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using BTCPayServer.Client.Models;
 using BTCPayServer.Events;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Plugins.Crowdfund;
@@ -46,7 +47,7 @@ namespace BTCPayServer.Plugins.FileSeller
         protected override async Task ProcessEvent(object evt, CancellationToken cancellationToken)
         {
             if (evt is not InvoiceEvent invoiceEvent) return;
-            List<PosCartItem> cartItems = null;
+            List<AppCartItem> cartItems = null;
             if (invoiceEvent.Name is not (InvoiceEvent.Completed or InvoiceEvent.MarkedCompleted
                 or InvoiceEvent.Confirmed))
             {
@@ -68,11 +69,11 @@ namespace BTCPayServer.Plugins.FileSeller
             if ((!string.IsNullOrEmpty(invoiceEvent.Invoice.Metadata.ItemCode) ||
                  AppService.TryParsePosCartItems(invoiceEvent.Invoice.Metadata.PosData, out cartItems)))
             {
-                var items = cartItems ?? new List<PosCartItem>();
+                var items = cartItems ?? new List<AppCartItem>();
                 if (!string.IsNullOrEmpty(invoiceEvent.Invoice.Metadata.ItemCode) &&
                     !items.Exists(cartItem => cartItem.Id == invoiceEvent.Invoice.Metadata.ItemCode))
                 {
-                    items.Add(new PosCartItem()
+                    items.Add(new AppCartItem()
                     {
                         Id = invoiceEvent.Invoice.Metadata.ItemCode,
                         Count = 1,

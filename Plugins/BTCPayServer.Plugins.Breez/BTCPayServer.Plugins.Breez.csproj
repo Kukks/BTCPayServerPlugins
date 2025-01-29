@@ -9,7 +9,7 @@
     <PropertyGroup>
         <Product>Breez / Greenlight</Product>
         <Description>Lightweight lightning baby!</Description>
-        <Version>1.0.9</Version>
+        <Version>1.0.10</Version>
 <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->

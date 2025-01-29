@@ -69,7 +69,7 @@ public class BringinService : EventHostedServiceBase
     protected override void SubscribeToEvents()
     {
         base.SubscribeToEvents();
-        Subscribe<StoreRemovedEvent>();
+        Subscribe<StoreEvent.Removed>();
         Subscribe<InvoiceEvent>();
         Subscribe<PayoutEvent>();
     }
@@ -117,7 +117,7 @@ public class BringinService : EventHostedServiceBase
     {
         var storeId = evt switch
         {
-            StoreRemovedEvent storeRemovedEvent => storeRemovedEvent.StoreId,
+            StoreEvent.Removed storeRemovedEvent => storeRemovedEvent.StoreId,
             InvoiceEvent invoiceEvent => invoiceEvent.Invoice.StoreId,
             PayoutEvent payoutEvent => payoutEvent.Payout.StoreDataId,
             _ => null
@@ -129,7 +129,7 @@ public class BringinService : EventHostedServiceBase
             {
                 switch (evt)
                 {
-                    case StoreRemovedEvent storeRemovedEvent:
+                    case StoreEvent.Removed storeRemovedEvent:
                         _settings.TryRemove(storeRemovedEvent.StoreId, out _);
                         break;
                     case InvoiceEvent

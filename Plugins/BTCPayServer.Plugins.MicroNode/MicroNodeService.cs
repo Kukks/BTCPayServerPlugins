@@ -645,7 +645,7 @@ public class MicroNodeService : EventHostedServiceBase
                         PushEvent(new CreatePayoutEvt());
                 }, cancellationToken);
 
-        }else if (evt is StoreRemovedEvent storeRemovedEvent)
+        }else if (evt is StoreEvent.Removed storeRemovedEvent)
         {
            _storeSettings.Remove(storeRemovedEvent.StoreId);
            _ownerSettings.Remove(storeRemovedEvent.StoreId);
@@ -665,7 +665,7 @@ public class MicroNodeService : EventHostedServiceBase
     {
         Subscribe<PayoutEvent>();
         Subscribe<CreatePayoutEvt>();
-        Subscribe<StoreRemovedEvent>();
+        Subscribe<StoreEvent.Removed>();
         Subscribe<CheckActiveTransactions>();
         base.SubscribeToEvents();
     }

@@ -265,7 +265,7 @@ public class WalletProvider : PeriodicRunner, IWalletProvider
                 (await _storeRepository.GetSettingsAsync<WabisabiStoreSettings>(nameof(WabisabiStoreSettings))));
             _initialLoad.SetResult();
         }, cancellationToken);
-        _disposables.Add(_eventAggregator.SubscribeAsync<StoreRemovedEvent>(async @event =>
+        _disposables.Add(_eventAggregator.SubscribeAsync<StoreEvent.Removed>(async @event =>
         {
             await _initialLoad.Task;
             await UnloadWallet(@event.StoreId);

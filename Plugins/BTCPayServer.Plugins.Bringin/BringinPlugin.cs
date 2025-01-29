@@ -13,7 +13,7 @@ public class BringinPlugin : BaseBTCPayServerPlugin
     {
         new()
         {
-            Identifier = nameof(BTCPayServer), Condition = ">=2.0.0"
+            Identifier = nameof(BTCPayServer), Condition = ">=2.0.6"
         }
     };
 
