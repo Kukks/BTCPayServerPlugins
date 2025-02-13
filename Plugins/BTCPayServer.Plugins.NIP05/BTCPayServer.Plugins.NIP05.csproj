@@ -11,7 +11,7 @@
     <PropertyGroup>
         <Product>Nostr</Product>
         <Description>NIP5 addresses, Zap support, Nostr Wallet Connect Lightning support</Description>
-        <Version>1.1.17</Version>
+        <Version>1.1.18</Version>
 <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->
@@ -36,7 +36,7 @@
         <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
     </ItemGroup>
     <ItemGroup>
-      <PackageReference Include="NNostr.Client" Version="0.0.51" />
+      <PackageReference Include="NNostr.Client" Version="0.0.54" />
     </ItemGroup>
     <ItemGroup>
       <Folder Include="Resources" />
