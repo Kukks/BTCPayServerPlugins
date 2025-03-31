@@ -191,6 +191,8 @@ public class Nip5Controller : Controller
     [AllowAnonymous]
     public async Task<IActionResult> GetUser([FromQuery] string name)
     {
+        if(string.IsNullOrEmpty(name))
+            return BadRequest("name is required");
         var result = await Get(name);
 
         return result.storeId is null
