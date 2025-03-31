@@ -338,8 +338,9 @@ public class WabisabiCoordinatorClientInstance:IHostedService
                 });
         }
 
-        WasabiCoordinatorStatusFetcher = new WasabiCoordinatorStatusFetcher(sharedWabisabiClient, _logger);
-
+        WasabiCoordinatorStatusFetcher = new WasabiCoordinatorStatusFetcher(sharedWabisabiClient, _logger, () =>  serviceProvider.GetService<WabisabiCoordinatorClientInstanceManager>().RemoveCoordinator(this.CoordinatorName) );
+        
+        
         RoundStateUpdater =
             new RoundStateUpdater(TimeSpan.FromSeconds(5), sharedWabisabiClient, WasabiCoordinatorStatusFetcher);
 
