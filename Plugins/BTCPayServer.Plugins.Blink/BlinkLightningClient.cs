@@ -1,4 +1,4 @@
-﻿#nullable enable
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -408,12 +408,13 @@ expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
         private readonly BlinkLightningClient _lightningClient;
         private readonly Channel<LightningInvoice> _invoices = Channel.CreateUnbounded<LightningInvoice>();
         private readonly IDisposable _subscription;
+        private readonly ILogger _logger;
 
         public BlinkListener(GraphQLHttpClient httpClient, BlinkLightningClient lightningClient, ILogger logger)
         {
             try
             {
-
+                _logger = logger;
                 _lightningClient = lightningClient;
                 var stream = httpClient.CreateSubscriptionStream<JObject>(new GraphQLRequest()
                 {
@@ -455,7 +456,7 @@ expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
                     }
                     catch (Exception e)
                     {
-                        logger.LogError(e, "Error while processing detecting lightning invoice payment");
+                        _logger.LogError(e, "Error while processing detecting lightning invoice payment");
                     }
                    
                 });
@@ -492,7 +493,8 @@ expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
                 return await res;
             }
 
-            throw new Exception("Stream disconnected, cannot await invoice");
+            _logger.LogInformation("Stream disconnected, cannot await invoice. resultsz: "+ resultz);
+            return new LightningInvoice { Id = Guid.NewGuid().ToString() }; // Return a dummy invoice so calling listening logic exits
         }
     }
     public async Task<(Network Network, string DefaultWalletId, string DefaultWalletCurrency)> GetNetworkAndDefaultWallet(CancellationToken cancellation =default)
