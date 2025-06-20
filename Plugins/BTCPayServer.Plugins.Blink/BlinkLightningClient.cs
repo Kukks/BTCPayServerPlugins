@@ -493,7 +493,28 @@ expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
                 return await res;
             }
 
-            _logger.LogInformation("Stream disconnected, cannot await invoice. resultsz: "+ resultz);
+            // Enhanced logging to identify which task completed and its details
+            var taskType = resultz.GetType();
+            var typeName = taskType.Name.Contains('`') ? taskType.Name.Split('`')[0] : taskType.Name;
+            var genericArgs = taskType.GenericTypeArguments;
+            var genericTypeInfo = genericArgs.Length > 0 
+                ? $"<{string.Join(", ", genericArgs.Select(t => t.Name))}>" 
+                : "";
+                
+            _logger.LogInformation("WaitInvoice completed - Task Type: {TaskType}{GenericArgs}, " +
+                                   "Status: {Status}, IsCompletedSuccessfully: {IsCompletedSuccessfully}, " +
+                                   "IsFaulted: {IsFaulted}", 
+                typeName, 
+                genericTypeInfo,
+                resultz.Status, 
+                resultz.IsCompletedSuccessfully, 
+                resultz.IsFaulted);
+                
+            if (resultz.IsFaulted && resultz.Exception != null)
+            {
+                _logger.LogError("Task completed with fault: {Exception}", resultz.Exception);
+            }
+
             return new LightningInvoice { Id = Guid.NewGuid().ToString() }; // Return a dummy invoice so calling listening logic exits
         }
     }
