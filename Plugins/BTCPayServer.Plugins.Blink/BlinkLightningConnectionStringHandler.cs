@@ -3,6 +3,7 @@ using System;
 using System.Linq;
 using System.Net.Http;
 using BTCPayServer.Lightning;
+using BTCPayServer.Payments.Lightning;
 using Microsoft.Extensions.Logging;
 using Network = NBitcoin.Network;
 
@@ -82,48 +83,21 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
         client.BaseAddress = uri;
 
         kv.TryGetValue("wallet-id", out var walletId);
-        var bclient = new BlinkLightningClient(apiKey, uri, walletId, network, client, _loggerFactory.CreateLogger($"{nameof(BlinkLightningClient)}:{walletId}"));
-        (Network Network, string DefaultWalletId, string DefaultWalletCurrency) res;
-        try
-        {
-            res = bclient.GetNetworkAndDefaultWallet().GetAwaiter().GetResult();
-            if (res.Network != network)
-            {
-                error = $"The wallet is not on the right network ({res.Network.Name} instead of {network.Name})";
-                return null;
-            }
 
-            if (walletId is null && string.IsNullOrEmpty(res.DefaultWalletId))
-            {
-                error = $"The wallet-id is not set and no default wallet is set";
-                return null;
-            }
-        }
-        catch (Exception e)
-        {
-            error = $"Invalid server or api key";
-            return null;
-        }
-
-        if (walletId is null)
-        {
-            bclient.WalletId = res.DefaultWalletId;
-            bclient.WalletCurrency = res.DefaultWalletCurrency;
-            bclient.Logger = _loggerFactory.CreateLogger($"{nameof(BlinkLightningClient)}:{walletId}");
-        }
-        else
+        BlinkCurrency? currency = null;
+        if (kv.TryGetValue("currency", out var v))
         {
             try
             {
-                bclient.GetBalance().GetAwaiter().GetResult();
+                currency = BlinkLightningClient.ParseBlinkCurrency(v);
             }
-            catch (Exception e)
+            catch (FormatException e)
             {
-                error = "Invalid wallet id";
+                error = e.Message;
                 return null;
             }
         }
 
-        return bclient;
+        return new BlinkLightningClient(apiKey, uri, walletId, currency, network, client, _loggerFactory.CreateLogger($"{nameof(BlinkLightningClient)}:{walletId}"));
     }
 }
