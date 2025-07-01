@@ -1,4 +1,4 @@
-﻿# Biotcoin Switch Plugin
+﻿# Bitcoin Switch Plugin
 
 This plugin allows you to connect your BTCPay Server to the Bitcoin Switch hardware, developed by the amazing LNURL team.
 
@@ -15,3 +15,4 @@ This plugin allows you to connect your BTCPay Server to the Bitcoin Switch hardw
 9. Save the app
 10. Your websocket url is the point of sale url, appended with "/bitcoinswitch" and the scheme set to wss:// (e.g. wss://mybtcpay.com/apps/A9xD2nxuWzQTh33E9U6YvyyXrvA/pos/bitcoinswitch)
 11. Upon purchase (invoice marked as settled), any open websockets will receive the message to activate (io-duration)
+12. Configure your hardware using https://bitcoinswitch.lnbits.com/
