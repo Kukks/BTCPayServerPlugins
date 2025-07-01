@@ -1,0 +1,12 @@
+﻿
+<template v-if="editingItem">
+    <div class="form-group">
+        <label class="form-label">Bitcoin Switch GPIO</label>
+        <input type="number" inputmode="numeric" min="0" step="1" class="form-control mb-2" :value="editingItem['bitcoinswitch_gpio'] || ''" v-on:change="if(event.target.value) Vue.set(editingItem, 'bitcoinswitch_gpio', event.target.value); else Vue.delete(editingItem, 'bitcoinswitch_gpio');"/>
+    </div>
+    
+    <div class="form-group" v-if="editingItem['bitcoinswitch_gpio']">
+        <label class="form-label">Bitcoin Switch Duration</label>
+        <input type="number" inputmode="numeric" min="1" step="1000" class="form-control mb-2" :value="editingItem['bitcoinswitch_duration'] || ''" asp-items="files" class="form-select w-auto" v-on:change="if(event.target.value) Vue.set(editingItem, 'bitcoinswitch_duration', event.target.value); else Vue.delete(editingItem, 'bitcoinswitch_duration');"/>
+    </div>
+</template>
