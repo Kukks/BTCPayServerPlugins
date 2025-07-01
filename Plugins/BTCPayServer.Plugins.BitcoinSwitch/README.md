@@ -1,6 +1,6 @@
 ﻿# Bitcoin Switch Plugin
 
-This plugin allows you to connect your BTCPay Server to the Bitcoin Switch hardware, developed by the amazing LNURL team.
+This plugin allows you to connect your BTCPay Server to the Bitcoin Switch hardware, developed by the amazing [LNBits](https://lnbits.com/) team.
 
 ## Installation
 
