@@ -179,9 +179,8 @@ query InvoiceByPaymentHash($paymentHash: PaymentHash!, $walletId: WalletId!) {
             }
         };
         var response = await _client.SendQueryAsync<dynamic>(reques,  cancellation);
-        
-
-        return response.Data is null ? null : ToInvoice(response.Data.me.defaultAccount.walletById.invoiceByPaymentHash);
+        var result = response.Data?.SelectToken("me.defaultAccount.walletById.invoiceByPaymentHash") as JObject;
+        return result is null ? null : ToInvoice(result);
     }
 
     public LightningInvoice? ToInvoice(JObject invoice)
