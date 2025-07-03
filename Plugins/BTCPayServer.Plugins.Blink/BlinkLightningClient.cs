@@ -451,11 +451,11 @@ mutation lnInvoiceCreate($input: LnInvoiceCreateOnBehalfOfRecipientInput!) {
                     memo = createInvoiceRequest.Description,
                     descriptionHash = createInvoiceRequest.DescriptionHash?.ToString(),
                     amount = (long)createInvoiceRequest.Amount.ToUnit(LightMoneyUnit.Satoshi),
-expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
-                    
+                    expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
                 }
             }
         };
+
         var response = await _client.SendQueryAsync<dynamic>(reques,  cancellation);
         var inv = (isUSD
             ? response.Data.lnUsdInvoiceBtcDenominatedCreateOnBehalfOfRecipient.invoice
