@@ -9,7 +9,7 @@
     <PropertyGroup>
         <Product>Bitcoin Switch</Product>
         <Description>Control harwdare using the POS as a switch</Description>
-        <Version>1.0.0</Version>
+        <Version>1.0.1</Version>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->
@@ -37,11 +37,6 @@
 
     <ItemGroup>
       <Folder Include="Resources\js\" />
-    </ItemGroup>
-
-
-    <ItemGroup>
-      <AdditionalFiles Include="Views\Shared\BitcoinSwitch\FileSellerTemplateEditorItemDetail.cshtml" />
     </ItemGroup>
 
 </Project>

@@ -1,12 +1,23 @@
 ﻿
 <template v-if="editingItem">
     <div class="form-group">
-        <label class="form-label">Bitcoin Switch GPIO</label>
-        <input type="number" inputmode="numeric" min="0" step="1" class="form-control mb-2" :value="editingItem['bitcoinswitch_gpio'] || ''" v-on:change="if(event.target.value) Vue.set(editingItem, 'bitcoinswitch_gpio', event.target.value); else Vue.delete(editingItem, 'bitcoinswitch_gpio');"/>
+        <label class="form-label">Bitcoin Switch</label>
+        <input
+            type="text"
+            class="form-control mb-2"
+            :value="editingItem['bitcoinswitch'] || ''"
+            pattern="^[0-9]+-[0-9]+(?:\.[0-9]+)?(?:\s*,\s*(?:delay\s*[0-9]+|[0-9]+-[0-9]+(?:\.[0-9]+)?))*$"
+            title="e.g. 25-5000,delay 5000,26-5000.0,delay 2000,23-200"
+            v-on:change="
+        event.target.reportValidity();
+        const val = event.target.value;
+        if (val) Vue.set(editingItem, 'bitcoinswitch', val);
+        else Vue.delete(editingItem, 'bitcoinswitch');
+      "
+        />
     </div>
-    
-    <div class="form-group" v-if="editingItem['bitcoinswitch_gpio']">
-        <label class="form-label">Bitcoin Switch Duration</label>
-        <input type="number" inputmode="numeric" min="1" step="1000" class="form-control mb-2" :value="editingItem['bitcoinswitch_duration'] || ''" asp-items="files" class="form-select w-auto" v-on:change="if(event.target.value) Vue.set(editingItem, 'bitcoinswitch_duration', event.target.value); else Vue.delete(editingItem, 'bitcoinswitch_duration');"/>
-    </div>
+
+    <p>
+        Each segment specifies a <strong>GPIO pin</strong> and its <strong>activation duration</strong> (in milliseconds) in the format <code>pin-duration</code> (e.g., <code>25-5000.0</code>). You can also insert <code>,delay&nbsp;milliseconds</code> (e.g., <code>,delay&nbsp;5000</code>) between segments to pause before the next activation. Separate all parts with commas.
+    </p>
 </template>
