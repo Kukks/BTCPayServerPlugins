@@ -339,6 +339,8 @@ public class TicketTailorService : EventHostedServiceBase, IWebhookProvider
 
     public const string TicketTailorTicketIssued = "TicketTailorTicketIssued";
 
+    public bool SupportsCustomerEmail { get; } = true;
+
     public Dictionary<string, string> GetSupportedWebhookTypes()
     {
         return new Dictionary<string, string>
