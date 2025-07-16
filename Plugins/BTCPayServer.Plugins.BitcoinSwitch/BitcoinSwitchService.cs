@@ -20,7 +20,7 @@ namespace BTCPayServer.Plugins.FileSeller
     public class BitcoinSwitchEvent
     {
         public string AppId { get; set; }
-        public string SwitchSettings { get; set; }
+        public List<SwitchAction> SwitchSettings { get; set; }
     }
 
     public class BitcoinSwitchService : EventHostedServiceBase
@@ -63,6 +63,9 @@ List<AppCartItem> cartItems = null;
             {
                 return;
             }
+             //
+             // invoiceEvent.Invoice.Metadata.AdditionalData
+             //    .TryGetValue("bitcoinswitchsettings", out var explicitBitcoinswitchSettings);
 
             var appIds = AppService.GetAppInternalTags(invoiceEvent.Invoice);
 
@@ -119,19 +122,26 @@ List<AppCartItem> cartItems = null;
                     {
                         var appId = valueTuple.Data.Id;
                         var gpio = item1.AdditionalData["bitcoinswitch"].Value<string>();
-                       
 
-                        PushEvent(new BitcoinSwitchEvent()
-                        {
-                            AppId = appId,
-                            SwitchSettings = gpio
-                        });
-
+                        if (ParseActions(gpio) is { } actions)
+                            PushEvent(new BitcoinSwitchEvent()
+                            {
+                                AppId = appId,
+                                SwitchSettings = actions
+                            });
                     }
                 }
-
-
+                // if(explicitBitcoinswitchSettings is not null)
+                // {
+                //     if (ParseActions(explicitBitcoinswitchSettings.Value<string>()) is { } actions)
+                //         PushEvent(new BitcoinSwitchEvent()
+                //         {
+                //             SwitchSettings = actions
+                //         });
+                // }
+                
                 invoiceEvent.Invoice.Metadata.SetAdditionalData("bitcoinswitchactivated", "true");
+                
                 await _invoiceRepository.UpdateInvoiceMetadata(invoiceEvent.InvoiceId, invoiceEvent.Invoice.StoreId,
                     invoiceEvent.Invoice.Metadata.ToJObject());
                 
@@ -143,10 +153,9 @@ List<AppCartItem> cartItems = null;
 
         private async Task HandleGPIOMessages(CancellationToken cancellationToken, BitcoinSwitchEvent bitcoinSwitchEvent)
         {
-            // Parse switch settings into actions
-            var actions = ParseActions(bitcoinSwitchEvent.SwitchSettings);
 
-                
+
+            var actions = bitcoinSwitchEvent.SwitchSettings;
             try
             {
                 // Execute each action sequentially
@@ -181,42 +190,49 @@ List<AppCartItem> cartItems = null;
             {
                 Logs.PayServer.LogError(ex, "Error sending BitcoinSwitchEvent to socket");
             }
-                
-
-            return;
         }
 
         /// <summary>
         /// Parses a settings string like "25-5000.0,delay 1000,23-200.0" into a sequence of actions.
         /// </summary>
-        private static List<SwitchAction> ParseActions(string settings)
+        private List<SwitchAction>? ParseActions(string settings)
         {
-            var actions = new List<SwitchAction>();
-            var segments = settings.Split(',', StringSplitOptions.RemoveEmptyEntries);
-            foreach (var seg in segments.Select(s => s.Trim()))
+            try
             {
-                if (seg.StartsWith("delay ", StringComparison.OrdinalIgnoreCase))
+                var actions = new List<SwitchAction>();
+                var segments = settings.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                foreach (var seg in segments.Select(s => s.Trim()))
                 {
-                    // Delay segment
-                    var parts = seg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length == 2 && int.TryParse(parts[1], out var ms))
+                    if (seg.StartsWith("delay ", StringComparison.OrdinalIgnoreCase))
                     {
-                        actions.Add(SwitchAction.Delay(ms));
+                        // Delay segment
+                        var parts = seg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length == 2 && int.TryParse(parts[1], out var ms))
+                        {
+                            actions.Add(SwitchAction.Delay(ms));
+                        }
+                    }
+                    else
+                    {
+                        // Pin-duration segment
+                        var parts = seg.Split('-', StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length == 2 
+                            && int.TryParse(parts[0], out var pin)
+                            && double.TryParse(parts[1], out var duration))
+                        {
+                            actions.Add(SwitchAction.Command(pin, duration));
+                        }
                     }
                 }
-                else
-                {
-                    // Pin-duration segment
-                    var parts = seg.Split('-', StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length == 2 
-                        && int.TryParse(parts[0], out var pin)
-                        && double.TryParse(parts[1], out var duration))
-                    {
-                        actions.Add(SwitchAction.Command(pin, duration));
-                    }
-                }
+                return actions;
             }
-            return actions;
+            catch (Exception e)
+            {
+               Logs.PayServer.LogError(e, "Error parsing BitcoinSwitchEvent settings");
+                return null;
+            }
+            
+            
         }
     }
 
