@@ -280,6 +280,12 @@ namespace BTCPayServer.Plugins.Prism
                     : new PrismSettings()).ToObject<PrismSettings>();
         }
 
+        public async Task<PrismSettings> GetPrismSettings(string storeId)
+        {
+            var prismSettingsDict = await _storeRepository.GetSettingsAsync<PrismSettings>(nameof(PrismSettings));
+            return prismSettingsDict.TryGetValue(storeId, out var prismSettings) ? prismSettings : new PrismSettings();
+        }
+
         public async Task<bool> UpdatePrismSettingsForStore(string storeId, PrismSettings updatedSettings,
             bool skipLock = false)
         {

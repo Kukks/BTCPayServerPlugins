@@ -1,0 +1,55 @@
+@using BTCPayServer.Payments
+@using BTCPayServer.Plugins.Prism
+@model Split
+
+<div class="p-2 m-1 split-block">
+    <div class="form-group">
+        <label class="form-label">Source</label>
+        <select name="Splits[@ViewData["Index"]].Source" class="form-select form-select-sm w-auto">
+            <option value="*">Catch-all lightning payments</option>
+            <option value="*@PaymentTypes.CHAIN.ToString()">Catch-all on-chain payments</option>
+            <option value="*All">Catch-all payments</option>
+        </select>
+        <span asp-validation-for="Source" class="text-danger"></span>
+    </div>
+
+    <table class="table mb-0">
+        <thead>
+            <tr>
+                <th>Destination</th>
+                <th>Percentage</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @for (int i = 0; i < Model.Destinations.Count; i++)
+            {
+                <tr>
+                    <td>
+                        <input name="Splits[@ViewData["Index"]].Destinations[@i].Destination"
+                               value="@Model.Destinations[i].Destination"
+                               class="form-control dest" />
+                    </td>
+                    <td>
+                        <input type="number"
+                               step="0.01"
+                               name="Splits[@ViewData["Index"]].Destinations[@i].Percentage"
+                               value="@Model.Destinations[i].Percentage"
+                               class="form-control form-control-sm" />
+                    </td>
+                    <td>
+                        <button type="button" class="btn btn-danger btn-sm remove-dest">Remove</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="3">
+                    <button type="button" class="btn btn-link add-dest">+ Add Destination</button>
+                    <button type="button" class="btn btn-link text-danger remove-prism">Remove Prism</button>
+                </td>
+            </tr>
+        </tfoot>
+    </table>
+</div>

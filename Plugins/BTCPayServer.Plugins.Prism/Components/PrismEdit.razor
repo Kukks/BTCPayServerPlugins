@@ -55,6 +55,10 @@ else
                 <a href="https://dergigi.com/2023/03/12/lightning-prisms/" class="ms-1" target="_blank" rel="noreferrer noopener">
                     <span class="fa fa-question-circle-o text-secondary" title="More information..."></span>
                 </a>
+
+                <a href="#descriptor" data-bs-toggle="collapse">
+                    <vc:icon symbol="info" />
+                </a>
             </h2>
             <div class="d-flex gap-3 mt-3 mt-sm-0">
                 @if (SelectedDestinationId is null or "null")
@@ -77,6 +81,25 @@ else
                     @((MarkupString) PrismEditButtonsFilter)
                 }
             </div>
+
+            <div id="descriptor" class="collapse">
+                <div class="d-flex px-4 py-4 mb-4 bg-tile rounded">
+                    <div class="flex-fill">
+                        <p text-translate="true" class="mb-2">Invoices are documents issued by the seller to a buyer to collect payment.</p>
+                        <p text-translate="true" class="mb-3">An invoice must be paid within a defined time interval at a fixed exchange rate to protect the issuer from price fluctuations.</p>
+                        <p class="mb-3" html-translate="true">You can also apply filters to your search by searching for <code>filtername:value</code>. Be sure to split your search parameters with comma. Supported filters are:</p>
+                        <ul>
+                            <li html-translate="true"><code>orderid:id</code> for filtering a specific order</li>
+                            <li html-translate="true"><code>itemcode:code</code> for filtering a specific type of item purchased through the pos or crowdfund apps</li>
+                        </ul>
+                        <a href="https://docs.btcpayserver.org/Invoices/" target="_blank" rel="noreferrer noopener" text-translate="true">Learn More</a>
+                    </div>
+                    <button type="button" class="btn-close ms-auto" data-bs-toggle="collapse" data-bs-target="#descriptor" aria-expanded="false">
+                        <vc:icon symbol="close" />
+                    </button>
+                </div>
+            </div>
+
         </div>
         <p class="text-muted">
             The prism plugin allows automated value splits for your lightning and onchain payments. You can set up multiple prisms, each with their own source (which is a <a href="@LNAddressLink">lightning address username</a>, or use *, *Onchain or *All as catch-all for all payments made against invoices, excluding ones which Prism can handle explicitly) and destinations (which are other lightning addresses,, lnurls, bitcoin addresses, an xpub, or a custom formaty provided by other plugins). The plugin will automatically credit the configured percentage of the payment to the destination (while also making sure there is 2% reserved to cater for fees, don't worry, once the lightning node tells us the exact fee amount, we credit/debit the balance after the payment), and once the configured threshold is reached, a <a href="@PayoutsLink">payout</a> will be created. Then, a <a href="@PayoutProcessorLink">payout processor</a> will run at intervals and process the payout.

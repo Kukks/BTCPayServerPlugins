@@ -1,0 +1,82 @@
+﻿@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Components.UIExtensionPoint
+@using BTCPayServer.PayoutProcessors
+@using BTCPayServer.Payouts
+@using BTCPayServer.Plugins.Prism
+@using BTCPayServer.Plugins.Prism.Components
+@using BTCPayServer.Abstractions.Contracts
+@using Microsoft.AspNetCore.Http
+@using Microsoft.AspNetCore.Routing
+@inject IScopeProvider ScopeProvider
+@model PrismSettings
+@{
+    ViewData.SetActivePage("Prism", "Prism Destination", "Prism");
+    var storeId = ScopeProvider.GetCurrentStoreId();
+}
+
+<div class="sticky-header">
+    <h2><span>@ViewData["Title"]</span></h2>
+    <div class="d-flex gap-3 mt-3 mt-sm-0">
+        <a asp-controller="Prism" asp-action="PrismSetting" asp-route-storeId="@storeId" class="btn btn-secondary" role="button">Go Back</a>
+        <a asp-controller="Prism" asp-action="ViewPrismDestination" asp-route-storeId="@storeId" class="btn btn-success" role="button">Create</a>
+    </div>
+</div>
+
+<partial name="_StatusMessage" />
+
+@if (Model.Destinations != null && Model.Destinations.Any())
+{
+    <div class="table-responsive-md">
+        <table class="table table-hover">
+            <thead>
+            <tr>
+                <th scope="col">Destination Id</th>
+                <th scope="col">Destination</th>
+                <th scope="col">Sats Threshold</th>
+                <th scope="col">Reserved Fee</th>
+                <th scope="col" class="text-end"></th>
+            </tr>
+            </thead>
+            <tbody>
+                @foreach (var kvp in Model.Destinations)
+                {
+                    var destinationId = kvp.Key;
+                    var dest = kvp.Value;
+
+                <tr class="mass-action-row">
+                    <td>@destinationId</td>
+                    <td>@dest.Destination</td>
+                    <td>@dest.SatThreshold</td>
+                    <td>@dest.Reserve</td>
+
+                    <td class="text-end">
+                        <div class="d-inline-flex align-items-center gap-3">
+                            <div class="dropdown">
+                                <button class="btn btn-link dropdown-toggle p-0 dropdown-toggle-no-caret text-body" type="button" data-bs-toggle="dropdown"
+                                            aria-expanded="false" id="ToggleActions-@destinationId">
+                                    <vc:icon symbol="dots" />
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="Prism" asp-action="ViewPrismDestination" asp-route-storeId="@storeId" 
+                                            asp-route-destinationId="@destinationId">Edit</a>
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="Prism" asp-action="DeletePrismDestination" asp-route-storeId="@storeId"
+                                            asp-route-destinationId="@destinationId">Delete</a>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+}
+else
+{
+    <p class="text-secondary mt-4">
+        <span>There are no prism destination created yet. Why don't you create one?</span>
+    </p>
+}
