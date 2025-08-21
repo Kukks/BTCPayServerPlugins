@@ -1,0 +1,259 @@
+﻿@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Payments
+@using BTCPayServer.PayoutProcessors
+@using BTCPayServer.Payouts
+@using BTCPayServer.Plugins.Prism
+@using BTCPayServer.Plugins.Prism.ViewModel
+@using Microsoft.AspNetCore.Http    
+@using Microsoft.AspNetCore.Routing
+@inject LinkGenerator LinkGenerator
+@inject IScopeProvider ScopeProvider
+@inject IHttpContextAccessor HttpContextAccessor
+@inject PayoutProcessorService PayoutProcessorService
+@inject IEnumerable<IPayoutProcessorFactory> PayoutProcessorFactories
+@model AutoTransferSettingsViewModel
+@{
+    ViewData.SetActivePage(PrismPluginNavPages.AutoTransfer, "Automated Store Transfers");
+    var storeId = ScopeProvider.GetCurrentStoreId();
+    PayoutMethodId pmiln = PayoutTypes.LN.GetPayoutMethodId("BTC");
+    PayoutMethodId pmichain = PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
+    string PayoutProcessorLink = LinkGenerator.GetUriByAction(HttpContextAccessor.HttpContext, "ConfigureStorePayoutProcessors", "UIPayoutProcessors", new { StoreId = storeId });
+    var fetchProcessors = PayoutProcessorService.GetProcessors(new PayoutProcessorService.PayoutProcessorQuery()
+    {
+        Stores = new[] { storeId },
+        PayoutMethods = new[] { pmiln, pmichain }
+    });
+    var NoPayoutProcessors = PayoutProcessorFactories.Any(factory => factory.GetSupportedPayoutMethods().Contains(pmiln)) && (await fetchProcessors).All(data =>
+                !new[] { pmiln, pmichain }.Contains(data.GetPayoutMethodId()));
+
+    bool IsValidReminderDate(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        if (int.TryParse(value, out var num))
+        {
+            return num >= 1 && num <= 31;
+        }
+        return false;
+    }
+    var initialReminders = (Model.AutomationTransferDays ?? "").Split(',').Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r.Trim())
+        .Where(IsValidReminderDate).Distinct().OrderBy(r => int.Parse(r)).ToList();
+}
+
+<div class="sticky-header">
+    <h2>
+        <span>@ViewData["Title"]</span>
+        <a href="#descriptor" data-bs-toggle="collapse">
+            <vc:icon symbol="info" />
+        </a>
+    </h2>
+    <div class="d-flex gap-3 mt-3 mt-sm-0">
+        @if (!NoPayoutProcessors)
+        {
+            <div class="dropdown">
+                <button id="StatusOptionsToggle" class="btn btn-secondary dropdown-toggle dropdown-toggle-custom-caret" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <span>Options</span>
+                </button>
+                <ul class="dropdown-menu" aria-labelledby="StatusOptionsToggle">
+                    <li>
+                        <a class="dropdown-item" asp-controller="AutoTransfer" asp-action="ManualTransfer" asp-route-storeId="@storeId">Send Now</a>
+                    </li>
+                    <li>
+                        <a class="dropdown-item" asp-controller="AutoTransfer" asp-action="ListScheduleTransfer" asp-route-storeId="@storeId">Schedule Transfer</a>
+                    </li>
+                    <li>
+                        <a class="dropdown-item" asp-controller="AutoTransfer" asp-action="ConfigurePoSAutoTransfer" asp-route-storeId="@storeId">POS product auto transfer</a>
+                    </li>
+                </ul>
+            </div>
+
+        }
+        <button type="submit" form="event-form" class="btn btn-success" @(NoPayoutProcessors ? "disabled" : "")>Save Settings</button>
+    </div>
+</div>
+
+<div id="descriptor" class="collapse">
+    <div class="d-flex px-4 py-4 mb-4 bg-tile rounded">
+        <div class="flex-fill">
+            <p class="mb-2">Configure automated Bitcoin transfers from this store to another store within your BTCPay Server instance</p>
+        </div>
+        <button type="button" class="btn-close ms-auto" data-bs-toggle="collapse" data-bs-target="#descriptor" aria-expanded="false">
+            <vc:icon symbol="close" />
+        </button>
+    </div>
+</div>
+
+@if (NoPayoutProcessors)
+{
+    <div class="alert alert-warning mb-5" role="alert">
+        An automated payout processor is required in order to automate prism payouts. <a class="alert-link p-0" href="@PayoutProcessorLink">Configure now</a>
+    </div>
+}
+
+<partial name="_StatusMessage" />
+
+<form id="event-form" asp-action="SaveSettings" asp-controller="AutoTransfer" asp-route-storeId="@storeId" method="post">
+    <div class="p-2 m-1 split-block">
+
+        <div class="col-sm-10 col-md-9 col-xl-7 col-xxl-6">
+            <div class="form-group d-flex align-items-center">
+                <input type="checkbox" class="btcpay-toggle me-2" id="featureToggle" asp-for="Enabled" disabled="@NoPayoutProcessors" />
+                <label asp-for="Enabled" class="form-check-label mb-0">Enabled</label>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="MinimumBalanceThreshold" class="form-label"></label>
+                <input asp-for="MinimumBalanceThreshold" class="form-control" />
+                <span asp-validation-for="MinimumBalanceThreshold" class="text-danger"></span>
+                <span class="text-muted">Payout will only be processed for wallet balance greater than 546 sats</span>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="SatThreshold" class="form-label">Sats Threshold</label>
+                <input asp-for="SatThreshold" class="form-control" />
+                <span asp-validation-for="SatThreshold" class="text-danger"></span>
+                <span class="text-muted">Minimum amount of sats that can be sent</span>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="ReserveFeePercentage" class="form-label">Reserve</label>
+                <input asp-for="ReserveFeePercentage" class="form-control" />
+                <span asp-validation-for="ReserveFeePercentage" class="text-danger"></span>
+                <span class="text-muted">When a payout is being generated, how many of its amount in percentage should be excluded to cover the fee.</span>
+            </div>
+
+            <div class="form-group d-flex align-items-center">
+                <input type="checkbox" class="btcpay-toggle me-2" id="featureToggle" asp-for="EnableScheduledAutomation" disabled="@NoPayoutProcessors" />
+                <label asp-for="EnableScheduledAutomation" class="form-check-label mb-0"></label>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="AutomationTransferDays" class="form-label"></label>
+                <div class="input-group mb-3">
+                    <input type="number" id="transferDayInput" class="form-control" placeholder="Enter date (1-31)" min="1" max="31" />
+                    <button type="button" id="addTransferDay" class="btn btn-secondary">Add</button>
+                </div>
+                <div id="automatedTransferList" class="d-flex flex-wrap align-items-center gap-2">
+                    @foreach (var reminder in initialReminders)
+                    {
+                        <span class="badge bg-secondary me-1 mb-1 role-button cursor-pointer" data-value="@reminder">
+                            @reminder
+                        </span>
+                    }
+                </div>
+                <input type="hidden" id="transferDays" asp-for="AutomationTransferDays" value="@string.Join(",", initialReminders)" />
+                <div id="validationMessage" class="text-danger mt-2"></div>
+            </div>
+
+        </div>
+    </div>
+</form>
+
+
+<h5>Transfer History</h5>
+
+<div class="table-responsive">
+    <table class="table table-hover align-middle">
+        <thead>
+            <tr>
+                <th scope="col">Payout ID</th>
+                <th scope="col">Destination Store</th>
+                <th scope="col">Reserve Fee</th>
+                <th scope="col">Amount (Sats)</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model?.PendingPayouts?.Any() == true)
+            {
+                @foreach (var payout in Model.PendingPayouts)
+                {
+                    var payoutId = payout.Key;
+                    var payoutDetails = payout.Value;
+                    <tr>
+                        <td>@payoutId</td>
+                        <td>@payoutDetails.StoreName</td>
+                        <td>@payoutDetails.FeeCharged</td>
+                        <td>@payoutDetails.PayoutAmount</td>
+                    </tr>
+                }
+            }
+            else
+            {
+                <tr>
+                    <td colspan="4" class="text-center text-muted py-4">
+                        No pending payouts found
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+
+@section PageFootContent {
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            const transferDayInput = document.getElementById("transferDayInput");
+            const addTransferDayButton = document.getElementById("addTransferDay");
+            const automatedTransferList = document.getElementById("automatedTransferList")
+            const hiddenInput = document.getElementById("transferDays");
+            const validationMessage = document.getElementById("validationMessage");
+
+            function isValidReminderDate(value) {
+                const num = parseInt(value, 10);
+                return !isNaN(num) && num >= 1 && num <= 31;
+            }
+
+            function updateHiddenInput() {
+                const selectedValues = Array.from(automatedTransferList.querySelectorAll(".role-button"))
+                    .map(badge => badge.getAttribute("data-value"))
+                    .filter(val => val);
+                hiddenInput.value = selectedValues.join(",");
+            }
+
+            addTransferDayButton.addEventListener("click", function () {
+                const value = transferDayInput.value.trim();
+
+                if (!value) {
+                    validationMessage.textContent = "Please enter a date";
+                    return;
+                }
+
+                if (!isValidReminderDate(value)) {
+                    validationMessage.textContent = "Please enter a valid date between 1 and 31";
+                    return;
+                }
+
+                const existingValues = hiddenInput.value.split(",");
+                if (existingValues.includes(value)) {
+                    validationMessage.textContent = "This date is already added";
+                    return;
+                }
+
+                const badge = document.createElement("span");
+                badge.classList.add("badge", "bg-secondary", "me-1", "mb-1", "role-button", "cursor-pointer");
+                badge.setAttribute("data-value", value);
+                badge.textContent = value;
+
+                automatedTransferList.appendChild(badge);
+                updateHiddenInput();
+                transferDayInput.value = "";
+                validationMessage.textContent = "";
+            });
+
+            transferDayInput.addEventListener("keypress", function (e) {
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    addTransferDayButton.click();
+                }
+            });
+
+            automatedTransferList.addEventListener("click", function (e) {
+                if (e.target.classList.contains("role-button")) {
+                    e.target.remove();
+                    updateHiddenInput();
+                }
+            });
+        });
+    </script>
+}

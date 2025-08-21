@@ -2,7 +2,5 @@
 
 public enum PrismPluginNavPages
 {
-    Prism,
-    Index,
-    Edit
+    AutoTransfer
 }
