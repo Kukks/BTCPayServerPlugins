@@ -2,7 +2,8 @@
 
 public enum PrismPluginNavPages
 {
-    Prism,
+    PrismConfig,
+    ManagePrism,
     Index,
     Edit
 }

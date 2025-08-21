@@ -21,7 +21,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NBitcoin;
 using Newtonsoft.Json.Linq;
-using LightningAddressData = BTCPayServer.Data.LightningAddressData;
 
 namespace BTCPayServer.Plugins.Prism
 {

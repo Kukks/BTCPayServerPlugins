@@ -1,4 +1,5 @@
 ﻿#nullable enable
+using System.Linq;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Models;
@@ -29,6 +30,15 @@ public class PrismController : Controller
         return View();
     }
 
+    [HttpGet("manage")]
+    public async Task<IActionResult> ManagePrism()
+    {
+        if (CurrentStore is null)
+            return NotFound();
+
+        var prismSettings = await _satBreaker.GetPrismSettings(CurrentStore.Id);
+        return View(prismSettings ?? new PrismSettings());
+    }
 
     [HttpGet("settings")]
     public async Task<IActionResult> PrismSetting()
@@ -47,10 +57,33 @@ public class PrismController : Controller
         if (CurrentStore is null)
             return NotFound();
 
+        var groupedSources = vm.Splits.GroupBy(s => s.Source)
+        .Select(g => new
+        {
+            Source = g.Key,
+            Count = g.Count(),
+            TotalPercentage = g.SelectMany(s => s.Destinations).Sum(d => d.Percentage)
+        }).ToList();
+
+        var duplicateSources = groupedSources.Where(x => x.Count > 1).Select(x => x.Source).ToList();
+        var invalidSources = groupedSources.Where(x => x.TotalPercentage > 100).Select(x => x.Source).ToList();
+
+        if (duplicateSources.Any())
+        {
+            TempData[WellKnownTempData.ErrorMessage] = "You cannot configure multiple of the same source. A source was configured more than once";
+            return RedirectToAction(nameof(PrismSetting), new { storeId = CurrentStore.Id });
+        }
+        if (invalidSources.Any())
+        {
+            TempData[WellKnownTempData.ErrorMessage] = "The total percentage for a sources should not exceed 100";
+            return RedirectToAction(nameof(PrismSetting), new { storeId = CurrentStore.Id });
+        }
+
         var prismSettings = await _satBreaker.GetPrismSettings(CurrentStore.Id);
         prismSettings.Enabled = vm.Enabled;
         prismSettings.SatThreshold = vm.SatThreshold;
         prismSettings.Reserve = vm.Reserve;
+        prismSettings.Splits = vm.Splits;
         await _satBreaker.UpdatePrismSettingsForStore(CurrentStore.Id, prismSettings);
         TempData[WellKnownTempData.SuccessMessage] = "Prism global settings updated successfully";
         return RedirectToAction(nameof(PrismSetting), new { storeId = CurrentStore.Id });
