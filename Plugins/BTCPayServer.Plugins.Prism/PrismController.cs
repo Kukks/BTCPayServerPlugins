@@ -24,12 +24,6 @@ public class PrismController : Controller
     }
     public StoreData CurrentStore => HttpContext.GetStoreData();
 
-    [HttpGet]
-    public async Task<IActionResult> Edit()
-    {
-        return View();
-    }
-
     [HttpGet("manage")]
     public async Task<IActionResult> ManagePrism()
     {
@@ -39,6 +33,23 @@ public class PrismController : Controller
         var prismSettings = await _satBreaker.GetPrismSettings(CurrentStore.Id);
         return View(prismSettings ?? new PrismSettings());
     }
+
+    [HttpPost("update-balance")]
+    public async Task<IActionResult> UpdateBalance(string storeId, string destination, long newBalance)
+    {
+        if (string.IsNullOrWhiteSpace(destination) || newBalance < 0)
+        {
+            TempData[WellKnownTempData.ErrorMessage] = "Destination is required. Balance can also not be negative";
+            return RedirectToAction(nameof(ManagePrism), new { storeId = CurrentStore.Id });
+        }
+        var prismSettings = await _satBreaker.GetPrismSettings(CurrentStore.Id);
+        prismSettings.DestinationBalance[destination] = newBalance;
+        await _satBreaker.UpdatePrismSettingsForStore(CurrentStore.Id, prismSettings);
+
+        TempData[WellKnownTempData.SuccessMessage] = "Destination balance updated successfully.";
+        return RedirectToAction(nameof(ManagePrism), new { storeId = CurrentStore.Id });
+    }
+
 
     [HttpGet("settings")]
     public async Task<IActionResult> PrismSetting()
@@ -67,15 +78,22 @@ public class PrismController : Controller
 
         var duplicateSources = groupedSources.Where(x => x.Count > 1).Select(x => x.Source).ToList();
         var invalidSources = groupedSources.Where(x => x.TotalPercentage > 100).Select(x => x.Source).ToList();
+        var emptyDestinations = vm.Splits.SelectMany(s => s.Destinations)
+            .Where(d => string.IsNullOrWhiteSpace(d.Destination)).ToList();
 
         if (duplicateSources.Any())
         {
-            TempData[WellKnownTempData.ErrorMessage] = "You cannot configure multiple of the same source. A source was configured more than once";
+            TempData[WellKnownTempData.ErrorMessage] = "Each source can only be configured once. Duplicate sources were detected";
             return RedirectToAction(nameof(PrismSetting), new { storeId = CurrentStore.Id });
         }
         if (invalidSources.Any())
         {
             TempData[WellKnownTempData.ErrorMessage] = "The total percentage for a sources should not exceed 100";
+            return RedirectToAction(nameof(PrismSetting), new { storeId = CurrentStore.Id });
+        }
+        if (emptyDestinations.Any())
+        {
+            TempData[WellKnownTempData.ErrorMessage] = "Every destination must be selected. Empty destinations are not allowed.";
             return RedirectToAction(nameof(PrismSetting), new { storeId = CurrentStore.Id });
         }
 

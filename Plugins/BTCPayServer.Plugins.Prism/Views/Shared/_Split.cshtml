@@ -1,6 +1,9 @@
 @using BTCPayServer.Payments
 @using BTCPayServer.Plugins.Prism
 @model Split
+@{
+    var destinations = ViewData["Destinations"] as Dictionary<string, PrismDestination> ?? new();
+}
 
 <div class="p-2 m-1 split-block" data-index="@ViewData["Index"]">
     <div class="form-group">
@@ -23,11 +26,26 @@
         <tbody>
             @for (int i = 0; i < Model.Destinations.Count; i++)
             {
+                var currentDest = Model.Destinations[i].Destination;
+                var configuredMatch = destinations.Values.FirstOrDefault(d => d.Destination == currentDest);
                 <tr>
                     <td>
-                        <input name="Splits[@ViewData["Index"]].Destinations[@i].Destination"
-                               value="@Model.Destinations[i].Destination"
-                               class="form-control dest" />
+                        @if (configuredMatch != null)
+                        {
+                            <select name="Splits[@ViewData["Index"]].Destinations[@i].Destination" class="form-select dest">
+                                @foreach (var dest in destinations)
+                                {
+                                    <option value="@dest.Value.Destination" selected="@(currentDest == dest.Value.Destination)">
+                                        @dest.Key
+                                    </option> 
+                                }
+                            </select>
+                        }
+                        else
+                        {
+                            <input name="Splits[@ViewData["Index"]].Destinations[@i].Destination"
+                                   value="@currentDest" class="form-control dest" />
+                        }
                     </td>
                     <td>
                         <div class="d-flex align-items-center">

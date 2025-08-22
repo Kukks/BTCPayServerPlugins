@@ -77,11 +77,4 @@
             <span>Manage Prism</span>
         </a>
     </li>
-
-    <li class="nav-item nav-item-sub">
-        <a asp-controller="Prism" asp-action="Edit" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage(PrismPluginNavPages.Edit)" id="Nav-Prism"
-           permission="@Policies.CanModifyStoreSettings">
-            <span>Old Prism</span>
-        </a>
-    </li>
 }

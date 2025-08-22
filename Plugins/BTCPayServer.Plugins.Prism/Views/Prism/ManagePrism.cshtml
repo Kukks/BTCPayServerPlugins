@@ -4,7 +4,7 @@
 @inject IScopeProvider ScopeProvider
 @model PrismSettings
 @{
-    ViewData.SetActivePage("Prism", "Manage Prism", "Prism");
+    ViewData.SetActivePage(PrismPluginNavPages.ManagePrism, "Manage Prism");
     var storeId = ScopeProvider.GetCurrentStoreId();
 }
 
@@ -59,7 +59,6 @@
                     <tr>
                         <th scope="col">Destination</th>
                         <th scope="col">Balance (sats)</th>
-                        <th scope="col" class="text-end">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -69,9 +68,13 @@
                         {
                             <tr>
                                 <td>@balance.Key</td>
-                                <td>@balance.Value</td>
-                                <td class="text-end">
-                                    <button type="button" class="btn btn-sm btn-outline-primary">View</button>
+                                <td>
+                                    <form asp-action="UpdateBalance" asp-controller="Prism" method="post"
+                                          asp-route-storeId="@storeId"
+                                          asp-route-destination="@balance.Key">
+                                        <input type="number" name="newBalance" min="0" value="@balance.Value" class="form-control form-control-sm d-inline w-auto" />
+                                        <button type="submit" class="btn btn-sm btn-outline-success">Save</button>
+                                    </form>
                                 </td>
                             </tr>
                         }
