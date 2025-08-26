@@ -1,0 +1,117 @@
+@using BTCPayServer.Payments
+@using BTCPayServer.Plugins.Prism.ViewModel
+@model AutoTransferSettingsViewModel
+@{
+    var formId = "event-form";
+    var scriptId = "autoPaymentScript";
+    var tableId = "destinationsTable";
+    var addButtonId = "addDest";
+    var formAction = ViewData["formAction"]?.ToString();
+}
+
+<form id="@formId" action="@formAction" method="post">
+    <div class="p-2 m-1 split-block">
+        <div class="form-group">
+            <label class="form-label fw-bold">Source</label>
+            <select asp-for="Source" class="form-select form-select w-auto">
+                <option value="@PaymentTypes.CHAIN.ToString()">Process payment to store(s) via onchain</option>
+                <option value="@PaymentTypes.LN.ToString()">Process payment to store(s) via lightning</option>
+            </select>
+            <span asp-validation-for="Source" class="text-danger"></span>
+        </div>
+
+        <table class="table mb-0" id="@tableId">
+            <thead>
+                <tr>
+                    <th>Destination Store</th>
+                    <th>Destination Payment Method</th>
+                    <th>Amount (Sats)</th>
+                </tr>
+            </thead>
+            <tbody>
+                @for (int i = 0; i < Model.Destinations.Count; i++)
+                {
+                    <tr>
+                        <td>
+                            <select name="Destinations[@i].StoreId" class="form-select">
+                                <option value="">-- Select a destination store --</option>
+                                @foreach (var store in Model.AvailableStores)
+                                {
+                                    <option value="@store.Value" selected="@(Model.Destinations[i].StoreId == store.Value)">
+                                        @store.Text
+                                    </option>
+                                }
+                            </select>
+                        </td>
+                        <td>
+                            <select name="Destinations[@i].DestinationPaymentMethod" class="form-select">
+                                <option value="CHAIN" selected="@(Model.Destinations[i].DestinationPaymentMethod == "CHAIN")">On-Chain</option>
+                                <option value="LIGHTNING" selected="@(Model.Destinations[i].DestinationPaymentMethod == "LIGHTNING")">Lightning</option>
+                            </select>
+                        </td>
+                        <td>
+                            <div class="d-flex align-items-center gap-2">
+                                <input type="number"
+                                       name="Destinations[@i].Amount"
+                                       step="1"
+                                       min="1"
+                                       value="@Model.Destinations[i].Amount"
+                                       class="form-control form-control-sm"
+                                       style="width:90px; text-align:center;" />
+
+                                <button type="button" class="btn btn-outline-danger btn-sm remove-dest">Remove</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <button type="button" id="@addButtonId" class="btn btn-link add-dest">+ Add New Destination</button>
+</form>
+
+<script id="@scriptId">
+    (function() {
+        const formId = '@formId';
+        const tableId = '@tableId';
+        const addButtonId = '@addButtonId';
+
+        let destIndex = @Model.Destinations.Count;
+        const availableStores = `@Html.Raw(string.Join("", Model.AvailableStores.Select(s => $"<option value='{s.Value}'>{s.Text}</option>")))`;
+
+        document.getElementById(addButtonId).addEventListener("click", function () {
+            const tableBody = document.querySelector(`#${tableId} tbody`);
+            const row = document.createElement("tr");
+            row.innerHTML = `
+                <td>
+                    <select name="Destinations[${destIndex}].StoreId" class="form-select">
+                        <option value="">-- Select a destination store --</option>
+                        ${availableStores}
+                    </select>
+                </td>
+                <td>
+                    <select name="Destinations[${destIndex}].DestinationPaymentMethod" class="form-select">
+                        <option value="">-- Select payment method --</option>
+                        <option value="CHAIN">On-chain (BTC)</option>
+                        <option value="LIGHTNING">Lightning</option>
+                    </select>
+                </td>
+                <td>
+                    <div class="d-flex align-items-center gap-2">
+                        <input type="number" name="Destinations[${destIndex}].Amount" step="1" min="1" value="0"
+                               class="form-control form-control-sm" style="width:90px; text-align:center;" />
+                        <button type="button" class="btn btn-outline-danger btn-sm remove-dest">Remove</button>
+                    </div>
+                </td>
+            `;
+            tableBody.appendChild(row);
+            destIndex++;
+        });
+
+        document.getElementById(formId).addEventListener("click", function (e) {
+            if (e.target && e.target.classList.contains("remove-dest")) {
+                e.target.closest("tr").remove();
+            }
+        });
+    })();
+</script>

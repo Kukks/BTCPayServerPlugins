@@ -5,5 +5,6 @@ public enum PrismPluginNavPages
     PrismConfig,
     ManagePrism,
     Index,
-    Edit
+    Edit,
+    AutoTransfer
 }
