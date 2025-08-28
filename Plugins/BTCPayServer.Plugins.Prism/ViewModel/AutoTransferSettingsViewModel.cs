@@ -8,7 +8,6 @@ namespace BTCPayServer.Plugins.Prism.ViewModel;
 public class AutoTransferSettingsViewModel
 {
     public bool Enabled { get; set; }
-    public string Source { get; set; }
     public int ReserveFeePercentage { get; set; }
     public long SatThreshold { get; set; }
 

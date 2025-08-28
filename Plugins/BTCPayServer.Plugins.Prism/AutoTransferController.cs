@@ -1,4 +1,5 @@
 ﻿#nullable enable
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -6,6 +7,9 @@ using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Client;
 using BTCPayServer.Data;
+using BTCPayServer.Payments;
+using BTCPayServer.Payments.Lightning;
+using BTCPayServer.Payouts;
 using BTCPayServer.Plugins.Prism.Services;
 using BTCPayServer.Plugins.Prism.ViewModel;
 using Microsoft.AspNetCore.Authorization;
@@ -15,6 +19,8 @@ using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.EntityFrameworkCore;
 using NBitcoin;
 using NBitcoin.DataEncoders;
+using Newtonsoft.Json;
+using Org.BouncyCastle.Ocsp;
 
 namespace BTCPayServer.Plugins.Prism;
 
@@ -22,10 +28,12 @@ namespace BTCPayServer.Plugins.Prism;
 [Route("stores/{storeId}/plugins/auto-transfer/")]
 public class AutoTransferController : Controller
 {
+    private readonly PayoutMethodHandlerDictionary _handlers;
     private readonly AutoTransferService _autoTransferService;
     private readonly UserManager<ApplicationUser> _userManager;
-    public AutoTransferController(AutoTransferService autoTransferService, UserManager<ApplicationUser> userManager)
+    public AutoTransferController(PayoutMethodHandlerDictionary handlers, AutoTransferService autoTransferService, UserManager<ApplicationUser> userManager)
     {
+        _handlers = handlers;
         _userManager = userManager;
         _autoTransferService = autoTransferService;
     }
@@ -95,12 +103,12 @@ public class AutoTransferController : Controller
         if (CurrentStore is null)
             return NotFound();
 
-        vm.Destinations.ForEach(c => c.SourcePaymentMethod = vm.Source);
         if (vm.Destinations == null || !vm.Destinations.Any() || vm.Destinations.Any(d => HasNullProperties(d)))
         {
             TempData[WellKnownTempData.ErrorMessage] = "destination fields are required.";
             return RedirectToAction(nameof(ManualTransfer), new { storeId = CurrentStore.Id });
         }
+
         var autoTransferSettings = await _autoTransferService.GetAutoTransferSettings(CurrentStore.Id);
         if (!autoTransferSettings.Enabled)
         {
@@ -155,7 +163,6 @@ public class AutoTransferController : Controller
         if (CurrentStore is null)
             return NotFound();
 
-        vm.Destinations.ForEach(c => c.SourcePaymentMethod = vm.Source);
         if (vm.Destinations == null || !vm.Destinations.Any() || vm.Destinations.Any(d => HasNullProperties(d)))
         {
             TempData[WellKnownTempData.ErrorMessage] = "destination fields are required.";
@@ -181,7 +188,6 @@ public class AutoTransferController : Controller
         if (CurrentStore is null)
             return NotFound();
 
-        vm.Destinations.ForEach(c => c.SourcePaymentMethod = vm.Source);
         if (vm.Destinations == null || !vm.Destinations.Any() || vm.Destinations.Any(d => HasNullProperties(d)))
         {
             TempData[WellKnownTempData.ErrorMessage] = "destination fields are required.";

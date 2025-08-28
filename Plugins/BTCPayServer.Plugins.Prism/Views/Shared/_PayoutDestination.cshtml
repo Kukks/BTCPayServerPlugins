@@ -11,15 +11,6 @@
 
 <form id="@formId" action="@formAction" method="post">
     <div class="p-2 m-1 split-block">
-        <div class="form-group">
-            <label class="form-label fw-bold">Source</label>
-            <select asp-for="Source" class="form-select form-select w-auto">
-                <option value="@PaymentTypes.CHAIN.ToString()">Process payment to store(s) via onchain</option>
-                <option value="@PaymentTypes.LN.ToString()">Process payment to store(s) via lightning</option>
-            </select>
-            <span asp-validation-for="Source" class="text-danger"></span>
-        </div>
-
         <table class="table mb-0" id="@tableId">
             <thead>
                 <tr>

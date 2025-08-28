@@ -4,7 +4,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
+using BTCPayServer.Controllers;
 using BTCPayServer.Data;
+using BTCPayServer.Data.Payouts.LightningLike;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Lightning;
 using BTCPayServer.Payments;
@@ -24,7 +26,6 @@ namespace BTCPayServer.Plugins.Prism.Services;
 public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
 {
     private readonly StoreRepository _storeRepo;
-    private readonly IScopeProvider _scopeProvider;
     private readonly StoreRepository _storeRepository;
     private readonly EventAggregator _eventAggregator;
     private readonly ILogger<AutoTransferService> _logger;
@@ -35,7 +36,6 @@ public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
     public event EventHandler<AutoTransferPaymentEvent> AutoTransferUpdated;
 
     public AutoTransferService(StoreRepository storeRepo,
-        IScopeProvider scopeProvider,
         StoreRepository storeRepository,
         EventAggregator eventAggregator,
         ILogger<AutoTransferService> logger,
@@ -47,7 +47,6 @@ public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
         _logger = logger;
         _handlers = handlers;
         _storeRepo = storeRepo;
-        _scopeProvider = scopeProvider;
         _eventAggregator = eventAggregator;
         _storeRepository = storeRepository;
         _pluginHookService = pluginHookService;
@@ -60,11 +59,16 @@ public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
     {
         try
         {
-            var storeId = _scopeProvider.GetCurrentStoreId();
-            var settings = await GetAutoTransferSettings(storeId);
-            if (!settings.Enabled || !settings.ScheduledDestinations.Any()) return;
+            var autoSettings = await GetAllAutoTransferSettings();
+            foreach (var setting in autoSettings)
+            {
+                if (setting.Value != null)
+                {
+                    if (!setting.Value.Enabled || !setting.Value.ScheduledDestinations.Any()) return;
 
-            PushEvent(new AutoTransferPaymentEvent { StoreId = storeId, Settings = settings });
+                    PushEvent(new AutoTransferPaymentEvent { StoreId = setting.Key, Settings = setting.Value });
+                }
+            }
         }
         catch (PostgresException)
         {
@@ -95,8 +99,7 @@ public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
                 {
                     Destinations = destinationDetail,
                     ReserveFeePercentage = settings.Reserve,
-                    SatThreshold = settings.SatThreshold,
-                    //Source = settings.Source
+                    SatThreshold = settings.SatThreshold
                 });
 
             }
@@ -113,58 +116,17 @@ public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
         _updateLock.Release();
     }
 
-
-    public async Task CreatePayouts(string storeId, AutoTransferSettingsViewModel autoPayoutSettings)
-    {
-        var autoTransferSettings = await GetAutoTransferSettings(storeId);
-        if (!autoTransferSettings.Enabled) return;
-
-        foreach (var destination in autoPayoutSettings.Destinations)
-        {
-            if (destination.Amount < autoPayoutSettings.SatThreshold) continue;
-
-            var percentage = autoPayoutSettings.ReserveFeePercentage / 100m;
-            var reserveFee = (long)Math.Max(0, Math.Round(destination.Amount * percentage, 0, MidpointRounding.AwayFromZero));
-            var payoutAmount = destination.Amount - reserveFee;
-            if (payoutAmount <= 0) continue;
-
-            var pmi = string.IsNullOrEmpty(autoPayoutSettings.Source) || !PayoutMethodId.TryParse(autoPayoutSettings.Source, out var pmi2)
-                ? PayoutTypes.LN.GetPayoutMethodId("BTC") : pmi2;
-
-            var destinationStore = await _storeRepo.FindStore(destination.StoreId);
-            var destinationaddress = await GetDestinationAddress(destinationStore, destination.DestinationPaymentMethod, payoutAmount);
-            if (string.IsNullOrEmpty(destinationaddress)) continue;
-
-            var claimRequest = new ClaimRequest()
-            {
-                Destination = new PrismPlaceholderClaimDestination(destinationaddress),
-                PreApprove = true,
-                StoreId = storeId,
-                PayoutMethodId = pmi,
-                ClaimedAmount = Money.Satoshis(payoutAmount).ToDecimal(MoneyUnit.BTC),
-                Metadata = JObject.FromObject(new
-                {
-                    Source = "Auto payout"
-                })
-            };
-            claimRequest = (await _pluginHookService.ApplyFilter("prism-claim-create", claimRequest)) as ClaimRequest;
-            if (claimRequest is null) continue;
-
-            var payout = await _pullPaymentHostedService.Claim(claimRequest);
-            if (payout.Result != ClaimRequest.ClaimResult.Ok) continue; 
-
-            autoTransferSettings.PendingPayouts ??= new Dictionary<string, AutoTransferPayout>();
-            autoTransferSettings.PendingPayouts.Add(payout.PayoutData.Id, new AutoTransferPayout(payoutAmount, reserveFee, destination.StoreId, destinationStore.StoreName, DateTimeOffset.Now));
-            await UpdateAutoTransferSettingsForStore(storeId, autoTransferSettings);
-        }
-    }
-
     private readonly SemaphoreSlim _updateLock = new(1, 1);
 
     public async Task<AutoTransferSettings> GetAutoTransferSettings(string storeId)
     {
         var autoTransferSettingsDict = await _storeRepository.GetSettingsAsync<AutoTransferSettings>(nameof(AutoTransferSettings));
         return autoTransferSettingsDict.TryGetValue(storeId, out var autoTransferSettings) ? autoTransferSettings : new AutoTransferSettings();
+    }
+
+    public async Task<Dictionary<string, AutoTransferSettings>> GetAllAutoTransferSettings()
+    {
+        return await _storeRepository.GetSettingsAsync<AutoTransferSettings>(nameof(AutoTransferSettings));
     }
 
     public async Task<bool> UpdateAutoTransferSettingsForStore(string storeId, AutoTransferSettings updatedSettings, bool skipLock = false)
@@ -190,28 +152,68 @@ public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
         return true;
     }
 
-    private async Task<string> GetDestinationAddress(StoreData store, string source, long amount)
+    public async Task CreatePayouts(string storeId, AutoTransferSettingsViewModel autoPayoutSettings)
+    {
+        var autoTransferSettings = await GetAutoTransferSettings(storeId);
+        if (!autoTransferSettings.Enabled) return;
+
+        foreach (var destination in autoPayoutSettings.Destinations)
+        {
+            if (destination.Amount < autoPayoutSettings.SatThreshold) continue;
+
+            var percentage = autoPayoutSettings.ReserveFeePercentage / 100m;
+            var reserveFee = (long)Math.Max(0, Math.Round(destination.Amount * percentage, 0, MidpointRounding.AwayFromZero));
+            var payoutAmount = destination.Amount - reserveFee;
+            if (payoutAmount <= 0) continue;
+
+            var destinationStore = await _storeRepo.FindStore(destination.StoreId);
+            var payout = await ProcessPayout(destinationStore, destination, storeId, payoutAmount);
+            if (payout == null) continue;
+
+            autoTransferSettings.PendingPayouts ??= new Dictionary<string, AutoTransferPayout>();
+            autoTransferSettings.PendingPayouts.Add(payout.Id, new AutoTransferPayout(payoutAmount, reserveFee, destination.StoreId, destinationStore.StoreName, DateTimeOffset.Now));
+            await UpdateAutoTransferSettingsForStore(storeId, autoTransferSettings);
+        }
+    }
+
+    private async Task<PayoutData> ProcessPayout(StoreData store, AutoTransferDestination storeDestination, string sourceStoreId, long amount)
     {
         string destination = string.Empty;
-        if (store == null) return destination;
-
-        var blob = store.GetStoreBlob();
+        if (store == null) return null;
+        var claimRequest = new ClaimRequest();
         try
         {
-            switch (source)
+            switch (storeDestination.DestinationPaymentMethod)
             {
                 case "CHAIN":
                     WalletId walletId = new WalletId(store.Id, "BTC");
                     var address = (await _walletReceiveService.GetOrGenerate(walletId)).Address;
                     destination = address?.ToString();
+                    if (string.IsNullOrEmpty(destination)) return null;
+
+                    claimRequest = new ClaimRequest()
+                    {
+                        Destination = new PrismPlaceholderClaimDestination(destination),
+                        PreApprove = true,
+                        StoreId = sourceStoreId,
+                        PayoutMethodId = PayoutTypes.CHAIN.GetPayoutMethodId("BTC"),
+                        ClaimedAmount = Money.Satoshis(amount).ToDecimal(MoneyUnit.BTC),
+                        Metadata = JObject.FromObject(new
+                        {
+                            Source = "Auto payout"
+                        })
+                    };
+                    claimRequest = (await _pluginHookService.ApplyFilter("prism-claim-create", claimRequest)) as ClaimRequest;
+                    if (claimRequest is null) return null;
                     break;
 
                 case "LIGHTNING":
                     var network = GetNetwork();
-                    var lnConfig = _handlers.GetLightningConfig(store, network);
                     if (network is null || !network.SupportLightning)
-                        return destination;
+                        return null;
 
+                    var blob = store.GetStoreBlob();
+                    var lnConfig = _handlers.GetLightningConfig(store, network);
                     var client = _handlers.GetLightningHandler(network).CreateLightningClient(lnConfig);
                     var param = new CreateInvoiceParams(new LightMoney(amount), $"Auto payout from - {store.StoreName}", TimeSpan.FromHours(12))
                     {
@@ -220,15 +222,33 @@ public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
                     };
                     var lnInvoice = await client.CreateInvoice(param);
                     destination = lnInvoice.BOLT11;
-                    break;
-                default:
-                    break;
-            }
-        }
-        catch (Exception) {}
-        return destination;
-    }
+                    if (!BOLT11PaymentRequest.TryParse(lnInvoice.BOLT11, out var result, network.NBitcoinNetwork) || result is null) return null;
 
+                    claimRequest = new ClaimRequest()
+                    {
+                        Destination = new BoltInvoiceClaimDestination(lnInvoice.BOLT11, result),
+                        PreApprove = true,
+                        StoreId = sourceStoreId,
+                        PayoutMethodId = PayoutTypes.LN.GetPayoutMethodId("BTC"),
+                        ClaimedAmount = Money.Satoshis(amount).ToDecimal(MoneyUnit.BTC),
+                        Metadata = JObject.FromObject(new
+                        {
+                            Source = "Auto payout"
+                        })
+                    };
+                    break;
+
+                default:
+                    return null;
+            }
+            var claimResponse = await _pullPaymentHostedService.Claim(claimRequest);
+            if (claimResponse.Result != ClaimRequest.ClaimResult.Ok) return null;
+
+            return claimResponse.PayoutData;
+        }
+        catch (Exception) { }
+        return null;
+    }
 
     private BTCPayNetwork GetNetwork()
     {
