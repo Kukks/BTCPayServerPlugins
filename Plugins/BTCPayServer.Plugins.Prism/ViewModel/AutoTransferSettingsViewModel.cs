@@ -27,8 +27,18 @@ public class AutoTransferSettingsViewModel
     public string DestinationBatchId { get; set; } = string.Empty;
     public List<AutoTransferDestination> Destinations { get; set; } = new();
     public Dictionary<string, AutoTransferPayout> PendingPayouts { get; set; } = new();
+    public Dictionary<string, PoSTemplateAutoTransferViewModel> PoSTransferViewModel { get; set; } = new();
 }
 
+
+public class PoSTemplateAutoTransferViewModel
+{
+    public string AppId { get; set; }
+    public string ProductItemId { get; set; }
+    public string ProductTitle { get; set; }
+    public decimal Price { get; set; }
+    public int Percentage { get; set; }
+}
 
 public class TransferRecord
 {

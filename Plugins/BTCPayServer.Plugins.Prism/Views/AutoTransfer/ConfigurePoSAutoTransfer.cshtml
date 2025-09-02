@@ -1,0 +1,83 @@
+﻿@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Payments
+@using BTCPayServer.Plugins.Prism
+@using BTCPayServer.Plugins.Prism.ViewModel
+@using Microsoft.AspNetCore.Http
+@using Microsoft.AspNetCore.Routing
+@inject LinkGenerator LinkGenerator
+@inject IScopeProvider ScopeProvider
+@inject IHttpContextAccessor HttpContextAccessor
+@model List<PosAppProductSplitModel>
+
+@{
+    ViewData["Title"] = "Configure PoS product splits";
+    var storeId = ScopeProvider.GetCurrentStoreId();
+}
+
+<div class="sticky-header d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0"><span>@ViewData["Title"]</span></h2>
+    <div class="d-flex gap-2">
+        <a asp-controller="AutoTransfer" asp-action="Index" asp-route-storeId="@storeId" class="btn btn-secondary">Go Back </a>
+        <button type="submit" form="event-form" class="btn btn-success">Save</button>
+    </div>
+</div>
+
+<form id="event-form" asp-controller="AutoTransfer" asp-action="SavePoSAutoTransferSetting" asp-route-storeId="@storeId" method="post">
+    <div class="accordion" id="appsAccordion">
+        @for (int i = 0; i < Model.Count; i++)
+        {
+            var app = Model[i];
+            <div class="accordion-item mb-3 shadow-sm rounded">
+                <h2 class="accordion-header" id="heading-@app.AppId">
+                    <button class="accordion-button collapsed fw-semibold" type="button"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#collapse-@app.AppId"
+                            aria-expanded="false">
+                        @app.AppTitle
+                        <span class="badge bg-secondary ms-2">@app.Products.Count products</span>
+                    </button>
+                </h2>
+                <div id="collapse-@app.AppId" class="accordion-collapse collapse"
+                     aria-labelledby="heading-@app.AppId" data-bs-parent="#appsAccordion">
+                    <div class="accordion-body">
+                        <input type="hidden" asp-for="@Model[i].AppId" />
+                        <input type="hidden" asp-for="@Model[i].AppTitle" />
+                        <div class="row g-3">
+                            @for (int j = 0; j < app.Products.Count; j++)
+                            {
+                                var product = app.Products[j];
+                                <div class="col-md-6 col-lg-4">
+                                    <div class="card h-100 shadow-sm border-0">
+                                        <div class="card-body">
+                                            <h5 class="card-title">@product.Title</h5>
+                                            <p class="text-muted mb-2">Price: @product.Price</p>
+
+                                            <input type="hidden" asp-for="@Model[i].Products[j].ProductId" />
+                                            <input type="hidden" asp-for="@Model[i].Products[j].Title" />
+                                            <input type="hidden" asp-for="@Model[i].Products[j].Price" />
+
+                                            <label class="form-label small">Percentage to Auto-Transfer</label>
+                                            <input asp-for="@Model[i].Products[j].Percentage"
+                                                   type="number"
+                                                   class="form-control"
+                                                   min="0"
+                                                   max="100"
+                                                   step="1"
+                                                   oninput="this.value = this.value.replace(/[^0-9]/g, '')" />
+                                            <span class="text-muted">Please ensure the percentage is more than Dust amount</span>
+
+                                            <label class="form-label small">Destination Store</label>
+                                            <select asp-for="@Model[i].Products[j].DestinationStoreId" asp-items="@Model[i].Products[j].StoreOptions" class="form-select">
+                                                <option value="">-- Select Store --</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</form>

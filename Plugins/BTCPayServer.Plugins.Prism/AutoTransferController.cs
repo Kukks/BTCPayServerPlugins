@@ -1,26 +1,25 @@
 ﻿#nullable enable
-using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Client;
 using BTCPayServer.Data;
-using BTCPayServer.Payments;
-using BTCPayServer.Payments.Lightning;
 using BTCPayServer.Payouts;
+using BTCPayServer.Plugins.PointOfSale;
 using BTCPayServer.Plugins.Prism.Services;
 using BTCPayServer.Plugins.Prism.ViewModel;
+using BTCPayServer.Services.Apps;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.EntityFrameworkCore;
 using NBitcoin;
 using NBitcoin.DataEncoders;
-using Newtonsoft.Json;
-using Org.BouncyCastle.Ocsp;
 
 namespace BTCPayServer.Plugins.Prism;
 
@@ -28,16 +27,19 @@ namespace BTCPayServer.Plugins.Prism;
 [Route("stores/{storeId}/plugins/auto-transfer/")]
 public class AutoTransferController : Controller
 {
+    private readonly AppService _appService;
     private readonly PayoutMethodHandlerDictionary _handlers;
     private readonly AutoTransferService _autoTransferService;
     private readonly UserManager<ApplicationUser> _userManager;
-    public AutoTransferController(PayoutMethodHandlerDictionary handlers, AutoTransferService autoTransferService, UserManager<ApplicationUser> userManager)
+    public AutoTransferController(PayoutMethodHandlerDictionary handlers, AutoTransferService autoTransferService,
+        AppService appService, UserManager<ApplicationUser> userManager)
     {
         _handlers = handlers;
+        _appService = appService;
         _userManager = userManager;
         _autoTransferService = autoTransferService;
     }
-    public StoreData CurrentStore => HttpContext.GetStoreData();
+    public Data.StoreData CurrentStore => HttpContext.GetStoreData();
 
     private string GetUserId() => _userManager.GetUserId(User);
 
@@ -76,6 +78,94 @@ public class AutoTransferController : Controller
         TempData[WellKnownTempData.SuccessMessage] = "Auto transfer settings updated successfully.";
         return RedirectToAction(nameof(Index), new { storeId = CurrentStore.Id });
     }
+
+
+    [HttpGet("pos/configure")]
+    public async Task<IActionResult> ConfigurePoSAutoTransfer()
+    {
+        if (CurrentStore is null)
+            return NotFound();
+
+        var user = _userManager.Users.Where(c => c.Id == GetUserId())
+                .Include(user => user.UserStores).ThenInclude(data => data.StoreData).SingleOrDefault();
+
+        var posApps = await _appService.GetApps(PointOfSaleAppType.AppType);
+        if (posApps == null || !posApps.Any())
+        {
+            TempData[WellKnownTempData.ErrorMessage] = "There are currently no POS app available for this store";
+            return RedirectToAction(nameof(Index), new { storeId = CurrentStore.Id });
+        }
+        var storePosApps = posApps.Where(c => c.StoreDataId == CurrentStore.Id && !c.Archived).ToList();
+        if (storePosApps == null || !storePosApps.Any())
+        {
+            TempData[WellKnownTempData.ErrorMessage] = "There are currently no POS app available for this store";
+            return RedirectToAction(nameof(Index), new { storeId = CurrentStore.Id });
+        }
+
+        var userStores = user?.UserStores.Where(s => s.StoreDataId != CurrentStore.Id && !s.StoreData.Archived).Select(s => s.StoreData).ToList() ?? new List<Data.StoreData>();
+        var autoTransferSettings = await _autoTransferService.GetAutoTransferSettings(CurrentStore.Id);
+        var savedSplits = autoTransferSettings?.PosProductAutoTransferSplit ?? new List<PosAppProductSplitModel>();
+        var model = storePosApps.Select(app =>
+        {
+            var settings = app.GetSettings<PointOfSaleSettings>();
+            var products = new List<ProductSplitItemModel>();
+            if (!string.IsNullOrEmpty(settings?.Template))
+            {
+                var templateItems = JsonSerializer.Deserialize<List<PoSAppItem>>(settings.Template);
+                if (templateItems != null)
+                {
+                    products = templateItems.Select(item =>
+                    {
+                        var savedProduct = savedSplits.FirstOrDefault(x => x.AppId == app.Id)?.Products.FirstOrDefault(p => p.ProductId == item.Id);
+                        var destinationStoreId = savedProduct?.DestinationStoreId;
+                        return new ProductSplitItemModel
+                        {
+                            ProductId = item.Id,
+                            Title = item.Title,
+                            Price = item.Price ?? 0m,
+                            Percentage = savedProduct?.Percentage ?? 0,
+                            StoreOptions = userStores.Select(s => new SelectListItem
+                            {
+                                Value = s.Id,
+                                Text = s.StoreName,
+                                Selected = (s.Id == destinationStoreId)
+                            }).ToList()
+                        };
+                    }).ToList();
+                }
+            }
+            return new PosAppProductSplitModel
+            {
+                AppId = app.Id,
+                AppTitle = app.Name,
+                Products = products
+            };
+        }).ToList();
+        return View(model);
+    }
+
+    [HttpPost("pos/configure/save")]
+    public async Task<IActionResult> SavePoSAutoTransferSetting(string storeId, List<PosAppProductSplitModel> vm)
+    {
+        if (CurrentStore is null)
+            return NotFound();
+
+        foreach (var item in vm)
+        {
+            var invalidProducts = item.Products.Where(p => p.Percentage > 0 && string.IsNullOrWhiteSpace(p.DestinationStoreId)).ToList();
+            if (invalidProducts.Any())
+            {
+                TempData[WellKnownTempData.ErrorMessage] = "Products with percentage greater than 0 must have a specified destination store";
+                return RedirectToAction(nameof(ConfigurePoSAutoTransfer), new { storeId = CurrentStore.Id });
+            }
+        }
+        var autoTransferSettings = await _autoTransferService.GetAutoTransferSettings(CurrentStore.Id);
+        autoTransferSettings.PosProductAutoTransferSplit = vm;
+        await _autoTransferService.UpdateAutoTransferSettingsForStore(CurrentStore.Id, autoTransferSettings);
+        TempData[WellKnownTempData.SuccessMessage] = "PoS products configuration updated successfully.";
+        return RedirectToAction(nameof(ConfigurePoSAutoTransfer), new { storeId = CurrentStore.Id });
+    }
+
 
     [HttpGet("send-now")]
     public async Task<IActionResult> ManualTransfer()

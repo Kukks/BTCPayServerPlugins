@@ -14,13 +14,17 @@ using BTCPayServer.Lightning;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Lightning;
 using BTCPayServer.Payouts;
+using BTCPayServer.Plugins.Prism.Services;
+using BTCPayServer.Plugins.Prism.ViewModel;
 using BTCPayServer.Services;
 using BTCPayServer.Services.Invoices;
+using BTCPayServer.Services.Rates;
 using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NBitcoin;
 using Newtonsoft.Json.Linq;
+using NLog.Layouts;
 
 namespace BTCPayServer.Plugins.Prism
 {
@@ -47,6 +51,8 @@ namespace BTCPayServer.Plugins.Prism
     {
         private readonly StoreRepository _storeRepository;
         private readonly ILogger<SatBreaker> _logger;
+        private readonly CurrencyNameTable _currencyNameTable;
+        private readonly AutoTransferService _autoTransferService;
         private readonly PullPaymentHostedService _pullPaymentHostedService;
         private readonly BTCPayNetworkProvider _btcPayNetworkProvider;
         private readonly LightningClientFactoryService _lightningClientFactoryService;
@@ -62,6 +68,8 @@ namespace BTCPayServer.Plugins.Prism
         public SatBreaker(StoreRepository storeRepository,
             EventAggregator eventAggregator,
             ILogger<SatBreaker> logger,
+            CurrencyNameTable currencyNameTable,
+            AutoTransferService autoTransferService,
             PullPaymentHostedService pullPaymentHostedService,
             BTCPayNetworkProvider btcPayNetworkProvider,
             LightningClientFactoryService lightningClientFactoryService,
@@ -73,6 +81,8 @@ namespace BTCPayServer.Plugins.Prism
         {
             _storeRepository = storeRepository;
             _logger = logger;
+            _currencyNameTable = currencyNameTable;
+            _autoTransferService = autoTransferService;
             _pullPaymentHostedService = pullPaymentHostedService;
             _btcPayNetworkProvider = btcPayNetworkProvider;
             _lightningClientFactoryService = lightningClientFactoryService;
@@ -451,43 +461,80 @@ namespace BTCPayServer.Plugins.Prism
                         new[] {InvoiceEventCode.Confirmed, InvoiceEventCode.MarkedCompleted}.Contains(
                             invoiceEvent.EventCode):
                     {
-                        if (!_prismSettings.TryGetValue(invoiceEvent.Invoice.StoreId, out var prismSettings) ||
-                            !prismSettings.Enabled)
-                        {
-                            return;
-                        }
-
-                        var prisms = DetermineMatches(prismSettings, invoiceEvent.Invoice);
-                        foreach (var prism in prisms)
-                        {
-                            if (prism.Item2 is not { } msats || msats<= 0)
-                                continue;
-                            var splits = prism.Item1?.Destinations;
-                            if (splits?.Any() is not true)
-                                continue;
-
-                            //compute the sats for each destination  based on splits percentage
-                            var msatsPerDestination =
-                                splits.ToDictionary(s => s.Destination, s => (long) (msats.MilliSatoshi * (s.Percentage / 100)));
-
-                            prismSettings.DestinationBalance ??= new Dictionary<string, long>();
-                            foreach (var (destination, splitMSats) in msatsPerDestination)
+                        if (_prismSettings.TryGetValue(invoiceEvent.Invoice.StoreId, out var prismSettings) && prismSettings.Enabled)
+                        {   
+                            var prisms = DetermineMatches(prismSettings, invoiceEvent.Invoice);
+                            foreach (var prism in prisms)
                             {
-                                if (prismSettings.DestinationBalance.TryGetValue(destination, out var currentBalance))
+                                if (prism.Item2 is not { } msats || msats <= 0)
+                                    continue;
+                                var splits = prism.Item1?.Destinations;
+                                if (splits?.Any() is not true)
+                                    continue;
+
+                                //compute the sats for each destination  based on splits percentage
+                                var msatsPerDestination =
+                                    splits.ToDictionary(s => s.Destination, s => (long)(msats.MilliSatoshi * (s.Percentage / 100)));
+
+                                prismSettings.DestinationBalance ??= new Dictionary<string, long>();
+                                foreach (var (destination, splitMSats) in msatsPerDestination)
                                 {
-                                    prismSettings.DestinationBalance[destination] = currentBalance + splitMSats;
+                                    if (prismSettings.DestinationBalance.TryGetValue(destination, out var currentBalance))
+                                    {
+                                        prismSettings.DestinationBalance[destination] = currentBalance + splitMSats;
+                                    }
+                                    else if (splitMSats > 0)
+                                    {
+                                        prismSettings.DestinationBalance.Add(destination, splitMSats);
+                                    }
                                 }
-                                else if (splitMSats > 0)
-                                {
-                                    prismSettings.DestinationBalance.Add(destination, splitMSats);
-                                }
+                            }
+
+                            await UpdatePrismSettingsForStore(invoiceEvent.Invoice.StoreId, prismSettings, true);
+                            if (await CreatePayouts(invoiceEvent.Invoice.StoreId, prismSettings))
+                            {
+                                await UpdatePrismSettingsForStore(invoiceEvent.Invoice.StoreId, prismSettings, true);
                             }
                         }
 
-                        await UpdatePrismSettingsForStore(invoiceEvent.Invoice.StoreId, prismSettings, true);
-                        if (await CreatePayouts(invoiceEvent.Invoice.StoreId, prismSettings))
+                        var autoTransferSettings = await _autoTransferService.GetAutoTransferSettings(invoiceEvent.Invoice.StoreId);
+                        if (autoTransferSettings.Enabled)
                         {
-                            await UpdatePrismSettingsForStore(invoiceEvent.Invoice.StoreId, prismSettings, true);
+                            var itemCode = invoiceEvent.Invoice.Metadata?.ItemCode;
+                            if(string.IsNullOrEmpty(itemCode)) return;
+
+                            var matchedProduct = autoTransferSettings.PosProductAutoTransferSplit.SelectMany(app => app.Products).FirstOrDefault(p => p.ProductId == itemCode);
+                            if (matchedProduct == null || matchedProduct.Percentage <= 0) return;
+
+                            var destinationStore = await _storeRepository.FindStore(matchedProduct.DestinationStoreId);
+                            if (destinationStore == null || destinationStore.Archived) return;
+
+                            int amountToTransferInSats = invoiceEvent.Invoice.GetPayments(true).Where(p => p.Status == PaymentStatus.Settled)
+                                .Sum(p =>
+                                {
+                                    var decimals = _currencyNameTable.GetNumberFormatInfo(invoiceEvent.Invoice.Currency)?.CurrencyDecimalDigits ?? 2;
+                                    var paymentReceived = Math.Round(p.InvoicePaidAmount.Net, decimals);
+                                    var transferAmount = (paymentReceived * matchedProduct.Percentage) / 100m;
+
+                                    return invoiceEvent.Invoice.Currency switch
+                                    {
+                                        "BTC" => (int)(transferAmount * 100_000_000m),
+                                        "SATS" => (int)transferAmount,
+                                        _ => (int)((transferAmount / p.Rate) * 100_000_000m)
+                                    };
+                                });
+
+                            if (amountToTransferInSats <= 546) return;
+
+                            var claimRequest = await _autoTransferService.ProcessOnchainClaimRequest(destinationStore.Id, invoiceEvent.Invoice.StoreId, amountToTransferInSats);
+                            if (claimRequest == null) return;
+
+                            var claimResponse = await _pullPaymentHostedService.Claim(claimRequest);
+                            if (claimResponse.Result != ClaimRequest.ClaimResult.Ok) return;
+
+                            autoTransferSettings.PendingPayouts ??= new Dictionary<string, AutoTransferPayout>();
+                            autoTransferSettings.PendingPayouts.Add(claimResponse.PayoutData.Id, new AutoTransferPayout(amountToTransferInSats, 0, destinationStore.Id, destinationStore.StoreName, DateTimeOffset.Now));
+                            await _autoTransferService.UpdateAutoTransferSettingsForStore(invoiceEvent.Invoice.StoreId, autoTransferSettings);
                         }
                         break;
                     }

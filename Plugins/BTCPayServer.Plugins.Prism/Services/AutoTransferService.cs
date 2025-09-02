@@ -20,6 +20,7 @@ using Microsoft.Extensions.Logging;
 using NBitcoin;
 using Newtonsoft.Json.Linq;
 using Npgsql;
+using static BTCPayServer.Models.InvoicingModels.CheckoutModel;
 
 namespace BTCPayServer.Plugins.Prism.Services;
 
@@ -186,25 +187,8 @@ public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
             switch (storeDestination.DestinationPaymentMethod)
             {
                 case "CHAIN":
-                    WalletId walletId = new WalletId(store.Id, "BTC");
-                    var address = (await _walletReceiveService.GetOrGenerate(walletId)).Address;
-                    destination = address?.ToString();
-                    if (string.IsNullOrEmpty(destination)) return null;
-
-                    claimRequest = new ClaimRequest()
-                    {
-                        Destination = new PrismPlaceholderClaimDestination(destination),
-                        PreApprove = true,
-                        StoreId = sourceStoreId,
-                        PayoutMethodId = PayoutTypes.CHAIN.GetPayoutMethodId("BTC"),
-                        ClaimedAmount = Money.Satoshis(amount).ToDecimal(MoneyUnit.BTC),
-                        Metadata = JObject.FromObject(new
-                        {
-                            Source = "Auto payout"
-                        })
-                    };
-                    claimRequest = (await _pluginHookService.ApplyFilter("prism-claim-create", claimRequest)) as ClaimRequest;
-                    if (claimRequest is null) return null;
+                    claimRequest = await ProcessOnchainClaimRequest(store.Id, sourceStoreId, amount);
+                    if (claimRequest == null) return null;
                     break;
 
                 case "LIGHTNING":
@@ -248,6 +232,30 @@ public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
         }
         catch (Exception) { }
         return null;
+    }
+
+    public async Task<ClaimRequest> ProcessOnchainClaimRequest(string destinationStoreId, string sourceStoreId, long amountInSat)
+    {
+        WalletId walletId = new WalletId(destinationStoreId, "BTC");
+        var address = (await _walletReceiveService.GetOrGenerate(walletId)).Address;
+        string destination = address?.ToString();
+        if (string.IsNullOrEmpty(destination)) return null;
+
+        var claimRequest = new ClaimRequest()
+        {
+            Destination = new PrismPlaceholderClaimDestination(destination),
+            PreApprove = true,
+            StoreId = sourceStoreId,
+            PayoutMethodId = PayoutTypes.CHAIN.GetPayoutMethodId("BTC"),
+            ClaimedAmount = Money.Satoshis(amountInSat).ToDecimal(MoneyUnit.BTC),
+            Metadata = JObject.FromObject(new
+            {
+                Source = "Auto payout"
+            })
+        };
+        claimRequest = (await _pluginHookService.ApplyFilter("prism-claim-create", claimRequest)) as ClaimRequest;
+        if (claimRequest is null) return null;
+        return claimRequest;
     }
 
     private BTCPayNetwork GetNetwork()
