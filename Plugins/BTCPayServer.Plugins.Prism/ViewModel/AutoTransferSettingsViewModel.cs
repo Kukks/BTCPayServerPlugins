@@ -11,6 +11,9 @@ public class AutoTransferSettingsViewModel
     public int ReserveFeePercentage { get; set; }
     public long SatThreshold { get; set; }
 
+    [Display(Name = "Minimum balance required to initiate transfer (in Sats)")]
+    public long MinimumBalanceThreshold { get; set; }
+
     [Display(Name = "Enable Scheduled Transfers")]
     public bool EnableScheduledAutomation { get; set; }
     public string AutomationTransferDays { get; set; }

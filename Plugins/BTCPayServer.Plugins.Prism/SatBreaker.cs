@@ -23,8 +23,8 @@ using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NBitcoin;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using NLog.Layouts;
 
 namespace BTCPayServer.Plugins.Prism
 {
@@ -289,12 +289,6 @@ namespace BTCPayServer.Plugins.Prism
                     : new PrismSettings()).ToObject<PrismSettings>();
         }
 
-        public async Task<PrismSettings> GetPrismSettings(string storeId)
-        {
-            var prismSettingsDict = await _storeRepository.GetSettingsAsync<PrismSettings>(nameof(PrismSettings));
-            return prismSettingsDict.TryGetValue(storeId, out var prismSettings) ? prismSettings : new PrismSettings();
-        }
-
         public async Task<bool> UpdatePrismSettingsForStore(string storeId, PrismSettings updatedSettings,
             bool skipLock = false)
         {
@@ -500,41 +494,38 @@ namespace BTCPayServer.Plugins.Prism
                         var autoTransferSettings = await _autoTransferService.GetAutoTransferSettings(invoiceEvent.Invoice.StoreId);
                         if (autoTransferSettings.Enabled)
                         {
-                            var itemCode = invoiceEvent.Invoice.Metadata?.ItemCode;
-                            if(string.IsNullOrEmpty(itemCode)) return;
+                            var autoTransferProducts = autoTransferSettings.PosProductAutoTransferSplit.SelectMany(app => app.Products).ToList();
+                            var metadataJson = JsonConvert.SerializeObject(invoiceEvent.Invoice.Metadata);
+                            dynamic metadata = JsonConvert.DeserializeObject<dynamic>(metadataJson);
+                            if (metadata?.posData?.cart == null) return;
 
-                            var matchedProduct = autoTransferSettings.PosProductAutoTransferSplit.SelectMany(app => app.Products).FirstOrDefault(p => p.ProductId == itemCode);
-                            if (matchedProduct == null || matchedProduct.Percentage <= 0) return;
+                            var transfersByDestination = new Dictionary<string, int>();
+                            foreach (var cartItem in metadata.posData.cart)
+                            {
+                                string itemId = (string)cartItem.id;
+                                int count = (int)cartItem.count;
+                                decimal price = (decimal)cartItem.price;
+                                var matchedProduct = autoTransferProducts.FirstOrDefault(p => p.ProductId == itemId && p.Percentage > 0);
+                                if (matchedProduct == null || matchedProduct.Percentage <= 0 || string.IsNullOrEmpty(matchedProduct.DestinationStoreId)) continue;
 
-                            var destinationStore = await _storeRepository.FindStore(matchedProduct.DestinationStoreId);
-                            if (destinationStore == null || destinationStore.Archived) return;
-
-                            int amountToTransferInSats = invoiceEvent.Invoice.GetPayments(true).Where(p => p.Status == PaymentStatus.Settled)
-                                .Sum(p =>
+                                var itemTotal = count * price;
+                                int sats = CalculateTransferAmountInSats(invoiceEvent, matchedProduct.Percentage, itemTotal);
+                                if (!transfersByDestination.ContainsKey(matchedProduct.DestinationStoreId))
                                 {
-                                    var decimals = _currencyNameTable.GetNumberFormatInfo(invoiceEvent.Invoice.Currency)?.CurrencyDecimalDigits ?? 2;
-                                    var paymentReceived = Math.Round(p.InvoicePaidAmount.Net, decimals);
-                                    var transferAmount = (paymentReceived * matchedProduct.Percentage) / 100m;
+                                    transfersByDestination[matchedProduct.DestinationStoreId] = 0;
+                                }
+                                transfersByDestination[matchedProduct.DestinationStoreId] += sats;
+                            }
 
-                                    return invoiceEvent.Invoice.Currency switch
-                                    {
-                                        "BTC" => (int)(transferAmount * 100_000_000m),
-                                        "SATS" => (int)transferAmount,
-                                        _ => (int)((transferAmount / p.Rate) * 100_000_000m)
-                                    };
-                                });
+                            foreach (var kvp in transfersByDestination)
+                            {
+                                var destinationStoreId = kvp.Key;
+                                var totalSats = kvp.Value;
+                                var destinationStore = await _storeRepository.FindStore(destinationStoreId);
+                                if (destinationStore == null || destinationStore.Archived || totalSats < 546) continue;
 
-                            if (amountToTransferInSats <= 546) return;
-
-                            var claimRequest = await _autoTransferService.ProcessOnchainClaimRequest(destinationStore.Id, invoiceEvent.Invoice.StoreId, amountToTransferInSats);
-                            if (claimRequest == null) return;
-
-                            var claimResponse = await _pullPaymentHostedService.Claim(claimRequest);
-                            if (claimResponse.Result != ClaimRequest.ClaimResult.Ok) return;
-
-                            autoTransferSettings.PendingPayouts ??= new Dictionary<string, AutoTransferPayout>();
-                            autoTransferSettings.PendingPayouts.Add(claimResponse.PayoutData.Id, new AutoTransferPayout(amountToTransferInSats, 0, destinationStore.Id, destinationStore.StoreName, DateTimeOffset.Now));
-                            await _autoTransferService.UpdateAutoTransferSettingsForStore(invoiceEvent.Invoice.StoreId, autoTransferSettings);
+                                await ExecuteClaim(autoTransferSettings,destinationStore, invoiceEvent.Invoice.StoreId, totalSats);
+                            }
                         }
                         break;
                     }
@@ -556,6 +547,38 @@ namespace BTCPayServer.Plugins.Prism
             {
                 Unlock();
             }
+        }
+
+        private int CalculateTransferAmountInSats(InvoiceEvent invoiceEvent, decimal percentage, decimal? overrideAmount = null)
+        {
+            return invoiceEvent.Invoice.GetPayments(true).Where(p => p.Status == PaymentStatus.Settled)
+                .Sum(p =>
+                {
+                    var decimals = _currencyNameTable.GetNumberFormatInfo(invoiceEvent.Invoice.Currency)?.CurrencyDecimalDigits ?? 2;
+                    var paymentReceived = Math.Round(p.InvoicePaidAmount.Net, decimals);
+                    var baseAmount = overrideAmount ?? paymentReceived;
+                    var transferAmount = (baseAmount * percentage) / 100m;
+
+                    return invoiceEvent.Invoice.Currency switch
+                    {
+                        "BTC" => (int)(transferAmount * 100_000_000m),
+                        "SATS" => (int)transferAmount,
+                        _ => (int)((transferAmount / p.Rate) * 100_000_000m)
+                    };
+                });
+        }
+
+        private async Task ExecuteClaim(AutoTransferSettings autoTransferSettings, Data.StoreData destinationStore, string sourceStoreId, long amount)
+        {
+            var claimRequest = await _autoTransferService.ProcessOnchainClaimRequest(destinationStore.Id, sourceStoreId, amount);
+            if (claimRequest == null) return;
+
+            var claimResponse = await _pullPaymentHostedService.Claim(claimRequest);
+            if (claimResponse.Result != ClaimRequest.ClaimResult.Ok) return;
+
+            autoTransferSettings.PendingPayouts ??= new Dictionary<string, AutoTransferPayout>();
+            autoTransferSettings.PendingPayouts.Add(claimResponse.PayoutData.Id, new AutoTransferPayout(amount, 0, destinationStore.Id, destinationStore.StoreName, DateTimeOffset.Now));
+            await _autoTransferService.UpdateAutoTransferSettingsForStore(sourceStoreId, autoTransferSettings);
         }
 
         private async Task<bool> CreatePayouts(string storeId, PrismSettings prismSettings)

@@ -1,4 +1,5 @@
 ﻿@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Payments
 @using BTCPayServer.PayoutProcessors
 @using BTCPayServer.Payouts
@@ -12,7 +13,7 @@
 @inject IEnumerable<IPayoutProcessorFactory> PayoutProcessorFactories
 @model AutoTransferSettings
 @{
-    ViewData["Title"] = "Scheduled Store Transfers";
+    ViewData.SetActivePage(PrismPluginNavPages.AutoTransfer, "Scheduled Store Transfers");
     var storeId = ScopeProvider.GetCurrentStoreId();
 }
 

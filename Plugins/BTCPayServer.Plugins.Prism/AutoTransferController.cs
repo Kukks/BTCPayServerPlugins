@@ -1,20 +1,19 @@
 ﻿#nullable enable
 using System.Collections.Generic;
 using System.Linq;
+using BTCPayServer;
 using System.Text.Json;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Client;
 using BTCPayServer.Data;
-using BTCPayServer.Payouts;
 using BTCPayServer.Plugins.PointOfSale;
 using BTCPayServer.Plugins.Prism.Services;
 using BTCPayServer.Plugins.Prism.ViewModel;
 using BTCPayServer.Services.Apps;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.EntityFrameworkCore;
@@ -28,13 +27,10 @@ namespace BTCPayServer.Plugins.Prism;
 public class AutoTransferController : Controller
 {
     private readonly AppService _appService;
-    private readonly PayoutMethodHandlerDictionary _handlers;
     private readonly AutoTransferService _autoTransferService;
     private readonly UserManager<ApplicationUser> _userManager;
-    public AutoTransferController(PayoutMethodHandlerDictionary handlers, AutoTransferService autoTransferService,
-        AppService appService, UserManager<ApplicationUser> userManager)
+    public AutoTransferController(AutoTransferService autoTransferService, AppService appService, UserManager<ApplicationUser> userManager)
     {
-        _handlers = handlers;
         _appService = appService;
         _userManager = userManager;
         _autoTransferService = autoTransferService;
@@ -52,6 +48,7 @@ public class AutoTransferController : Controller
         var autoTransferSettings = await _autoTransferService.GetAutoTransferSettings(CurrentStore.Id);
         var viewModel = new AutoTransferSettingsViewModel
         {
+            MinimumBalanceThreshold = autoTransferSettings.MinimumBalanceThreshold,
             PendingPayouts = autoTransferSettings.PendingPayouts,
             AutomationTransferDays = autoTransferSettings.AutomationTransferDays, 
             EnableScheduledAutomation = autoTransferSettings.EnableScheduledAutomation,
@@ -72,8 +69,9 @@ public class AutoTransferController : Controller
         autoTransferSettings.Enabled = vm.Enabled;
         autoTransferSettings.SatThreshold = vm.SatThreshold;
         autoTransferSettings.Reserve = vm.ReserveFeePercentage;
-        autoTransferSettings.EnableScheduledAutomation = vm.EnableScheduledAutomation;
         autoTransferSettings.AutomationTransferDays = vm.AutomationTransferDays;
+        autoTransferSettings.MinimumBalanceThreshold = vm.MinimumBalanceThreshold;
+        autoTransferSettings.EnableScheduledAutomation = vm.EnableScheduledAutomation;
         await _autoTransferService.UpdateAutoTransferSettingsForStore(CurrentStore.Id, autoTransferSettings);
         TempData[WellKnownTempData.SuccessMessage] = "Auto transfer settings updated successfully.";
         return RedirectToAction(nameof(Index), new { storeId = CurrentStore.Id });
@@ -86,9 +84,7 @@ public class AutoTransferController : Controller
         if (CurrentStore is null)
             return NotFound();
 
-        var user = _userManager.Users.Where(c => c.Id == GetUserId())
-                .Include(user => user.UserStores).ThenInclude(data => data.StoreData).SingleOrDefault();
-
+        var user = GetUser();
         var posApps = await _appService.GetApps(PointOfSaleAppType.AppType);
         if (posApps == null || !posApps.Any())
         {
@@ -123,6 +119,7 @@ public class AutoTransferController : Controller
                             ProductId = item.Id,
                             Title = item.Title,
                             Price = item.Price ?? 0m,
+                            Currency = settings.Currency,
                             Percentage = savedProduct?.Percentage ?? 0,
                             StoreOptions = userStores.Select(s => new SelectListItem
                             {
@@ -166,16 +163,13 @@ public class AutoTransferController : Controller
         return RedirectToAction(nameof(ConfigurePoSAutoTransfer), new { storeId = CurrentStore.Id });
     }
 
-
     [HttpGet("send-now")]
-    public async Task<IActionResult> ManualTransfer()
+    public IActionResult ManualTransfer()
     {
         if (CurrentStore is null)
             return NotFound();
 
-        var user = _userManager.Users.Where(c => c.Id == GetUserId())
-                .Include(user => user.UserStores).ThenInclude(data => data.StoreData).SingleOrDefault();
-
+        var user = GetUser();
         var viewModel = new AutoTransferSettingsViewModel
         {
             AvailableStores = user?.UserStores.Where(s => s.StoreDataId != CurrentStore.Id).Select(s => new SelectListItem
@@ -198,15 +192,12 @@ public class AutoTransferController : Controller
             TempData[WellKnownTempData.ErrorMessage] = "destination fields are required.";
             return RedirectToAction(nameof(ManualTransfer), new { storeId = CurrentStore.Id });
         }
-
-        var autoTransferSettings = await _autoTransferService.GetAutoTransferSettings(CurrentStore.Id);
-        if (!autoTransferSettings.Enabled)
+        var processPayment = await _autoTransferService.CreatePayouts(storeId, vm);
+        if (!processPayment.success)
         {
-            TempData[WellKnownTempData.ErrorMessage] = "Enable auto-transfer to process payment";
+            TempData[WellKnownTempData.ErrorMessage] = processPayment.message;
             return RedirectToAction(nameof(ManualTransfer), new { storeId = CurrentStore.Id });
         }
-        await _autoTransferService.CreatePayouts(storeId, vm);
-
         return RedirectToAction(nameof(Index), new { storeId = CurrentStore.Id });
     }
 
@@ -220,16 +211,13 @@ public class AutoTransferController : Controller
         return View(autoTransferSettings);
     }
 
-
     [HttpGet("view-schedule")]
     public async Task<IActionResult> ViewScheduledAutoTransfer(string storeId, string batchId)
     {
         if (CurrentStore is null)
             return NotFound();
 
-        var user = _userManager.Users.Where(c => c.Id == GetUserId())
-                .Include(user => user.UserStores).ThenInclude(data => data.StoreData).SingleOrDefault();
-
+        var user = GetUser();
         var autoTransferSettings = await _autoTransferService.GetAutoTransferSettings(CurrentStore.Id);
         var viewModel = new AutoTransferSettingsViewModel
         {
@@ -298,7 +286,6 @@ public class AutoTransferController : Controller
         if (CurrentStore is null)
             return NotFound();
 
-
         var autoTransferSettings = await _autoTransferService.GetAutoTransferSettings(CurrentStore.Id);
         if (!autoTransferSettings.ScheduledDestinations.ContainsKey(batchId))
         {
@@ -331,4 +318,6 @@ public class AutoTransferController : Controller
         var props = obj.GetType().GetProperties();
         return props.Any(p => p.GetValue(obj) == null);
     }
+
+    private ApplicationUser? GetUser() => _userManager.Users.Where(c => c.Id == GetUserId()).Include(user => user.UserStores).ThenInclude(data => data.StoreData).SingleOrDefault();
 }

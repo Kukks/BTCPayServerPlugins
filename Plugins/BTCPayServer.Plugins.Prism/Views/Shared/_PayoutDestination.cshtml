@@ -15,7 +15,6 @@
             <thead>
                 <tr>
                     <th>Destination Store</th>
-                    <th>Destination Payment Method</th>
                     <th>Amount (Sats)</th>
                 </tr>
             </thead>
@@ -32,12 +31,6 @@
                                         @store.Text
                                     </option>
                                 }
-                            </select>
-                        </td>
-                        <td>
-                            <select name="Destinations[@i].DestinationPaymentMethod" class="form-select">
-                                <option value="CHAIN" selected="@(Model.Destinations[i].DestinationPaymentMethod == "CHAIN")">On-Chain</option>
-                                <option value="LIGHTNING" selected="@(Model.Destinations[i].DestinationPaymentMethod == "LIGHTNING")">Lightning</option>
                             </select>
                         </td>
                         <td>
@@ -78,13 +71,6 @@
                     <select name="Destinations[${destIndex}].StoreId" class="form-select">
                         <option value="">-- Select a destination store --</option>
                         ${availableStores}
-                    </select>
-                </td>
-                <td>
-                    <select name="Destinations[${destIndex}].DestinationPaymentMethod" class="form-select">
-                        <option value="">-- Select payment method --</option>
-                        <option value="CHAIN">On-chain (BTC)</option>
-                        <option value="LIGHTNING">Lightning</option>
                     </select>
                 </td>
                 <td>

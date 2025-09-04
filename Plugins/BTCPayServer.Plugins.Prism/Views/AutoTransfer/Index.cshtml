@@ -1,4 +1,5 @@
 ﻿@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Payments
 @using BTCPayServer.PayoutProcessors
 @using BTCPayServer.Payouts
@@ -13,7 +14,7 @@
 @inject IEnumerable<IPayoutProcessorFactory> PayoutProcessorFactories
 @model AutoTransferSettingsViewModel
 @{
-    ViewData["Title"] = "Automated Store Transfers";
+    ViewData.SetActivePage(PrismPluginNavPages.AutoTransfer, "Automated Store Transfers");
     var storeId = ScopeProvider.GetCurrentStoreId();
     PayoutMethodId pmiln = PayoutTypes.LN.GetPayoutMethodId("BTC");
     PayoutMethodId pmichain = PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
@@ -35,7 +36,6 @@
         }
         return false;
     }
-
     var initialReminders = (Model.AutomationTransferDays ?? "").Split(',').Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r.Trim())
         .Where(IsValidReminderDate).Distinct().OrderBy(r => int.Parse(r)).ToList();
 }
@@ -56,10 +56,10 @@
                 </button>
                 <ul class="dropdown-menu" aria-labelledby="StatusOptionsToggle">
                     <li>
-                        <a class="dropdown-item" asp-controller="AutoTransfer" asp-action="ListScheduleTransfer" asp-route-storeId="@storeId">Schedule Transfer</a>
+                        <a class="dropdown-item" asp-controller="AutoTransfer" asp-action="ManualTransfer" asp-route-storeId="@storeId">Send Now</a>
                     </li>
                     <li>
-                        <a class="dropdown-item" asp-controller="AutoTransfer" asp-action="ManualTransfer" asp-route-storeId="@storeId">Send Now</a>
+                        <a class="dropdown-item" asp-controller="AutoTransfer" asp-action="ListScheduleTransfer" asp-route-storeId="@storeId">Schedule Transfer</a>
                     </li>
                     <li>
                         <a class="dropdown-item" asp-controller="AutoTransfer" asp-action="ConfigurePoSAutoTransfer" asp-route-storeId="@storeId">POS product auto transfer</a>
@@ -99,6 +99,13 @@
             <div class="form-group d-flex align-items-center">
                 <input type="checkbox" class="btcpay-toggle me-2" id="featureToggle" asp-for="Enabled" disabled="@NoPayoutProcessors" />
                 <label asp-for="Enabled" class="form-check-label mb-0">Enabled</label>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="MinimumBalanceThreshold" class="form-label"></label>
+                <input asp-for="MinimumBalanceThreshold" class="form-control" />
+                <span asp-validation-for="MinimumBalanceThreshold" class="text-danger"></span>
+                <span class="text-muted">Payout will only be processed for wallet balance greater than 546 sats</span>
             </div>
 
             <div class="form-group">

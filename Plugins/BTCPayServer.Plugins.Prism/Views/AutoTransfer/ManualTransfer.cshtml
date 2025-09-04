@@ -1,7 +1,9 @@
 ﻿@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Payments
 @using BTCPayServer.PayoutProcessors
 @using BTCPayServer.Payouts
+@using BTCPayServer.Plugins.Prism
 @using BTCPayServer.Plugins.Prism.ViewModel
 @using Microsoft.AspNetCore.Http
 @using Microsoft.AspNetCore.Routing
@@ -12,7 +14,7 @@
 @inject IEnumerable<IPayoutProcessorFactory> PayoutProcessorFactories
 @model AutoTransferSettingsViewModel
 @{
-    ViewData["Title"] = "Store Transfers - Send now";
+    ViewData.SetActivePage(PrismPluginNavPages.AutoTransfer, "Store Transfers - Send now");
     var storeId = ScopeProvider.GetCurrentStoreId();
     string formAction = Url.Action("ProcessManualAutoPayment", "AutoTransfer", new { storeId });
 }

@@ -1,4 +1,5 @@
 ﻿@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Payments
 @using BTCPayServer.Plugins.Prism
 @using BTCPayServer.Plugins.Prism.ViewModel
@@ -8,9 +9,8 @@
 @inject IScopeProvider ScopeProvider
 @inject IHttpContextAccessor HttpContextAccessor
 @model List<PosAppProductSplitModel>
-
 @{
-    ViewData["Title"] = "Configure PoS product splits";
+    ViewData.SetActivePage(PrismPluginNavPages.AutoTransfer, "Configure PoS product splits");
     var storeId = ScopeProvider.GetCurrentStoreId();
 }
 
@@ -21,6 +21,16 @@
         <button type="submit" form="event-form" class="btn btn-success">Save</button>
     </div>
 </div>
+
+<div class="alert alert-warning alert-dismissible" role="alert">
+    <button type="button" class="btn-close" data-bs-dismiss="alert">
+        <vc:icon symbol="close" />
+    </button>
+    <h5 class="alert-heading" text-translate="true">Important notice</h5>
+    <p class="mb-0">The calculated transfer amount must be greater than 546 sats</p>
+</div>
+
+<partial name="_StatusMessage" />
 
 <form id="event-form" asp-controller="AutoTransfer" asp-action="SavePoSAutoTransferSetting" asp-route-storeId="@storeId" method="post">
     <div class="accordion" id="appsAccordion">
@@ -50,7 +60,7 @@
                                     <div class="card h-100 shadow-sm border-0">
                                         <div class="card-body">
                                             <h5 class="card-title">@product.Title</h5>
-                                            <p class="text-muted mb-2">Price: @product.Price</p>
+                                            <p class="text-muted mb-2">Price: @product.Price @product.Currency</p>
 
                                             <input type="hidden" asp-for="@Model[i].Products[j].ProductId" />
                                             <input type="hidden" asp-for="@Model[i].Products[j].Title" />
@@ -64,7 +74,6 @@
                                                    max="100"
                                                    step="1"
                                                    oninput="this.value = this.value.replace(/[^0-9]/g, '')" />
-                                            <span class="text-muted">Please ensure the percentage is more than Dust amount</span>
 
                                             <label class="form-label small">Destination Store</label>
                                             <select asp-for="@Model[i].Products[j].DestinationStoreId" asp-items="@Model[i].Products[j].StoreOptions" class="form-select">
