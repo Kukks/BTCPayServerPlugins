@@ -77,10 +77,10 @@ public class AutoTransferController : Controller
         }
         var autoTransferSettings = await _autoTransferService.GetAutoTransferSettings(CurrentStore.Id);
         autoTransferSettings.Enabled = vm.Enabled;
-        autoTransferSettings.SatThreshold = vm.SatThreshold;
-        autoTransferSettings.Reserve = vm.ReserveFeePercentage;
+        autoTransferSettings.SatThreshold = Math.Max(0, vm.SatThreshold);
+        autoTransferSettings.Reserve = Math.Clamp(vm.ReserveFeePercentage, 0, 100);
         autoTransferSettings.AutomationTransferDays = vm.AutomationTransferDays;
-        autoTransferSettings.MinimumBalanceThreshold = vm.MinimumBalanceThreshold;
+        autoTransferSettings.MinimumBalanceThreshold = Math.Max(546, vm.MinimumBalanceThreshold);
         autoTransferSettings.EnableScheduledAutomation = vm.EnableScheduledAutomation;
         await _autoTransferService.UpdateAutoTransferSettingsForStore(CurrentStore.Id, autoTransferSettings);
         TempData[WellKnownTempData.SuccessMessage] = "Auto transfer settings updated successfully.";
@@ -129,6 +129,7 @@ public class AutoTransferController : Controller
                             ProductId = item.Id,
                             Title = item.Title,
                             Price = item.Price ?? 0m,
+                            DestinationStoreId = destinationStoreId,
                             Currency = settings.Currency,
                             Percentage = savedProduct?.Percentage ?? 0,
                             StoreOptions = userStores.Select(s => new SelectListItem
@@ -183,11 +184,11 @@ public class AutoTransferController : Controller
         var user = GetUser();
         var viewModel = new AutoTransferSettingsViewModel
         {
-            AvailableStores = user?.UserStores.Where(s => s.StoreDataId != CurrentStore.Id).Select(s => new SelectListItem
+            AvailableStores = user?.UserStores.Where(s => s.StoreDataId != CurrentStore.Id && !s.StoreData.Archived).Select(s => new SelectListItem
             {
                 Value = s.StoreDataId,
                 Text = s.StoreData.StoreName
-            }).ToList()
+            }).ToList() ?? new List<SelectListItem>()
         };
         return View(viewModel);
     }
@@ -204,7 +205,7 @@ public class AutoTransferController : Controller
             TempData[WellKnownTempData.ErrorMessage] = "Destination store and amount (sats) are required.";
             return RedirectToAction(nameof(ManualTransfer), new { storeId = CurrentStore.Id });
         }
-        var processPayment = await _autoTransferService.CreatePayouts(storeId, vm);
+        var processPayment = await _autoTransferService.CreatePayouts(CurrentStore.Id, vm);
         if (!processPayment.success)
         {
             TempData[WellKnownTempData.ErrorMessage] = processPayment.message;
@@ -233,13 +234,13 @@ public class AutoTransferController : Controller
         var autoTransferSettings = await _autoTransferService.GetAutoTransferSettings(CurrentStore.Id);
         var viewModel = new AutoTransferSettingsViewModel
         {
-            AvailableStores = user?.UserStores.Where(s => s.StoreDataId != CurrentStore.Id).Select(s => new SelectListItem
+            AvailableStores = user?.UserStores.Where(s => s.StoreDataId != CurrentStore.Id && !s.StoreData.Archived).Select(s => new SelectListItem
             {
                 Value = s.StoreDataId,
                 Text = s.StoreData.StoreName
-            }).ToList()
+            }).ToList() ?? new List<SelectListItem>()
         };
-        if (!string.IsNullOrEmpty(batchId) && autoTransferSettings.ScheduledDestinations.ContainsKey(batchId))
+        if (!string.IsNullOrEmpty(batchId) && autoTransferSettings.ScheduledDestinations != null && autoTransferSettings.ScheduledDestinations.ContainsKey(batchId))
         {
             viewModel.Destinations = autoTransferSettings.ScheduledDestinations[batchId];
             viewModel.DestinationBatchId = batchId;
