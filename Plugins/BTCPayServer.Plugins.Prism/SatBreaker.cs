@@ -500,7 +500,7 @@ namespace BTCPayServer.Plugins.Prism
                             dynamic metadata = JsonConvert.DeserializeObject<dynamic>(metadataJson);
                             if (metadata?.posData?.cart == null) return;
 
-                            var transfersByDestination = new Dictionary<string, int>();
+                            var transfersByDestination = new Dictionary<string, long>();
                             foreach (var cartItem in metadata.posData.cart)
                             {
                                 string itemId = (string)cartItem.id;
@@ -510,7 +510,7 @@ namespace BTCPayServer.Plugins.Prism
                                 if (matchedProduct == null || matchedProduct.Percentage <= 0 || string.IsNullOrEmpty(matchedProduct.DestinationStoreId)) continue;
 
                                 var itemTotal = count * price;
-                                int sats = CalculateTransferAmountInSats(invoiceEvent, matchedProduct.Percentage, itemTotal);
+                                long  sats = CalculateTransferAmountInSats(invoiceEvent, matchedProduct.Percentage, itemTotal);
                                 if (!transfersByDestination.ContainsKey(matchedProduct.DestinationStoreId))
                                 {
                                     transfersByDestination[matchedProduct.DestinationStoreId] = 0;
@@ -555,7 +555,7 @@ namespace BTCPayServer.Plugins.Prism
             }
         }
 
-        private int CalculateTransferAmountInSats(InvoiceEvent invoiceEvent, decimal percentage, decimal? overrideAmount = null)
+        private long CalculateTransferAmountInSats(InvoiceEvent invoiceEvent, decimal percentage, decimal? overrideAmount = null)
         {
             return invoiceEvent.Invoice.GetPayments(true).Where(p => p.Status == PaymentStatus.Settled)
                 .Sum(p =>
@@ -567,9 +567,9 @@ namespace BTCPayServer.Plugins.Prism
 
                     return invoiceEvent.Invoice.Currency switch
                     {
-                        "BTC" => (int)(transferAmount * 100_000_000m),
-                        "SATS" => (int)transferAmount,
-                        _ => (int)((transferAmount / p.Rate) * 100_000_000m)
+                        "BTC" => (long)(transferAmount * 100_000_000m),
+                        "SATS" => (long)transferAmount,
+                        _ => (long)((transferAmount / p.Rate) * 100_000_000m)
                     };
                 });
         }

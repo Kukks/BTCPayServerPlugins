@@ -193,14 +193,15 @@ public class AutoTransferController : Controller
     }
 
     [HttpPost("process-payment")]
+    [ValidateAntiForgeryToken]
     public async Task<IActionResult> ProcessManualAutoPayment(string storeId, AutoTransferSettingsViewModel vm)
     {
         if (CurrentStore is null)
             return NotFound();
 
-        if (vm.Destinations == null || !vm.Destinations.Any() || vm.Destinations.Any(d => HasNullProperties(d)))
+        if (vm.Destinations == null || !vm.Destinations.Any() || vm.Destinations.Any(d => string.IsNullOrWhiteSpace(d.StoreId) || d.Amount <= 0))
         {
-            TempData[WellKnownTempData.ErrorMessage] = "destination fields are required.";
+            TempData[WellKnownTempData.ErrorMessage] = "Destination store and amount (sats) are required.";
             return RedirectToAction(nameof(ManualTransfer), new { storeId = CurrentStore.Id });
         }
         var processPayment = await _autoTransferService.CreatePayouts(storeId, vm);
@@ -247,12 +248,13 @@ public class AutoTransferController : Controller
     }
 
     [HttpPost("update-schedule/{batchId}")]
+    [ValidateAntiForgeryToken]
     public async Task<IActionResult> UpdateScheduledAutoPayment(string storeId, string batchId, AutoTransferSettingsViewModel vm)
     {
         if (CurrentStore is null)
             return NotFound();
 
-        if (vm.Destinations == null || !vm.Destinations.Any() || vm.Destinations.Any(d => HasNullProperties(d)))
+        if (vm.Destinations == null || !vm.Destinations.Any() || vm.Destinations.Any(d => string.IsNullOrWhiteSpace(d.StoreId) || d.Amount <= 0))
         {
             TempData[WellKnownTempData.ErrorMessage] = "destination fields are required.";
             return RedirectToAction(nameof(ViewScheduledAutoTransfer), new { storeId = CurrentStore.Id, batchId });
@@ -271,12 +273,13 @@ public class AutoTransferController : Controller
     }
 
     [HttpPost("save-schedule")]
+    [ValidateAntiForgeryToken]
     public async Task<IActionResult> SaveScheduledAutoPayment(string storeId, AutoTransferSettingsViewModel vm)
     {
         if (CurrentStore is null)
             return NotFound();
 
-        if (vm.Destinations == null || !vm.Destinations.Any() || vm.Destinations.Any(d => HasNullProperties(d)))
+        if (vm.Destinations == null || !vm.Destinations.Any() || vm.Destinations.Any(d => string.IsNullOrWhiteSpace(d.StoreId) || d.Amount <= 0))
         {
             TempData[WellKnownTempData.ErrorMessage] = "destination fields are required.";
             return RedirectToAction(nameof(ViewScheduledAutoTransfer), new { storeId = CurrentStore.Id });
@@ -320,14 +323,6 @@ public class AutoTransferController : Controller
         await _autoTransferService.UpdateAutoTransferSettingsForStore(CurrentStore.Id, autoTransferSettings);
         TempData[WellKnownTempData.SuccessMessage] = "Schedule record removed successfully.";
         return RedirectToAction(nameof(ListScheduleTransfer), new { storeId = CurrentStore.Id });
-    }
-
-    private bool HasNullProperties(object obj)
-    {
-        if (obj == null) return true;
-
-        var props = obj.GetType().GetProperties();
-        return props.Any(p => p.GetValue(obj) == null);
     }
 
     private ApplicationUser? GetUser() => _userManager.Users.Where(c => c.Id == GetUserId()).Include(user => user.UserStores).ThenInclude(data => data.StoreData).SingleOrDefault();
