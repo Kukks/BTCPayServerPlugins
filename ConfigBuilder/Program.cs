@@ -16,12 +16,10 @@ foreach (var plugin in plugins)
             p += $"{f};";
         else
         {
-
             f = $"{Path.GetFullPath(plugin)}/bin/Debug/net8.0/{Path.GetFileName(plugin)}.dll";
             if (File.Exists(f))
                 p += $"{f};";
         }
-
         // if (x.Any(s => s.EndsWith("Altcoins-Debug")))
         // {
         //     p += $"{Path.GetFullPath(plugin)}/bin/Altcoins-Debug/net8.0/{Path.GetFileName(plugin)}.dll;";
