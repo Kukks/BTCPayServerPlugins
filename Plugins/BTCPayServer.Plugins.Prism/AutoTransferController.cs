@@ -1,13 +1,15 @@
 ﻿#nullable enable
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using BTCPayServer;
 using System.Text.Json;
 using System.Threading.Tasks;
+using BTCPayServer;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Client;
 using BTCPayServer.Data;
+using BTCPayServer.Filters;
 using BTCPayServer.Plugins.PointOfSale;
 using BTCPayServer.Plugins.Prism.Services;
 using BTCPayServer.Plugins.Prism.ViewModel;
@@ -24,6 +26,7 @@ namespace BTCPayServer.Plugins.Prism;
 
 [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
 [Route("stores/{storeId}/plugins/auto-transfer/")]
+[ContentSecurityPolicy(CSPTemplate.AntiXSS, UnsafeInline = true)]
 public class AutoTransferController : Controller
 {
     private readonly AppService _appService;
@@ -60,11 +63,18 @@ public class AutoTransferController : Controller
     }
 
     [HttpPost("settings")]
+    [ValidateAntiForgeryToken]
     public async Task<IActionResult> SaveSettings(string storeId, AutoTransferSettingsViewModel vm)
     {
         if (CurrentStore is null)
             return NotFound();
 
+        var days = (vm.AutomationTransferDays ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (days.Any(d => !int.TryParse(d, out var day) || day < 1 || day > 31))
+        {
+            TempData[WellKnownTempData.ErrorMessage] = "Invalid schedule days. Days must be between 1 and 31";
+            return RedirectToAction(nameof(Index), new { storeId = CurrentStore.Id });
+        }
         var autoTransferSettings = await _autoTransferService.GetAutoTransferSettings(CurrentStore.Id);
         autoTransferSettings.Enabled = vm.Enabled;
         autoTransferSettings.SatThreshold = vm.SatThreshold;
@@ -142,6 +152,7 @@ public class AutoTransferController : Controller
     }
 
     [HttpPost("pos/configure/save")]
+    [ValidateAntiForgeryToken]
     public async Task<IActionResult> SavePoSAutoTransferSetting(string storeId, List<PosAppProductSplitModel> vm)
     {
         if (CurrentStore is null)
@@ -246,14 +257,13 @@ public class AutoTransferController : Controller
             TempData[WellKnownTempData.ErrorMessage] = "destination fields are required.";
             return RedirectToAction(nameof(ViewScheduledAutoTransfer), new { storeId = CurrentStore.Id, batchId });
         }
-
         var autoTransferSettings = await _autoTransferService.GetAutoTransferSettings(CurrentStore.Id);
+        autoTransferSettings.ScheduledDestinations ??= new Dictionary<string, List<AutoTransferDestination>>();
         if (!autoTransferSettings.ScheduledDestinations.ContainsKey(batchId))
         {
             TempData[WellKnownTempData.ErrorMessage] = "Invalid batch schedule.";
             return RedirectToAction(nameof(ViewScheduledAutoTransfer), new { storeId = CurrentStore.Id, batchId });
         }
-        autoTransferSettings.ScheduledDestinations ??= new Dictionary<string, List<AutoTransferDestination>>();
         autoTransferSettings.ScheduledDestinations[batchId] = new List<AutoTransferDestination>(vm.Destinations);
         await _autoTransferService.UpdateAutoTransferSettingsForStore(CurrentStore.Id, autoTransferSettings);
         TempData[WellKnownTempData.SuccessMessage] = "Schedule record updated successfully.";
@@ -287,6 +297,7 @@ public class AutoTransferController : Controller
             return NotFound();
 
         var autoTransferSettings = await _autoTransferService.GetAutoTransferSettings(CurrentStore.Id);
+        autoTransferSettings.ScheduledDestinations ??= new Dictionary<string, List<AutoTransferDestination>>();
         if (!autoTransferSettings.ScheduledDestinations.ContainsKey(batchId))
         {
             TempData[WellKnownTempData.ErrorMessage] = "Invalid batch destination specified";

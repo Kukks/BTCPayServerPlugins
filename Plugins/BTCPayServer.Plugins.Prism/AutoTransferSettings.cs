@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using BTCPayServer.Plugins.Prism.ViewModel;
 using Microsoft.AspNetCore.Mvc.Rendering;
 
@@ -14,13 +15,15 @@ public class AutoTransferSettings
     public string AutomationTransferDays { get; set; }
     public Dictionary<string, List<AutoTransferDestination>> ScheduledDestinations { get; set; } = new();
     public Dictionary<string, AutoTransferPayout> PendingPayouts { get; set; } = new();
-    public List<PosAppProductSplitModel> PosProductAutoTransferSplit { get; set; }
+    public List<PosAppProductSplitModel> PosProductAutoTransferSplit { get; set; } = new();
 }
 
 
 public class AutoTransferDestination
 {
+    [Required]
     public string StoreId { get; set; }
+    [Range(0, long.MaxValue)]
     public long Amount { get; set; }
 }
 

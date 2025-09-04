@@ -65,7 +65,7 @@ public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
             {
                 if (setting.Value != null)
                 {
-                    if (!setting.Value.Enabled || !setting.Value.EnableScheduledAutomation || !setting.Value.ScheduledDestinations.Any()) return;
+                    if (!setting.Value.Enabled || !setting.Value.EnableScheduledAutomation || !setting.Value.ScheduledDestinations.Any()) continue;
 
                     PushEvent(new AutoTransferPaymentEvent { StoreId = setting.Key, Settings = setting.Value });
                 }
@@ -155,18 +155,21 @@ public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
     public async Task<(bool success, string message)> CreatePayouts(string storeId, AutoTransferSettingsViewModel autoPayoutSettings)
     {
         var autoTransferSettings = await GetAutoTransferSettings(storeId);
-        if (!autoTransferSettings.Enabled) return(false, "Enable auto-transfer to process payment");
+        if (!autoTransferSettings.Enabled) return (false, "Enable auto-transfer to process payment");
 
         var currentStore = await _storeRepo.FindStore(storeId);
         var walletBalance = await GetStoreWalletBalance(currentStore);
         var thresholdBalance = Math.Max(546, autoTransferSettings.MinimumBalanceThreshold); // Ensure that threshold is at least dust amount
         decimal availableBalance = walletBalance;
+        if (autoPayoutSettings?.Destinations == null || autoPayoutSettings.Destinations.Count == 0)
+            return (false, "No destinations to process");
+        var createdAny = false;
 
         foreach (var destination in autoPayoutSettings.Destinations)
         {
-            if (destination.Amount < autoPayoutSettings.SatThreshold) continue;
+            if (destination.Amount <= 0 || destination.Amount < autoPayoutSettings.SatThreshold) continue;
 
-            var percentage = autoPayoutSettings.ReserveFeePercentage / 100m;
+            var percentage = autoTransferSettings.Reserve / 100m;
             var reserveFee = (long)Math.Max(0, Math.Round(destination.Amount * percentage, 0, MidpointRounding.AwayFromZero));
             var payoutAmount = destination.Amount - reserveFee;
             if (payoutAmount <= 0) continue;
@@ -174,7 +177,7 @@ public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
             if (availableBalance - payoutAmount < thresholdBalance) continue;
 
             var destinationStore = await _storeRepo.FindStore(destination.StoreId);
-            if (destinationStore == null) continue;
+            if (destinationStore == null || destinationStore.Archived) continue;
 
             var payout = await ProcessOnchainClaimRequest(destinationStore.Id, storeId, payoutAmount);
             if (payout == null) continue;
@@ -183,35 +186,44 @@ public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
             autoTransferSettings.PendingPayouts.Add(payout.Id, new AutoTransferPayout(payoutAmount, reserveFee, destination.StoreId, destinationStore.StoreName, DateTimeOffset.Now));
             await UpdateAutoTransferSettingsForStore(storeId, autoTransferSettings);
             availableBalance -= payoutAmount;
+            createdAny = true;
         }
-        return (true, "Payouts processed successfully");
+        return (createdAny, createdAny ? "Payouts processed successfully" : "Unable to process payout at the moment");
     }
 
     public async Task<PayoutData> ProcessOnchainClaimRequest(string destinationStoreId, string sourceStoreId, long amountInSat)
     {
-        WalletId walletId = new WalletId(destinationStoreId, _network);
-        var address = (await _walletReceiveService.GetOrGenerate(walletId)).Address;
-        string destination = address?.ToString();
-        if (string.IsNullOrEmpty(destination)) return null;
-
-        var claimRequest = new ClaimRequest()
+        try
         {
-            Destination = new PrismPlaceholderClaimDestination(destination),
-            PreApprove = true,
-            StoreId = sourceStoreId,
-            PayoutMethodId = PayoutTypes.CHAIN.GetPayoutMethodId(_network),
-            ClaimedAmount = Money.Satoshis(amountInSat).ToDecimal(MoneyUnit.BTC),
-            Metadata = JObject.FromObject(new
-            {
-                Source = "Auto payout"
-            })
-        };
-        claimRequest = (await _pluginHookService.ApplyFilter("prism-claim-create", claimRequest)) as ClaimRequest;
-        if (claimRequest is null) return null;
+            WalletId walletId = new WalletId(destinationStoreId, _network);
+            var address = (await _walletReceiveService.GetOrGenerate(walletId)).Address;
+            string destination = address?.ToString();
+            if (string.IsNullOrEmpty(destination)) return null;
 
-        var claimResponse = await _pullPaymentHostedService.Claim(claimRequest);
-        if (claimResponse.Result != ClaimRequest.ClaimResult.Ok) return null;
-        return claimResponse.PayoutData;
+            var claimRequest = new ClaimRequest()
+            {
+                Destination = new PrismPlaceholderClaimDestination(destination),
+                PreApprove = true,
+                StoreId = sourceStoreId,
+                PayoutMethodId = PayoutTypes.CHAIN.GetPayoutMethodId(_network),
+                ClaimedAmount = Money.Satoshis(amountInSat).ToDecimal(MoneyUnit.BTC),
+                Metadata = JObject.FromObject(new
+                {
+                    Source = "Auto payout"
+                })
+            };
+            claimRequest = (await _pluginHookService.ApplyFilter("prism-claim-create", claimRequest)) as ClaimRequest;
+            if (claimRequest is null) return null;
+
+            var claimResponse = await _pullPaymentHostedService.Claim(claimRequest);
+            if (claimResponse.Result != ClaimRequest.ClaimResult.Ok) return null;
+            return claimResponse.PayoutData;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AutoTransfer: failed to claim on-chain payout. destStore={DestinationStoreId} srcStore={SourceStoreId}", destinationStoreId, sourceStoreId);
+            return null;
+        }
     }
 
     public async Task<decimal> GetStoreWalletBalance(StoreData store)
@@ -219,12 +231,12 @@ public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
         var network = GetNetwork();
         WalletId walletId = new WalletId(store.Id, _network);
         var paymentMethod = store.GetDerivationSchemeSettings(_handlers, walletId.CryptoCode);
-        if (paymentMethod == null || store is null)
+        if (paymentMethod == null || network == null || store is null)
             return 0;
 
-        var balance = _walletProvider.GetWallet(network).GetBalance(paymentMethod.AccountDerivation);
-        var Balance = await balance;
-        var availableBalance = (Balance.Available ?? Balance.Total).GetValue(network);
+        var balanceTask = _walletProvider.GetWallet(network).GetBalance(paymentMethod.AccountDerivation);
+        var balance = await balanceTask;
+        var availableBalance = (balance.Available ?? balance.Total).GetValue(network);
         return availableBalance * 100_000_000m;
     }
 

@@ -495,7 +495,7 @@ namespace BTCPayServer.Plugins.Prism
                         var autoTransferSettings = await _autoTransferService.GetAutoTransferSettings(invoiceEvent.Invoice.StoreId);
                         if (autoTransferSettings.Enabled)
                         {
-                            var autoTransferProducts = autoTransferSettings.PosProductAutoTransferSplit.SelectMany(app => app.Products).ToList();
+                            var autoTransferProducts = (autoTransferSettings.PosProductAutoTransferSplit ?? new List<PosAppProductSplitModel>()).SelectMany(app => app.Products ?? Enumerable.Empty<ProductSplitItemModel>()).ToList();
                             var metadataJson = JsonConvert.SerializeObject(invoiceEvent.Invoice.Metadata);
                             dynamic metadata = JsonConvert.DeserializeObject<dynamic>(metadataJson);
                             if (metadata?.posData?.cart == null) return;

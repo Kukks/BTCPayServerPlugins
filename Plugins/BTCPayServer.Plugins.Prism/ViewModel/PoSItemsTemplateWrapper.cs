@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -40,8 +41,7 @@ public class DecimalStringConverter : JsonConverter<decimal?>
 {
     public override decimal? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        if (reader.TokenType == JsonTokenType.String &&
-            decimal.TryParse(reader.GetString(), out var value))
+        if (reader.TokenType == JsonTokenType.String && decimal.TryParse(reader.GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var value))
         {
             return value;
         }
@@ -55,7 +55,7 @@ public class DecimalStringConverter : JsonConverter<decimal?>
     public override void Write(Utf8JsonWriter writer, decimal? value, JsonSerializerOptions options)
     {
         if (value.HasValue)
-            writer.WriteStringValue(value.Value.ToString());
+            writer.WriteStringValue(value.Value.ToString(CultureInfo.InvariantCulture));
         else
             writer.WriteNullValue();
     }

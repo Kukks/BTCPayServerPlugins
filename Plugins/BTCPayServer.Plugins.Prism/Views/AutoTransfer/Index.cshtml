@@ -11,7 +11,6 @@
 @inject IScopeProvider ScopeProvider
 @inject IHttpContextAccessor HttpContextAccessor
 @inject PayoutProcessorService PayoutProcessorService
-@inject IEnumerable<IPayoutProcessorFactory> PayoutProcessorFactories
 @model AutoTransferSettingsViewModel
 @{
     ViewData.SetActivePage(PrismPluginNavPages.AutoTransfer, "Automated Store Transfers");
@@ -24,8 +23,9 @@
         Stores = new[] { storeId },
         PayoutMethods = new[] { pmiln, pmichain }
     });
-    var NoPayoutProcessors = PayoutProcessorFactories.Any(factory => factory.GetSupportedPayoutMethods().Contains(pmiln)) && (await fetchProcessors).All(data =>
-                !new[] { pmiln, pmichain }.Contains(data.GetPayoutMethodId()));
+
+    var processors = await fetchProcessors;
+    var NoPayoutProcessors = !processors.Any(p => new[] { pmiln, pmichain }.Contains(p.GetPayoutMethodId()));
 
     bool IsValidReminderDate(string value)
     {
@@ -97,7 +97,7 @@
 
         <div class="col-sm-10 col-md-9 col-xl-7 col-xxl-6">
             <div class="form-group d-flex align-items-center">
-                <input type="checkbox" class="btcpay-toggle me-2" id="featureToggle" asp-for="Enabled" disabled="@NoPayoutProcessors" />
+                <input type="checkbox" class="btcpay-toggle me-2" asp-for="Enabled" disabled="@NoPayoutProcessors" />
                 <label asp-for="Enabled" class="form-check-label mb-0">Enabled</label>
             </div>
 
@@ -123,7 +123,7 @@
             </div>
 
             <div class="form-group d-flex align-items-center">
-                <input type="checkbox" class="btcpay-toggle me-2" id="featureToggle" asp-for="EnableScheduledAutomation" disabled="@NoPayoutProcessors" />
+                <input type="checkbox" class="btcpay-toggle me-2" asp-for="EnableScheduledAutomation" disabled="@NoPayoutProcessors" />
                 <label asp-for="EnableScheduledAutomation" class="form-check-label mb-0"></label>
             </div>
 

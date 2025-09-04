@@ -61,26 +61,34 @@
         const addButtonId = '@addButtonId';
 
         let destIndex = @Model.Destinations.Count;
-        const availableStores = `@Html.Raw(string.Join("", Model.AvailableStores.Select(s => $"<option value='{s.Value}'>{s.Text}</option>")))`;
+        const availableStores = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.AvailableStores.Select(s => new { value = s.Value, text = s.Text })));
 
         document.getElementById(addButtonId).addEventListener("click", function () {
             const tableBody = document.querySelector(`#${tableId} tbody`);
             const row = document.createElement("tr");
+
             row.innerHTML = `
                 <td>
-                    <select name="Destinations[${destIndex}].StoreId" class="form-select">
-                        <option value="">-- Select a destination store --</option>
-                        ${availableStores}
-                    </select>
+                <input type="hidden" name="Destinations.Index" value="${destIndex}" />
+                <select name="Destinations[${destIndex}].StoreId" class="form-select">
+                    <option value="">-- Select a destination store --</option>
+                </select>
                 </td>
                 <td>
-                    <div class="d-flex align-items-center gap-2">
-                        <input type="number" name="Destinations[${destIndex}].Amount" step="1" min="1" value="0"
-                               class="form-control form-control-sm" style="width:90px; text-align:center;" />
-                        <button type="button" class="btn btn-outline-danger btn-sm remove-dest">Remove</button>
-                    </div>
-                </td>
-            `;
+                <div class="d-flex align-items-center gap-2">
+                    <input type="number" name="Destinations[${destIndex}].Amount" step="1" min="1" value="1"
+                            class="form-control form-control-sm" style="width:90px; text-align:center;" />
+                    <button type="button" class="btn btn-outline-danger btn-sm remove-dest">Remove</button>
+                </div>
+                </td>`;
+            const select = row.querySelector('select');
+            availableStores.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.value;
+                opt.textContent = s.text;
+                select.appendChild(opt);
+            });
+
             tableBody.appendChild(row);
             destIndex++;
         });
