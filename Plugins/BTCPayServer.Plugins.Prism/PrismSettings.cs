@@ -5,7 +5,9 @@ namespace BTCPayServer.Plugins.Prism;
 public class PrismSettings
 {
     public bool Enabled { get; set; }
-
+    public string? Schedule { get; set; }
+    public long MinimumBalanceThreshold { get; set; }
+    public bool EnableScheduledAutomation { get; set; }
     public Dictionary<string, long> DestinationBalance { get; set; } = new();
     public List<Split> Splits { get; set; } = new();
     public Dictionary<string, PendingPayout> PendingPayouts { get; set; } = new();
@@ -21,4 +23,6 @@ public class PrismDestination
     public decimal? Reserve { get; set; }
     public long? SatThreshold { get; set; }
     public string? PayoutMethodId { get; set; }
+    public decimal? Amount { get; set; }
+    public string? Schedule { get; set; }
 }

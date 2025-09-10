@@ -40,7 +40,7 @@ public class ProductSplitItemModel
     public string Title { get; set; }
     public decimal Price { get; set; }
     public string Currency { get; set; }
-    public int Percentage { get; set; }
+    public decimal Percentage { get; set; }
     public string DestinationStoreId { get; set; }
     public List<SelectListItem> StoreOptions { get; set; } = new();
 }

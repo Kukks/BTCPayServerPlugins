@@ -1,0 +1,295 @@
+﻿@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.Data
+@using BTCPayServer.Plugins.PointOfSale
+@using BTCPayServer.Plugins.Prism.Services
+@using BTCPayServer.Plugins.Prism.ViewModel
+@using BTCPayServer.Services.Apps
+@using Microsoft.AspNetCore.Http
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.Mvc.Rendering
+@using Microsoft.AspNetCore.Routing
+@using Microsoft.EntityFrameworkCore
+@using NBitcoin
+@using System.Text.Json
+@inject IScopeProvider ScopeProvider
+@inject SatBreaker SatBreaker
+@inject IHttpContextAccessor HttpContextAccessor
+@inject AppService _appService
+@inject NavigationManager Nav
+@inject UserManager<ApplicationUser> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AutoTransferService _autoTransferService
+
+
+@if (!Loading)
+{
+    <EditForm EditContext="EditContext" OnValidSubmit="Save">
+        <ValidationSummary class="alert alert-danger" />
+
+        <div class="sticky-header-setup"></div>
+        <div class="sticky-header d-sm-flex align-items-center justify-content-between">
+            <h2 class="mb-0">Configure Product Splits</h2>
+            <div class="d-flex gap-3 mt-3 mt-sm-0">
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-secondary" @onclick="GoBack">Go Back</button>
+                    @if (PosProducts.Any())
+                    {
+                        <button type="submit" class="btn btn-primary mx-2">Save Settings</button>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="alert alert-warning alert-dismissible" role="alert">
+            <button type="button" class="btn-close" data-bs-dismiss="alert">
+                <vc:icon symbol="close" />
+            </button>
+            <h5 class="alert-heading" text-translate="true">Important notice</h5>
+            <p class="mb-0">The calculated transfer amount must be greater than 546 sats</p>
+        </div>
+
+        @if (StatusMessageModel != null)
+        {
+            <div class="alert alert-@StatusMessageModel.ToString(StatusMessageModel.Severity)">
+                @StatusMessageModel.Message
+            </div>
+        }
+
+        <DataAnnotationsValidator />
+
+        @if (PosProducts.Any())
+        {
+            <div class="accordion" id="appsAccordion">
+                @for (int i = 0; i < PosProducts.Count; i++)
+                {
+                    var app = PosProducts[i]; 
+                    <div class="accordion-item mb-3 shadow-sm rounded" @key="app.AppId">
+                        <h2 class="accordion-header" id="heading-@app.AppId">
+                            <button class="accordion-button collapsed fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-@app.AppId" aria-expanded="false">
+                                @app.AppTitle
+                                <span class="badge bg-secondary ms-2">@app.Products.Count products</span>
+                            </button>
+                        </h2>
+                        <div id="collapse-@app.AppId" class="accordion-collapse collapse" aria-labelledby="heading-@app.AppId" data-bs-parent="#appsAccordion">
+                            <div class="accordion-body">
+                                <input type="hidden" @bind="app.AppId" />
+                                <input type="hidden" @bind="app.AppTitle" />
+                                <div class="row g-3">
+                                    @for (int j = 0; j < app.Products.Count; j++)
+                                    {
+                                        var product = app.Products[j];
+                                        <div class="col-md-6 col-lg-4" @key="product.ProductId">
+                                            <div class="card h-100 shadow-sm border-0">
+                                                <div class="card-body">
+                                                    <h5 class="card-title">@product.Title</h5>
+                                                    <p class="text-muted mb-2">Price: @product.Price @product.Currency</p>
+                                                    <input type="hidden" @bind="product.ProductId" />
+                                                    <input type="hidden" @bind="product.Title" />
+                                                    <input type="hidden" @bind="product.Price" />
+
+                                                    <label class="form-label small">Percentage to Auto-Transfer</label>
+                                                    <input type="number"
+                                                            class="form-control"
+                                                            min="0" max="100" step="1"
+                                                            @bind="product.Percentage"
+                                                            @bind:event="oninput" />
+
+                                                    <label class="form-label small mt-2">Destination Store</label>
+                                                    <select class="form-select"
+                                                            @bind="product.DestinationStoreId"
+                                                            @bind:event="oninput">
+                                                        <option value="">-- Select Store --</option>
+                                                        @foreach (var opt in product.StoreOptions)
+                                                        {
+                                                            <option value="@opt.Value">@opt.Text</option>
+                                                        }
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <p class="mt-4">No POS products found for this store.</p>
+        }
+    </EditForm>
+}
+
+
+
+@code {
+
+    [Parameter] public string StoreId { get; set; }
+
+    public ValidationMessageStore MessageStore { get; set; }
+
+    public EditContext? EditContext { get; set; }
+
+    public StatusMessageModel StatusMessageModel { get; set; }
+
+    public PrismSettings Settings { get; set; }
+
+    public bool Loading { get; set; } = true;
+
+
+    List<PosAppProductSplitModel> PosProducts = new();
+
+    private List<StoreData> UserStores;
+
+    void GoBack()
+    {
+        Nav.NavigateTo($"/stores/{StoreId}/plugins/prism/auto-transfer", forceLoad: true);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            if (user.Identity?.IsAuthenticated ?? false)
+            {
+                var userId = UserManager.GetUserId(user);
+                var appUser = await UserManager.Users
+                    .Where(c => c.Id == userId).Include(u => u.UserStores).ThenInclude(us => us.StoreData).SingleOrDefaultAsync();
+
+                UserStores = appUser?.UserStores.Where(s => s.StoreDataId != StoreId && !s.StoreData.Archived).Select(s => s.StoreData).ToList() ?? new();
+            }
+
+            var fetchSettings = SatBreaker.Get(StoreId);
+            var tasks = new Task[]
+            {
+                fetchSettings,
+            };
+            await Task.WhenAll(tasks);
+            Settings = await fetchSettings;
+
+            var posApps = await _appService.GetApps(PointOfSaleAppType.AppType);
+            if (posApps.Any())
+            {
+                var storePosApps = posApps.Where(c => c.StoreDataId == StoreId && !c.Archived).ToList();
+                if (storePosApps.Any())
+                {
+                    var posSplits = Settings.Splits.Where(s => s.Source.StartsWith("pos:")).ToList();
+
+                    PosProducts = storePosApps.Select(app =>
+                    {
+                        var settings = app.GetSettings<PointOfSaleSettings>();
+                        var products = new List<ProductSplitItemModel>();
+                        if (!string.IsNullOrEmpty(settings?.Template))
+                        {
+                            var templateItems = JsonSerializer.Deserialize<List<PoSAppItem>>(settings.Template);
+                            if (templateItems != null)
+                            {
+                                products = templateItems.Select(item =>
+                                {
+                                    var split = posSplits.FirstOrDefault(s => s.Source == $"pos:{app.Id}:{item.Id}");
+                                    var dest = split?.Destinations.FirstOrDefault();
+                                    return new ProductSplitItemModel
+                                    {
+                                        ProductId = item.Id,
+                                        Title = item.Title,
+                                        Price = item.Price ?? 0m,
+                                        Currency = settings.Currency,
+                                        DestinationStoreId = dest?.Destination.Replace("store-prism:", "", StringComparison.OrdinalIgnoreCase),
+                                        Percentage = dest?.Percentage ?? 0m,
+                                        StoreOptions = UserStores.Select(s => new SelectListItem
+                                        {
+                                            Value = s.Id,
+                                            Text = s.StoreName,
+                                            Selected = (s.Id == dest?.Destination)
+                                        }).ToList()
+                                    };
+                                }).ToList();
+                            }
+                        }
+                        return new PosAppProductSplitModel
+                        {
+                            AppId = app.Id,
+                            AppTitle = app.Name,
+                            Products = products
+                        };
+                    }).ToList();
+                }
+            }
+
+            EditContext = new EditContext(Settings);
+            MessageStore = new ValidationMessageStore(EditContext);
+            EditContext.OnFieldChanged += FieldChanged;
+
+
+            Loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+
+    private void FieldChanged(object sender, FieldChangedEventArgs e)
+    {
+        StatusMessageModel = null;
+    
+    }
+
+    private async Task RemovePrism(Split item)
+    {
+        if (Settings.Splits.Remove(item))
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        if (EditContext is not null)
+        {
+            EditContext.OnFieldChanged -= FieldChanged;
+        }
+    }
+
+    async Task Save()
+    {
+        var settz = await SatBreaker.Get(StoreId);
+        settz.Splits.RemoveAll(s => s.Source.StartsWith("pos:"));
+        foreach (var app in PosProducts)
+        {
+            foreach (var product in app.Products)
+            {
+                if (product.Percentage > 0 && !string.IsNullOrEmpty(product.DestinationStoreId))
+                {
+                    settz.Splits.Add(new Split
+                    {
+                        Source = $"pos:{app.AppId}:{product.ProductId}",
+                        Destinations = new List<BTCPayServer.Plugins.Prism.PrismSplit>
+                        {
+                            new BTCPayServer.Plugins.Prism.PrismSplit{ Destination = $"store-prism:{product.DestinationStoreId}", Percentage = Math.Min(100, product.Percentage) },
+                        }
+                    });
+                }
+            }
+        }
+		Settings = settz;
+        await UpdateAndShowResult(settz);
+    }
+
+    private async Task UpdateAndShowResult(PrismSettings settz)
+    {
+        var ok = await SatBreaker.UpdatePrismSettingsForStore(StoreId, settz);
+        StatusMessageModel = new()
+        {
+            Severity = ok ? StatusMessageModel.StatusSeverity.Success : StatusMessageModel.StatusSeverity.Error,
+            Message = ok ? "Settings saved successfully" : "Settings were changed by another process. Refresh and try again."
+        };
+    }
+
+}

@@ -1,0 +1,312 @@
+﻿@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.Client.Models
+@using BTCPayServer.Data
+@using BTCPayServer.Plugins.Prism.Services
+@using BTCPayServer.Plugins.Prism.ViewModel
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.Mvc.Rendering
+@using Microsoft.EntityFrameworkCore
+@using NBitcoin
+@using NBitcoin.DataEncoders
+@inject IScopeProvider ScopeProvider
+@inject IPluginHookService PluginHookService
+@inject LightningAddressService LightningAddressService
+@inject SatBreaker SatBreaker
+@inject NavigationManager Nav
+@inject UserManager<ApplicationUser> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
+
+@if (!Loading)
+{
+    <EditForm EditContext="EditContext" OnValidSubmit="Save">
+        <div class="sticky-header-setup"></div>
+        <div class="sticky-header d-sm-flex align-items-center justify-content-between">
+            <h2 class="mb-0">Store Transfer</h2>
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-secondary" @onclick="GoBack">Go Back</button>
+                <button type="submit" class="btn btn-primary mx-2">Save Transfers</button>
+            </div>
+        </div>
+
+        @if (StatusMessageModel != null)
+        {
+            <div class="alert alert-@StatusMessageModel.ToString(StatusMessageModel.Severity)">
+                @StatusMessageModel.Message
+            </div>
+        }
+
+        <ValidationSummary class="alert alert-danger" />
+
+        <div class="p-2 m-1 split-block">
+            <div class="col-sm-10 col-md-9 col-xl-7 col-xxl-6">
+                <div class="form-group mb-4">
+                    <label class="form-label">Transfer mode</label>
+                    <select class="form-select" @bind="SendMode" @bind:event="oninput">
+                        <option value="@TransferMode.SendNow">Send now</option>
+                        <option value="@TransferMode.Schedule">Schedule transfer</option>
+                        <option value="@TransferMode.Both">Both</option>
+                    </select>
+                </div>
+
+                @if (SendMode != TransferMode.SendNow)
+                {
+                    <h5>Schedule Days</h5>
+                    <div class="form-group">
+                        <label class="form-label">Transfer days (1-31)</label>
+                        <div class="input-group mb-3">
+                            <input type="number" class="form-control" placeholder="Enter date (1-31)"
+                                   min="1" max="31" @bind="newDay" @bind:event="oninput"
+                                   @onkeypress="OnDayKeyPress" />
+                            <button type="button" class="btn btn-secondary" @onclick="AddDay">Add</button>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 mb-2">
+                            @foreach (var day in selectedDays)
+                            {
+                                <span class="badge bg-secondary cursor-pointer" @onclick="() => RemoveDay(day)">@day</span>
+                            }
+                        </div>
+                        <ValidationMessage For="() => Settings.Schedule" />
+                        <div class="text-danger">@dayError</div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead>
+                    <tr>
+                        <th>Destination Store</th>
+                        <th>Amount (sats)</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var d in Destinations)
+                    {
+                        <tr>
+                            <td>
+                                <select class="form-select" @bind="d.Destination" @bind:event="oninput">
+                                    <option value="">-- Select store --</option>
+                                    @foreach (var s in AvailableStores)
+                                    {
+                                        <option value="@s.Value">@s.Text</option>
+                                    }
+                                </select>
+                            </td>
+                            <td>
+                                <input type="number" min="546" step="1" class="form-control" @bind="d.Amount" @bind:event="oninput" />
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveDest(d)">Remove</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            <button type="button" class="btn btn-link" @onclick="AddDest">+ Add destination</button>
+        </div>
+    </EditForm>
+}
+
+
+
+@code {
+
+    [Parameter] public string StoreId { get; set; }
+
+    public ValidationMessageStore MessageStore { get; set; }
+
+    public EditContext? EditContext { get; set; }
+
+    public StatusMessageModel StatusMessageModel { get; set; }
+
+    public PrismSettings Settings { get; set; }
+
+    public bool Loading { get; set; } = true;
+
+    private List<Data.StoreData> UserStores;
+
+    List<PrismDestination> Destinations { get; set; } = new();
+    List<SelectListItem> AvailableStores = new();
+
+    enum TransferMode { SendNow, Schedule, Both }
+
+    TransferMode SendMode = TransferMode.SendNow;
+    List<int> selectedDays = new();
+    string newDay = "";
+    string dayError = "";
+
+
+    void GoBack()
+    {
+        Nav.NavigateTo($"/stores/{StoreId}/plugins/prism/auto-transfer", forceLoad: true);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            if (user.Identity?.IsAuthenticated ?? false)
+            {
+                var userId = UserManager.GetUserId(user);
+                var appUser = await UserManager.Users.Where(c => c.Id == userId).Include(u => u.UserStores).ThenInclude(us => us.StoreData).SingleOrDefaultAsync();
+                UserStores = appUser?.UserStores.Where(s => s.StoreDataId != StoreId && !s.StoreData.Archived).Select(s => s.StoreData).ToList() ?? new();
+            }
+
+            AvailableStores = UserStores.Select(s => new SelectListItem
+            {
+                Value = s.Id,
+                Text = s.StoreName
+            }).ToList() ?? new List<SelectListItem>();
+
+            var fetchSettings = SatBreaker.Get(StoreId);
+            var tasks = new Task[]
+            {
+                fetchSettings
+            };
+            await Task.WhenAll(tasks);
+            Settings = await fetchSettings;
+            selectedDays = Settings.Schedule?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(int.Parse).ToList();
+            EditContext = new EditContext(Settings);
+            MessageStore = new ValidationMessageStore(EditContext);
+            EditContext.OnFieldChanged += FieldChanged;
+            SatBreaker.PrismUpdated += SatBreakerOnPrismUpdated;
+            Loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    private void FieldChanged(object sender, FieldChangedEventArgs e)
+    {
+        StatusMessageModel = null;
+    }
+
+    void AddDest() => Destinations.Add(new PrismDestination());
+
+    void RemoveDest(PrismDestination d) => Destinations.Remove(d);
+
+    void ParseDays()
+    {
+        selectedDays = (Settings.Schedule ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(s => int.TryParse(s, out var d) && d is >= 1 and <= 31)
+            .Select(int.Parse).Distinct().OrderBy(x => x).ToList();
+    }
+
+    void AddDay()
+    {
+        dayError = "";
+        if (!int.TryParse(newDay, out var day) || day is < 1 or > 31) { dayError = "Please enter a valid date between 1 and 31"; return; }
+
+        if (selectedDays.Contains(day)) { dayError = "Day already added"; return; }
+        selectedDays.Add(day);
+        selectedDays = selectedDays.OrderBy(x => x).ToList();
+        Settings.Schedule = string.Join(",", selectedDays);
+        newDay = "";
+    }
+
+    async Task OnDayKeyPress(KeyboardEventArgs e) { if (e.Key == "Enter") { AddDay(); await Task.CompletedTask; } }
+
+    void RemoveDay(int day)
+    {
+        selectedDays.Remove(day);
+        Settings.Schedule = string.Join(",", selectedDays);
+    }
+
+    private void SatBreakerOnPrismUpdated(object sender, PrismPaymentDetectedEventArgs e)
+    {
+        if (e.StoreId != StoreId) return;
+        if (e.Settings != Settings && e.Settings.Version != Settings.Version)
+        {
+            Settings.Version = e.Settings.Version;
+        }
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        if (EditContext is not null)
+        {
+            EditContext.OnFieldChanged -= FieldChanged;
+        }
+        SatBreaker.PrismUpdated -= SatBreakerOnPrismUpdated;
+    }
+
+
+    async Task Save()
+    {
+        var settz = await SatBreaker.Get(StoreId);
+        if (!Destinations.Any(x => !string.IsNullOrWhiteSpace(x.Destination) && x.Amount > 0))
+        {
+            StatusMessageModel = new()
+            {
+                Severity = StatusMessageModel.StatusSeverity.Error,
+                Message = "Destination si required. Amount has to be greater than 0"
+            };
+            return;
+        }
+        if (SendMode != TransferMode.Schedule)
+        {
+            // var payoutDestinations = Destinations.Where(d => d.Destination?.StartsWith("prism-store:", StringComparison.OrdinalIgnoreCase) == true && d.Amount.HasValue && d.Amount.Value > Settings.SatThreshold).ToList();
+            // if (!payoutDestinations.Any()) return;
+            var destinationToProcess = Destinations.Where(d => d.Amount > Settings.SatThreshold).Select(d => new PrismDestination
+            {
+                Destination = $"store-prism:{d.Destination}",
+                Amount = d.Amount,
+                Schedule = d.Schedule,
+                Reserve = d.Reserve,
+                SatThreshold = d.SatThreshold,
+                PayoutMethodId = d.PayoutMethodId
+            }).ToList();
+            await SatBreaker.StoreAutoTransferPayout(StoreId, settz, destinationToProcess);
+        }
+        if (SendMode != TransferMode.SendNow)
+        {
+            if (!selectedDays.Any())
+            {
+                StatusMessageModel = new()
+                {
+                    Severity = StatusMessageModel.StatusSeverity.Error,
+                    Message = "Payout record proceesed. Unable to save schedule. Kindly enter a schedule date"
+                };
+                return;
+            }
+            foreach (var d in Destinations)
+            {
+                var id = Encoders.Base58.EncodeData(RandomUtils.GetBytes(20));
+                settz.Destinations[id] = new PrismDestination
+                {
+                    Destination = $"store-prism:{d.Destination}",
+                    Schedule = selectedDays.Any() ? string.Join(",", selectedDays) : string.Empty,
+                    Amount = d.Amount
+                };
+            }
+            Settings = settz;
+        }
+        await UpdateAndShowResult(settz);
+        RevertToDefault();
+    }
+
+    private async Task UpdateAndShowResult(PrismSettings settz)
+    {
+        var ok = await SatBreaker.UpdatePrismSettingsForStore(StoreId, settz);
+        StatusMessageModel = new()
+        {
+            Severity = ok ? StatusMessageModel.StatusSeverity.Success : StatusMessageModel.StatusSeverity.Error,
+            Message = ok ? "Store transfer recorded successfully" : "Settings were changed by another process. Refresh and try again."
+        };
+    }
+
+    private void RevertToDefault()
+    {
+        selectedDays = new();
+        Destinations = new();
+        SendMode = TransferMode.SendNow;
+    }
+
+}

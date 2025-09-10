@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
@@ -14,18 +15,16 @@ using BTCPayServer.Lightning;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Lightning;
 using BTCPayServer.Payouts;
-using BTCPayServer.Plugins.Prism.Services;
-using BTCPayServer.Plugins.Prism.ViewModel;
 using BTCPayServer.Services;
 using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Rates;
 using BTCPayServer.Services.Stores;
+using BTCPayServer.Services.Wallets;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NBitcoin;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using static BTCPayServer.Models.InvoicingModels.CheckoutModel;
 
 namespace BTCPayServer.Plugins.Prism
 {
@@ -53,7 +52,9 @@ namespace BTCPayServer.Plugins.Prism
         private readonly StoreRepository _storeRepository;
         private readonly ILogger<SatBreaker> _logger;
         private readonly CurrencyNameTable _currencyNameTable;
-        private readonly AutoTransferService _autoTransferService;
+        private readonly PaymentMethodHandlerDictionary _handlers;
+        private readonly BTCPayWalletProvider _walletProvider;
+        private readonly WalletReceiveService _walletReceiveService;
         private readonly PullPaymentHostedService _pullPaymentHostedService;
         private readonly BTCPayNetworkProvider _btcPayNetworkProvider;
         private readonly LightningClientFactoryService _lightningClientFactoryService;
@@ -70,9 +71,11 @@ namespace BTCPayServer.Plugins.Prism
             EventAggregator eventAggregator,
             ILogger<SatBreaker> logger,
             CurrencyNameTable currencyNameTable,
-            AutoTransferService autoTransferService,
+            BTCPayWalletProvider walletProvider,
+            PaymentMethodHandlerDictionary handlers,
             PullPaymentHostedService pullPaymentHostedService,
             BTCPayNetworkProvider btcPayNetworkProvider,
+            WalletReceiveService walletReceiveService,
             LightningClientFactoryService lightningClientFactoryService,
             IOptions<LightningNetworkOptions> lightningNetworkOptions,
             BTCPayNetworkJsonSerializerSettings btcPayNetworkJsonSerializerSettings,
@@ -82,10 +85,12 @@ namespace BTCPayServer.Plugins.Prism
         {
             _storeRepository = storeRepository;
             _logger = logger;
+            _handlers = handlers;
+            _walletProvider = walletProvider;
             _currencyNameTable = currencyNameTable;
-            _autoTransferService = autoTransferService;
             _pullPaymentHostedService = pullPaymentHostedService;
             _btcPayNetworkProvider = btcPayNetworkProvider;
+            _walletReceiveService = walletReceiveService;
             _lightningClientFactoryService = lightningClientFactoryService;
             _lightningNetworkOptions = lightningNetworkOptions;
             _btcPayNetworkJsonSerializerSettings = btcPayNetworkJsonSerializerSettings;
@@ -290,6 +295,12 @@ namespace BTCPayServer.Plugins.Prism
                     : new PrismSettings()).ToObject<PrismSettings>();
         }
 
+        public async Task<Dictionary<string, PrismSettings>> GetAllPrismSettings()
+        {
+            return await _storeRepository.GetSettingsAsync<PrismSettings>(nameof(PrismSettings));
+        }
+
+
         public async Task<bool> UpdatePrismSettingsForStore(string storeId, PrismSettings updatedSettings,
             bool skipLock = false)
         {
@@ -396,23 +407,50 @@ namespace BTCPayServer.Plugins.Prism
                 return (pmi, valid, split);
             }).Where(tuple => tuple.valid).ToDictionary(split => split.pmi, split => split.split);
 
-            
-            while(payments.Any() || catchAlls.Any())
+
+            var posSplits = prismSettings.Splits.Where(split => split.Source.StartsWith("pos", StringComparison.OrdinalIgnoreCase)).ToDictionary(s => s.Source, StringComparer.OrdinalIgnoreCase);
+            var metadataJson = JsonConvert.SerializeObject(entity.Metadata);
+            dynamic metadata = JsonConvert.DeserializeObject<dynamic>(metadataJson);
+            if (posSplits.Count > 0 && metadata?.posData?.cart != null)
+            {
+                var orderUrl = entity.Metadata?.OrderUrl;
+                var match = !string.IsNullOrEmpty(orderUrl) ? Regex.Match(orderUrl, @"\/apps\/([^\/]+)\/pos\b", RegexOptions.IgnoreCase) : null;
+                if (match?.Success == true)
+                {
+                    var posAppId = match.Groups[1].Value;
+                    foreach (var cartItem in metadata.posData.cart)
+                    {
+                        string itemId = (string)cartItem.id;
+                        int count = (int)cartItem.count;
+                        decimal price = (decimal)cartItem.price;
+
+                        var sourceKey = $"pos:{posAppId}:{itemId}";
+                        if (!posSplits.TryGetValue(sourceKey, out var split) || split.Destinations.Count == 0)
+                            continue;
+
+                        var itemTotal = count * price;
+                        long sats = CalculateTransferAmountInSats(entity, split.Destinations.First().Percentage, itemTotal);
+                        result.Add((split, LightMoney.FromUnit(sats, LightMoneyUnit.Satoshi)));
+                    }
+                }
+            }
+
+
+            while (payments.Any() && catchAlls.Any())
             {
                 decimal paymentSum;
                 Split catchAllSplit;
                 //check if all catachalls do not match to all payments.key and then check if there is a catch all with a null key, that will take all the payments
-                if(catchAlls.All(catchAll => payments.All(payment => payment.Key != catchAll.Key)) && catchAlls.TryGetValue(null, out catchAllSplit))
+                if (catchAlls.All(catchAll => payments.All(payment => payment.Key != catchAll.Key)) && catchAlls.TryGetValue(null, out catchAllSplit))
                 {
 
                     paymentSum = payments.Sum(paymentEntity =>
                         paymentEntity.Sum(paymentEntity => paymentEntity.PaidAmount.Net));
-                    
+
                     payments = Array.Empty<IGrouping<PaymentMethodId, PaymentEntity>>();
                 }
                 else
                 {
-                    
                     var paymentGroup = payments.First();
                     if (!catchAlls.Remove(paymentGroup.Key, out catchAllSplit))
                     {
@@ -420,12 +458,10 @@ namespace BTCPayServer.Plugins.Prism
                         payments = payments.Where(grouping => grouping.Key != paymentGroup.Key).Append(paymentGroup).ToArray();
                         continue;
                     }
-                
+
                     paymentSum = paymentGroup.Sum(paymentEntity => paymentEntity.PaidAmount.Net);
                     payments = payments.Where(grouping => grouping.Key != paymentGroup.Key).ToArray();
                 }
-                
-                
                 if (paymentSum > 0)
                 {
                     result.Add((catchAllSplit, LightMoney.FromUnit(paymentSum, LightMoneyUnit.BTC)));
@@ -491,48 +527,6 @@ namespace BTCPayServer.Plugins.Prism
                                 await UpdatePrismSettingsForStore(invoiceEvent.Invoice.StoreId, prismSettings, true);
                             }
                         }
-
-                        var autoTransferSettings = await _autoTransferService.GetAutoTransferSettings(invoiceEvent.Invoice.StoreId);
-                        if (autoTransferSettings.Enabled)
-                        {
-                            var autoTransferProducts = (autoTransferSettings.PosProductAutoTransferSplit ?? new List<PosAppProductSplitModel>()).SelectMany(app => app.Products ?? Enumerable.Empty<ProductSplitItemModel>()).ToList();
-                            var metadataJson = JsonConvert.SerializeObject(invoiceEvent.Invoice.Metadata);
-                            dynamic metadata = JsonConvert.DeserializeObject<dynamic>(metadataJson);
-                            if (metadata?.posData?.cart == null) return;
-
-                            var transfersByDestination = new Dictionary<string, long>();
-                            foreach (var cartItem in metadata.posData.cart)
-                            {
-                                string itemId = (string)cartItem.id;
-                                int count = (int)cartItem.count;
-                                decimal price = (decimal)cartItem.price;
-                                var matchedProduct = autoTransferProducts.FirstOrDefault(p => p.ProductId == itemId && p.Percentage > 0);
-                                if (matchedProduct == null || matchedProduct.Percentage <= 0 || string.IsNullOrEmpty(matchedProduct.DestinationStoreId)) continue;
-
-                                var itemTotal = count * price;
-                                long  sats = CalculateTransferAmountInSats(invoiceEvent, matchedProduct.Percentage, itemTotal);
-                                if (!transfersByDestination.ContainsKey(matchedProduct.DestinationStoreId))
-                                {
-                                    transfersByDestination[matchedProduct.DestinationStoreId] = 0;
-                                }
-                                transfersByDestination[matchedProduct.DestinationStoreId] += sats;
-                            }
-
-                            foreach (var kvp in transfersByDestination)
-                            {
-                                var destinationStoreId = kvp.Key;
-                                var totalSats = kvp.Value;
-                                var destinationStore = await _storeRepository.FindStore(destinationStoreId);
-                                if (destinationStore == null || destinationStore.Archived || totalSats < 546) continue;
-
-                                var payout = await _autoTransferService.ProcessOnchainClaimRequest(destinationStore.Id, invoiceEvent.Invoice.StoreId, totalSats);
-                                if (payout == null) return;
-
-                                autoTransferSettings.PendingPayouts ??= new Dictionary<string, AutoTransferPayout>();
-                                autoTransferSettings.PendingPayouts.Add(payout.Id, new AutoTransferPayout(totalSats, 0, destinationStore.Id, destinationStore.StoreName, DateTimeOffset.Now));
-                                await _autoTransferService.UpdateAutoTransferSettingsForStore(invoiceEvent.Invoice.StoreId, autoTransferSettings);
-                            }
-                        }
                         break;
                     }
                     case CheckPayoutsEvt:
@@ -555,24 +549,73 @@ namespace BTCPayServer.Plugins.Prism
             }
         }
 
-        private long CalculateTransferAmountInSats(InvoiceEvent invoiceEvent, decimal percentage, decimal? overrideAmount = null)
+        private long CalculateTransferAmountInSats(InvoiceEntity invoice, decimal percentage, decimal? overrideAmount = null)
         {
-            return invoiceEvent.Invoice.GetPayments(true).Where(p => p.Status == PaymentStatus.Settled)
+            return invoice.GetPayments(true).Where(p => p.Status == PaymentStatus.Settled)
                 .Sum(p =>
                 {
-                    var decimals = _currencyNameTable.GetNumberFormatInfo(invoiceEvent.Invoice.Currency)?.CurrencyDecimalDigits ?? 2;
-                    var paymentReceived = Math.Round(p.InvoicePaidAmount.Net, decimals);
-                    var baseAmount = overrideAmount ?? paymentReceived;
-                    var transferAmount = (baseAmount * percentage) / 100m;
-
-                    return invoiceEvent.Invoice.Currency switch
+                    var decimals = _currencyNameTable.GetNumberFormatInfo(invoice.Currency)?.CurrencyDecimalDigits ?? 2;
+                    var baseAmount = overrideAmount ?? Math.Round(p.InvoicePaidAmount.Net, decimals); ;
+                    return invoice.Currency switch
                     {
-                        "BTC" => (long)(transferAmount * 100_000_000m),
-                        "SATS" => (long)transferAmount,
-                        _ => (long)((transferAmount / p.Rate) * 100_000_000m)
+                        "BTC" => (long)(baseAmount * 100_000_000m),
+                        "SATS" => (long)baseAmount,
+                        _ => (long)((baseAmount / p.Rate) * 100_000_000m)
                     };
                 });
         }
+
+        public async Task<decimal> GetStoreWalletBalance(Data.StoreData store)
+        {
+            if (!_handlers.TryGetValue(PaymentTypes.LNURL.GetPaymentMethodId("BTC"), out var o) || o is not LNURLPayPaymentHandler { Network: var network })
+                return 0;
+
+            WalletId walletId = new WalletId(store.Id, "BTC");
+            var paymentMethod = store.GetDerivationSchemeSettings(_handlers, walletId.CryptoCode);
+            if (paymentMethod == null) return 0;
+
+            var balanceTask = _walletProvider.GetWallet(network).GetBalance(paymentMethod.AccountDerivation);
+            var balance = await balanceTask;
+            var availableBalance = (balance.Available ?? balance.Total).GetValue(network);
+            return availableBalance * 100_000_000m;
+        }
+
+        public async Task<(bool success, string message)> StoreAutoTransferPayout(string storeId, PrismSettings prismSettings, List<PrismDestination> destinations)
+        {
+            prismSettings.DestinationBalance ??= new Dictionary<string, long>();
+            var currentStore = await _storeRepository.FindStore(storeId);
+            var walletBalance = await GetStoreWalletBalance(currentStore);
+
+            var reserveRate = prismSettings.Reserve / 100m;
+            var payoutPlan = destinations.Select(d =>
+            {
+                var gross = (long)d.Amount!.Value;
+                var fee = (long)Math.Max(0, Math.Round(gross * reserveRate, MidpointRounding.AwayFromZero));
+                var net = gross - fee;
+                return new { Dest = d, Gross = gross, Fee = fee, Net = net };
+            }).Where(w => w.Net > 0).ToList();
+
+            var totalNet = payoutPlan.Sum(w => w.Net);
+            if (walletBalance - totalNet < 546) return (false, "Insufficient balance to cover all transactions");
+
+
+            foreach (var p in payoutPlan)
+            {
+                var msats = (long)LightMoney.FromUnit(p.Gross, LightMoneyUnit.Satoshi).MilliSatoshi;
+
+                if (prismSettings.DestinationBalance.ContainsKey(p.Dest.Destination!))
+                    prismSettings.DestinationBalance[p.Dest.Destination!] += msats;
+                else
+                    prismSettings.DestinationBalance[p.Dest.Destination!] = msats;
+            }
+            if (await CreatePayouts(storeId, prismSettings))
+            {
+                await UpdatePrismSettingsForStore(storeId, prismSettings, true);
+                return (true, "Payouts processed successfully");
+            }
+            return (false, "Unable to process payout at the moment");
+        }
+
 
         private async Task<bool> CreatePayouts(string storeId, PrismSettings prismSettings)
         {
@@ -586,6 +629,7 @@ namespace BTCPayServer.Plugins.Prism
             foreach (var (destination, amtMsats) in prismSettings.DestinationBalance)
             {
                 prismSettings.Destinations.TryGetValue(destination, out var destinationSettings);
+
                 var satThreshold = destinationSettings?.SatThreshold ?? prismSettings.SatThreshold;
                 var reserve = destinationSettings?.Reserve ?? prismSettings.Reserve;
 

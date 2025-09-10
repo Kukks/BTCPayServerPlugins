@@ -24,9 +24,11 @@ public class PrismPlugin : BaseBTCPayServerPlugin
         applicationBuilder.AddHostedService(provider => provider.GetRequiredService<SatBreaker>());
         applicationBuilder.AddSingleton<IHostedService>(provider => provider.GetService<AutoTransferService>());
         applicationBuilder.AddScheduledTask<AutoTransferService>(TimeSpan.FromHours(12));
+        applicationBuilder.AddSingleton<IPluginHookFilter, StoreDestinationValidator>();
         applicationBuilder.AddSingleton<IPluginHookFilter, OpenSatsDestinationValidator>();
         applicationBuilder.AddSingleton<IPluginHookFilter, LNURLPrismDestinationValidator>();
         applicationBuilder.AddSingleton<IPluginHookFilter, OnChainPrismDestinationValidator>();
+        applicationBuilder.AddSingleton<IPluginHookFilter, StorePrismClaimCreate>();
         applicationBuilder.AddSingleton<IPluginHookFilter, LNURLPrismClaimCreate>();
         applicationBuilder.AddSingleton<IPluginHookFilter, OnChainPrismClaimCreate>();
         applicationBuilder.AddSingleton<IPluginHookFilter, OpenSatsPrismClaimCreate>();
