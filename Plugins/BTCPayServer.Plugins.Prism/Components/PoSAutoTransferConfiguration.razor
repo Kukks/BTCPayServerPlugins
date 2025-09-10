@@ -20,6 +20,7 @@
 @inject UserManager<ApplicationUser> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
 @inject AutoTransferService _autoTransferService
+@implements IDisposable
 
 
 @if (!Loading)
@@ -46,7 +47,7 @@
                 <vc:icon symbol="close" />
             </button>
             <h5 class="alert-heading" text-translate="true">Important notice</h5>
-            <p class="mb-0">The calculated transfer amount must be greater than prism sats threshold</p>
+            <p class="mb-0">The calculated transfer amount must be greater than the Prism sats threshold</p>
         </div>
 
         @if (StatusMessageModel != null)

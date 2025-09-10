@@ -19,6 +19,7 @@
 @inject LinkGenerator LinkGenerator
 @inject PullPaymentHostedService PullPaymentHostedService
 @inject IHttpContextAccessor HttpContextAccessor
+@implements IDisposable
 
 
 
@@ -254,11 +255,16 @@
     private void SatBreakerOnPrismUpdated(object sender, PrismPaymentDetectedEventArgs e)
     {
         if (e.StoreId != StoreId) return;
-        if (e.Settings != Settings && e.Settings.Version != Settings.Version)
+        if (EditContext is not null) 
         {
-            Settings.Version = e.Settings.Version;
+            EditContext.OnFieldChanged -= FieldChanged;
         }
-        InvokeAsync(StateHasChanged);
+        Settings = e.Settings;
+        EditContext = new EditContext(Settings);
+        MessageStore = new ValidationMessageStore(EditContext);
+        EditContext.OnFieldChanged += FieldChanged;
+        ParseDays();
+        _ = InvokeAsync(StateHasChanged);
     }
 
     private async Task CreateNewPrism()

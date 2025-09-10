@@ -16,6 +16,7 @@
 @inject NavigationManager Nav
 @inject UserManager<ApplicationUser> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
+@implements IDisposable
 
 @if (!Loading)
 {

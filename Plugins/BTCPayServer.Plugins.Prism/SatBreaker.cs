@@ -609,6 +609,7 @@ namespace BTCPayServer.Plugins.Prism
                 else
                     prismSettings.DestinationBalance[p.Dest.Destination!] = msats;
             }
+            await UpdatePrismSettingsForStore(storeId, prismSettings, true);
             if (await CreatePayouts(storeId, prismSettings))
             {
                 await UpdatePrismSettingsForStore(storeId, prismSettings, true);
