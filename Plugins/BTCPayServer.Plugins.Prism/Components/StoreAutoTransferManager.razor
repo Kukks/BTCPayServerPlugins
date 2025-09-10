@@ -283,7 +283,7 @@
             }
             foreach (var d in Destinations)
             {
-                var id = scheduleTitle ?? Encoders.Base58.EncodeData(RandomUtils.GetBytes(20));
+                var id = !string.IsNullOrEmpty(scheduleTitle) ? scheduleTitle :  Encoders.Base58.EncodeData(RandomUtils.GetBytes(20));
                 settz.Destinations[id] = new PrismDestination
                 {
                     Destination = $"store-prism:{d.Destination}",
