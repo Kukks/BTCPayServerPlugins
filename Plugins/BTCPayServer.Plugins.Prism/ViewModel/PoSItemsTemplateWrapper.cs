@@ -3,14 +3,9 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Mvc.Rendering;
 
 namespace BTCPayServer.Plugins.Prism.ViewModel;
-
-public class PoSItemsTemplateWrapper
-{
-    [JsonPropertyName("items")]
-    public List<PoSAppItem> Items { get; set; } = new();
-}
 
 public class PoSAppItem
 {
@@ -59,5 +54,23 @@ public class DecimalStringConverter : JsonConverter<decimal?>
         else
             writer.WriteNullValue();
     }
+}
+
+public class PosAppProductSplitModel
+{
+    public string AppId { get; set; }
+    public string AppTitle { get; set; }
+    public List<ProductSplitItemModel> Products { get; set; } = new();
+}
+
+public class ProductSplitItemModel
+{
+    public string ProductId { get; set; }
+    public string Title { get; set; }
+    public decimal Price { get; set; }
+    public string Currency { get; set; }
+    public decimal Percentage { get; set; }
+    public string DestinationStoreId { get; set; }
+    public List<SelectListItem> StoreOptions { get; set; } = new();
 }
 

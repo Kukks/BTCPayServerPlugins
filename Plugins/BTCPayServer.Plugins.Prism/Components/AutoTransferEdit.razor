@@ -104,39 +104,42 @@
         </div>
     </EditForm>
 
-    <h5>Transfer History</h5>
+    <h5>Schedule History</h5>
     <div class="table-responsive">
         <table class="table table-hover align-middle">
             <thead>
                 <tr>
-                    <th>Payout ID</th>
-                    <th>Destination Store</th>
-                    <th>Reserve Fee</th>
-                    <th>Amount (Sats)</th>
+                    <th>Store Schedule Id</th>
+                    <th>Destination Store(s)</th>
+                    <th>Action</th>
                 </tr>
             </thead>
-            @* <tbody>
-                @if (vm?.PendingPayouts?.Any() == true)
+            <tbody>
+                @if (ScheduledEntries.Any())
                 {
-                    @foreach (var kv in vm.PendingPayouts)
+                    @foreach (var kv in ScheduledEntries)
                     {
                         <tr>
                             <td>@kv.Key</td>
-                            <td>@kv.Value.StoreName</td>
-                            <td>@kv.Value.FeeCharged</td>
-                            <td>@kv.Value.PayoutAmount</td>
+                            <td>@StoreCount(kv.Value.Destination)</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-danger"
+                                        @onclick="async () => await DeleteScheduledDestination(kv.Key)">
+                                    Delete
+                                </button>
+                            </td>
                         </tr>
                     }
                 }
                 else
                 {
                     <tr>
-                        <td colspan="4" class="text-center text-muted py-4">
-                            No pending payouts found
+                        <td colspan="3" class="text-center text-muted py-4">
+                            No scheduled transfers found
                         </td>
                     </tr>
                 }
-            </tbody> *@
+            </tbody>
         </table>
     </div>
 }
@@ -157,6 +160,7 @@
 
     public string PayoutProcessorLink { get; set; }
 
+    List<KeyValuePair<string, PrismDestination>> ScheduledEntries => Settings?.Destinations?.Where(kv => kv.Value.Destination?.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase) == true).ToList() ?? new();
     public bool Loading { get; set; } = true;
     public PayoutMethodId pmi { get; set; } = PayoutTypes.LN.GetPayoutMethodId("BTC");
     public PayoutMethodId pmichain { get; set; } = PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
@@ -166,6 +170,8 @@
     string dayError = "";
     List<int> selectedDays = new();
 
+
+    int StoreCount(string dest) => dest.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length;
 
     private string PrismEditButtonsFilter { get; set; }
 
@@ -188,6 +194,7 @@
             };
             await Task.WhenAll(tasks);
             Settings = await fetchSettings;
+            ParseDays();
 
             EditContext = new EditContext(Settings);
             MessageStore = new ValidationMessageStore(EditContext);
@@ -197,7 +204,6 @@
             NoPayoutProcessors = PayoutProcessorFactories.Any(factory => factory.GetSupportedPayoutMethods().Contains(pmi)) && (await fetchProcessors).All(data =>
                 !new[] { pmi, pmichain }.Contains(data.GetPayoutMethodId()));
 
-            ParseDays();
             Loading = false;
             await InvokeAsync(StateHasChanged);
         }
@@ -278,14 +284,22 @@
         SatBreaker.PrismUpdated -= SatBreakerOnPrismUpdated;
     }
 
+    async Task DeleteScheduledDestination(string key)
+    {
+        var settz = await SatBreaker.Get(StoreId);
+        settz.Destinations.Remove(key);
+        await UpdateAndShowResult(settz);
+		Settings = settz;
+    }
+
     async Task Save()
     {
         var settz = await SatBreaker.Get(StoreId);
         settz.MinimumBalanceThreshold = Math.Max(Settings.MinimumBalanceThreshold, 546);
         settz.EnableScheduledAutomation = Settings.EnableScheduledAutomation;
         settz.Schedule = Settings.Schedule;
-        Settings = settz;
         await UpdateAndShowResult(settz);
+		Settings = settz;
     }
 
     private async Task UpdateAndShowResult(PrismSettings settz)

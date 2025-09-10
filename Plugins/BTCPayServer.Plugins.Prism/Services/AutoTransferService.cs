@@ -59,7 +59,7 @@ public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
 
         int today = DateTime.UtcNow.Day;
         List<PrismDestination> scheduleTransferDueToday = settings.Destinations.Values.Where(d =>
-                d.Destination?.StartsWith("prism-store:", StringComparison.OrdinalIgnoreCase) == true &&
+                d.Destination?.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase) == true &&
                 d.Amount.HasValue && d.Amount.Value > settings.SatThreshold &&
                 (d.Schedule ?? string.Empty)
                     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Any(s => int.TryParse(s, out var day) && day == today)).ToList();

@@ -57,7 +57,7 @@ internal class StorePrismClaimCreate : IPluginHookFilter
 
             claimRequest.Metadata = JObject.FromObject(new
             {
-                Source = $"Prism->Store ({store.Id}"
+                Source = $"Prism->Store ({store.Id})"
             });
             claimRequest.Destination = claimDestination.destination;
             claimRequest.PayoutMethodId = paymentMethod;

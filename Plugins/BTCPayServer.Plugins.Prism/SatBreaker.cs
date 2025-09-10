@@ -430,7 +430,10 @@ namespace BTCPayServer.Plugins.Prism
 
                         var itemTotal = count * price;
                         long sats = CalculateTransferAmountInSats(entity, split.Destinations.First().Percentage, itemTotal);
-                        result.Add((split, LightMoney.FromUnit(sats, LightMoneyUnit.Satoshi)));
+                        if (sats > prismSettings.SatThreshold)
+                        {
+                            result.Add((split, LightMoney.FromUnit(sats, LightMoneyUnit.Satoshi)));
+                        }
                     }
                 }
             }
@@ -585,7 +588,6 @@ namespace BTCPayServer.Plugins.Prism
             prismSettings.DestinationBalance ??= new Dictionary<string, long>();
             var currentStore = await _storeRepository.FindStore(storeId);
             var walletBalance = await GetStoreWalletBalance(currentStore);
-
             var reserveRate = prismSettings.Reserve / 100m;
             var payoutPlan = destinations.Select(d =>
             {
@@ -596,8 +598,7 @@ namespace BTCPayServer.Plugins.Prism
             }).Where(w => w.Net > 0).ToList();
 
             var totalNet = payoutPlan.Sum(w => w.Net);
-            if (walletBalance - totalNet < 546) return (false, "Insufficient balance to cover all transactions");
-
+            if (walletBalance - totalNet < prismSettings.MinimumBalanceThreshold) return (false, "Insufficient balance to cover all transactions");
 
             foreach (var p in payoutPlan)
             {

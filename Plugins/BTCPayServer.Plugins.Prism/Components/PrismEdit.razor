@@ -198,8 +198,8 @@ else
         }
     }
 
-    public string[] Destinations => Settings.Destinations.Where(kv => !kv.Value.Destination
-                                 .StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase)).Select(kv => kv.Key).ToArray();
+
+    public string[] Destinations => Settings.Destinations.Where(kv => !(kv.Value?.Destination?.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase) ?? false)).Select(kv => kv.Key).ToArray();
 
     public bool Loading { get; set; } = true;
     public List<LightningAddressData> Users { get; set; } = new();

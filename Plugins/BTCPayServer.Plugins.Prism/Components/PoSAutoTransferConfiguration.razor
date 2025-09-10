@@ -46,7 +46,7 @@
                 <vc:icon symbol="close" />
             </button>
             <h5 class="alert-heading" text-translate="true">Important notice</h5>
-            <p class="mb-0">The calculated transfer amount must be greater than 546 sats</p>
+            <p class="mb-0">The calculated transfer amount must be greater than prism sats threshold</p>
         </div>
 
         @if (StatusMessageModel != null)
@@ -206,7 +206,7 @@
                                         {
                                             Value = s.Id,
                                             Text = s.StoreName,
-                                            Selected = (s.Id == dest?.Destination)
+                                            Selected = (s.Id == dest?.Destination?.Replace("store-prism:", "", StringComparison.OrdinalIgnoreCase))
                                         }).ToList()
                                     };
                                 }).ToList();
@@ -278,8 +278,8 @@
                 }
             }
         }
-		Settings = settz;
         await UpdateAndShowResult(settz);
+        Settings = settz;
     }
 
     private async Task UpdateAndShowResult(PrismSettings settz)

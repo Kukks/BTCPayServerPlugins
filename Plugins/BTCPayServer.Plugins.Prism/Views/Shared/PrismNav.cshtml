@@ -72,7 +72,7 @@
     </li>
 
     <li class="nav-item nav-item-sub">
-        <a asp-controller="Prism" asp-action="AutoTransfer" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage(PrismPluginNavPages.AutoTransfer)" id="Nav-Prism"
+        <a asp-controller="Prism" asp-action="AutoTransfer" asp-route-storeId="@storeId" class="nav-link @ViewData.IsActivePage("AutoTransfer")" id="Nav-Prism"
            permission="@Policies.CanModifyStoreSettings">
             <span>Auto Transfer</span>
         </a>

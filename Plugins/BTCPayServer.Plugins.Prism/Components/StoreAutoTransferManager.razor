@@ -51,9 +51,14 @@
 
                 @if (SendMode != TransferMode.SendNow)
                 {
-                    <h5>Schedule Days</h5>
+                    
                     <div class="form-group">
-                        <label class="form-label">Transfer days (1-31)</label>
+                        <label class="form-label">Schedule Title</label>
+                            <input class="form-control" @bind="scheduleTitle" />
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Schedule Transfer days (1-31)</label>
                         <div class="input-group mb-3">
                             <input type="number" class="form-control" placeholder="Enter date (1-31)"
                                    min="1" max="31" @bind="newDay" @bind:event="oninput"
@@ -137,6 +142,7 @@
     List<int> selectedDays = new();
     string newDay = "";
     string dayError = "";
+    string scheduleTitle = "";
 
 
     void GoBack()
@@ -170,7 +176,7 @@
             };
             await Task.WhenAll(tasks);
             Settings = await fetchSettings;
-            selectedDays = Settings.Schedule?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(int.Parse).ToList();
+            selectedDays = Settings.Schedule?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(s => int.TryParse(s, out _)).Select(int.Parse).ToList() ?? new List<int>();
             EditContext = new EditContext(Settings);
             MessageStore = new ValidationMessageStore(EditContext);
             EditContext.OnFieldChanged += FieldChanged;
@@ -246,17 +252,15 @@
             StatusMessageModel = new()
             {
                 Severity = StatusMessageModel.StatusSeverity.Error,
-                Message = "Destination si required. Amount has to be greater than 0"
+                Message = "Destination is required. Amount has to be greater than 0"
             };
             return;
         }
         if (SendMode != TransferMode.Schedule)
         {
-            // var payoutDestinations = Destinations.Where(d => d.Destination?.StartsWith("prism-store:", StringComparison.OrdinalIgnoreCase) == true && d.Amount.HasValue && d.Amount.Value > Settings.SatThreshold).ToList();
-            // if (!payoutDestinations.Any()) return;
             var destinationToProcess = Destinations.Where(d => d.Amount > Settings.SatThreshold).Select(d => new PrismDestination
             {
-                Destination = $"store-prism:{d.Destination}",
+                Destination = d.Destination?.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase) == true ? d.Destination : $"store-prism:{d.Destination}",
                 Amount = d.Amount,
                 Schedule = d.Schedule,
                 Reserve = d.Reserve,
@@ -272,13 +276,13 @@
                 StatusMessageModel = new()
                 {
                     Severity = StatusMessageModel.StatusSeverity.Error,
-                    Message = "Payout record proceesed. Unable to save schedule. Kindly enter a schedule date"
+                    Message = "Payout record processed. Unable to save schedule. Kindly enter a schedule date"
                 };
                 return;
             }
             foreach (var d in Destinations)
             {
-                var id = Encoders.Base58.EncodeData(RandomUtils.GetBytes(20));
+                var id = scheduleTitle ?? Encoders.Base58.EncodeData(RandomUtils.GetBytes(20));
                 settz.Destinations[id] = new PrismDestination
                 {
                     Destination = $"store-prism:{d.Destination}",
@@ -307,6 +311,7 @@
         selectedDays = new();
         Destinations = new();
         SendMode = TransferMode.SendNow;
+        scheduleTitle = "";
     }
 
 }
