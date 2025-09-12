@@ -106,6 +106,16 @@
                                                             <option value="@opt.Value">@opt.Text</option>
                                                         }
                                                     </select>
+
+                                                    <label class="form-label small">Split this product’s payment that arrives via</label>
+                                                    <select class="form-select"
+                                                            @bind="product.PaymentMethod"
+                                                            @bind:event="oninput">
+                                                        @foreach (var opt in _sourcePaymentOptions)
+                                                        {
+                                                            <option value="@opt.Value">@opt.Text</option>
+                                                        }
+                                                    </select>
                                                 </div>
                                             </div>
                                         </div>
@@ -140,8 +150,14 @@
 
     public bool Loading { get; set; } = true;
 
-
     List<PosAppProductSplitModel> PosProducts = new();
+
+    List<SelectListItem> _sourcePaymentOptions = new List<SelectListItem>
+    {
+        new ("Lightning Payment", "LN"),
+        new ("On-chain Payment",  "CHAIN"),
+        new ("Both Payment",    "All")
+    };
 
     private List<StoreData> UserStores;
 
@@ -195,19 +211,24 @@
                                 {
                                     var split = posSplits.FirstOrDefault(s => s.Source == $"pos:{app.Id}:{item.Id}");
                                     var dest = split?.Destinations.FirstOrDefault();
+                                    string fullDestinationPath = dest?.Destination ?? "";
+                                    var destinationParts = fullDestinationPath.Split(':', 3, StringSplitOptions.RemoveEmptyEntries);
+                                    string storeId = destinationParts.Length > 1 ? destinationParts[1] : "";
+                                    string paymentMethod = destinationParts.Length > 2 ? destinationParts[2] : "All";
                                     return new ProductSplitItemModel
                                     {
                                         ProductId = item.Id,
                                         Title = item.Title,
                                         Price = item.Price ?? 0m,
                                         Currency = settings.Currency,
-                                        DestinationStoreId = dest?.Destination.Replace("store-prism:", "", StringComparison.OrdinalIgnoreCase),
+                                        DestinationStoreId = storeId,
+										PaymentMethod = paymentMethod,
                                         Percentage = dest?.Percentage ?? 0m,
                                         StoreOptions = UserStores.Select(s => new SelectListItem
                                         {
                                             Value = s.Id,
                                             Text = s.StoreName,
-                                            Selected = (s.Id == dest?.Destination?.Replace("store-prism:", "", StringComparison.OrdinalIgnoreCase))
+                                            Selected = (s.Id == storeId)
                                         }).ToList()
                                     };
                                 }).ToList();
@@ -273,7 +294,11 @@
                         Source = $"pos:{app.AppId}:{product.ProductId}",
                         Destinations = new List<BTCPayServer.Plugins.Prism.PrismSplit>
                         {
-                            new BTCPayServer.Plugins.Prism.PrismSplit{ Destination = $"store-prism:{product.DestinationStoreId}", Percentage = Math.Min(100, product.Percentage) },
+                            new BTCPayServer.Plugins.Prism.PrismSplit
+                            { 
+                                Destination = $"store-prism:{product.DestinationStoreId}:{product.PaymentMethod}", 
+                                Percentage = Math.Min(100, product.Percentage) 
+                            }
                         }
                     });
                 }

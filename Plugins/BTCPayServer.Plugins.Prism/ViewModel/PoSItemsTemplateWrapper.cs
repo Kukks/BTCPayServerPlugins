@@ -71,6 +71,7 @@ public class ProductSplitItemModel
     public string Currency { get; set; }
     public decimal Percentage { get; set; }
     public string DestinationStoreId { get; set; }
+    public string PaymentMethod { get; set; } = "All";
     public List<SelectListItem> StoreOptions { get; set; } = new();
 }
 

@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
+using BTCPayServer.Data;
 using BTCPayServer.Payouts;
+using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 
 namespace BTCPayServer.Plugins.Prism;
@@ -9,10 +11,12 @@ namespace BTCPayServer.Plugins.Prism;
 public class StoreDestinationValidator : IPluginHookFilter
 {
     private readonly StoreRepository _storeRepository;
+    private readonly PaymentMethodHandlerDictionary _handlers;
     public string Hook => "prism-destination-validate";
 
-    public StoreDestinationValidator(StoreRepository storeRepository)
+    public StoreDestinationValidator(StoreRepository storeRepository, PaymentMethodHandlerDictionary handlers)
     {
+        _handlers = handlers;
         _storeRepository = storeRepository;
     }
 
@@ -24,14 +28,21 @@ public class StoreDestinationValidator : IPluginHookFilter
 
         try
         {
-            var storeId = args1["store-prism:".Length..];
+            var argBody = args1["store-prism:".Length..];
+            var lastColon = argBody.LastIndexOf(':');
+            var storeId = lastColon == -1 ? argBody : argBody[..lastColon];
+            var paymentMethod = lastColon == -1 ? null : argBody[(lastColon + 1)..];
+
             if (string.IsNullOrWhiteSpace(storeId)) return result;
 
             var store = await _storeRepository.FindStore(storeId);
             if (store == null) return result;
 
+            if (!store.AnyPaymentMethodAvailable(_handlers)) return result;
+
+            var pmi = string.IsNullOrEmpty(paymentMethod) || PayoutMethodId.TryParse(paymentMethod, out var pmi2) ? PayoutTypes.CHAIN.GetPayoutMethodId("BTC") : pmi2;
             result.Success = true;
-            result.PayoutMethodId = PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
+            result.PayoutMethodId = pmi;
             return result;
         }
         catch (Exception){ return result; }

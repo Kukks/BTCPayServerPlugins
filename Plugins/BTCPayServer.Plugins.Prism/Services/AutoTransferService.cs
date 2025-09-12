@@ -28,7 +28,8 @@ public class AutoTransferService : EventHostedServiceBase, IPeriodicTask
     {
         try
         {
-            var prismSettings = await _satBreaker.GetAllPrismSettings();
+            var prismSettings = _satBreaker.GetPrismSetting();
+            if (prismSettings == null) return;
             foreach (var setting in prismSettings)
             {
                 if (setting.Value != null)
