@@ -297,8 +297,18 @@ namespace BTCPayServer.Plugins.Prism
                     : new PrismSettings()).ToObject<PrismSettings>();
         }
 
-        public Dictionary<string, PrismSettings> GetPrismSetting() => _prismSettings;
-
+        public async Task<Dictionary<string, PrismSettings>> GetPrismSetting(CancellationToken cancellationToken = default)
+        {
+            await WaitAndLock(cancellationToken);
+            try
+            {
+                return new Dictionary<string, PrismSettings>(_prismSettings);
+            }
+            finally
+            {
+                Unlock();
+            }
+        }
 
         public async Task<bool> UpdatePrismSettingsForStore(string storeId, PrismSettings updatedSettings,
             bool skipLock = false)
@@ -413,6 +423,7 @@ namespace BTCPayServer.Plugins.Prism
             {
                 foreach (var (posId, items) in appItems)
                 {
+                    if (items is null || !items.Any()) continue;
                     foreach (var item in items)
                     {
                         var sourceKey = $"pos:{posId}:{item.Id}";
@@ -616,7 +627,9 @@ namespace BTCPayServer.Plugins.Prism
             foreach (var dest in destinations)
             {
                 if (dest.Amount is null) continue;
-                if (pendingStorePayout.Contains(dest.Destination.Split(':', 3)[1])) continue;
+
+                var destStoreId = dest.Destination.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase) ? dest.Destination.Split(':', 3).ElementAtOrDefault(1) : null;
+                if (string.IsNullOrEmpty(destStoreId) || pendingStorePayout.Contains(destStoreId)) continue;
 
                 var msats = (long)LightMoney.FromUnit(dest.Amount.Value, LightMoneyUnit.Satoshi).MilliSatoshi;
                 if (prismSettings.DestinationBalance.TryGetValue(dest.Destination!, out var current))
