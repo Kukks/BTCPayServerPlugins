@@ -12,12 +12,15 @@ public class StoreDestinationValidator : IPluginHookFilter
 {
     private readonly StoreRepository _storeRepository;
     private readonly PaymentMethodHandlerDictionary _handlers;
+    private readonly PayoutMethodHandlerDictionary _payoutMethodHandlerDictionary;
     public string Hook => "prism-destination-validate";
 
-    public StoreDestinationValidator(StoreRepository storeRepository, PaymentMethodHandlerDictionary handlers)
+    public StoreDestinationValidator(StoreRepository storeRepository, PaymentMethodHandlerDictionary handlers,
+        PayoutMethodHandlerDictionary payoutMethodHandlerDictionary)
     {
         _handlers = handlers;
         _storeRepository = storeRepository;
+        _payoutMethodHandlerDictionary = payoutMethodHandlerDictionary;
     }
 
     public async Task<object> Execute(object args)
@@ -28,7 +31,7 @@ public class StoreDestinationValidator : IPluginHookFilter
 
         try
         {
-            var argBody = args1["store-prism:".Length..];
+            var argBody = args1.Split(':')[1];
             var lastColon = argBody.LastIndexOf(':');
             var storeId = lastColon == -1 ? argBody : argBody[..lastColon];
             var paymentMethod = lastColon == -1 ? null : argBody[(lastColon + 1)..];
@@ -41,6 +44,8 @@ public class StoreDestinationValidator : IPluginHookFilter
             if (!store.AnyPaymentMethodAvailable(_handlers)) return result;
 
             var pmi = string.IsNullOrEmpty(paymentMethod) || PayoutMethodId.TryParse(paymentMethod, out var pmi2) ? PayoutTypes.CHAIN.GetPayoutMethodId("BTC") : pmi2;
+            if (!_payoutMethodHandlerDictionary.TryGetValue(pmi, out var handler)) return result;
+
             result.Success = true;
             result.PayoutMethodId = pmi;
             return result;

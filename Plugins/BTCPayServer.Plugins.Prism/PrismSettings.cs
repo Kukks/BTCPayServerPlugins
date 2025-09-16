@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 
 namespace BTCPayServer.Plugins.Prism;
 
@@ -14,6 +15,7 @@ public class PrismSettings
     public long SatThreshold { get; set; } = 100;
     public ulong Version { get; set; } = 0;
     public decimal Reserve { get; set; } = 2;
+    public DateTimeOffset? LastProcessedSchedule { get; set; }
 }
 
 public class PrismDestination
