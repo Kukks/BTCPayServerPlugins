@@ -267,7 +267,16 @@
                 SatThreshold = d.SatThreshold,
                 PayoutMethodId = d.PayoutMethodId
             }).ToList();
-            await SatBreaker.StoreAutoTransferPayout(StoreId, settz, destinationToProcess);
+            var autoPayout = await SatBreaker.StoreAutoTransferPayout(StoreId, settz, destinationToProcess);
+            if (!autoPayout.success)
+            {
+                StatusMessageModel = new()
+                {
+                    Severity = StatusMessageModel.StatusSeverity.Error,
+                    Message = autoPayout.message
+                };
+                return;
+            }
         }
         if (SendMode != TransferMode.SendNow)
         {

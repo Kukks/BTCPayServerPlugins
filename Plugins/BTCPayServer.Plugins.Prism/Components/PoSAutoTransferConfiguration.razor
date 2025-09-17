@@ -87,33 +87,46 @@
                                                     <input type="hidden" @bind="product.Title" />
                                                     <input type="hidden" @bind="product.Price" />
 
-                                                    <label class="form-label small">Percentage to Auto-Transfer</label>
-                                                    <input type="number"
-                                                            class="form-control"
-                                                            min="0" max="100" step="1"
-                                                            @bind="product.Percentage"
-                                                            @bind:event="oninput" />
+                                                    @foreach (var d in product.Destinations)
+                                                    {
+                                                        <div class="row g-2 mb-2">
+                                                            <div class="col-2">
+                                                                <input type="number" class="form-control form-control-sm"
+                                                                       min="0" max="100" step="1"
+                                                                       placeholder="%"
+                                                                       @bind="d.Percentage"
+                                                                       @bind:event="oninput">
+                                                            </div>
+                                                            <div class="col-5">
+                                                                <select class="form-select form-select-sm"
+                                                                        @bind="d.Derstination"
+                                                                        @bind:event="oninput">
+                                                                    <option value="">-- Store --</option>
+                                                                    @foreach (var opt in product.StoreOptions)
+                                                                    {
+                                                                        bool alreadyUsed = product.Destinations.Any(existing => existing != d && existing.Derstination == opt.Value);
+                                                                        <option value="@opt.Value" disabled="@alreadyUsed">@opt.Text</option>
+                                                                    }
+                                                                </select>
+                                                            </div>
+                                                            <div class="col-5 d-flex gap-1">
+                                                                <select class="form-select form-select-sm"
+                                                                        @bind="d.PaymentMethod"
+                                                                        @bind:event="oninput">
+                                                                    <option value="BTC-LN">Lightning</option>
+                                                                    <option value="BTC-CHAIN">On-chain</option>
+                                                                </select>
+                                                                <button type="button" class="btn btn-sm btn-outline-danger"
+                                                                        @onclick="() => product.Destinations.Remove(d)">
+                                                                    Remove</button>
+                                                            </div>
+                                                        </div>
+                                                    }
 
-                                                    <label class="form-label small mt-2">Destination Store</label>
-                                                    <select class="form-select"
-                                                            @bind="product.DestinationStoreId"
-                                                            @bind:event="oninput">
-                                                        <option value="">-- Select Store --</option>
-                                                        @foreach (var opt in product.StoreOptions)
-                                                        {
-                                                            <option value="@opt.Value">@opt.Text</option>
-                                                        }
-                                                    </select>
-
-                                                    <label class="form-label small">Split this product’s payment that arrives via</label>
-                                                    <select class="form-select"
-                                                            @bind="product.PaymentMethod"
-                                                            @bind:event="oninput">
-                                                        @foreach (var opt in _sourcePaymentOptions)
-                                                        {
-                                                            <option value="@opt.Value">@opt.Text</option>
-                                                        }
-                                                    </select>
+                                                    <button type="button" class="btn btn-sm btn-outline-primary w-100"
+                                                            @onclick="() => product.Destinations.Add(new())">
+                                                        + Add split destination
+                                                    </button>
                                                 </div>
                                             </div>
                                         </div>
@@ -149,13 +162,6 @@
     public bool Loading { get; set; } = true;
 
     List<PosAppProductSplitModel> PosProducts = new();
-
-    List<SelectListItem> _sourcePaymentOptions = new List<SelectListItem>
-    {
-        new ("Lightning Payment", "LN"),
-        new ("On-chain Payment",  "CHAIN"),
-        new ("Both Payment",    "All")
-    };
 
     private List<StoreData> UserStores;
 
@@ -202,7 +208,7 @@
                         var products = new List<ProductSplitItemModel>();
                         if (!string.IsNullOrEmpty(settings?.Template))
                         {
-                            var templateItems = JsonSerializer.Deserialize<List<PoSAppItem>>(settings.Template);
+                            var templateItems = AppService.Parse(settings.Template);
                             if (templateItems != null)
                             {
                                 products = templateItems.Select(item =>
@@ -219,9 +225,17 @@
                                         Title = item.Title,
                                         Price = item.Price ?? 0m,
                                         Currency = settings.Currency,
-                                        DestinationStoreId = storeId,
-										PaymentMethod = paymentMethod,
-                                        Percentage = dest?.Percentage ?? 0m,
+                                        Destinations = split?.Destinations
+                                       .Select(d =>
+                                       {
+                                           var parts = d.Destination.Split(':', 3);
+                                           return new ProductDestinationRow
+                                           {
+                                               Derstination = parts.Length > 1 ? parts[1] : "",
+                                               PaymentMethod = parts.Length > 2 ? parts[2] : "All",
+                                               Percentage = (int)d.Percentage
+                                           };
+                                       }).ToList() ?? new List<ProductDestinationRow>(),
                                         StoreOptions = UserStores.Select(s => new SelectListItem
                                         {
                                             Value = s.Id,
@@ -258,7 +272,7 @@
     private void FieldChanged(object sender, FieldChangedEventArgs e)
     {
         StatusMessageModel = null;
-    
+
     }
 
     private async Task RemovePrism(Split item)
@@ -285,19 +299,29 @@
         {
             foreach (var product in app.Products)
             {
-                if (product.Percentage > 0 && !string.IsNullOrEmpty(product.DestinationStoreId))
+                var validDestination = product.Destinations.Where(d => d.Percentage > 0 && !string.IsNullOrEmpty(d.Derstination))
+                       .Select(d => new BTCPayServer.Plugins.Prism.PrismSplit
+                       {
+                           Destination = $"store-prism:{d.Derstination}:{d.PaymentMethod}",
+                           Percentage = Math.Min(100, d.Percentage.Value)
+                       }).ToList();
+
+                if(validDestination.Sum(d => d.Percentage) > 100)
+                {
+                    StatusMessageModel = new()
+                    {
+                        Severity =StatusMessageModel.StatusSeverity.Error,
+                        Message = "Sum of all percentage split cannot be greater than 100"
+                    };
+                    return;
+                }
+
+                if (validDestination.Any())
                 {
                     settz.Splits.Add(new Split
                     {
                         Source = $"pos:{app.AppId}:{product.ProductId}",
-                        Destinations = new List<BTCPayServer.Plugins.Prism.PrismSplit>
-                        {
-                            new BTCPayServer.Plugins.Prism.PrismSplit
-                            { 
-                                Destination = $"store-prism:{product.DestinationStoreId}:{product.PaymentMethod}", 
-                                Percentage = Math.Min(100, product.Percentage) 
-                            }
-                        }
+                        Destinations = validDestination
                     });
                 }
             }

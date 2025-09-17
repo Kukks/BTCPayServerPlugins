@@ -63,15 +63,20 @@ public class PosAppProductSplitModel
     public List<ProductSplitItemModel> Products { get; set; } = new();
 }
 
+public class ProductDestinationRow
+{
+    public string Derstination { get; set; } = "";
+    public int? Percentage { get; set; }
+    public string PaymentMethod { get; set; } = "CHAIN";
+}
+
 public class ProductSplitItemModel
 {
     public string ProductId { get; set; }
     public string Title { get; set; }
     public decimal Price { get; set; }
     public string Currency { get; set; }
-    public decimal Percentage { get; set; }
-    public string DestinationStoreId { get; set; }
-    public string PaymentMethod { get; set; } = "All";
+    public List<ProductDestinationRow> Destinations { get; set; } = new();
     public List<SelectListItem> StoreOptions { get; set; } = new();
 }
 
