@@ -65,9 +65,9 @@ public class PosAppProductSplitModel
 
 public class ProductDestinationRow
 {
-    public string Derstination { get; set; } = "";
+    public string Destination { get; set; } = "";
     public int? Percentage { get; set; }
-    public string PaymentMethod { get; set; } = "CHAIN";
+    public string PaymentMethod { get; set; } = "BTC-CHAIN";
 }
 
 public class ProductSplitItemModel

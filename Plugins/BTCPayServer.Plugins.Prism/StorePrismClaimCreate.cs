@@ -56,7 +56,7 @@ internal class StorePrismClaimCreate : IPluginHookFilter
 
             if (!store.AnyPaymentMethodAvailable(_handlers)) return null;
 
-            var pmi = string.IsNullOrEmpty(paymentMethod) || PayoutMethodId.TryParse(paymentMethod, out var pmi2) ? PayoutTypes.CHAIN.GetPayoutMethodId("BTC") : pmi2;
+            var pmi = (!string.IsNullOrEmpty(paymentMethod) && PayoutMethodId.TryParse(paymentMethod, out var parsedPmi)) ? parsedPmi : PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
             if (!_payoutMethodHandlerDictionary.TryGetValue(pmi, out var handler)) return null;
 
             string? address = pmi switch

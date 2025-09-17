@@ -42,7 +42,7 @@ public class StoreDestinationValidator : IPluginHookFilter
 
             if (!store.AnyPaymentMethodAvailable(_handlers)) return result;
 
-            var pmi = string.IsNullOrEmpty(paymentMethod) || PayoutMethodId.TryParse(paymentMethod, out var pmi2) ? PayoutTypes.CHAIN.GetPayoutMethodId("BTC") : pmi2;
+            var pmi = (!string.IsNullOrEmpty(paymentMethod) && PayoutMethodId.TryParse(paymentMethod, out var parsedPmi)) ? parsedPmi : PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
             if (!_payoutMethodHandlerDictionary.TryGetValue(pmi, out var handler)) return result;
 
             result.Success = true;

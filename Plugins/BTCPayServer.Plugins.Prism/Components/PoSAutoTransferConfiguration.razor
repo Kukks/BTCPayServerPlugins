@@ -99,12 +99,12 @@
                                                             </div>
                                                             <div class="col-5">
                                                                 <select class="form-select form-select-sm"
-                                                                        @bind="d.Derstination"
+                                                                        @bind="d.Destination"
                                                                         @bind:event="oninput">
                                                                     <option value="">-- Store --</option>
                                                                     @foreach (var opt in product.StoreOptions)
                                                                     {
-                                                                        bool alreadyUsed = product.Destinations.Any(existing => existing != d && existing.Derstination == opt.Value);
+                                                                        bool alreadyUsed = product.Destinations.Any(existing => existing != d && existing.Destination == opt.Value);
                                                                         <option value="@opt.Value" disabled="@alreadyUsed">@opt.Text</option>
                                                                     }
                                                                 </select>
@@ -231,7 +231,7 @@
                                            var parts = d.Destination.Split(':', 3);
                                            return new ProductDestinationRow
                                            {
-                                               Derstination = parts.Length > 1 ? parts[1] : "",
+                                               Destination = parts.Length > 1 ? parts[1] : "",
                                                PaymentMethod = parts.Length > 2 ? parts[2] : "All",
                                                Percentage = (int)d.Percentage
                                            };
@@ -299,10 +299,10 @@
         {
             foreach (var product in app.Products)
             {
-                var validDestination = product.Destinations.Where(d => d.Percentage > 0 && !string.IsNullOrEmpty(d.Derstination))
+                var validDestination = product.Destinations.Where(d => d.Percentage > 0 && !string.IsNullOrEmpty(d.Destination))
                        .Select(d => new BTCPayServer.Plugins.Prism.PrismSplit
                        {
-                           Destination = $"store-prism:{d.Derstination}:{d.PaymentMethod}",
+                           Destination = $"store-prism:{d.Destination}:{d.PaymentMethod}",
                            Percentage = Math.Min(100, d.Percentage.Value)
                        }).ToList();
 
