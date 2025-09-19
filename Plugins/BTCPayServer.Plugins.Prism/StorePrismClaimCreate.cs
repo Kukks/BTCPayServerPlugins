@@ -3,13 +3,14 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
+using BTCPayServer.Client.Models;
+using BTCPayServer.Controllers;
 using BTCPayServer.Data;
 using BTCPayServer.HostedServices;
+using BTCPayServer.Payments;
 using BTCPayServer.Payouts;
 using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
-using BTCPayServer.Services.Wallets;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json.Linq;
 
@@ -19,21 +20,14 @@ internal class StorePrismClaimCreate : IPluginHookFilter
 {
     private readonly StoreRepository _storeRepository;
     private readonly IServiceProvider _serviceProvider;
-    private readonly IHttpContextAccessor _contextAccessor;
     private readonly PaymentMethodHandlerDictionary _handlers;
-    private readonly WalletReceiveService _walletReceiveService;
-    private readonly LightningAddressService _lightningAddressService;
     public string Hook => "prism-claim-create";
 
-    public StorePrismClaimCreate(StoreRepository storeRepository, WalletReceiveService walletReceiveService, PaymentMethodHandlerDictionary handlers,
-       IServiceProvider serviceProvider, LightningAddressService lightningAddressService, IHttpContextAccessor contextAccessor)
+    public StorePrismClaimCreate(StoreRepository storeRepository, PaymentMethodHandlerDictionary handlers, IServiceProvider serviceProvider)
     {
         _handlers = handlers;
         _serviceProvider = serviceProvider;
         _storeRepository = storeRepository;
-        _walletReceiveService = walletReceiveService;
-        _lightningAddressService = lightningAddressService;
-        _contextAccessor = contextAccessor;
     }
 
     public async Task<object> Execute(object args)
@@ -54,24 +48,11 @@ internal class StorePrismClaimCreate : IPluginHookFilter
             var store = await _storeRepository.FindStore(storeId);
             if (store == null) return null;
 
-            if (!store.AnyPaymentMethodAvailable(_handlers)) return null;
-
             var pmi = (!string.IsNullOrEmpty(paymentMethod) && PayoutMethodId.TryParse(paymentMethod, out var parsedPmi)) ? parsedPmi : PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
             if (!_payoutMethodHandlerDictionary.TryGetValue(pmi, out var handler)) return null;
 
-            string? address = pmi switch
-            {
-                var id when id == PayoutTypes.CHAIN.GetPayoutMethodId("BTC")
-                    => (await _walletReceiveService.GetOrGenerate(new WalletId(store.Id, "BTC"))).Address?.ToString(),
-
-                var id when id == PayoutTypes.LN.GetPayoutMethodId("BTC")
-                    => (await CreateLNUrlRequestFromStore(store)),
-
-                _ => null
-            };
+            var address = await CreateClaimRequestDestination(store, pmi);
             if (string.IsNullOrWhiteSpace(address)) return null;
-
-
 
             var claimDestination = await handler.ParseClaimDestination(address, CancellationToken.None);
             if (claimDestination.destination is null) return null;
@@ -89,12 +70,29 @@ internal class StorePrismClaimCreate : IPluginHookFilter
     }
 
 
-    private async Task<string> CreateLNUrlRequestFromStore(StoreData store)
+    private async Task<string> CreateClaimRequestDestination(Data.StoreData store, PayoutMethodId payoutMethodId)
     {
-        var addresses = await _lightningAddressService.Get(new LightningAddressQuery() { StoreIds = new[] { store.Id } });
-        if (!addresses.Any()) return null;
+        var blob = store.GetStoreBlob();
+        var invoiceController = _serviceProvider.GetRequiredService<UIInvoiceController>();
+        PaymentMethodId? pmi = payoutMethodId switch
+        {
+            var id when id == PayoutTypes.LN.GetPayoutMethodId("BTC") => PaymentTypes.LNURL.GetPaymentMethodId("BTC"),
 
-        return $"{addresses.First().Username}@{_contextAccessor.HttpContext?.Request.Host.ToUriComponent()}";
+            var id when id == PayoutTypes.CHAIN.GetPayoutMethodId("BTC") => PaymentTypes.CHAIN.GetPaymentMethodId("BTC"),
+
+            _ => null
+        };
+        if (pmi is null) return null;
+
+        var config = store.GetPaymentMethodConfigs(_handlers, onlyEnabled: true);
+        if (!config.Any() || !config.TryGetValue(pmi, out var methodConfig) || blob.GetExcludedPaymentMethods().Match(pmi))
+            return null;
+
+        InvoiceEntity invoice = await invoiceController.CreateInvoiceCoreRaw(new CreateInvoiceRequest
+        {
+            Currency = "SATS",
+            Checkout = new InvoiceDataBase.CheckoutOptions { LazyPaymentMethods = false, PaymentMethods = new[] { pmi.ToString() }, Expiration = TimeSpan.FromDays(30) },
+        }, store, null);
+        return invoice.GetPaymentPrompt(pmi)?.Destination;
     }
-
 }
