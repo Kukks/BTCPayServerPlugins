@@ -2,6 +2,7 @@
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Data;
+using BTCPayServer.Payments;
 using BTCPayServer.Payouts;
 using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
@@ -40,13 +41,25 @@ public class StoreDestinationValidator : IPluginHookFilter
             var store = await _storeRepository.FindStore(storeId);
             if (store == null) return result;
 
-            if (!store.AnyPaymentMethodAvailable(_handlers)) return result;
+            var blob = store.GetStoreBlob();
+            var payoutMethodId = (!string.IsNullOrEmpty(paymentMethod) && PayoutMethodId.TryParse(paymentMethod, out var parsedPmi)) ? parsedPmi : PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
+            if (!_payoutMethodHandlerDictionary.TryGetValue(payoutMethodId, out var handler)) return result;
 
-            var pmi = (!string.IsNullOrEmpty(paymentMethod) && PayoutMethodId.TryParse(paymentMethod, out var parsedPmi)) ? parsedPmi : PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
-            if (!_payoutMethodHandlerDictionary.TryGetValue(pmi, out var handler)) return result;
+            PaymentMethodId? pmi = payoutMethodId switch
+            {
+                var id when id == PayoutTypes.LN.GetPayoutMethodId("BTC") => PaymentTypes.LNURL.GetPaymentMethodId("BTC"),
+
+                var id when id == PayoutTypes.CHAIN.GetPayoutMethodId("BTC") => PaymentTypes.CHAIN.GetPaymentMethodId("BTC"),
+
+                _ => null
+            };
+            if (pmi is null) return result;
+
+            var config = store.GetPaymentMethodConfig(pmi, _handlers, onlyEnabled: true);
+            if (config == null || blob.GetExcludedPaymentMethods().Match(pmi)) return result;
 
             result.Success = true;
-            result.PayoutMethodId = pmi;
+            result.PayoutMethodId = payoutMethodId;
             return result;
         }
         catch (Exception){ return result; }

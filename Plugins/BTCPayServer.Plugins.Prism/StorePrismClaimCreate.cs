@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
@@ -84,14 +83,13 @@ internal class StorePrismClaimCreate : IPluginHookFilter
         };
         if (pmi is null) return null;
 
-        var config = store.GetPaymentMethodConfigs(_handlers, onlyEnabled: true);
-        if (!config.Any() || !config.TryGetValue(pmi, out var methodConfig) || blob.GetExcludedPaymentMethods().Match(pmi))
-            return null;
+        var config = store.GetPaymentMethodConfig(pmi, _handlers, onlyEnabled: true);
+        if (config == null || blob.GetExcludedPaymentMethods().Match(pmi)) return null;
 
         InvoiceEntity invoice = await invoiceController.CreateInvoiceCoreRaw(new CreateInvoiceRequest
         {
             Currency = "SATS",
-            Checkout = new InvoiceDataBase.CheckoutOptions { LazyPaymentMethods = false, PaymentMethods = new[] { pmi.ToString() }, Expiration = TimeSpan.FromDays(30) },
+            Checkout = new InvoiceDataBase.CheckoutOptions { LazyPaymentMethods = false, PaymentMethods = new[] { pmi.ToString() }, Expiration = TimeSpan.FromDays(60) },
         }, store, null);
         return invoice.GetPaymentPrompt(pmi)?.Destination;
     }
