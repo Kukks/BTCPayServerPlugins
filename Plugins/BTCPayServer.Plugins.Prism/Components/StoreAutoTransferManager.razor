@@ -51,12 +51,10 @@
 
                 @if (SendMode != TransferMode.SendNow)
                 {
-                    
                     <div class="form-group">
                         <label class="form-label">Schedule Title</label>
                             <input class="form-control" @bind="scheduleTitle" />
                     </div>
-
                     <div class="form-group">
                         <label class="form-label">Schedule Transfer days (1-31)</label>
                         <div class="input-group mb-3">
@@ -75,46 +73,52 @@
                         <div class="text-danger">@dayError</div>
                     </div>
                 }
-            </div>
-        </div>
 
-        <div class="table-responsive">
-            <table class="table align-middle">
-                <thead>
-                    <tr>
-                        <th>Destination Store</th>
-                        <th>Amount (sats)</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var d in Destinations)
-                    {
-                        <tr>
-                            <td>
-                                <select class="form-select" @bind="d.Destination" @bind:event="oninput">
-                                    <option value="">-- Select store --</option>
-                                    @foreach (var s in AvailableStores)
-                                    {
-                                        <option value="@s.Value">@s.Text</option>
-                                    }
-                                </select>
-                            </td>
-                            <td>
-                                <input type="number" min="546" step="1" class="form-control" @bind="d.Amount" @bind:event="oninput" />
-                            </td>
-                            <td>
-                                <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveDest(d)">Remove</button>
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-            <button type="button" class="btn btn-link" @onclick="AddDest">+ Add destination</button>
+                <div class="table-responsive">
+                    <table class="table align-middle">
+                        <thead>
+                            <tr>
+                                <th>Destination Store</th>
+                                <th>Destination Store Payment Method</th>
+                                <th>Amount (sats)</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var d in Destinations)
+                            {
+                                <tr>
+                                    <td>
+                                        <select class="form-select" @bind="d.Destination" @bind:event="oninput">
+                                            <option value="">-- Select store --</option>
+                                            @foreach (var s in AvailableStores)
+                                            {
+                                                <option value="@s.Value">@s.Text</option>
+                                            }
+                                        </select>
+                                    </td>
+                                    <td>
+                                        <select class="form-select form-select-sm" @bind="destinationStorePaymentMethod" @bind:event="oninput">
+                                            <option value="BTC-CHAIN">On-chain</option>
+                                            <option value="BTC-LN">Lightning</option>
+                                        </select>
+                                    </td>
+                                    <td>
+                                        <input type="number" min="546" step="1" class="form-control" @bind="d.Amount" @bind:event="oninput" />
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveDest(d)">Remove</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    <button type="button" class="btn btn-link" @onclick="AddDest">+ Add destination</button>
+                </div>
+            </div>
         </div>
     </EditForm>
 }
-
 
 
 @code {
@@ -143,6 +147,7 @@
     string newDay = "";
     string dayError = "";
     string scheduleTitle = "";
+    string destinationStorePaymentMethod = "";
 
 
     void GoBack()
@@ -162,7 +167,6 @@
                 var appUser = await UserManager.Users.Where(c => c.Id == userId).Include(u => u.UserStores).ThenInclude(us => us.StoreData).SingleOrDefaultAsync();
                 UserStores = appUser?.UserStores.Where(s => s.StoreDataId != StoreId && !s.StoreData.Archived).Select(s => s.StoreData).ToList() ?? new();
             }
-
             AvailableStores = UserStores.Select(s => new SelectListItem
             {
                 Value = s.Id,
@@ -185,11 +189,6 @@
             await InvokeAsync(StateHasChanged);
         }
         await base.OnAfterRenderAsync(firstRender);
-    }
-
-    private void FieldChanged(object sender, FieldChangedEventArgs e)
-    {
-        StatusMessageModel = null;
     }
 
     void AddDest() => Destinations.Add(new PrismDestination());
@@ -234,6 +233,11 @@
         InvokeAsync(StateHasChanged);
     }
 
+    private void FieldChanged(object sender, FieldChangedEventArgs e)
+    {
+        StatusMessageModel = null;
+    }
+
     public void Dispose()
     {
         if (EditContext is not null)
@@ -256,37 +260,12 @@
             };
             return;
         }
-        if (SendMode != TransferMode.Schedule)
-        {
-            var destinationToProcess = Destinations.Where(d => d.Amount > Settings.SatThreshold).Select(d => new PrismDestination
-            {
-                Destination = d.Destination?.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase) == true ? d.Destination : $"store-prism:{d.Destination}",
-                Amount = d.Amount,
-                Schedule = d.Schedule,
-                Reserve = d.Reserve,
-                SatThreshold = d.SatThreshold,
-                PayoutMethodId = d.PayoutMethodId
-            }).ToList();
-            var autoPayout = await SatBreaker.StoreAutoTransferPayout(StoreId, settz, destinationToProcess);
-            if (!autoPayout.success)
-            {
-                StatusMessageModel = new()
-                {
-                    Severity = StatusMessageModel.StatusSeverity.Error,
-                    Message = autoPayout.message
-                };
-                return;
-            }
-        }
+        bool showSuccessMessage = true;
         if (SendMode != TransferMode.SendNow)
         {
             if (!selectedDays.Any())
             {
-                StatusMessageModel = new()
-                {
-                    Severity = StatusMessageModel.StatusSeverity.Error,
-                    Message = "Payout record processed. Unable to save schedule. Kindly enter a schedule date"
-                };
+                DisplayErrorResult("Unable to save schedule. Kindly enter a schedule date");
                 return;
             }
             foreach (var d in Destinations)
@@ -294,24 +273,47 @@
                 var id = !string.IsNullOrEmpty(scheduleTitle) ? scheduleTitle :  Encoders.Base58.EncodeData(RandomUtils.GetBytes(20));
                 settz.Destinations[id] = new PrismDestination
                 {
-                    Destination = $"store-prism:{d.Destination}",
+                    Destination = $"store-prism:{d.Destination}:{destinationStorePaymentMethod}",
                     Schedule = selectedDays.Any() ? string.Join(",", selectedDays) : string.Empty,
                     Amount = d.Amount
                 };
             }
             Settings = settz;
+            showSuccessMessage = await SatBreaker.UpdatePrismSettingsForStore(StoreId, settz);
         }
-        await UpdateAndShowResult(settz);
+        if (SendMode != TransferMode.Schedule)
+        {
+            var destinationToProcess = Destinations.Where(d => d.Amount > Settings.SatThreshold).Select(d => new PrismDestination
+            {
+                Destination = d.Destination?.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase) == true ? d.Destination : $"store-prism:{d.Destination}:{destinationStorePaymentMethod}",
+                Amount = d.Amount
+            }).ToList();
+            var autoPayout = await SatBreaker.StoreAutoTransferPayout(StoreId, settz, destinationToProcess);
+            if (!autoPayout.success)
+            {
+                DisplayErrorResult(autoPayout.message);
+                return;
+            }
+        }
+        ShowResult(showSuccessMessage);
         RevertToDefault();
     }
 
-    private async Task UpdateAndShowResult(PrismSettings settz)
+    private void ShowResult(bool success)
     {
-        var ok = await SatBreaker.UpdatePrismSettingsForStore(StoreId, settz);
         StatusMessageModel = new()
         {
-            Severity = ok ? StatusMessageModel.StatusSeverity.Success : StatusMessageModel.StatusSeverity.Error,
-            Message = ok ? "Store transfer recorded successfully" : "Settings were changed by another process. Refresh and try again."
+            Severity = success ? StatusMessageModel.StatusSeverity.Success : StatusMessageModel.StatusSeverity.Error,
+            Message = success ? "Store transfer recorded successfully" : "Settings were changed by another process. Refresh and try again."
+        };
+    }
+
+    private void DisplayErrorResult(string message)
+    {
+        StatusMessageModel = new()
+        {
+            Severity = StatusMessageModel.StatusSeverity.Error,
+            Message = message
         };
     }
 

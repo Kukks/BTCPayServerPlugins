@@ -45,7 +45,7 @@
                 <vc:icon symbol="close" />
             </button>
             <h5 class="alert-heading" text-translate="true">Important notice</h5>
-            <p class="mb-0">The calculated transfer amount must be greater than the Prism sats threshold</p>
+            <p class="mb-0">Please ensure the calculated value for the percentage specified is greater than the Prism sats threshold.</p>
         </div>
 
         @if (StatusMessageModel != null)
@@ -110,9 +110,7 @@
                                                                 </select>
                                                             </div>
                                                             <div class="col-5 d-flex gap-1">
-                                                                <select class="form-select form-select-sm"
-                                                                        @bind="d.PaymentMethod"
-                                                                        @bind:event="oninput">
+                                                                <select class="form-select form-select-sm" @bind="d.PaymentMethod" @bind:event="oninput">
                                                                     <option value="BTC-LN">Lightning</option>
                                                                     <option value="BTC-CHAIN">On-chain</option>
                                                                 </select>
@@ -122,7 +120,6 @@
                                                             </div>
                                                         </div>
                                                     }
-
                                                     <button type="button" class="btn btn-sm btn-outline-primary w-100"
                                                             @onclick="() => product.Destinations.Add(new())">
                                                         + Add split destination
@@ -185,7 +182,6 @@
 
                 UserStores = appUser?.UserStores.Where(s => s.StoreDataId != StoreId && !s.StoreData.Archived).Select(s => s.StoreData).ToList() ?? new();
             }
-
             var fetchSettings = SatBreaker.Get(StoreId);
             var tasks = new Task[]
             {
@@ -194,77 +190,64 @@
             await Task.WhenAll(tasks);
             Settings = await fetchSettings;
 
-            var posApps = await _appService.GetApps(PointOfSaleAppType.AppType);
-            if (posApps.Any())
+            var storePosApps = (await _appService.GetApps(PointOfSaleAppType.AppType)).Where(c => c.StoreDataId == StoreId && !c.Archived).ToList();
+            if (storePosApps.Any())
             {
-                var storePosApps = posApps.Where(c => c.StoreDataId == StoreId && !c.Archived).ToList();
-                if (storePosApps.Any())
+                var posSplits = Settings.Splits.Where(s => s.Source.StartsWith("pos:")).ToList();
+                PosProducts = storePosApps.Select(app =>
                 {
-                    var posSplits = Settings.Splits.Where(s => s.Source.StartsWith("pos:")).ToList();
-
-                    PosProducts = storePosApps.Select(app =>
+                    var settings = app.GetSettings<PointOfSaleSettings>();
+                    var products = new List<ProductSplitItemModel>();
+                    if (!string.IsNullOrEmpty(settings?.Template))
                     {
-                        var settings = app.GetSettings<PointOfSaleSettings>();
-                        var products = new List<ProductSplitItemModel>();
-                        if (!string.IsNullOrEmpty(settings?.Template))
+                        var templateItems = AppService.Parse(settings.Template) ?? Array.Empty<Client.Models.AppItem>();
+                        products = templateItems.Select(item =>
                         {
-                            var templateItems = AppService.Parse(settings.Template);
-                            if (templateItems != null)
+                            var split = posSplits.FirstOrDefault(s => s.Source == $"pos:{app.Id}:{item.Id}");
+                            var dest = split?.Destinations.FirstOrDefault();
+                            var parts = (dest?.Destination ?? "").Split(':', 3, StringSplitOptions.RemoveEmptyEntries);
+                            string storeId = parts.Length > 1 ? parts[1] : string.Empty;
+                            string paymentMethod = parts.Length > 2 ? parts[2] : string.Empty;
+                            return new ProductSplitItemModel
                             {
-                                products = templateItems.Select(item =>
+                                ProductId = item.Id,
+                                Title = item.Title,
+                                Price = item.Price ?? 0m,
+                                Currency = settings.Currency,
+                                Destinations = split?.Destinations
+                               .Select(d =>
+                               {
+                                   var parts = d.Destination.Split(':', 3);
+                                   return new ProductDestinationRow
+                                   {
+                                       Destination = parts.Length > 1 ? parts[1] : string.Empty,
+                                       PaymentMethod = parts.Length > 2 ? parts[2] : string.Empty,
+                                       Percentage = (int)d.Percentage
+                                   };
+                               }).ToList() ?? new List<ProductDestinationRow>(),
+                                StoreOptions = UserStores.Select(s => new SelectListItem
                                 {
-                                    var split = posSplits.FirstOrDefault(s => s.Source == $"pos:{app.Id}:{item.Id}");
-                                    var dest = split?.Destinations.FirstOrDefault();
-                                    string fullDestinationPath = dest?.Destination ?? "";
-                                    var destinationParts = fullDestinationPath.Split(':', 3, StringSplitOptions.RemoveEmptyEntries);
-                                    string storeId = destinationParts.Length > 1 ? destinationParts[1] : "";
-                                    string paymentMethod = destinationParts.Length > 2 ? destinationParts[2] : "All";
-                                    return new ProductSplitItemModel
-                                    {
-                                        ProductId = item.Id,
-                                        Title = item.Title,
-                                        Price = item.Price ?? 0m,
-                                        Currency = settings.Currency,
-                                        Destinations = split?.Destinations
-                                       .Select(d =>
-                                       {
-                                           var parts = d.Destination.Split(':', 3);
-                                           return new ProductDestinationRow
-                                           {
-                                               Destination = parts.Length > 1 ? parts[1] : "",
-                                               PaymentMethod = parts.Length > 2 ? parts[2] : "All",
-                                               Percentage = (int)d.Percentage
-                                           };
-                                       }).ToList() ?? new List<ProductDestinationRow>(),
-                                        StoreOptions = UserStores.Select(s => new SelectListItem
-                                        {
-                                            Value = s.Id,
-                                            Text = s.StoreName,
-                                            Selected = (s.Id == storeId)
-                                        }).ToList()
-                                    };
-                                }).ToList();
-                            }
-                        }
-                        return new PosAppProductSplitModel
-                        {
-                            AppId = app.Id,
-                            AppTitle = app.Name,
-                            Products = products
-                        };
-                    }).ToList();
-                }
+                                    Value = s.Id,
+                                    Text = s.StoreName,
+                                    Selected = (s.Id == storeId)
+                                }).ToList()
+                            };
+                        }).ToList();
+                    }
+                    return new PosAppProductSplitModel
+                    {
+                        AppId = app.Id,
+                        AppTitle = app.Name,
+                        Products = products
+                    };
+                }).ToList();
             }
-
             EditContext = new EditContext(Settings);
             MessageStore = new ValidationMessageStore(EditContext);
             EditContext.OnFieldChanged += FieldChanged;
-
-
             Loading = false;
             await InvokeAsync(StateHasChanged);
         }
-
         await base.OnAfterRenderAsync(firstRender);
     }
 
@@ -275,12 +258,19 @@
 
     }
 
-    private async Task RemovePrism(Split item)
+
+    private void SatBreakerOnPrismUpdated(object sender, PrismPaymentDetectedEventArgs e)
     {
-        if (Settings.Splits.Remove(item))
+        if (e.StoreId != StoreId) return;
+        if (EditContext is not null)
         {
-            await InvokeAsync(StateHasChanged);
+            EditContext.OnFieldChanged -= FieldChanged;
         }
+        Settings = e.Settings;
+        EditContext = new EditContext(Settings);
+        MessageStore = new ValidationMessageStore(EditContext);
+        EditContext.OnFieldChanged += FieldChanged;
+        _ = InvokeAsync(StateHasChanged);
     }
 
     public void Dispose()
@@ -289,6 +279,7 @@
         {
             EditContext.OnFieldChanged -= FieldChanged;
         }
+        SatBreaker.PrismUpdated -= SatBreakerOnPrismUpdated;
     }
 
     async Task Save()
@@ -299,14 +290,16 @@
         {
             foreach (var product in app.Products)
             {
-                var validDestination = product.Destinations.Where(d => d.Percentage > 0 && !string.IsNullOrEmpty(d.Destination))
+                var validDestinations = product.Destinations.Where(d => d.Percentage is > 0 && !string.IsNullOrEmpty(d.Destination))
                        .Select(d => new BTCPayServer.Plugins.Prism.PrismSplit
                        {
                            Destination = $"store-prism:{d.Destination}:{d.PaymentMethod}",
                            Percentage = Math.Min(100, d.Percentage.Value)
                        }).ToList();
 
-                if(validDestination.Sum(d => d.Percentage) > 100)
+                if (!validDestinations.Any()) continue;
+
+                if(validDestinations.Sum(d => d.Percentage) > 100)
                 {
                     StatusMessageModel = new()
                     {
@@ -316,14 +309,11 @@
                     return;
                 }
 
-                if (validDestination.Any())
+                settz.Splits.Add(new Split
                 {
-                    settz.Splits.Add(new Split
-                    {
-                        Source = $"pos:{app.AppId}:{product.ProductId}",
-                        Destinations = validDestination
-                    });
-                }
+                    Source = $"pos:{app.AppId}:{product.ProductId}",
+                    Destinations = validDestinations
+                });
             }
         }
         await UpdateAndShowResult(settz);
@@ -336,7 +326,7 @@
         StatusMessageModel = new()
         {
             Severity = ok ? StatusMessageModel.StatusSeverity.Success : StatusMessageModel.StatusSeverity.Error,
-            Message = ok ? "Settings saved successfully" : "Settings were changed by another process. Refresh and try again."
+            Message = ok ? "Settings saved successfully" : "Settings not saved successfully. Refresh and try again."
         };
     }
 
