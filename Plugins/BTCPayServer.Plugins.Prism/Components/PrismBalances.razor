@@ -48,6 +48,7 @@
                     <th>Destination</th>
                     <th>Reserve fee</th>
                     <th>Amount</th>
+                    <th>Store transfer amount</th>
                     <th>Actions</th>
                 </tr>
                 @foreach (var (payoutId, pendingPayout) in PendingPayouts)
@@ -57,6 +58,7 @@
                         <td style="word-break:break-all;">@pendingPayout.DestinationId</td>
                         <td style="word-break:break-all;">@pendingPayout.FeeCharged</td>
                         <td style="word-break:break-all;">@pendingPayout.PayoutAmount</td>
+                        <td style="word-break:break-all;">@pendingPayout.ScheduledTransferAmount</td>
                         <td>
                             <button type="button" class="btn btn-sm btn-link" @onclick="() => CancelPayout(payoutId)" disabled="@IsActionOngoing">Cancel</button>
                         </td>

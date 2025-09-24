@@ -7,6 +7,7 @@ using BTCPayServer.Payouts;
 using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.DependencyInjection;
+using static System.String;
 
 namespace BTCPayServer.Plugins.Prism;
 
@@ -24,6 +25,21 @@ public class StoreDestinationValidator : IPluginHookFilter
         _storeRepository = storeRepository;
     }
 
+    private static (string storeId, PaymentMethodId paymentMethod) Parse(string destination)
+    {
+        if (destination is not string args1 || !args1.StartsWith("store-prism:", StringComparison.InvariantCultureIgnoreCase)) return (null, null);
+        var parts = args1.Split(':', StringSplitOptions.RemoveEmptyEntries);
+        string storeId = parts[1];
+        string paymentMethod = parts.Length > 2 ? parts[2] : null;
+        
+        var payoutMethodId = (!IsNullOrEmpty(paymentMethod) && PaymentMethodId.TryParse(paymentMethod, out var parsedPmi)) ? parsedPmi : PaymentTypes.CHAIN.GetPaymentMethodId("BTC");
+       
+
+        return (storeId, payoutMethodId);
+        
+    }
+    
+    
     public async Task<object> Execute(object args)
     {
         var result = new PrismDestinationValidationResult();
@@ -32,34 +48,21 @@ public class StoreDestinationValidator : IPluginHookFilter
         try
         {
             var _payoutMethodHandlerDictionary = _serviceProvider.GetRequiredService<PayoutMethodHandlerDictionary>();
-            var parts = args1.Split(':', StringSplitOptions.RemoveEmptyEntries);
-            string storeId = parts[1];
-            string paymentMethod = parts.Length > 2 ? parts[2] : null;
+                
+                var parsed = Parse(args1);
 
-            if (string.IsNullOrWhiteSpace(storeId)) return result;
-
-            var store = await _storeRepository.FindStore(storeId);
+            var store = await _storeRepository.FindStore(parsed.storeId);
             if (store == null) return result;
 
             var blob = store.GetStoreBlob();
-            var payoutMethodId = (!string.IsNullOrEmpty(paymentMethod) && PayoutMethodId.TryParse(paymentMethod, out var parsedPmi)) ? parsedPmi : PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
-            if (!_payoutMethodHandlerDictionary.TryGetValue(payoutMethodId, out var handler)) return result;
+            if(!PayoutMethodId.TryParse(parsed.paymentMethod.ToString(), out var PM) || !_payoutMethodHandlerDictionary.TryGetValue(PM, out var handler)) return result;
 
-            PaymentMethodId? pmi = payoutMethodId switch
-            {
-                var id when id == PayoutTypes.LN.GetPayoutMethodId("BTC") => PaymentTypes.LNURL.GetPaymentMethodId("BTC"),
 
-                var id when id == PayoutTypes.CHAIN.GetPayoutMethodId("BTC") => PaymentTypes.CHAIN.GetPaymentMethodId("BTC"),
-
-                _ => null
-            };
-            if (pmi is null) return result;
-
-            var config = store.GetPaymentMethodConfig(pmi, _handlers, onlyEnabled: true);
-            if (config == null || blob.GetExcludedPaymentMethods().Match(pmi)) return result;
+            var config = store.GetPaymentMethodConfig(parsed.paymentMethod, _handlers, onlyEnabled: true);
+            if (config == null || blob.GetExcludedPaymentMethods().Match(parsed.paymentMethod)) return result;
 
             result.Success = true;
-            result.PayoutMethodId = payoutMethodId;
+            result.PayoutMethodId = PM;
             return result;
         }
         catch (Exception){ return result; }
