@@ -1,0 +1,40 @@
+﻿@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Components.UIExtensionPoint
+@using BTCPayServer.Plugins.Prism.Components
+@using BTCPayServer.Abstractions.Contracts
+@using Microsoft.AspNetCore.Components
+@inject IScopeProvider ScopeProvider
+@{
+    ViewData.SetActivePage("AutoTransfer", "AutoTransfer", "Prism");
+    string storeId = ScopeProvider.GetCurrentStoreId();
+    var mode = Context.Request.Query["mode"].ToString();
+
+}
+
+@section PageHeadContent {
+    <base href="~/" />
+}
+
+@if (mode == "pos")
+{
+    @(await Html.RenderComponentAsync<PoSAutoTransferConfiguration>(RenderMode.ServerPrerendered, new
+    {
+        StoreId = storeId
+    }))
+}
+else if (mode == "send")
+{
+    @(await Html.RenderComponentAsync<StoreAutoTransferManager>(RenderMode.ServerPrerendered, new
+    {
+        StoreId = storeId
+    }))
+}
+else
+{
+    @(await Html.RenderComponentAsync<AutoTransferEdit>(RenderMode.ServerPrerendered, new
+    {
+        StoreId = storeId,
+    }))
+}
+
+<vc:ui-extension-point location="auto-transfer-edit" model="@Model"></vc:ui-extension-point>

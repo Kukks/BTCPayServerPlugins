@@ -130,10 +130,11 @@ else
 
                     </div>
 
-                    @if (Settings.Splits.Any())
+                    var prismSplits = Settings.Splits.Where(IsPrismSource).ToList();
+                    @if (prismSplits.Any())
                     {
                         <h2>Your Prisms</h2>
-                        @foreach (var item in Settings.Splits)
+                        @foreach (var item in prismSplits)
                         {
                             <PrismSplit Split="@item" OnRequestRemove="@RemovePrism"/>
                         }
@@ -178,6 +179,8 @@ else
 
 @code {
 
+    private static bool IsPrismSource(Split split) =>
+       string.IsNullOrEmpty(split.Source) || !(split.Source.StartsWith("pos") || split.Source.StartsWith("storetransfer-"));
 
     private void AddDestination()
     {
@@ -198,7 +201,8 @@ else
         }
     }
 
-    public string[] Destinations => Settings.Destinations.Keys.ToArray();
+
+    public string[] Destinations => Settings.Destinations.Where(kv => !(kv.Value?.Destination?.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase) ?? false)).Select(kv => kv.Key).ToArray();
 
     public bool Loading { get; set; } = true;
     public List<LightningAddressData> Users { get; set; } = new();
@@ -278,7 +282,7 @@ else
         var previousState = EditContext.GetValidationMessages().Any();
         MessageStore.Clear();
         StatusMessageModel = null;
-        foreach (var prism in Settings.Splits)
+        foreach (var prism in Settings.Splits.Where(c => !c.Source.StartsWith("pos")))
         {
             if (string.IsNullOrEmpty(prism.Source))
             {
