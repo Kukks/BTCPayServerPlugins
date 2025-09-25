@@ -251,6 +251,12 @@
             return;
         }
 
+        if (!string.IsNullOrWhiteSpace(TotalAmount) && !long.TryParse(TotalAmount, out var _))
+        {
+            DisplayErrorResult("Amount must be a positive integer number of sats or left blank");
+            return;
+        }
+
         var id = !string.IsNullOrEmpty(scheduleTitle) ? scheduleTitle : Encoders.Base58.EncodeData(RandomUtils.GetBytes(20));
         string source = $"storetransfer-{id}:{PaymentId}:{TotalAmount}";
         settz.Splits.Add(new Split
