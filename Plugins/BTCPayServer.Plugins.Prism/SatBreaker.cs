@@ -111,7 +111,7 @@ namespace BTCPayServer.Plugins.Prism
         {
             public DateTimeOffset? LastProcessedDate  { get; set; }
         }
-        public record ScheduleDayEvent();
+        public record ScheduleDayEvent(string forceSplitSource = null);
 
         public async Task Do(CancellationToken cancellationToken)
         {
@@ -508,12 +508,12 @@ namespace BTCPayServer.Plugins.Prism
                     case StoreEvent.Removed storeRemovedEvent:
                         _prismSettings.Remove(storeRemovedEvent.StoreId);
                         return;
-                    case ScheduleDayEvent:
+                    case ScheduleDayEvent scheduleDayEvent:
                         foreach (var (storeId, prismSettings) in _prismSettings)
                         {
-                                if (!prismSettings.EnableScheduledAutomation) continue;
+                                if (!prismSettings.EnableScheduledAutomation && string.IsNullOrEmpty(scheduleDayEvent.forceSplitSource)) continue;
 
-                                var prisms = await DetermineMatches(storeId, prismSettings, DateTimeOffset.UtcNow.Day);
+                                var prisms = await DetermineMatches(storeId, prismSettings, DateTimeOffset.UtcNow.Day, scheduleDayEvent.forceSplitSource);
                                 Dictionary<string,LightMoney> destinationAmounts = new();
                                 foreach (var prism in prisms)
                                 {
@@ -612,7 +612,7 @@ namespace BTCPayServer.Plugins.Prism
             }
         }
 
-        private async Task<(Split, LightMoney)[]> DetermineMatches(string storeId, PrismSettings prismSettings, int utcNowDay)
+        private async Task<(Split, LightMoney)[]> DetermineMatches(string storeId, PrismSettings prismSettings, int utcNowDay, string forceSplitSource = null)
         {
 
             if (prismSettings.PendingPayouts.Any(pair => pair.Value.ScheduledTransferAmount > 0))
@@ -620,13 +620,13 @@ namespace BTCPayServer.Plugins.Prism
                 // we skip as there are payouts with scheduled transfer amount > 0 and this may conflict and end up oversending.
                 return Array.Empty<(Split, LightMoney)>();
             }
-            //TODO: we can optionally do an overload that accepts a split source to force a transfer outside of the schedule
+
             var splitsWithScheduleForToday = prismSettings.Splits.Where(s => 
                 s.Schedule?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                     .Any(part => int.TryParse(part, out var day) && day == utcNowDay) == true).ToList();
 
 
-            if (!splitsWithScheduleForToday.Any()) return Array.Empty<(Split, LightMoney)>() ;
+            if (!splitsWithScheduleForToday.Any() && string.IsNullOrEmpty(forceSplitSource)) return Array.Empty<(Split, LightMoney)>() ;
 
             var result = new List<(Split, LightMoney)>();
             var lnClient = new Lazy<Task<ILightningClient>>(async () => await ConstructLightningClient(storeId)); 
@@ -639,10 +639,19 @@ namespace BTCPayServer.Plugins.Prism
                 var wallet = _walletProvider.GetWallet("BTC");
                 var res = await wallet.GetBalance(settings.AccountDerivation);
                 return new LightMoney(Money.Coins(res.Available.GetValue(wallet.Network)));
+            });
 
-            }); 
-            
-            foreach (var split in splitsWithScheduleForToday.Where(c => c.Source.StartsWith("storetransfer-")))
+            List<Split> scheduleSplit = new();
+            if (splitsWithScheduleForToday.Any())
+            {
+                scheduleSplit.AddRange(splitsWithScheduleForToday);
+            }
+            if (!string.IsNullOrEmpty(forceSplitSource) && prismSettings.Splits.FirstOrDefault(s => s.Source.Equals(forceSplitSource, StringComparison.OrdinalIgnoreCase)) is { } forcedSplit)
+            {
+                scheduleSplit.Add(forcedSplit);
+            }
+
+            foreach (var split in scheduleSplit.Where(c => c.Source.StartsWith("storetransfer-")))
             {
                 PaymentMethodId pmiStr;
                 string amountPart;
@@ -783,8 +792,9 @@ namespace BTCPayServer.Plugins.Prism
                 var payout = await _pullPaymentHostedService.Claim(claimRequest);
                 if (payout.Result != ClaimRequest.ClaimResult.Ok) continue;
                 prismSettings.PendingPayouts ??= new Dictionary<string, PendingPayout>();
+                long additionalSats = additionalAmount.MilliSatoshi / 1000;
                 prismSettings.PendingPayouts.Add(payout.PayoutData.Id,
-                    new PendingPayout(payoutAmount, reserveFee, destination, additionalAmount));
+                    new PendingPayout(payoutAmount, reserveFee, destination, additionalSats));
                 var newAmount = amtMsats - (payoutAmount + reserveFee) * 1000;
                 if (newAmount <= 0)
                     prismSettings.DestinationBalance.Remove(destination);

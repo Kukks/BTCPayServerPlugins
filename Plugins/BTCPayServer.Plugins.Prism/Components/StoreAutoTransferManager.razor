@@ -5,8 +5,10 @@
 @using Microsoft.EntityFrameworkCore
 @using NBitcoin
 @using NBitcoin.DataEncoders
+@using static BTCPayServer.Plugins.Prism.SatBreaker
 @inject SatBreaker SatBreaker
 @inject NavigationManager Nav
+@inject EventAggregator EventAggregator
 @inject UserManager<ApplicationUser> UserManager
 @inject AuthenticationStateProvider AuthStateProvider
 @implements IDisposable
@@ -74,7 +76,7 @@
                         <thead>
                             <tr>
                                 <th>Destination Store</th>
-                                <th>Percewntage split (%)</th>
+                                <th>Percentage split (%)</th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -250,14 +252,19 @@
         }
 
         var id = !string.IsNullOrEmpty(scheduleTitle) ? scheduleTitle : Encoders.Base58.EncodeData(RandomUtils.GetBytes(20));
+        string source = $"storetransfer-{id}:{PaymentId}:{TotalAmount}";
         settz.Splits.Add(new Split
         {
-            Source = $"storetransfer-{id}:{PaymentId}:{TotalAmount}",
+            Source = source,
             Schedule = selectedDays.Any() ? string.Join(",", selectedDays) : string.Empty,
             Destinations = validDestinations
         });
         var savedRecord = await SatBreaker.UpdatePrismSettingsForStore(StoreId, settz);
         ShowResult(savedRecord);
+        if (savedRecord && !selectedDays.Any())
+        {
+            EventAggregator.Publish(new ScheduleDayEvent(forceSplitSource: source));
+        }
         RevertToDefault();
     }
 
@@ -283,5 +290,6 @@
     {
         selectedDays = new();
         scheduleTitle = "";
+		TotalAmount = "";
     }
 }
