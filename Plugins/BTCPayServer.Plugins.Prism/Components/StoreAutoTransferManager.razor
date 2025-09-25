@@ -1,5 +1,4 @@
-﻿
-@using BTCPayServer.Abstractions.Models
+﻿@using BTCPayServer.Abstractions.Models
 @using BTCPayServer.Data
 @using Microsoft.AspNetCore.Identity
 @using Microsoft.AspNetCore.Mvc.Rendering
@@ -35,52 +34,52 @@
 
         <div class="p-2 m-1 split-block">
             <div class="col-sm-10 col-md-9 col-xl-7 col-xxl-6">
-                <div class="form-group mb-4">
-                    <label class="form-label">Transfer mode</label>
-                    <select class="form-select" @bind="SendMode" @bind:event="oninput">
-                        <option value="@TransferMode.SendNow">Send now</option>
-                        <option value="@TransferMode.Schedule">Schedule transfer</option>
-                        <option value="@TransferMode.Both">Both</option>
+
+                <div class="form-group">
+                    <label class="form-label">Transfer Title</label>
+                    <input class="form-control" @bind="scheduleTitle" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Payment Method</label>
+                    <select class="form-select form-select-sm" @bind="PaymentId" @bind:event="oninput">
+                        <option value="BTC-CHAIN">On-chain</option>
+                        <option value="BTC-LN">Lightning</option>
                     </select>
                 </div>
-
-                @if (SendMode != TransferMode.SendNow)
-                {
-                    <div class="form-group">
-                        <label class="form-label">Schedule Title</label>
-                            <input class="form-control" @bind="scheduleTitle" />
+                <div class="form-group">
+                    <label class="form-label">Amount to transfer from wallet (sats)</label>
+                    <input class="form-control" @bind="TotalAmount" />
+                    <span class="text-muted">Leave blank if you want to transfer all your wallet balance</span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Schedule Transfer days (1-31)</label>
+                    <div class="input-group mb-3">
+                        <input type="number" class="form-control" placeholder="Enter date (1-31)"
+                               min="1" max="31" @bind="newDay" @bind:event="oninput"
+                               @onkeypress="OnDayKeyPress" />
+                        <button type="button" class="btn btn-secondary" @onclick="AddDay">Add</button>
                     </div>
-                    <div class="form-group">
-                        <label class="form-label">Schedule Transfer days (1-31)</label>
-                        <div class="input-group mb-3">
-                            <input type="number" class="form-control" placeholder="Enter date (1-31)"
-                                   min="1" max="31" @bind="newDay" @bind:event="oninput"
-                                   @onkeypress="OnDayKeyPress" />
-                            <button type="button" class="btn btn-secondary" @onclick="AddDay">Add</button>
-                        </div>
-                        <div class="d-flex flex-wrap gap-2 mb-2">
-                            @foreach (var day in selectedDays)
-                            {
-                                <span class="badge bg-secondary cursor-pointer" @onclick="() => RemoveDay(day)">@day</span>
-                            }
-                        </div>
-                        <ValidationMessage For="() => Settings.Schedule" />
-                        <div class="text-danger">@dayError</div>
+                    <div class="d-flex flex-wrap gap-2 mb-2">
+                        @foreach (var day in selectedDays)
+                        {
+                            <span class="badge bg-secondary cursor-pointer" @onclick="() => RemoveDay(day)">@day</span>
+                        }
                     </div>
-                }
+                    <ValidationMessage For="() => Settings.Schedule" />
+                    <div class="text-danger">@dayError</div>
+                </div>
 
                 <div class="table-responsive">
                     <table class="table align-middle">
                         <thead>
                             <tr>
                                 <th>Destination Store</th>
-                                <th>Destination Store Payment Method</th>
-                                <th>Amount (sats)</th>
+                                <th>Percewntage split (%)</th>
                                 <th></th>
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var d in Destinations)
+                            @foreach (var d in StoreTransfer.Destinations)
                             {
                                 <tr>
                                     <td>
@@ -93,13 +92,7 @@
                                         </select>
                                     </td>
                                     <td>
-                                        <select class="form-select form-select-sm" @bind="destinationStorePaymentMethod" @bind:event="oninput">
-                                            <option value="BTC-CHAIN">On-chain</option>
-                                            <option value="BTC-LN">Lightning</option>
-                                        </select>
-                                    </td>
-                                    <td>
-                                        <input type="number" min="546" step="1" class="form-control" @bind="d.Amount" @bind:event="oninput" />
+                                        <input type="number" min="1" max="100" step="1" class="form-control" placeholder="%" @bind="d.Percentage" @bind:event="oninput" />
                                     </td>
                                     <td>
                                         <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveDest(d)">Remove</button>
@@ -130,19 +123,16 @@
 
     public bool Loading { get; set; } = true;
 
-    private List<Data.StoreData> UserStores;
-
-    List<PrismDestination> Destinations { get; set; } = new();
     List<SelectListItem> AvailableStores = new();
 
-    enum TransferMode { SendNow, Schedule, Both }
+    Split StoreTransfer = new();
+    string PaymentId = "BTC-CHAIN";
+    string TotalAmount = "";
 
-    TransferMode SendMode = TransferMode.SendNow;
     List<int> selectedDays = new();
     string newDay = "";
     string dayError = "";
     string scheduleTitle = "";
-    string destinationStorePaymentMethod = "";
 
 
     void GoBack()
@@ -156,6 +146,7 @@
         {
             var authState = await AuthStateProvider.GetAuthenticationStateAsync();
             var user = authState.User;
+            List<Data.StoreData> UserStores = new();
             if (user.Identity?.IsAuthenticated ?? false)
             {
                 var userId = UserManager.GetUserId(user);
@@ -168,13 +159,7 @@
                 Text = s.StoreName
             }).ToList() ?? new List<SelectListItem>();
 
-            var fetchSettings = SatBreaker.Get(StoreId);
-            var tasks = new Task[]
-            {
-                fetchSettings
-            };
-            await Task.WhenAll(tasks);
-            Settings = await fetchSettings;
+            Settings = await SatBreaker.Get(StoreId);
             selectedDays = Settings.Schedule?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(s => int.TryParse(s, out _)).Select(int.Parse).ToList() ?? new List<int>();
             EditContext = new EditContext(Settings);
             MessageStore = new ValidationMessageStore(EditContext);
@@ -186,9 +171,9 @@
         await base.OnAfterRenderAsync(firstRender);
     }
 
-    void AddDest() => Destinations.Add(new PrismDestination());
+    void AddDest() => StoreTransfer.Destinations.Add(new BTCPayServer.Plugins.Prism.PrismSplit());
 
-    void RemoveDest(PrismDestination d) => Destinations.Remove(d);
+    void RemoveDest(BTCPayServer.Plugins.Prism.PrismSplit d) => StoreTransfer.Destinations.Remove(d);
 
     void ParseDays()
     {
@@ -246,51 +231,33 @@
     async Task Save()
     {
         var settz = await SatBreaker.Get(StoreId);
-        if (!Destinations.Any(x => !string.IsNullOrWhiteSpace(x.Destination) && x.Amount > 0))
-        {
-            StatusMessageModel = new()
+
+        var validDestinations = StoreTransfer.Destinations.Where(d => d.Percentage is > 0 && !string.IsNullOrEmpty(d.Destination))
+            .Select(d => new BTCPayServer.Plugins.Prism.PrismSplit
             {
-                Severity = StatusMessageModel.StatusSeverity.Error,
-                Message = "Destination is required. Amount has to be greater than 0"
-            };
+                Destination = $"store-prism:{d.Destination}:{PaymentId}",
+                Percentage = Math.Min(100, d.Percentage)
+            }).ToList();
+        if (!validDestinations.Any())
+        {
+            DisplayErrorResult("Please include destination store and specify percentage");
             return;
         }
-        bool showSuccessMessage = true;
-        if (SendMode != TransferMode.SendNow)
+        if (validDestinations.Sum(d => d.Percentage) > 100)
         {
-            if (!selectedDays.Any())
-            {
-                DisplayErrorResult("Unable to save schedule. Kindly enter a schedule date");
-                return;
-            }
-            foreach (var d in Destinations)
-            {
-                var id = !string.IsNullOrEmpty(scheduleTitle) ? scheduleTitle :  Encoders.Base58.EncodeData(RandomUtils.GetBytes(20));
-                settz.Destinations[id] = new PrismDestination
-                {
-                    Destination = $"store-prism:{d.Destination}:{destinationStorePaymentMethod}",
-                    Schedule = selectedDays.Any() ? string.Join(",", selectedDays) : string.Empty,
-                    Amount = d.Amount
-                };
-            }
-            Settings = settz;
-            showSuccessMessage = await SatBreaker.UpdatePrismSettingsForStore(StoreId, settz);
+            DisplayErrorResult("Sum of all percentage split cannot be greater than 100");
+            return;
         }
-        if (SendMode != TransferMode.Schedule)
+
+        var id = !string.IsNullOrEmpty(scheduleTitle) ? scheduleTitle : Encoders.Base58.EncodeData(RandomUtils.GetBytes(20));
+        settz.Splits.Add(new Split
         {
-            var destinationToProcess = Destinations.Where(d => d.Amount > Settings.SatThreshold).Select(d => new PrismDestination
-            {
-                Destination = d.Destination?.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase) == true ? d.Destination : $"store-prism:{d.Destination}:{destinationStorePaymentMethod}",
-                Amount = d.Amount
-            }).ToList();
-            var autoPayout = await SatBreaker.StoreAutoTransferPayout(StoreId, settz, destinationToProcess);
-            if (!autoPayout.success)
-            {
-                DisplayErrorResult(autoPayout.message);
-                return;
-            }
-        }
-        ShowResult(showSuccessMessage);
+            Source = $"storetransfer-{id}:{PaymentId}:{TotalAmount}",
+            Schedule = selectedDays.Any() ? string.Join(",", selectedDays) : string.Empty,
+            Destinations = validDestinations
+        });
+        var savedRecord = await SatBreaker.UpdatePrismSettingsForStore(StoreId, settz);
+        ShowResult(savedRecord);
         RevertToDefault();
     }
 
@@ -315,9 +282,6 @@
     private void RevertToDefault()
     {
         selectedDays = new();
-        Destinations = new();
-        SendMode = TransferMode.SendNow;
         scheduleTitle = "";
     }
-
 }

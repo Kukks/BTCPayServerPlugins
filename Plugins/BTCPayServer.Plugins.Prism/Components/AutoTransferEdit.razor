@@ -96,22 +96,25 @@
                     <table class="table table-hover align-middle">
                         <thead>
                             <tr>
-                                <th>Store Schedule Id</th>
-                                <th>Destination Store(s)</th>
+                                <th>Name</th>
+                                <th>Destination Count</th>
+                                <th>Is Scheduled Transfer?</th>
                                 <th>Action</th>
                             </tr>
                         </thead>
                         <tbody>
-                            @if (ScheduledEntries.Any())
+                            @if (ScheduleSplit.Any())
                             {
-                                @foreach (var kv in ScheduledEntries)
+                                @foreach (var split in ScheduleSplit)
                                 {
+                                    var parts = split.Source.Substring("storetransfer-".Length).Split(':', StringSplitOptions.RemoveEmptyEntries);
+                                    var Id = parts[0];
                                     <tr>
-                                        <td>@kv.Key</td>
-                                        <td>@StoreCount(kv.Value.Destination)</td>
+                                        <td>@Id</td>
+                                        <td>@split.Destinations.Count</td>
+                                        <td>@(!string.IsNullOrEmpty(split.Schedule))</td>
                                         <td>
-                                            <button class="btn btn-sm btn-outline-danger"
-                                                    @onclick="async () => await DeleteScheduledDestination(kv.Key)">
+                                            <button class="btn btn-sm btn-outline-danger" @onclick="async () => await DeleteScheduledDestination(Id)">
                                                 Delete
                                             </button>
                                         </td>
@@ -148,9 +151,10 @@
 
     public PrismSettings Settings { get; set; }
 
+    public List<Split> ScheduleSplit { get; set; }
+
     public string PayoutProcessorLink { get; set; }
 
-    List<KeyValuePair<string, PrismDestination>> ScheduledEntries => Settings?.Destinations?.Where(kv => kv.Value.Destination?.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase) == true).ToList() ?? new();
     public bool Loading { get; set; } = true;
     public PayoutMethodId pmi { get; set; } = PayoutTypes.LN.GetPayoutMethodId("BTC");
     public PayoutMethodId pmichain { get; set; } = PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
@@ -159,9 +163,6 @@
     string newDay = "";
     string dayError = "";
     List<int> selectedDays = new();
-
-
-    int StoreCount(string dest) => dest.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length;
 
     private string PrismEditButtonsFilter { get; set; }
 
@@ -185,6 +186,7 @@
             await Task.WhenAll(tasks);
             Settings = await fetchSettings;
             ParseDays();
+			ScheduleSplit = Settings?.Splits?.Where(kv => kv.Source?.StartsWith("storetransfer-", StringComparison.OrdinalIgnoreCase) == true).ToList() ?? new();
 
             EditContext = new EditContext(Settings);
             MessageStore = new ValidationMessageStore(EditContext);
@@ -268,7 +270,14 @@
     async Task DeleteScheduledDestination(string key)
     {
         var settz = await SatBreaker.Get(StoreId);
-        settz.Destinations.Remove(key);
+        settz.Splits.RemoveAll(split =>
+        {
+            if (string.IsNullOrEmpty(split.Source)) return false;
+            if (!split.Source.StartsWith("storetransfer-", StringComparison.OrdinalIgnoreCase)) return false;
+
+            var idPart = split.Source.Substring("storetransfer-".Length).Split(':')[0];
+            return idPart == key;
+        });
         await UpdateAndShowResult(settz);
 		Settings = settz;
     }

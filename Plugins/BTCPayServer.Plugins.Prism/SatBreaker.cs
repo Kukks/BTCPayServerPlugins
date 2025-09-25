@@ -19,12 +19,10 @@ using BTCPayServer.Services.Apps;
 using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using BTCPayServer.Services.Wallets;
-using CsvHelper.Configuration.Attributes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NBitcoin;
 using Newtonsoft.Json.Linq;
-using Npgsql;
 
 namespace BTCPayServer.Plugins.Prism
 {
@@ -63,7 +61,6 @@ namespace BTCPayServer.Plugins.Prism
         private readonly BTCPayWalletProvider _walletProvider;
 
         private Dictionary<string, PrismSettings> _prismSettings;
-        // public event EventHandler<ScheduleDayEvent> AutoTransferUpdated;
 
         public event EventHandler<PrismPaymentDetectedEventArgs> PrismUpdated;
 
@@ -514,6 +511,8 @@ namespace BTCPayServer.Plugins.Prism
                     case ScheduleDayEvent:
                         foreach (var (storeId, prismSettings) in _prismSettings)
                         {
+                                if (!prismSettings.EnableScheduledAutomation) continue;
+
                                 var prisms = await DetermineMatches(storeId, prismSettings, DateTimeOffset.UtcNow.Day);
                                 Dictionary<string,LightMoney> destinationAmounts = new();
                                 foreach (var prism in prisms)
@@ -622,10 +621,10 @@ namespace BTCPayServer.Plugins.Prism
                 return Array.Empty<(Split, LightMoney)>();
             }
             //TODO: we can optionally do an overload that accepts a split source to force a transfer outside of the schedule
-            var splitsWithScheduleForToday = prismSettings.Splits.Where(s =>
-                (bool) s.Schedule
-                    ?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    .Any(s => int.TryParse(s, out var day) && day == utcNowDay)).ToList();
+            var splitsWithScheduleForToday = prismSettings.Splits.Where(s => 
+                s.Schedule?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Any(part => int.TryParse(part, out var day) && day == utcNowDay) == true).ToList();
+
 
             if (!splitsWithScheduleForToday.Any()) return Array.Empty<(Split, LightMoney)>() ;
 
@@ -643,13 +642,12 @@ namespace BTCPayServer.Plugins.Prism
 
             }); 
             
-            foreach (var split in splitsWithScheduleForToday)
+            foreach (var split in splitsWithScheduleForToday.Where(c => c.Source.StartsWith("storetransfer-")))
             {
                 PaymentMethodId pmiStr;
                 string amountPart;
                 var source = split.Source;
                 
-                ///TODO: we should probably prefix the source to make it clear it's a store balance source
                 if (string.IsNullOrEmpty(source))
                 {
                     pmiStr = PaymentTypes.LN.GetPaymentMethodId("BTC");
@@ -658,13 +656,13 @@ namespace BTCPayServer.Plugins.Prism
                 else
                 {
                     var parts = source.Split(':');
-                    pmiStr = string.IsNullOrEmpty(parts[0])
+                    pmiStr = string.IsNullOrEmpty(parts[1])
                         ? PaymentTypes.LN.GetPaymentMethodId("BTC")
-                        : PaymentMethodId.Parse(parts[0]);
-                    amountPart = parts[1];
+                        : PaymentMethodId.Parse(parts[1]);
+                    amountPart = parts[2];
 
                 }
-                var walletBalance = LightMoney.Zero;;
+                var walletBalance = LightMoney.Zero;
                 
                 switch (pmiStr)
                 {
@@ -689,7 +687,7 @@ namespace BTCPayServer.Plugins.Prism
 
                 if (!string.IsNullOrEmpty(amountPart) && long.TryParse(amountPart, out var amount))
                 {
-                    walletBalance = Math.Min(walletBalance, amount);
+                    walletBalance = Math.Min(walletBalance, LightMoney.Satoshis(amount));
                 }
                 
 
@@ -788,7 +786,7 @@ namespace BTCPayServer.Plugins.Prism
                 prismSettings.PendingPayouts.Add(payout.PayoutData.Id,
                     new PendingPayout(payoutAmount, reserveFee, destination, additionalAmount));
                 var newAmount = amtMsats - (payoutAmount + reserveFee) * 1000;
-                if (newAmount == 0)
+                if (newAmount <= 0)
                     prismSettings.DestinationBalance.Remove(destination);
                 else
                 {

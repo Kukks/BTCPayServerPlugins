@@ -130,10 +130,11 @@ else
 
                     </div>
 
-                    @if (Settings.Splits.Where(c => !c.Source.StartsWith("pos")).Any())
+                    var prismSplits = Settings.Splits.Where(IsPrismSource).ToList();
+                    @if (prismSplits.Any())
                     {
                         <h2>Your Prisms</h2>
-                        @foreach (var item in Settings.Splits)
+                        @foreach (var item in prismSplits)
                         {
                             <PrismSplit Split="@item" OnRequestRemove="@RemovePrism"/>
                         }
@@ -178,6 +179,8 @@ else
 
 @code {
 
+    private static bool IsPrismSource(Split split) =>
+       string.IsNullOrEmpty(split.Source) || !(split.Source.StartsWith("pos") || split.Source.StartsWith("storetransfer-"));
 
     private void AddDestination()
     {
