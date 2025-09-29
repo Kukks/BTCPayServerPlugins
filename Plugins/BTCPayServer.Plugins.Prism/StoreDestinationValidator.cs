@@ -52,6 +52,8 @@ public class StoreDestinationValidator : IPluginHookFilter
             var _payoutMethodHandlerDictionary = _serviceProvider.GetRequiredService<PayoutMethodHandlerDictionary>();
                 
             var parsed = Parse(args1);
+            if (string.IsNullOrWhiteSpace(parsed.destinationId) || parsed.paymentMethod is null) return result;
+
             if (!PayoutMethodId.TryParse(parsed.paymentMethod.ToString(), out var PM) || !_payoutMethodHandlerDictionary.TryGetValue(PM, out var handler)) return result;
 
             var store = await _storeRepository.FindStore(parsed.destinationId);
