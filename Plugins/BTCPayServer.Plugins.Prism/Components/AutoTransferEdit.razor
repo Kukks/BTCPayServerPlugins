@@ -107,14 +107,13 @@
                             {
                                 @foreach (var split in ScheduleSplit)
                                 {
-                                    var parts = split.Source.Substring("storetransfer-".Length).Split(':', StringSplitOptions.RemoveEmptyEntries);
-                                    var Id = parts[0];
+                                    var src = SatBreaker.ParseSource(split.Source);
                                     <tr>
-                                        <td>@Id</td>
+                                        <td>@src.Value.paymentMethod.ToString()</td>
                                         <td>@split.Destinations.Count</td>
-                                        <td>@(!string.IsNullOrEmpty(split.Schedule))</td>
+                                        <td>@(src.Value.schedule.Any())</td>
                                         <td>
-                                            <button class="btn btn-sm btn-outline-danger" @onclick="async () => await DeleteScheduledDestination(Id)">
+                                            <button class="btn btn-sm btn-outline-danger" @onclick="async () => await DeleteScheduledDestination(split.Source)">
                                                 Delete
                                             </button>
                                         </td>
@@ -186,7 +185,7 @@
             await Task.WhenAll(tasks);
             Settings = await fetchSettings;
             ParseDays();
-			ScheduleSplit = Settings?.Splits?.Where(kv => kv.Source?.StartsWith("storetransfer-", StringComparison.OrdinalIgnoreCase) == true).ToList() ?? new();
+			ScheduleSplit = Settings?.Splits?.Where(kv => SatBreaker.TryParseSource(kv.Source, out var dest))?.ToList() ?? new();
 
             EditContext = new EditContext(Settings);
             MessageStore = new ValidationMessageStore(EditContext);
@@ -267,19 +266,14 @@
         SatBreaker.PrismUpdated -= SatBreakerOnPrismUpdated;
     }
 
-    async Task DeleteScheduledDestination(string key)
+    async Task DeleteScheduledDestination(string src )
     {
         var settz = await SatBreaker.Get(StoreId);
-        settz.Splits.RemoveAll(split =>
+        if (settz.Splits.RemoveAll(split => split.Source == src) > 0)
         {
-            if (string.IsNullOrEmpty(split.Source)) return false;
-            if (!split.Source.StartsWith("storetransfer-", StringComparison.OrdinalIgnoreCase)) return false;
-
-            var idPart = split.Source.Substring("storetransfer-".Length).Split(':')[0];
-            return idPart == key;
-        });
-        await UpdateAndShowResult(settz);
-		Settings = settz;
+            await UpdateAndShowResult(settz);
+            Settings = settz;
+        }
     }
 
     async Task Save()

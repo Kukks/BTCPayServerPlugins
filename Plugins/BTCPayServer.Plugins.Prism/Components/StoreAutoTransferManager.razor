@@ -1,5 +1,7 @@
 ﻿@using BTCPayServer.Abstractions.Models
 @using BTCPayServer.Data
+@using BTCPayServer.Lightning
+@using BTCPayServer.Payments
 @using Microsoft.AspNetCore.Identity
 @using Microsoft.AspNetCore.Mvc.Rendering
 @using Microsoft.EntityFrameworkCore
@@ -251,18 +253,17 @@
             return;
         }
 
-        if (!string.IsNullOrWhiteSpace(TotalAmount) && !long.TryParse(TotalAmount, out var _))
+        if (!string.IsNullOrWhiteSpace(TotalAmount) && (!long.TryParse(TotalAmount, out var amt)|| amt <= 0))
         {
             DisplayErrorResult("Amount must be a positive integer number of sats or left blank");
             return;
         }
 
-        var id = !string.IsNullOrEmpty(scheduleTitle) ? scheduleTitle : Encoders.Base58.EncodeData(RandomUtils.GetBytes(20));
-        string source = $"storetransfer-{id}:{PaymentId}:{TotalAmount}";
+        // var id = !string.IsNullOrEmpty(scheduleTitle) ? scheduleTitle : Encoders.Base58.EncodeData(RandomUtils.GetBytes(20));
+        string source = SatBreaker.EncodeSource(selectedDays.ToArray(), PaymentMethodId.Parse(PaymentId),string.IsNullOrWhiteSpace(TotalAmount)? null: LightMoney.Satoshis(long.Parse(TotalAmount)));
         settz.Splits.Add(new Split
         {
             Source = source,
-            Schedule = selectedDays.Any() ? string.Join(",", selectedDays) : string.Empty,
             Destinations = validDestinations
         });
         var savedRecord = await SatBreaker.UpdatePrismSettingsForStore(StoreId, settz);

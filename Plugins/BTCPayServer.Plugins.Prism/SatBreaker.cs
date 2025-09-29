@@ -491,6 +491,49 @@ namespace BTCPayServer.Plugins.Prism
             return result.ToArray();
         }
 
+
+        public static (int[] schedule, PaymentMethodId paymentMethod, LightMoney amount)? ParseSource(string source)
+        {
+            return TryParseSource(source, out var dest)? dest: null;
+        }
+
+        public static string EncodeSource(int[] schedule, PaymentMethodId paymentMethod, LightMoney amount )
+        {
+            return $"storetransfer:{paymentMethod}:{amount}:{string.Join(',', schedule)}";
+        }
+        
+        public static bool TryParseSource(string source, out (int[] schedule, PaymentMethodId paymentMethod, LightMoney? amount)? dest)
+        {;
+
+            try
+            {
+                if (source.StartsWith("storetransfer:"))
+                {
+                    var parts = source.Split(':');
+
+                    var schedule = parts[3].Split(',', StringSplitOptions.RemoveEmptyEntries).Select(int.Parse).ToArray();
+
+                    var paymentMethod = string.IsNullOrEmpty(parts[1])? PaymentTypes.LN.GetPaymentMethodId("BTC"): PaymentMethodId.Parse(parts[1]);
+                    
+                    var amount = string.IsNullOrEmpty(parts[2])? null: LightMoney.Parse(parts[2]);
+
+                    
+                    dest = (schedule, paymentMethod, amount);
+                    return true;
+                }
+            }
+            catch (Exception)
+            {
+
+            }
+
+            dest = null;
+
+            return false;
+
+        }
+        
+
         /// <summary>
         /// if an invoice is completed, check if it was created through a lightning address, and if the store has prism enabled and one of the splits' source is the same lightning address, grab the paid amount, split it based on the destination percentages, and credit it inside the prism destbalances.
         /// When the threshold is reached (plus a 2% reserve fee to account for fees), create a payout and deduct the balance. 
@@ -620,10 +663,11 @@ namespace BTCPayServer.Plugins.Prism
                 // we skip as there are payouts with scheduled transfer amount > 0 and this may conflict and end up oversending.
                 return Array.Empty<(Split, LightMoney)>();
             }
-
-            var splitsWithScheduleForToday = prismSettings.Splits.Where(s => 
-                s.Schedule?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    .Any(part => int.TryParse(part, out var day) && day == utcNowDay) == true).ToList();
+            
+            var splitsWithStoreTransfer = prismSettings.Splits.Select((split => (split, ParseSource(split.Source)))).Where(pair => pair.Item2 != null).ToArray();
+            
+            var splitsWithScheduleForToday = splitsWithStoreTransfer
+                .Where(part =>  part.Item2.Value.schedule.Any(day => day == utcNowDay)).ToList();
 
 
             if (!splitsWithScheduleForToday.Any() && string.IsNullOrEmpty(forceSplitSource)) return Array.Empty<(Split, LightMoney)>() ;
@@ -641,39 +685,20 @@ namespace BTCPayServer.Plugins.Prism
                 return new LightMoney(Money.Coins(res.Available.GetValue(wallet.Network)));
             });
 
-            List<Split> scheduleSplit = new();
-            if (splitsWithScheduleForToday.Any())
+            var splitsToProcess = splitsWithScheduleForToday.ToList();
+            if (!string.IsNullOrEmpty(forceSplitSource) && TryParseSource(forceSplitSource, out var forcedSplitSourceParsed)  && prismSettings.Splits.FirstOrDefault(s => s.Source.Equals(forceSplitSource, StringComparison.OrdinalIgnoreCase)) is { } forcedSplit)
             {
-                scheduleSplit.AddRange(splitsWithScheduleForToday);
+                splitsToProcess.Add((forcedSplit, forcedSplitSourceParsed));
             }
-            if (!string.IsNullOrEmpty(forceSplitSource) && prismSettings.Splits.FirstOrDefault(s => s.Source.Equals(forceSplitSource, StringComparison.OrdinalIgnoreCase)) is { } forcedSplit)
-            {
-                scheduleSplit.Add(forcedSplit);
-            }
+            
+            
 
-            foreach (var split in scheduleSplit.Where(c => c.Source.StartsWith("storetransfer-")))
+            foreach (var split in splitsToProcess)
             {
-                PaymentMethodId pmiStr;
-                string amountPart;
-                var source = split.Source;
-                
-                if (string.IsNullOrEmpty(source))
-                {
-                    pmiStr = PaymentTypes.LN.GetPaymentMethodId("BTC");
-                    amountPart = "";//empty string means all of it
-                }
-                else
-                {
-                    var parts = source.Split(':');
-                    pmiStr = string.IsNullOrEmpty(parts[1])
-                        ? PaymentTypes.LN.GetPaymentMethodId("BTC")
-                        : PaymentMethodId.Parse(parts[1]);
-                    amountPart = parts[2];
-
-                }
+               
                 var walletBalance = LightMoney.Zero;
                 
-                switch (pmiStr)
+                switch (split.Item2.Value.paymentMethod)
                 {
                     case var pmi when pmi == PaymentTypes.LN.GetPaymentMethodId("BTC"):
                         var client = await lnClient.Value;
@@ -694,15 +719,12 @@ namespace BTCPayServer.Plugins.Prism
 
                 if (walletBalance <= Money.Zero) continue;
 
-                if (!string.IsNullOrEmpty(amountPart) && long.TryParse(amountPart, out var amount))
-                {
-                    walletBalance = Math.Min(walletBalance, LightMoney.Satoshis(amount));
-                }
+                walletBalance = Math.Min(walletBalance, split.Item2.Value.amount ?? walletBalance);
                 
 
                 if (walletBalance > Money.Zero)
                 {
-                    result.Add((split, walletBalance));
+                    result.Add((split.split, walletBalance));
                 }
             }
             return result.ToArray();
@@ -740,7 +762,14 @@ namespace BTCPayServer.Plugins.Prism
             var result = false;
             prismSettings.DestinationBalance ??= new Dictionary<string, long>();
             prismSettings.Destinations ??= new Dictionary<string, PrismDestination>();
-            foreach (var (destination, amtMsats) in prismSettings.DestinationBalance)
+            
+            var copiedBalances = prismSettings.DestinationBalance.ToDictionary();
+            foreach (var destinationAmount in destinationAmounts)
+            {
+                copiedBalances.TryAdd(destinationAmount.Key, 0);
+            }
+            
+            foreach (var (destination, amtMsats) in copiedBalances)
             {
                 prismSettings.Destinations.TryGetValue(destination, out var destinationSettings);
                 

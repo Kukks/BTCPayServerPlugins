@@ -113,6 +113,11 @@ else
                                 <label asp-for="Enabled" class="form-check-label">Enabled</label>
                                 <ValidationMessage2 For="() => Settings.Enabled" class="text-danger"></ValidationMessage2>
                             </div>
+                            <div class="form-group form-check">
+                                <input @bind="Settings.EnableScheduledAutomation" type="checkbox" class="form-check-input"/>
+                                <label asp-for="Enabled" class="form-check-label">Schedule Automation</label>
+                                <ValidationMessage2 For="() => Settings.EnableScheduledAutomation" class="text-danger"></ValidationMessage2>
+                            </div>
                             <div class="form-group">
                                 <label class="form-label">Sat Threshold</label>
                                 <input type="number" @bind="Settings.SatThreshold" min="1" class="form-control"/>
