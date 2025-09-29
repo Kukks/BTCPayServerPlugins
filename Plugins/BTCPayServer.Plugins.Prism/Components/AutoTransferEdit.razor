@@ -67,11 +67,6 @@
 
         <div class="p-2 m-1 split-block">
             <div class="col-sm-10 col-md-9 col-xl-7 col-xxl-6">
-                <div class="form-group d-flex align-items-center">
-                    <InputCheckbox class="btcpay-toggle me-2" @bind-Value="Settings.EnableScheduledAutomation" disabled="@NoPayoutProcessors" />
-                    <label class="form-check-label mb-0">Enable Scheduled Transfers</label>
-                </div>
-
                 <div class="form-group">
                     <label class="form-label">Transfer days (1-31)</label>
                     <div class="input-group mb-3">
@@ -96,22 +91,20 @@
                     <table class="table table-hover align-middle">
                         <thead>
                             <tr>
-                                <th>Name</th>
-                                <th>Destination Count</th>
-                                <th>Is Scheduled Transfer?</th>
+                                <th>Payment Method</th>
+                                <th>Number of Recipients</th>
                                 <th>Action</th>
                             </tr>
                         </thead>
                         <tbody>
-                            @if (ScheduleSplit.Any())
+                            @foreach (var split in ScheduleSplit)
                             {
-                                @foreach (var split in ScheduleSplit)
+                                var src = SatBreaker.ParseSource(split.Source);
+                                if (src.Value.schedule.Any()) 
                                 {
-                                    var src = SatBreaker.ParseSource(split.Source);
                                     <tr>
                                         <td>@src.Value.paymentMethod.ToString()</td>
                                         <td>@split.Destinations.Count</td>
-                                        <td>@(src.Value.schedule.Any())</td>
                                         <td>
                                             <button class="btn btn-sm btn-outline-danger" @onclick="async () => await DeleteScheduledDestination(split.Source)">
                                                 Delete
@@ -119,14 +112,6 @@
                                         </td>
                                     </tr>
                                 }
-                            }
-                            else
-                            {
-                                <tr>
-                                    <td colspan="3" class="text-center text-muted py-4">
-                                        No scheduled transfers found
-                                    </td>
-                                </tr>
                             }
                         </tbody>
                     </table>
@@ -279,7 +264,6 @@
     async Task Save()
     {
         var settz = await SatBreaker.Get(StoreId);
-        settz.EnableScheduledAutomation = Settings.EnableScheduledAutomation;
         settz.Schedule = Settings.Schedule;
         await UpdateAndShowResult(settz);
 		Settings = settz;

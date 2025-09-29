@@ -11,6 +11,7 @@ using BTCPayServer.Payouts;
 using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.DependencyInjection;
+using NBitcoin;
 using Newtonsoft.Json.Linq;
 
 namespace BTCPayServer.Plugins.Prism;
@@ -19,14 +20,17 @@ internal class StorePrismClaimCreate : IPluginHookFilter
 {
     private readonly StoreRepository _storeRepository;
     private readonly IServiceProvider _serviceProvider;
+    private readonly BTCPayNetworkProvider _networkProvider;
     private readonly PaymentMethodHandlerDictionary _handlers;
     public string Hook => "prism-claim-create";
 
-    public StorePrismClaimCreate(StoreRepository storeRepository, PaymentMethodHandlerDictionary handlers, IServiceProvider serviceProvider)
+    public StorePrismClaimCreate(StoreRepository storeRepository, PaymentMethodHandlerDictionary handlers, 
+        IServiceProvider serviceProvider, BTCPayNetworkProvider networkProvider)
     {
         _handlers = handlers;
         _serviceProvider = serviceProvider;
         _storeRepository = storeRepository;
+        _networkProvider = networkProvider;
     }
 
     public async Task<object> Execute(object args)
@@ -39,29 +43,37 @@ internal class StorePrismClaimCreate : IPluginHookFilter
         {
             var _payoutMethodHandlerDictionary = _serviceProvider.GetRequiredService<PayoutMethodHandlerDictionary>();
             var parts = args1.Split(':', StringSplitOptions.RemoveEmptyEntries);
-            string storeId = parts[1];
+            string destinationId = parts[1];
             string paymentMethod = parts.Length > 2 ? parts[2] : null;
 
-            if (string.IsNullOrWhiteSpace(storeId)) return null;
-
-            var store = await _storeRepository.FindStore(storeId);
-            if (store == null) return null;
+            if (string.IsNullOrWhiteSpace(destinationId)) return null;
 
             var pmi = (!string.IsNullOrEmpty(paymentMethod) && PayoutMethodId.TryParse(paymentMethod, out var parsedPmi)) ? parsedPmi : PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
             if (!_payoutMethodHandlerDictionary.TryGetValue(pmi, out var handler)) return null;
 
-            var address = await CreateClaimRequestDestination(store, pmi);
-            if (string.IsNullOrWhiteSpace(address)) return null;
+            var store = await _storeRepository.FindStore(destinationId);
+            if (store != null)
+            {
+                var address = await CreateClaimRequestDestination(store, pmi);
+                if (string.IsNullOrWhiteSpace(address)) return null;
 
-            var claimDestination = await handler.ParseClaimDestination(address, CancellationToken.None);
-            if (claimDestination.destination is null) return null;
+                var claimDestination = await handler.ParseClaimDestination(address, CancellationToken.None);
+                if (claimDestination.destination is null) return null;
 
+                claimRequest.Destination = claimDestination.destination;
+            }
+            else
+            {
+                var network = _networkProvider.GetNetwork<BTCPayNetwork>("BTC");
+                if (network is null) return null;
+
+                claimRequest.Destination = new AddressClaimDestination(BitcoinAddress.Create(destinationId, network.NBitcoinNetwork));
+            }
             claimRequest.Metadata = JObject.FromObject(new
             {
                 Source = $"Prism - Store transfer",
-                DestinationStore = store.Id
+                Destination = destinationId
             });
-            claimRequest.Destination = claimDestination.destination;
             claimRequest.PayoutMethodId = pmi;
             return claimRequest;
         }

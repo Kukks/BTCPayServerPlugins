@@ -670,7 +670,7 @@ namespace BTCPayServer.Plugins.Prism
                 .Where(part =>  part.Item2.Value.schedule.Any(day => day == utcNowDay)).ToList();
 
 
-            if (!splitsWithScheduleForToday.Any() && string.IsNullOrEmpty(forceSplitSource)) return Array.Empty<(Split, LightMoney)>() ;
+            if (!splitsWithScheduleForToday.Any() && string.IsNullOrEmpty(forceSplitSource)) return Array.Empty<(Split, LightMoney)>();
 
             var result = new List<(Split, LightMoney)>();
             var lnClient = new Lazy<Task<ILightningClient>>(async () => await ConstructLightningClient(storeId)); 

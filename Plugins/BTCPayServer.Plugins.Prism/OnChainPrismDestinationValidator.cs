@@ -1,11 +1,8 @@
 ﻿using System;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
-using BTCPayServer.Data;
-using BTCPayServer.Payments;
 using BTCPayServer.Payouts;
 using NBitcoin;
-using NBXplorer;
 
 namespace BTCPayServer.Plugins.Prism;
 

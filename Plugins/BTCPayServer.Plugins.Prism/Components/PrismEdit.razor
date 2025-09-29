@@ -108,16 +108,19 @@ else
                     <div class="row mb-4">
                         <div class="col-xl-10 col-xxl-constrain">
 
-                            <div class="form-group form-check">
-                                <input @bind="Settings.Enabled" type="checkbox" class="form-check-input"/>
-                                <label asp-for="Enabled" class="form-check-label">Enabled</label>
+
+                            <div class="d-flex align-items-center gap-2">
+                                <input @bind="Settings.Enabled" type="checkbox" class="btcpay-toggle" />
+                                <label asp-for="Enabled" class="mb-0">Enabled</label>
                                 <ValidationMessage2 For="() => Settings.Enabled" class="text-danger"></ValidationMessage2>
                             </div>
-                            <div class="form-group form-check">
-                                <input @bind="Settings.EnableScheduledAutomation" type="checkbox" class="form-check-input"/>
-                                <label asp-for="Enabled" class="form-check-label">Schedule Automation</label>
+
+                            <div class="d-flex align-items-center gap-2 my-4">
+                                <input @bind="Settings.EnableScheduledAutomation" type="checkbox" class="btcpay-toggle" />
+                                <label asp-for="EnableScheduledAutomation" class="mb-0">Schedule Automation</label>
                                 <ValidationMessage2 For="() => Settings.EnableScheduledAutomation" class="text-danger"></ValidationMessage2>
                             </div>
+
                             <div class="form-group">
                                 <label class="form-label">Sat Threshold</label>
                                 <input type="number" @bind="Settings.SatThreshold" min="1" class="form-control"/>
@@ -185,7 +188,7 @@ else
 @code {
 
     private static bool IsPrismSource(Split split) =>
-       string.IsNullOrEmpty(split.Source) || !(split.Source.StartsWith("pos") || split.Source.StartsWith("storetransfer-"));
+       string.IsNullOrEmpty(split.Source) || !(split.Source.StartsWith("pos") || split.Source.StartsWith("storetransfer"));
 
     private void AddDestination()
     {
@@ -287,7 +290,7 @@ else
         var previousState = EditContext.GetValidationMessages().Any();
         MessageStore.Clear();
         StatusMessageModel = null;
-        foreach (var prism in Settings.Splits.Where(c => !c.Source.StartsWith("pos")))
+        foreach (var prism in Settings.Splits.Where(c => !(c.Source.StartsWith("pos") || c.Source.StartsWith("storetransfer"))))
         {
             if (string.IsNullOrEmpty(prism.Source))
             {
@@ -380,6 +383,7 @@ else
     {
         var settz = await SatBreaker.Get(StoreId);
         settz.Splits = Settings.Splits;
+        settz.EnableScheduledAutomation = Settings.EnableScheduledAutomation;
         settz.Destinations = Settings.Destinations;
         settz.Enabled = Settings.Enabled;
         settz.SatThreshold = Settings.SatThreshold;
