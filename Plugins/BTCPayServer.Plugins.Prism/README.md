@@ -17,7 +17,7 @@ Prism gives BTCPay merchants and users flexibility to manage and automate how Bi
 
 - Splits from Invoice Payments: Automatically split funds from invoices paid via Lightning or on-chain Bitcoin transactions.
 
-- PoS Item splits: Define splits for individual items in Point-of-Sale (PoS) items. This is good for revenue sharing, commisions, e.t.c.
+- PoS Item splits: Define splits for individual items in Point-of-Sale (PoS) items. This is good for revenue sharing, commissions, e.t.c.
 
 - Store-to-store transfer: Route payments from one of your stores to another within the same BTCPay Server. You can also route payment to onchain addresses. This is ideal for merchants managing multiple stores. Transfers can be setup in two ways:
 	
@@ -96,6 +96,6 @@ Note: New transfers won’t process if there are pending payouts. This is especi
 
 BTCPay Server is built and maintained entirely by contributors around the internet. We welcome and appreciate new contributions.
 
-Do you notice any errors or bug? are you having issues with using the plugin? would you like to request a feature? please [create an issue](https://github.com/Kukks/BTCPayServerPlugins/issues/new)
+Do you notice any errors or bugs? are you having issues with using the plugin? would you like to request a feature? please [create an issue](https://github.com/Kukks/BTCPayServerPlugins/issues/new)
 
 Feel free to join our support channel over at [https://chat.btcpayserver.org/](https://chat.btcpayserver.org/) or [https://t.me/btcpayserver](https://t.me/btcpayserver) if you need help or have any further questions.
