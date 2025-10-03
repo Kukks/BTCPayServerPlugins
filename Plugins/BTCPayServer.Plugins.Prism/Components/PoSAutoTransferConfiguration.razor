@@ -46,7 +46,7 @@
             </button>
             <h5 class="alert-heading" text-translate="true">Important notice</h5>
             <p class="mb-0">Please ensure the calculated value for the percentage specified is greater than the Prism sats threshold.</p>
-            <p class="mb-0">Also ensure you have the selected payment method configured for payout proceesing</p>
+            <p class="mb-0">Also ensure you have the selected payment method configured for payout processing</p>
         </div>
 
         @if (StatusMessageModel != null)
@@ -154,7 +154,6 @@
 
     List<PosAppProductSplitModel> PosProducts = new();
 
-    private List<StoreData> UserStores;
 
     void GoBack()
     {
@@ -165,17 +164,6 @@
     {
         if (firstRender)
         {
-            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
-            var user = authState.User;
-
-            if (user.Identity?.IsAuthenticated ?? false)
-            {
-                var userId = UserManager.GetUserId(user);
-                var appUser = await UserManager.Users
-                    .Where(c => c.Id == userId).Include(u => u.UserStores).ThenInclude(us => us.StoreData).SingleOrDefaultAsync();
-
-                UserStores = appUser?.UserStores.Where(s => s.StoreDataId != StoreId && !s.StoreData.Archived).Select(s => s.StoreData).ToList() ?? new();
-            }
             var fetchSettings = SatBreaker.Get(StoreId);
             var tasks = new Task[]
             {
@@ -218,13 +206,7 @@
                                        PaymentMethod = parts.Length > 2 ? parts[2] : string.Empty,
                                        Percentage = (int)d.Percentage
                                    };
-                               }).ToList() ?? new List<ProductDestinationRow>(),
-                                StoreOptions = UserStores.Select(s => new SelectListItem
-                                {
-                                    Value = s.Id,
-                                    Text = s.StoreName,
-                                    Selected = (s.Id == storeId)
-                                }).ToList()
+                               }).ToList() ?? new List<ProductDestinationRow>()
                             };
                         }).ToList();
                     }
@@ -239,6 +221,7 @@
             EditContext = new EditContext(Settings);
             MessageStore = new ValidationMessageStore(EditContext);
             EditContext.OnFieldChanged += FieldChanged;
+            SatBreaker.PrismUpdated += SatBreakerOnPrismUpdated;
             Loading = false;
             await InvokeAsync(StateHasChanged);
         }

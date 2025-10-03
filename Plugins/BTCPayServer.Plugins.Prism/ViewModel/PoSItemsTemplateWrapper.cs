@@ -77,6 +77,5 @@ public class ProductSplitItemModel
     public decimal Price { get; set; }
     public string Currency { get; set; }
     public List<ProductDestinationRow> Destinations { get; set; } = new();
-    public List<SelectListItem> StoreOptions { get; set; } = new();
 }
 
