@@ -46,6 +46,7 @@
             </button>
             <h5 class="alert-heading" text-translate="true">Important notice</h5>
             <p class="mb-0">Please ensure the calculated value for the percentage specified is greater than the Prism sats threshold.</p>
+            <p class="mb-0">Also ensure you have the selected payment method configured for payout proceesing</p>
         </div>
 
         @if (StatusMessageModel != null)
@@ -89,34 +90,27 @@
 
                                                     @foreach (var d in product.Destinations)
                                                     {
-                                                        <div class="row g-2 mb-2">
+                                                        <div class="row g-2 mb-2 align-items-center">
                                                             <div class="col-2">
                                                                 <input type="number" class="form-control form-control-sm"
-                                                                       min="0" max="100" step="1"
-                                                                       placeholder="%"
-                                                                       @bind="d.Percentage"
-                                                                       @bind:event="oninput">
+                                                                       min="0" max="100" step="1" placeholder="%"
+                                                                       @bind="d.Percentage" @bind:event="oninput">
                                                             </div>
-                                                            <div class="col-5">
-                                                                <select class="form-select form-select-sm"
-                                                                        @bind="d.Destination"
-                                                                        @bind:event="oninput">
-                                                                    <option value="">-- Store --</option>
-                                                                    @foreach (var opt in product.StoreOptions)
-                                                                    {
-                                                                        bool alreadyUsed = product.Destinations.Any(existing => existing != d && existing.Destination == opt.Value);
-                                                                        <option value="@opt.Value" disabled="@alreadyUsed">@opt.Text</option>
-                                                                    }
-                                                                </select>
-                                                            </div>
-                                                            <div class="col-5 d-flex gap-1">
+                                                            <div class="col-3">
                                                                 <select class="form-select form-select-sm" @bind="d.PaymentMethod" @bind:event="oninput">
-                                                                    <option value="BTC-LN">Lightning</option>
                                                                     <option value="BTC-CHAIN">On-chain</option>
+                                                                    <option value="BTC-LN">Lightning</option>
                                                                 </select>
+                                                            </div>
+                                                            <div class="col-7 d-flex gap-1">
+                                                                <input type="text" class="form-control form-control-sm" style="font-family: monospace;"
+                                                                       @bind="d.Destination" @bind:event="oninput"
+                                                                       placeholder="@(d.PaymentMethod == "BTC-CHAIN" ? "Enter on-chain wallet address" : "Enter lightning address")" />
+
                                                                 <button type="button" class="btn btn-sm btn-outline-danger"
                                                                         @onclick="() => product.Destinations.Remove(d)">
-                                                                    Remove</button>
+                                                                    Remove
+                                                                </button>
                                                             </div>
                                                         </div>
                                                     }

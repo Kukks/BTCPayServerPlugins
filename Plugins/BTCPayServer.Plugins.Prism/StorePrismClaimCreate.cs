@@ -5,6 +5,7 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Controllers;
 using BTCPayServer.Data;
+using BTCPayServer.Data.Payouts.LightningLike;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Payments;
 using BTCPayServer.Payouts;
@@ -64,10 +65,7 @@ internal class StorePrismClaimCreate : IPluginHookFilter
             }
             else
             {
-                var network = _networkProvider.GetNetwork<BTCPayNetwork>("BTC");
-                if (network is null) return null;
-
-                claimRequest.Destination = new AddressClaimDestination(BitcoinAddress.Create(destinationId, network.NBitcoinNetwork));
+                if (!TryParseDestinationAddress(destinationId, claimRequest)) return null;
             }
             claimRequest.Metadata = JObject.FromObject(new
             {
@@ -104,5 +102,36 @@ internal class StorePrismClaimCreate : IPluginHookFilter
             Checkout = new InvoiceDataBase.CheckoutOptions { LazyPaymentMethods = false, PaymentMethods = new[] { pmi.ToString() }, Expiration = TimeSpan.FromDays(60) },
         }, store, null);
         return invoice.GetPaymentPrompt(pmi)?.Destination;
+    }
+
+    private bool TryParseDestinationAddress(string address, ClaimRequest claimRequest)
+    {
+        var network = _networkProvider.GetNetwork<BTCPayNetwork>("BTC");
+        if (network is null) return false;
+
+        try
+        {
+            claimRequest.Destination = new AddressClaimDestination(BitcoinAddress.Create(address, network.NBitcoinNetwork));
+            return true;
+        }
+        catch { }
+
+        try
+        {
+            LNURL.LNURL.ExtractUriFromInternetIdentifier(address);
+            claimRequest.Destination = new LNURLPayClaimDestinaton(address);
+            return true;
+        }
+        catch { }
+
+        try
+        {
+            LNURL.LNURL.Parse(address, out _);
+            claimRequest.Destination = new LNURLPayClaimDestinaton(address);
+            return true;
+        }
+        catch { }
+
+        return false;
     }
 }

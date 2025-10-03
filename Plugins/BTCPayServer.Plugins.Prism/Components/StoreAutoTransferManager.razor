@@ -243,7 +243,7 @@
             }).ToList();
         if (!validDestinations.Any())
         {
-            DisplayErrorResult("Please include destination store and specify percentage");
+            DisplayErrorResult("Please include destination and specify percentage");
             return;
         }
         if (validDestinations.Sum(d => d.Percentage) > 100)
