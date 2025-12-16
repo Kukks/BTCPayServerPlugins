@@ -196,7 +196,7 @@ public class Smartifier
                 PubKey pubKey;
                 try
                 {
-                    pubKey = DerivationScheme.GetChild(coin.KeyPath).GetExtPubKeys().First().PubKey;
+                    pubKey = DerivationScheme.GetExtPubKeys().First().Derive(coin.KeyPath).PubKey;
                 }
                 catch (Exception e)
                 {

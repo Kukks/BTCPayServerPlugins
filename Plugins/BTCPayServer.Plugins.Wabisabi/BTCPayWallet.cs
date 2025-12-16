@@ -53,7 +53,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
     private readonly BTCPayNetworkJsonSerializerSettings _btcPayNetworkJsonSerializerSettings;
     private readonly Services.Wallets.BTCPayWallet _btcPayWallet;
     private readonly PullPaymentHostedService _pullPaymentHostedService;
-    public readonly DerivationStrategyBase DerivationScheme;
+    public readonly StandardDerivationStrategyBase DerivationScheme;
     public readonly ExplorerClient ExplorerClient;
     public WabisabiStoreSettings WabisabiStoreSettings;
     public readonly IUTXOLocker UtxoLocker;
@@ -67,7 +67,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
         BTCPayNetworkJsonSerializerSettings btcPayNetworkJsonSerializerSettings,
         Services.Wallets.BTCPayWallet btcPayWallet,
         PullPaymentHostedService pullPaymentHostedService,
-        DerivationStrategyBase derivationScheme,
+        StandardDerivationStrategyBase derivationScheme,
         ExplorerClient explorerClient,
         BTCPayKeyChain keyChain,
         string storeId,
@@ -502,7 +502,7 @@ public class BTCPayWallet : IWallet, IDestinationProvider
                 {
                     var s = await _storeRepository.FindStore(storeIdForutxo);
                     var scheme = s.GetDerivationSchemeSettings(_paymentMethodHandlerDictionary, "BTC");
-                    utxoDerivationScheme = scheme.AccountDerivation;
+                    utxoDerivationScheme = scheme.AccountDerivation as StandardDerivationStrategyBase;
                 }
 
                 List<(IndexedTxOut txout, Task<KeyPathInformation>)> scriptInfos = new();
@@ -548,8 +548,8 @@ public class BTCPayWallet : IWallet, IDestinationProvider
                 {
                     if (scriptInfos2.TryGetValue(s.ScriptPubKey, out var si))
                     {
-                        var derivation = DerivationScheme.GetChild(si.Item2.Result.KeyPath).GetExtPubKeys().First()
-                            .PubKey;
+                        var derivation = DerivationScheme.GetExtPubKeys().First()
+                            .Derive(si.Item2.Result.KeyPath).PubKey;
 
                         var hdPubKey = new HdPubKey(derivation, kp.Derive(si.Item2.Result.KeyPath).KeyPath,
                             LabelsArray.Empty,
@@ -757,7 +757,7 @@ public async Task<IEnumerable<IDestination>> GetNextDestinationsAsync(int count,
 
     public Task<ScriptType[]> GetScriptTypeAsync()
     {
-        return Task.FromResult(new []{DerivationScheme.GetDerivation(0).ScriptPubKey.GetScriptType()});
+        return Task.FromResult(new []{DerivationScheme.GetDerivation(new KeyPath(0)).ScriptPubKey.GetScriptType()});
     }
 
     private Action<(uint256 roundId, uint256 transactionId, int outputIndex)> PaymentSucceeded(string payoutId)
