@@ -19,6 +19,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
 using NBXplorer;
+using NBXplorer.DerivationStrategy;
 using WalletWasabi.Bases;
 using WalletWasabi.WabiSabi.Client;
 using WalletWasabi.Wallets;
@@ -85,7 +86,9 @@ public class WalletProvider : PeriodicRunner, IWalletProvider
             var explorerClient = _explorerClientProvider.GetExplorerClient("BTC");
             var isHotWallet = paymentMethod.IsHotWallet;
             var enabled = store.GetEnabledPaymentIds().Contains(pmi);
-            var derivationStrategy = paymentMethod.AccountDerivation;
+            var derivationStrategy = paymentMethod.AccountDerivation as StandardDerivationStrategyBase;
+            if (derivationStrategy is null)
+                return null;
             BTCPayKeyChain keychain;
             var accountKeyPath = paymentMethod.AccountKeySettings.FirstOrDefault()?.GetRootedKeyPath();
             if (isHotWallet && enabled)

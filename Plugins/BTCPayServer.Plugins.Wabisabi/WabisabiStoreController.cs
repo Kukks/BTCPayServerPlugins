@@ -10,6 +10,7 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Common;
+using BTCPayServer.Controllers.Greenfield;
 using BTCPayServer.Data;
 using BTCPayServer.Filters;
 using BTCPayServer.Security;
@@ -39,26 +40,29 @@ namespace BTCPayServer.Plugins.Wabisabi
     {
         private readonly WabisabiService _WabisabiService;
         private readonly WalletProvider _walletProvider;
-        private readonly IBTCPayServerClientFactory _btcPayServerClientFactory;
         private readonly IExplorerClientProvider _explorerClientProvider;
         private readonly WabisabiCoordinatorService _wabisabiCoordinatorService;
         private readonly IAuthorizationService _authorizationService;
+        private readonly GreenfieldPullPaymentController _pullPaymentController;
+        private readonly GreenfieldStoreOnChainWalletsController _storeOnChainWalletsController;
         private readonly WabisabiCoordinatorClientInstanceManager _instanceManager;
         private readonly Socks5HttpClientHandler _socks5HttpClientHandler;
         public WabisabiStoreController(WabisabiService WabisabiService, WalletProvider walletProvider,
-            IBTCPayServerClientFactory btcPayServerClientFactory,
             IExplorerClientProvider explorerClientProvider,
             WabisabiCoordinatorService wabisabiCoordinatorService,
             WabisabiCoordinatorClientInstanceManager instanceManager, 
             IAuthorizationService authorizationService,
-            IServiceProvider serviceProvider)
+            IServiceProvider serviceProvider,
+            GreenfieldPullPaymentController pullPaymentController,
+            GreenfieldStoreOnChainWalletsController storeOnChainWalletsController)
         {
             _WabisabiService = WabisabiService;
             _walletProvider = walletProvider;
-            _btcPayServerClientFactory = btcPayServerClientFactory;
             _explorerClientProvider = explorerClientProvider;
             _wabisabiCoordinatorService = wabisabiCoordinatorService;
             _authorizationService = authorizationService;
+            _pullPaymentController = pullPaymentController;
+            _storeOnChainWalletsController = storeOnChainWalletsController;
             _instanceManager = instanceManager;
             _socks5HttpClientHandler = serviceProvider.GetRequiredService<Socks5HttpClientHandler>();
         }
@@ -338,8 +342,7 @@ namespace BTCPayServer.Plugins.Wabisabi
 
             if (command == "payout")
             {
-                var client = await _btcPayServerClientFactory.Create(null, storeId);
-                await client.CreatePayout(storeId,
+                await _pullPaymentController.CreatePayoutThroughStore(storeId,
                     new CreatePayoutThroughStoreRequest()
                     {
                         Approved = true, Amount = spendViewModel.Amount, Destination = spendViewModel.Destination
@@ -384,8 +387,7 @@ namespace BTCPayServer.Plugins.Wabisabi
             if (command == "send")
             {
                 var userid = HttpContext.User.Claims.Single(claim => claim.Type == ClaimTypes.NameIdentifier).Value;
-                var client = await _btcPayServerClientFactory.Create(userid, storeId);
-                var tx = await client.CreateOnChainTransaction(storeId, "BTC",
+                var res = await _storeOnChainWalletsController.CreateOnChainTransaction(storeId, "BTC",
                     new CreateOnChainTransactionRequest()
                     {
                         SelectedInputs = spendViewModel.SelectedCoins?.Select(OutPoint.Parse).ToList(),
@@ -399,10 +401,12 @@ namespace BTCPayServer.Plugins.Wabisabi
                             }
                     });
 
-                TempData["SuccessMessage"] =
-                    $"The tx {tx.TransactionHash} has been broadcast.";
-
-                return RedirectToAction("UpdateWabisabiStoreSettings", new {storeId});
+                if (res is OkObjectResult { Value: OnChainWalletTransactionData tx })
+                {
+                    TempData["SuccessMessage"] =
+                        $"The tx {tx.TransactionHash} has been broadcast.";
+                    return RedirectToAction("UpdateWabisabiStoreSettings", new { storeId });
+                }
             }
 
             return View(spendViewModel);
