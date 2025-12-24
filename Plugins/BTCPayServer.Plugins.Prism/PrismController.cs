@@ -13,8 +13,14 @@ namespace BTCPayServer.Plugins.Prism;
 [ContentSecurityPolicy(CSPTemplate.AntiXSS, UnsafeInline = true)]
 public class PrismController : Controller
 {
-    [HttpGet]
-    public async Task<IActionResult> Edit()
+    [HttpGet("edit")]
+    public IActionResult Edit(string storeId)
+    {
+        return View();
+    }
+
+    [HttpGet("auto-transfer")]
+    public IActionResult AutoTransfer(string storeId)
     {
         return View();
     }

@@ -1,7 +1,6 @@
 ﻿using System;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
-using BTCPayServer.Abstractions.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -21,9 +20,13 @@ public class PrismPlugin : BaseBTCPayServerPlugin
         applicationBuilder.AddUIExtension("store-integrations-nav", "PrismNav");
         applicationBuilder.AddSingleton<SatBreaker>();
         applicationBuilder.AddHostedService(provider => provider.GetRequiredService<SatBreaker>());
+        applicationBuilder.AddScheduledTask<SatBreaker>(TimeSpan.FromHours(12));
+        applicationBuilder.AddSingleton<StoreDestinationValidator>();
+        applicationBuilder.AddSingleton<IPluginHookFilter>(provider => provider.GetRequiredService<StoreDestinationValidator>());
         applicationBuilder.AddSingleton<IPluginHookFilter, OpenSatsDestinationValidator>();
         applicationBuilder.AddSingleton<IPluginHookFilter, LNURLPrismDestinationValidator>();
         applicationBuilder.AddSingleton<IPluginHookFilter, OnChainPrismDestinationValidator>();
+        applicationBuilder.AddSingleton<IPluginHookFilter, StorePrismClaimCreate>();
         applicationBuilder.AddSingleton<IPluginHookFilter, LNURLPrismClaimCreate>();
         applicationBuilder.AddSingleton<IPluginHookFilter, OnChainPrismClaimCreate>();
         applicationBuilder.AddSingleton<IPluginHookFilter, OpenSatsPrismClaimCreate>();
