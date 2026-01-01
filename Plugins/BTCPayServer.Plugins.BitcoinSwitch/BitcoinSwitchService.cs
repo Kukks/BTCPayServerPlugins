@@ -216,9 +216,9 @@ List<AppCartItem> cartItems = null;
                     {
                         // Pin-duration segment
                         var parts = seg.Split('-', StringSplitOptions.RemoveEmptyEntries);
-                        if (parts.Length == 2 
+                        if (parts.Length == 2
                             && int.TryParse(parts[0], out var pin)
-                            && double.TryParse(parts[1], out var duration))
+                            && double.TryParse(parts[1], NumberStyles.Any, CultureInfo.InvariantCulture, out var duration))
                         {
                             actions.Add(SwitchAction.Command(pin, duration));
                         }

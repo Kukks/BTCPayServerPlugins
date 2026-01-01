@@ -275,7 +275,11 @@ public class BreezController : Controller
 
         try
         {
-            var result = client.Sdk.SendOnchain(new SendOnchainRequest(amount, address, feesHash, satPerByte));
+            
+            
+            var prep = client.Sdk.PrepareOnchainPayment(new PrepareOnchainPaymentRequest(amount, SwapAmountType.Send, satPerByte));
+            var result = client.Sdk.PayOnchain(new PayOnchainRequest(address, prep));
+            // var result = client.Sdk.SendSpontaneousPayment(new SendSpontaneousPaymentRequestew SendOnchainRequest(amount, address, feesHash, satPerByte));
             TempData[WellKnownTempData.SuccessMessage] = $"swap out created: {result.reverseSwapInfo.id}";
         }
         catch (Exception e)

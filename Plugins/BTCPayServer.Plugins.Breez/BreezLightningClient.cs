@@ -42,15 +42,15 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
             new GreenlightNodeConfig(glCreds, inviteCode)
         );
         var config = BreezSdkMethods.DefaultConfig(
-                network == NBitcoin.Network.Main ? EnvironmentType.PRODUCTION : EnvironmentType.STAGING,
+                network == NBitcoin.Network.Main ? EnvironmentType.Production : EnvironmentType.Staging,
                 apiKey,
                 nodeConfig
             ) with
             {
                 workingDir = workingDir,
-                network = network == NBitcoin.Network.Main ? Network.BITCOIN :
-                network == NBitcoin.Network.TestNet ? Network.TESTNET :
-                network == NBitcoin.Network.RegTest ? Network.REGTEST : Network.SIGNET
+                network = network == NBitcoin.Network.Main ? Network.Bitcoin :
+                network == NBitcoin.Network.TestNet ? Network.Testnet :
+                network == NBitcoin.Network.RegTest ? Network.Regtest : Network.Signet
             };
         var seed = mnemonic.DeriveSeed();
         Sdk = BreezSdkMethods.Connect(new ConnectRequest(config, seed.ToList()), this);
@@ -99,9 +99,9 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
             BOLT11 = lnPaymentDetails.data.bolt11,
             Status = payment.status switch
             {
-                PaymentStatus.FAILED => LightningPaymentStatus.Failed,
-                PaymentStatus.COMPLETE => LightningPaymentStatus.Complete,
-                PaymentStatus.PENDING => LightningPaymentStatus.Pending,
+                PaymentStatus.Failed => LightningPaymentStatus.Failed,
+                PaymentStatus.Complete => LightningPaymentStatus.Complete,
+                PaymentStatus.Pending => LightningPaymentStatus.Pending,
                 _ => throw new ArgumentOutOfRangeException()
             },
             CreatedAt = DateTimeOffset.FromUnixTimeMilliseconds(payment.paymentTime),
@@ -129,9 +129,9 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
             BOLT11 = lnPaymentDetails.data.bolt11,
             Status = p.status switch
             {
-                PaymentStatus.PENDING => LightningInvoiceStatus.Unpaid,
-                PaymentStatus.FAILED => LightningInvoiceStatus.Expired,
-                PaymentStatus.COMPLETE => LightningInvoiceStatus.Paid,
+                PaymentStatus.Pending => LightningInvoiceStatus.Unpaid,
+                PaymentStatus.Failed => LightningInvoiceStatus.Expired,
+                PaymentStatus.Complete => LightningInvoiceStatus.Paid,
                 _ => LightningInvoiceStatus.Unpaid
             },
             PaidAt = DateTimeOffset.FromUnixTimeSeconds(p.paymentTime),
@@ -162,7 +162,7 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
     public async Task<LightningInvoice[]> ListInvoices(ListInvoicesParams request,
         CancellationToken cancellation = default)
     {
-        return Sdk.ListPayments(new ListPaymentsRequest(new List<PaymentTypeFilter>(){PaymentTypeFilter.RECEIVED}, null, null,
+        return Sdk.ListPayments(new ListPaymentsRequest(new List<PaymentTypeFilter>(){PaymentTypeFilter.Received}, null, null,
                 null, request?.PendingOnly is not true, (uint?) request?.OffsetIndex, null))
             .Select(FromPayment).ToArray();
     }
@@ -180,7 +180,7 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
     public async Task<LightningPayment[]> ListPayments(ListPaymentsParams request,
         CancellationToken cancellation = default)
     {
-        return Sdk.ListPayments(new ListPaymentsRequest(new List<PaymentTypeFilter>(){PaymentTypeFilter.RECEIVED}, null, null, null,
+        return Sdk.ListPayments(new ListPaymentsRequest(new List<PaymentTypeFilter>(){PaymentTypeFilter.Received}, null, null, null,
           null,      (uint?) request?.OffsetIndex, null))
             .Select(ToLightningPayment).ToArray();
     }
@@ -283,18 +283,18 @@ public class BreezLightningClient : ILightningClient, IDisposable, EventListener
             {
                 Result = result.payment.status switch
                 {
-                    PaymentStatus.FAILED => PayResult.Error,
-                    PaymentStatus.COMPLETE => PayResult.Ok,
-                    PaymentStatus.PENDING => PayResult.Unknown,
+                    PaymentStatus.Failed => PayResult.Error,
+                    PaymentStatus.Complete => PayResult.Ok,
+                    PaymentStatus.Pending => PayResult.Unknown,
                     _ => throw new ArgumentOutOfRangeException()
                 },
                 Details = new PayDetails()
                 {
                     Status = result.payment.status switch
                     {
-                        PaymentStatus.FAILED => LightningPaymentStatus.Failed,
-                        PaymentStatus.COMPLETE => LightningPaymentStatus.Complete,
-                        PaymentStatus.PENDING => LightningPaymentStatus.Pending,
+                        PaymentStatus.Failed => LightningPaymentStatus.Failed,
+                        PaymentStatus.Complete => LightningPaymentStatus.Complete,
+                        PaymentStatus.Pending => LightningPaymentStatus.Pending,
                         _ => LightningPaymentStatus.Unknown
                     },
                     Preimage =

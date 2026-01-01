@@ -15,7 +15,6 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using PaymentRequestData = BTCPayServer.Client.Models.PaymentRequestData;
 using WebhookDeliveryData = BTCPayServer.Data.WebhookDeliveryData;
 
 namespace BTCPayServer.Plugins.Subscriptions;
@@ -107,7 +106,7 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
             var pr = new Data.PaymentRequestData()
             {
                 StoreDataId = app.StoreDataId,
-                Status = PaymentRequestData.PaymentRequestStatus.Pending,
+                Status = PaymentRequestStatus.Pending,
                 Created = DateTimeOffset.UtcNow, Archived = false,
             };
             var additionalData = lastBlob.AdditionalData;
@@ -176,7 +175,7 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
                                 var pr = new Data.PaymentRequestData()
                                 {
                                     StoreDataId = app.StoreDataId,
-                                    Status = PaymentRequestData.PaymentRequestStatus.Pending,
+                                    Status = PaymentRequestStatus.Pending,
                                     Created = DateTimeOffset.UtcNow, Archived = false
                                 };
                                 pr.SetBlob(new PaymentRequestBaseData()
@@ -290,12 +289,12 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
                 var isNew = !prBlob.AdditionalData.TryGetValue(PaymentRequestSubscriptionIdKey, out var subscriptionIdToken);
 
                 if (isNew && paymentRequestStatusUpdated.Data.Status !=
-                    PaymentRequestData.PaymentRequestStatus.Completed)
+                    PaymentRequestStatus.Completed)
                 {
                     return;
                 }
 
-                if (paymentRequestStatusUpdated.Data.Status == PaymentRequestData.PaymentRequestStatus.Completed)
+                if (paymentRequestStatusUpdated.Data.Status == PaymentRequestStatus.Completed)
                 {
                     var subscriptionId = subscriptionIdToken?.Value<string>();
                     var blob = paymentRequestStatusUpdated.Data.GetBlob();
@@ -564,6 +563,8 @@ public class SubscriptionService : EventHostedServiceBase, IWebhookProvider
 
     public const string SubscriptionStatusUpdated = "SubscriptionStatusUpdated";
     public const string SubscriptionRenewalRequested = "SubscriptionRenewalRequested";
+
+    public bool SupportsCustomerEmail => true;
 
     public Dictionary<string, string> GetSupportedWebhookTypes()
     {

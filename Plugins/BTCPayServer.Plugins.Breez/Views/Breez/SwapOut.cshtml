@@ -29,7 +29,7 @@
     var sdk = BreezService.GetClient(storeId)?.Sdk;
     if (sdk is null)
         return;
-    var inProgressSwaps = sdk.InProgressReverseSwaps();
+    var inProgressSwaps = sdk.InProgressOnchainPayments();
     var deriv = Context.GetStoreData().GetDerivationSchemeSettings(PaymentMethodHandlerDictionary, "BTC");
     var f = sdk.RecommendedFees();
     var swapOutRec = sdk.FetchReverseSwapFees(new ReverseSwapFeesRequest());

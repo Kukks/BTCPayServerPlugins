@@ -28,7 +28,7 @@ namespace BTCPayServer.Plugins.TicketTailor
     public class TicketTailorController : Controller
     {
         private readonly IHttpClientFactory _httpClientFactory;
-        private readonly TicketTailorService _ticketTailorService;
+        private readonly TicketTailorWebhookProvider _ticketTailorService;
         private readonly UriResolver _uriResolver;
         private readonly AppService _appService;
         private readonly ApplicationDbContextFactory _contextFactory;
@@ -36,7 +36,7 @@ namespace BTCPayServer.Plugins.TicketTailor
         private readonly UIInvoiceController _uiInvoiceController;
 
         public TicketTailorController(IHttpClientFactory httpClientFactory,
-            TicketTailorService ticketTailorService,
+            TicketTailorWebhookProvider ticketTailorService,
             UriResolver uriResolver,
             AppService appService,
             ApplicationDbContextFactory contextFactory,
