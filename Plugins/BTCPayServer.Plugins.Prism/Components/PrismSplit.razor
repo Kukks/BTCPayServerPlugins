@@ -89,22 +89,33 @@
         else
         {
             <div class="d-flex justify-content-between align-items-center mb-2">
-                <div class="flex-grow-1 me-2">
-                    <input type="text" @bind="Split.Source" list="users" class="form-control form-control-sm"
-                           placeholder="Lightning address or * for catch-all"
-                           title="The source that triggers this split. Use a lightning address, or * to catch all payments."/>
-                    <ValidationMessage2 For="() => Split.Source" class="text-danger small"></ValidationMessage2>
+                @if (ShouldShowEdit)
+                {
+                    <div class="flex-grow-1 me-2">
+                        <input type="text" @bind="Split.Source" list="users" class="form-control form-control-sm"
+                               placeholder="Lightning address or * for catch-all"
+                               title="The source that triggers this split. Use a lightning address, or * to catch all payments."/>
+                        <ValidationMessage2 For="() => Split.Source" class="text-danger small"></ValidationMessage2>
+                    </div>
+                }
+                else
+                {
+                    <h6 class="card-title mb-0 flex-grow-1">
+                        <span class="badge bg-primary me-2">Split</span>
+                        <span>@Split.Source</span>
+                    </h6>
+                }
+                <div class="btn-group btn-group-sm">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="ToggleEdit" title="Edit split settings">@(ShouldShowEdit ? "Done" : "Edit")</button>
+                    <button type="button" class="btn btn-outline-danger" @onclick="RemoveSplit" title="Remove this split">Remove</button>
                 </div>
-                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="RemoveSplit" title="Remove this split">
-                    Remove
-                </button>
             </div>
         }
 
         <div class="destinations-list">
-            @if (IsWalletTransfer && !ShouldShowEdit)
+            @if (!ShouldShowEdit)
             {
-                @* Read-only view for wallet transfers when not editing *@
+                @* Read-only view when not editing *@
                 @foreach (var destination in Split.Destinations)
                 {
                     <div class="d-flex gap-2 mb-2 align-items-center">
@@ -126,7 +137,7 @@
                                    title="Destination alias or address where funds will be sent"/>
                             <ValidationMessage2 For="() => destination.Destination" class="text-danger small"></ValidationMessage2>
                         </div>
-                        <div class="input-group input-group-sm" style="width: 100px;">
+                        <div class="input-group input-group-sm" style="width: 120px;">
                             <input type="number" step="0.01" min="0" max="100" value="@destination.Percentage"
                                    @onchange="@((e) => UpdateDestinationValue(destination, e.Value))"
                                    class="form-control"
@@ -135,7 +146,7 @@
                             <span class="input-group-text">%</span>
                         </div>
                         <button type="button" class="btn btn-sm btn-outline-danger"
-                                @onclick="@(() => Split.Destinations.Remove(destination))"
+                                @onclick="@(() => RemoveDestination(destination))"
                                 title="Remove this destination">×</button>
                     </div>
                 }
@@ -153,6 +164,7 @@
     [Parameter] public Split Split { get; set; }
     [Parameter] public EventCallback<Split> OnRequestRemove { get; set; }
     [Parameter] public Func<Task<bool>> OnSave { get; set; }
+    [Parameter] public Func<Task> OnSaveForce { get; set; }
 
     private bool IsWalletTransfer => Split?.Source?.StartsWith("storetransfer:") == true;
     private bool IsEditing { get; set; } = false;
@@ -252,9 +264,16 @@
         var usedPercentage = Split.Destinations.Sum(d => d.Percentage);
         var remaining = Math.Max(0, 100 - usedPercentage);
         Split.Destinations.Add(new Prism.PrismSplit { Percentage = remaining });
+        // Ensure we stay in edit mode after adding a destination
+        IsEditing = true;
     }
 
     private void RemoveSplit() => OnRequestRemove.InvokeAsync(Split);
+
+    private void RemoveDestination(Prism.PrismSplit destination)
+    {
+        Split.Destinations.Remove(destination);
+    }
 
     private void SendNow()
     {

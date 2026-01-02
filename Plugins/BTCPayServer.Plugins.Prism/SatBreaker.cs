@@ -361,6 +361,7 @@ namespace BTCPayServer.Plugins.Prism
         }
 
         public async Task WaitAndLock(CancellationToken cancellationToken = default)
+        
         {
             await _updateLock.WaitAsync(cancellationToken);
         }
@@ -384,7 +385,7 @@ namespace BTCPayServer.Plugins.Prism
             }
         }
 
-        internal PrismSettings GetInternal(string storeId)
+        public PrismSettings GetInternal(string storeId)
         {
             return JObject
                 .FromObject(_prismSettings.TryGetValue(storeId, out var settings) && settings is not null

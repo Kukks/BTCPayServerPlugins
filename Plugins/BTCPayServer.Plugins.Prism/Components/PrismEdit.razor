@@ -61,9 +61,13 @@ else
         }
     </datalist>
     <datalist id="availableStores">
+        @foreach (var destination in Destinations)
+        {
+            <option value="@destination">@destination (alias)</option>
+        }
         @foreach (var s in AvailableStores)
         {
-            <option value="@s.Value">@s.Text</option>
+            <option value="@s.Value">@s.Text (store)</option>
         }
     </datalist>
 
@@ -148,7 +152,7 @@ else
                     <!-- Prisms -->
                     @foreach (var item in Settings.Splits.Where(s => s.Source is null || !s.Source.StartsWith("pos:")))
                     {
-                        <PrismSplit Split="@item" OnRequestRemove="@RemovePrism" OnSave="@SaveSettings"/>
+                        <PrismSplit Split="@item" OnRequestRemove="@RemovePrism" OnSave="@SaveSettings" OnSaveForce="@SaveSettingsForce"/>
                     }
 
                     <!-- POS Product Splits Section -->
@@ -282,7 +286,7 @@ else
         }
     }
 
-    public string[] Destinations => Settings.Destinations.Where(kv => !(kv.Value?.Destination?.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase) ?? false)).Select(kv => kv.Key).ToArray();
+    public string[] Destinations => Settings.Destinations.Select(kv => kv.Key).ToArray();
 
     public string[] AllDestinationAliases => Settings.Destinations.Keys.ToArray();
 
@@ -512,8 +516,8 @@ else
             rawDestination = aliasedDest.Destination;
         }
 
-        // Validate the raw destination
-        var result = PluginHookService.ApplyFilter("prism-destination-validate", rawDestination).ConfigureAwait(false).GetAwaiter().GetResult();
+        // Validate the raw destination (use Task.Run to avoid sync-over-async deadlock in Blazor)
+        var result = Task.Run(() => PluginHookService.ApplyFilter("prism-destination-validate", rawDestination)).GetAwaiter().GetResult();
 
         if (result is not PrismDestinationValidationResult validationResult || !validationResult.Success)
         {
@@ -569,8 +573,29 @@ else
     {
         if (Settings.Splits.Remove(item))
         {
-            await SaveSettings();
+            await SaveSettingsForce();
             await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task SaveSettingsForce()
+    {
+        // Save without validation - used for remove operations
+        await SatBreaker.WaitAndLock();
+        try
+        {
+            var settz = SatBreaker.GetInternal(StoreId);
+            settz.Splits = Settings.Splits;
+            settz.Destinations = Settings.Destinations;
+            settz.Enabled = Settings.Enabled;
+            settz.SatThreshold = Settings.SatThreshold;
+            settz.Reserve = Settings.Reserve;
+            Settings = settz;
+            await SatBreaker.UpdatePrismSettingsForStore(StoreId, settz, true);
+        }
+        finally
+        {
+            SatBreaker.Unlock();
         }
     }
 
@@ -613,7 +638,8 @@ else
         {
             var settz = SatBreaker.GetInternal(StoreId);
             settz.Destinations = Settings.Destinations;
-            await UpdateAndShowResult(settz, true);
+            Settings = settz;
+            await SatBreaker.UpdatePrismSettingsForStore(StoreId, settz, true);
         }
         finally
         {
@@ -763,7 +789,9 @@ else
                 settingsSplit.Destinations.RemoveAll(split => split.Destination == SelectedDestinationId);
             }
 
+            await SaveSettingsForce();
             SelectedDestinationId = null;
+            await InvokeAsync(StateHasChanged);
         }
 
         else
@@ -812,6 +840,7 @@ else
             }
 
             SelectedDestinationId = "null";
+            await InvokeAsync(StateHasChanged);
         }
     }
 
