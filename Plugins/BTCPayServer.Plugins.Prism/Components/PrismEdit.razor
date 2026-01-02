@@ -89,7 +89,6 @@ else
                             <li><button type="button" class="dropdown-item" @onclick="CreateNewWalletTransfer">Wallet Transfer</button></li>
                         </ul>
                     </div>
-                    <button type="submit" class="btn btn-success">Save</button>
                     <select class="form-select" style="max-width: fit-content" @bind="SelectedDestinationId">
                         <option value="null">Destinations</option>
                         @foreach (var destination in Destinations)
@@ -129,18 +128,18 @@ else
                     <!-- Settings Row -->
                     <div class="d-flex align-items-center gap-4 mb-4 p-3 bg-light rounded flex-wrap">
                         <div class="d-flex align-items-center gap-2" title="Enable or disable all prism processing for this store">
-                            <input @bind="Settings.Enabled" type="checkbox" class="btcpay-toggle" id="prism-enabled"/>
+                            <input @bind="Settings.Enabled" @bind:after="SaveGlobalSettings" type="checkbox" class="btcpay-toggle" id="prism-enabled"/>
                             <label for="prism-enabled" class="mb-0">Enabled</label>
                         </div>
                         <div class="d-flex align-items-center gap-2">
                             <label class="mb-0 text-nowrap" title="Minimum sats to accumulate before creating a payout">Threshold:</label>
-                            <input type="number" @bind="Settings.SatThreshold" min="1" class="form-control form-control-sm" style="width: 100px"
+                            <input type="number" @bind="Settings.SatThreshold" @bind:after="SaveGlobalSettings" min="1" class="form-control form-control-sm" style="width: 100px"
                                    title="Minimum sats to accumulate before creating a payout. Higher values reduce fees but delay payments."/>
                             <span class="text-muted">sats</span>
                         </div>
                         <div class="d-flex align-items-center gap-2">
                             <label class="mb-0 text-nowrap" title="Percentage to reserve from payouts to cover network fees">Reserve:</label>
-                            <input type="number" @bind="Settings.Reserve" min="0" max="100" step="any" class="form-control form-control-sm" style="width: 80px"
+                            <input type="number" @bind="Settings.Reserve" @bind:after="SaveGlobalSettings" min="0" max="100" step="any" class="form-control form-control-sm" style="width: 80px"
                                    title="Percentage of each payout reserved to cover network fees. Remaining balance carries over."/>
                             <span class="text-muted">%</span>
                         </div>
@@ -149,7 +148,7 @@ else
                     <!-- Prisms -->
                     @foreach (var item in Settings.Splits.Where(s => s.Source is null || !s.Source.StartsWith("pos:")))
                     {
-                        <PrismSplit Split="@item" OnRequestRemove="@RemovePrism"/>
+                        <PrismSplit Split="@item" OnRequestRemove="@RemovePrism" OnSave="@SaveSettings"/>
                     }
 
                     <!-- POS Product Splits Section -->
@@ -241,7 +240,7 @@ else
                         <PrismDestinationEditor
                             StoreId="@StoreId"
                             ValidateId="ValidateId"
-                            ValidateDestination="s => ValidateDestination(s, false)"
+                            ValidateDestination="s => ValidateDestinationSimple(s, false)"
                             Id="@SelectedDestinationId"
                             Settings="@SelectedDestination"
                             OnUpdate="OnDestinationUpdated"
@@ -284,6 +283,8 @@ else
     }
 
     public string[] Destinations => Settings.Destinations.Where(kv => !(kv.Value?.Destination?.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase) ?? false)).Select(kv => kv.Key).ToArray();
+
+    public string[] AllDestinationAliases => Settings.Destinations.Keys.ToArray();
 
     public bool Loading { get; set; } = true;
     public List<LightningAddressData> Users { get; set; } = new();
@@ -436,6 +437,8 @@ else
         var previousState = EditContext.GetValidationMessages().Any();
         MessageStore.Clear();
         StatusMessageModel = null;
+
+        // Validate regular prisms (not POS or wallet transfers)
         foreach (var prism in Settings.Splits.Where(c => c.Source is null || !(c.Source.StartsWith("pos") || c.Source.StartsWith("storetransfer"))))
         {
             if (string.IsNullOrEmpty(prism.Source))
@@ -447,48 +450,93 @@ else
                 MessageStore.Add(() => prism.Source, "Sources must be unique");
             }
 
-            if (!(prism.Destinations?.Count > 0))
-            {
-                MessageStore.Add(() => prism.Destinations, "At least one destination is required");
-                continue;
-            }
+            ValidateSplitDestinations(prism);
+        }
 
-            var sum = prism.Destinations.Sum(d => d.Percentage);
-            if (sum > 100)
+        // Validate wallet transfers (storetransfer: sources)
+        foreach (var transfer in Settings.Splits.Where(c => c.Source?.StartsWith("storetransfer") == true))
+        {
+            var parsed = SatBreaker.ParseSource(transfer.Source);
+            PayoutMethodId expectedPayoutMethod = null;
+            if (parsed?.paymentMethod != null)
             {
-                MessageStore.Add(() => prism.Destinations, "Destinations must sum up to a 100 maximum");
+                var pmStr = parsed.Value.paymentMethod.ToString();
+                expectedPayoutMethod = pmStr.Contains("LN")
+                    ? PayoutTypes.LN.GetPayoutMethodId("BTC")
+                    : PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
             }
-
-            foreach (var destination in prism.Destinations)
-            {
-                var dest = destination.Destination;
-                if (string.IsNullOrEmpty(dest))
-                {
-                    MessageStore.Add(() => destination.Destination, "Destination is required");
-                    continue;
-                }
-
-                if (!ValidateDestination(dest, true))
-                {
-                    MessageStore.Add(() => destination.Destination, "Destination is not valid");
-                }
-            }
+            ValidateSplitDestinations(transfer, expectedPayoutMethod);
         }
 
         if (previousState != EditContext.GetValidationMessages().Any())
             EditContext.NotifyValidationStateChanged();
     }
 
-    private bool ValidateDestination(string dest, bool allowAlias)
+    private void ValidateSplitDestinations(Split prism, PayoutMethodId expectedPayoutMethod = null)
     {
-        if (allowAlias && Destinations.Contains(dest))
+        if (!(prism.Destinations?.Count > 0))
         {
-            return true;
+            MessageStore.Add(() => prism.Destinations, "At least one destination is required");
+            return;
         }
 
-        // Use ConfigureAwait(false) to avoid deadlock in synchronous context
-        var result = PluginHookService.ApplyFilter("prism-destination-validate", dest).ConfigureAwait(false).GetAwaiter().GetResult();
-        return result is true or PrismDestinationValidationResult {Success: true};
+        var sum = prism.Destinations.Sum(d => d.Percentage);
+        if (sum > 100)
+        {
+            MessageStore.Add(() => prism.Destinations, "Destinations must sum up to a 100 maximum");
+        }
+
+        foreach (var destination in prism.Destinations)
+        {
+            var dest = destination.Destination;
+            if (string.IsNullOrEmpty(dest))
+            {
+                MessageStore.Add(() => destination.Destination, "Destination is required");
+                continue;
+            }
+
+            var validationResult = ValidateDestination(dest, allowAlias: true, expectedPayoutMethod);
+            if (!validationResult.success)
+            {
+                MessageStore.Add(() => destination.Destination, validationResult.error ?? "Destination is not valid");
+            }
+        }
+    }
+
+    private (bool success, string error) ValidateDestination(string dest, bool allowAlias, PayoutMethodId expectedPayoutMethod = null)
+    {
+        // If it's an alias, resolve to underlying destination
+        string rawDestination = dest;
+        if (allowAlias && Settings.Destinations.TryGetValue(dest, out var aliasedDest))
+        {
+            rawDestination = aliasedDest.Destination;
+        }
+
+        // Validate the raw destination
+        var result = PluginHookService.ApplyFilter("prism-destination-validate", rawDestination).ConfigureAwait(false).GetAwaiter().GetResult();
+
+        if (result is not PrismDestinationValidationResult validationResult || !validationResult.Success)
+        {
+            return (false, "Destination is not valid");
+        }
+
+        // Check payment method compatibility if expected
+        if (expectedPayoutMethod != null && validationResult.PayoutMethodId != null)
+        {
+            if (validationResult.PayoutMethodId != expectedPayoutMethod)
+            {
+                var expectedType = expectedPayoutMethod.ToString().Contains("LN") ? "Lightning" : "On-chain";
+                var actualType = validationResult.PayoutMethodId.ToString().Contains("LN") ? "Lightning" : "On-chain";
+                return (false, $"Destination is {actualType} but transfer is {expectedType}");
+            }
+        }
+
+        return (true, null);
+    }
+
+    private bool ValidateDestinationSimple(string dest, bool allowAlias)
+    {
+        return ValidateDestination(dest, allowAlias).success;
     }
 
     public ValidationMessageStore MessageStore { get; set; }
@@ -521,8 +569,41 @@ else
     {
         if (Settings.Splits.Remove(item))
         {
+            await SaveSettings();
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    private async Task<bool> SaveSettings()
+    {
+        // Trigger validation
+        if (EditContext?.Validate() == false)
+        {
+            return false;
+        }
+
+        await SatBreaker.WaitAndLock();
+        try
+        {
+            var settz = SatBreaker.GetInternal(StoreId);
+            settz.Splits = Settings.Splits;
+            settz.Destinations = Settings.Destinations;
+            settz.Enabled = Settings.Enabled;
+            settz.SatThreshold = Settings.SatThreshold;
+            settz.Reserve = Settings.Reserve;
+            Settings = settz;
+            await SatBreaker.UpdatePrismSettingsForStore(StoreId, settz, true);
+            return true;
+        }
+        finally
+        {
+            SatBreaker.Unlock();
+        }
+    }
+
+    private async Task SaveGlobalSettings()
+    {
+        await SaveSettings();
     }
 
     private async Task SaveDestinations()
