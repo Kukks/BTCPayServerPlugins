@@ -107,18 +107,73 @@ namespace BTCPayServer.Plugins.Prism
             PushEvent(new CheckPayoutsEvt());
         }
 
+        public override async Task StopAsync(CancellationToken cancellationToken)
+        {
+            await base.StopAsync(cancellationToken);
+            _updateLock.Dispose();
+        }
+
         public record GlobalPrismSettings
         {
             public DateTimeOffset? LastProcessedDate  { get; set; }
         }
         public record ScheduleDayEvent(string forceSplitSource = null);
 
+        public enum TransferFrequency { Daily, Weekly, Monthly }
+
+        public record TransferSchedule(TransferFrequency Frequency, int DayValue = 1)
+        {
+            public bool IsToday(DateTimeOffset now)
+            {
+                return Frequency switch
+                {
+                    TransferFrequency.Daily => true,
+                    TransferFrequency.Weekly => (int)now.DayOfWeek == DayValue, // 0=Sunday, 1=Monday, etc.
+                    TransferFrequency.Monthly => now.Day == DayValue,
+                    _ => false
+                };
+            }
+
+            public override string ToString()
+            {
+                return Frequency switch
+                {
+                    TransferFrequency.Daily => "D",
+                    TransferFrequency.Weekly => $"W:{DayValue}",
+                    TransferFrequency.Monthly => $"M:{DayValue}",
+                    _ => "D"
+                };
+            }
+
+            public static TransferSchedule Parse(string s)
+            {
+                if (string.IsNullOrEmpty(s) || s == "D")
+                    return new TransferSchedule(TransferFrequency.Daily);
+
+                if (s.StartsWith("W:") && int.TryParse(s[2..], out var weekDay))
+                    return new TransferSchedule(TransferFrequency.Weekly, weekDay);
+
+                if (s.StartsWith("M:") && int.TryParse(s[2..], out var monthDay))
+                    return new TransferSchedule(TransferFrequency.Monthly, monthDay);
+
+                // Legacy format: comma-separated days (treat as monthly on first day)
+                if (s.Contains(',') || int.TryParse(s, out var legacyDay))
+                {
+                    var days = s.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                    if (days.Length > 0 && int.TryParse(days[0], out var firstDay))
+                        return new TransferSchedule(TransferFrequency.Monthly, firstDay);
+                }
+
+                return new TransferSchedule(TransferFrequency.Daily);
+            }
+        }
+
         public async Task Do(CancellationToken cancellationToken)
         {
 
             var globalPrismSettings = await _settingsRepository.GetSettingAsync<GlobalPrismSettings>()??new GlobalPrismSettings();
 
-            if (globalPrismSettings.LastProcessedDate.HasValue && globalPrismSettings.LastProcessedDate.Value.Day == DateTimeOffset.UtcNow.Day)
+            if (globalPrismSettings.LastProcessedDate.HasValue && globalPrismSettings.LastProcessedDate.Value.Date == DateTimeOffset.UtcNow.Date)
             {
                 return;
             } 
@@ -148,6 +203,10 @@ namespace BTCPayServer.Plugins.Prism
         private async Task<ILightningClient> ConstructLightningClient(string storeId)
         {
             var store = await _storeRepository.FindStore(storeId);
+            if (store is null)
+            {
+                return null;
+            }
 
             var network = _btcPayNetworkProvider.GetNetwork<BTCPayNetwork>("BTC");
             var id = PaymentTypes.LN.GetPaymentMethodId("BTC");
@@ -314,6 +373,19 @@ namespace BTCPayServer.Plugins.Prism
 
         public async Task<PrismSettings> Get(string storeId)
         {
+            await WaitAndLock();
+            try
+            {
+                return GetInternal(storeId);
+            }
+            finally
+            {
+                Unlock();
+            }
+        }
+
+        internal PrismSettings GetInternal(string storeId)
+        {
             return JObject
                 .FromObject(_prismSettings.TryGetValue(storeId, out var settings) && settings is not null
                     ? settings
@@ -328,7 +400,7 @@ namespace BTCPayServer.Plugins.Prism
             {
                 if (!skipLock)
                     await WaitAndLock();
-                var currentSettings = await Get(storeId);
+                var currentSettings = skipLock ? GetInternal(storeId) : await Get(storeId);
 
                 if (currentSettings.Version != updatedSettings.Version)
                 {
@@ -492,45 +564,52 @@ namespace BTCPayServer.Plugins.Prism
         }
 
 
-        public static (int[] schedule, PaymentMethodId paymentMethod, LightMoney amount)? ParseSource(string source)
+        public static (TransferSchedule schedule, PaymentMethodId paymentMethod, LightMoney amount)? ParseSource(string source)
         {
-            return TryParseSource(source, out var dest)? dest: null;
+            return TryParseSource(source, out var dest) ? dest : null;
         }
 
-        public static string EncodeSource(int[] schedule, PaymentMethodId paymentMethod, LightMoney amount )
+        public static string EncodeSource(TransferSchedule schedule, PaymentMethodId paymentMethod, LightMoney amount)
         {
-            return $"storetransfer:{paymentMethod}:{amount}:{string.Join(',', schedule)}";
+            return $"storetransfer:{paymentMethod}:{amount}:{schedule}";
         }
-        
-        public static bool TryParseSource(string source, out (int[] schedule, PaymentMethodId paymentMethod, LightMoney? amount)? dest)
-        {;
+
+        public static bool TryParseSource(string source, out (TransferSchedule schedule, PaymentMethodId paymentMethod, LightMoney? amount)? dest)
+        {
+            dest = null;
+
+            if (string.IsNullOrEmpty(source) || !source.StartsWith("storetransfer:"))
+            {
+                return false;
+            }
+
+            var parts = source.Split(':');
+            if (parts.Length < 4)
+            {
+                return false;
+            }
 
             try
             {
-                if (source.StartsWith("storetransfer:"))
+                var scheduleStr = parts.Length >= 5 ? $"{parts[3]}:{parts[4]}" : parts[3];
+                var schedule = TransferSchedule.Parse(scheduleStr);
+
+                var paymentMethod = string.IsNullOrEmpty(parts[1]) ? PaymentTypes.LN.GetPaymentMethodId("BTC") : PaymentMethodId.Parse(parts[1]);
+                var amount = string.IsNullOrEmpty(parts[2]) ? null : LightMoney.Parse(parts[2]);
+
+                // Validate amount is positive if specified
+                if (amount != null && amount <= LightMoney.Zero)
                 {
-                    var parts = source.Split(':');
-
-                    var schedule = parts[3].Split(',', StringSplitOptions.RemoveEmptyEntries).Select(int.Parse).ToArray();
-
-                    var paymentMethod = string.IsNullOrEmpty(parts[1])? PaymentTypes.LN.GetPaymentMethodId("BTC"): PaymentMethodId.Parse(parts[1]);
-                    
-                    var amount = string.IsNullOrEmpty(parts[2])? null: LightMoney.Parse(parts[2]);
-
-                    
-                    dest = (schedule, paymentMethod, amount);
-                    return true;
+                    return false;
                 }
+
+                dest = (schedule, paymentMethod, amount);
+                return true;
             }
             catch (Exception)
             {
-
+                return false;
             }
-
-            dest = null;
-
-            return false;
-
         }
         
 
@@ -552,11 +631,12 @@ namespace BTCPayServer.Plugins.Prism
                         _prismSettings.Remove(storeRemovedEvent.StoreId);
                         return;
                     case ScheduleDayEvent scheduleDayEvent:
-                        foreach (var (storeId, prismSettings) in _prismSettings)
+                        // Use ToList() to create a snapshot, preventing "Collection was modified" if stores are removed during async iteration
+                        foreach (var (storeId, prismSettings) in _prismSettings.ToList())
                         {
                                 if (!prismSettings.EnableScheduledAutomation && string.IsNullOrEmpty(scheduleDayEvent.forceSplitSource)) continue;
 
-                                var prisms = await DetermineMatches(storeId, prismSettings, DateTimeOffset.UtcNow.Day, scheduleDayEvent.forceSplitSource);
+                                var prisms = await DetermineMatches(storeId, prismSettings, DateTimeOffset.UtcNow, scheduleDayEvent.forceSplitSource);
                                 Dictionary<string,LightMoney> destinationAmounts = new();
                                 foreach (var prism in prisms)
                                 {
@@ -655,7 +735,7 @@ namespace BTCPayServer.Plugins.Prism
             }
         }
 
-        private async Task<(Split, LightMoney)[]> DetermineMatches(string storeId, PrismSettings prismSettings, int utcNowDay, string forceSplitSource = null)
+        private async Task<(Split, LightMoney)[]> DetermineMatches(string storeId, PrismSettings prismSettings, DateTimeOffset utcNow, string forceSplitSource = null)
         {
 
             if (prismSettings.PendingPayouts.Any(pair => pair.Value.ScheduledTransferAmount > 0))
@@ -663,11 +743,11 @@ namespace BTCPayServer.Plugins.Prism
                 // we skip as there are payouts with scheduled transfer amount > 0 and this may conflict and end up oversending.
                 return Array.Empty<(Split, LightMoney)>();
             }
-            
+
             var splitsWithStoreTransfer = prismSettings.Splits.Select((split => (split, ParseSource(split.Source)))).Where(pair => pair.Item2 != null).ToArray();
-            
+
             var splitsWithScheduleForToday = splitsWithStoreTransfer
-                .Where(part =>  part.Item2.Value.schedule.Any(day => day == utcNowDay)).ToList();
+                .Where(part => part.Item2.Value.schedule.IsToday(utcNow)).ToList();
 
 
             if (!splitsWithScheduleForToday.Any() && string.IsNullOrEmpty(forceSplitSource)) return Array.Empty<(Split, LightMoney)>();
@@ -792,6 +872,13 @@ namespace BTCPayServer.Plugins.Prism
                           !PayoutMethodId.TryParse(destinationSettings?.PayoutMethodId, out var pmi2)
                     ? PayoutTypes.LN.GetPayoutMethodId("BTC")
                     : pmi2;
+
+                // Skip on-chain payouts below dust limit (546 sats)
+                const long DustLimit = 546;
+                if (pmi == PayoutTypes.CHAIN.GetPayoutMethodId("BTC") && payoutAmount < DustLimit)
+                {
+                    continue;
+                }
 
                 var source = "Prism";
                 if (destinationSettings is not null)

@@ -1,78 +1,72 @@
-﻿<div class="row mt-4">
-    
-    @if (DestinationBalance is not null)
-    {
-        <div class="col-sm-12  col-md-12 col-lg-6  col-xxl-constrain border border-light">
-            <h4 class="text-center p-2">Destination Pending Balances</h4>
-            <p class="text-muted text-center p-2">These are the current balances of destinations. Once the threshold is reached for a destination, a payout is generated of that amount (minus the reserve fee amount to cover potential costs).</p>
-
-            <table class="table table-sm">
-                <tr>
-                    <th>Destination</th>
-                    <th>Sats</th>
-                    <th>Actions</th>
-                </tr>
-                @foreach (var (dest, balance) in DestinationBalance)
-                {
+@if (HasData)
+{
+    <div class="card mt-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0" title="Funds accumulated per destination and pending payouts waiting to be processed">Balances & Payouts</h5>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm mb-0">
+                <thead>
                     <tr>
-                        <td class="text-truncate" style="max-width: 200px">@dest</td>
-                        <td>@(balance / 1000m)</td>
-                        <td>
-                            @if (UpdatingDestination == dest)
-                            {
-                                <input type="number" @bind="UpdatingValue" min="0"/>
-
-                                <button type="button" class="btn btn-sm btn-link" @onclick="() => UpdatingDestination = null">Cancel</button>
-                                <button type="button" class="btn btn-sm btn-link" @onclick="Update" disabled="@IsActionOngoing">Update</button>
-                            }
-                            else
-                            {
-
-                                <button type="button" class="btn btn-sm btn-link" @onclick="() => StartUpdate(dest, balance)" disabled="@IsActionOngoing">Update</button>
-                            }
-                        </td>
+                        <th>Destination</th>
+                        <th class="text-end">Amount</th>
+                        <th>Status</th>
+                        <th></th>
                     </tr>
-                }
+                </thead>
+                <tbody>
+                    @foreach (var item in GetUnifiedData())
+                    {
+                        <tr>
+                            <td class="text-truncate" style="max-width: 200px" title="@item.Destination">@item.Destination</td>
+                            <td class="text-end">@item.Amount.ToString("N0") sats</td>
+                            <td>
+                                @if (item.HasPayout)
+                                {
+                                    <span class="badge bg-warning text-dark" title="A payout has been created and is waiting to be processed by the payout processor">Payout pending</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary" title="Funds are accumulating until the threshold is reached">Accumulating</span>
+                                }
+                            </td>
+                            <td class="text-end">
+                                @if (item.HasPayout)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-danger"
+                                            @onclick="() => CancelPayout(item.PayoutId)"
+                                            disabled="@IsActionOngoing"
+                                            title="Cancel this pending payout and return funds to the accumulating balance">Cancel</button>
+                                }
+                                else if (UpdatingDestination == item.Destination)
+                                {
+                                    <div class="d-flex gap-1 justify-content-end">
+                                        <input type="number" @bind="UpdatingValue" min="0" class="form-control form-control-sm" style="width: 100px"
+                                               title="New balance in sats"/>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => UpdatingDestination = null" title="Cancel editing">×</button>
+                                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="Update" disabled="@IsActionOngoing" title="Save new balance">Save</button>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                                            @onclick="() => StartUpdate(item.Destination, item.RawBalance)"
+                                            disabled="@IsActionOngoing"
+                                            title="Manually adjust the accumulated balance for this destination">Edit</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
             </table>
         </div>
-    }
-
-    @if (PendingPayouts is not null)
-    {
-        <div class="col-sm-12 col-md-12 col-lg-6 col-xxl-constrain  border border-light">
-            <h4 class="text-center p-2">Pending Payouts</h4>
-            <p class="text-muted text-center p-2">These payouts were generated by Prism after a threshold for a destination was reached. If these payouts are cancelled, the original destination will be credited back the payout amount. If a payout completes, we attempt to get the actual fee spent to adjust the destination balance accordingly.</p>
-            <table class="table table-sm">
-                <tr>
-                    <th>Payout Id</th>
-                    <th>Destination</th>
-                    <th>Reserve fee</th>
-                    <th>Amount</th>
-                    <th>Store transfer amount</th>
-                    <th>Actions</th>
-                </tr>
-                @foreach (var (payoutId, pendingPayout) in PendingPayouts)
-                {
-                    <tr>
-                        <td style="word-break:break-all;">@payoutId</td>
-                        <td style="word-break:break-all;">@pendingPayout.DestinationId</td>
-                        <td style="word-break:break-all;">@pendingPayout.FeeCharged</td>
-                        <td style="word-break:break-all;">@pendingPayout.PayoutAmount</td>
-                        <td style="word-break:break-all;">@pendingPayout.ScheduledTransferAmount</td>
-                        <td>
-                            <button type="button" class="btn btn-sm btn-link" @onclick="() => CancelPayout(payoutId)" disabled="@IsActionOngoing">Cancel</button>
-                        </td>
-                    </tr>
-                }
-            </table>
-        </div>
-    }
-</div>
+    </div>
+}
 
 @code {
-
     private string? UpdatingDestination { get; set; }
     private long? UpdatingValue { get; set; }
+    private bool IsActionOngoing { get; set; }
 
     [Parameter]
     public Dictionary<string, long> DestinationBalance { get; set; }
@@ -83,17 +77,44 @@
     [Parameter]
     public EventCallback<(string destination, long newBalance)> OnUpdate { get; set; }
 
-    private bool IsActionOngoing { get; set; }
-
     [Parameter]
     public EventCallback<(string payoutId, TaskCompletionSource tcs)> OnCancelPayout { get; set; }
 
-    private EventCallback StartUpdate(string dest, long balance)
-    {
+    private bool HasData => (DestinationBalance?.Any() == true) || (PendingPayouts?.Any() == true);
 
+    private record UnifiedRow(string Destination, decimal Amount, long RawBalance, bool HasPayout, string? PayoutId);
+
+    private IEnumerable<UnifiedRow> GetUnifiedData()
+    {
+        var result = new Dictionary<string, UnifiedRow>();
+
+        // Add balances
+        if (DestinationBalance != null)
+        {
+            foreach (var (dest, balance) in DestinationBalance)
+            {
+                result[dest] = new UnifiedRow(dest, balance / 1000m, balance, false, null);
+            }
+        }
+
+        // Override with payouts (payout takes precedence in display)
+        if (PendingPayouts != null)
+        {
+            foreach (var (payoutId, payout) in PendingPayouts)
+            {
+                var dest = payout.DestinationId;
+                var amount = payout.PayoutAmount > 0 ? payout.PayoutAmount : payout.ScheduledTransferAmount;
+                result[dest] = new UnifiedRow(dest, amount, 0, true, payoutId);
+            }
+        }
+
+        return result.Values.OrderBy(r => r.Destination);
+    }
+
+    private void StartUpdate(string dest, long balance)
+    {
         UpdatingDestination = dest;
-        UpdatingValue = Convert.ToInt32(balance / 1000m);
-        return EventCallback.Empty;
+        UpdatingValue = (long)Math.Min(long.MaxValue, balance / 1000);
     }
 
     private async Task Update()

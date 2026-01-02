@@ -3,17 +3,20 @@ using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Data.Payouts.LightningLike;
 using BTCPayServer.HostedServices;
+using Microsoft.Extensions.Logging;
 
 namespace BTCPayServer.Plugins.Prism;
 
 public class LNURLPrismClaimCreate : IPluginHookFilter
 {
     private readonly BTCPayNetworkProvider _networkProvider;
+    private readonly ILogger<LNURLPrismClaimCreate> _logger;
     public string Hook => "prism-claim-create";
 
-    public LNURLPrismClaimCreate(BTCPayNetworkProvider networkProvider)
+    public LNURLPrismClaimCreate(BTCPayNetworkProvider networkProvider, ILogger<LNURLPrismClaimCreate> logger)
     {
         _networkProvider = networkProvider;
+        _logger = logger;
     }
     public async Task<object> Execute(object args)
     {
@@ -39,9 +42,9 @@ public class LNURLPrismClaimCreate : IPluginHookFilter
                 claimRequest.Destination = new LNURLPayClaimDestinaton(potentialLnurl);
                 return claimRequest;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // ignored
+                _logger.LogDebug(ex, "Failed to parse {Destination} as LNURL", potentialLnurl);
             }
         }
 

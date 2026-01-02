@@ -1,104 +1,253 @@
-﻿<div class="border border-light p-2 m-1">
-    <div class="form-group">
-        <label class="form-label">Source</label>
-        <input type="text" @bind="Split.Source" list="users" class="form-control src"/>
-        <ValidationMessage2 For="() => Split.Source" class="text-danger"></ValidationMessage2>
-    </div>
-    <table class="table mb-0">
-        <thead>
-        <tr>
-            <th>
-                Destination
-            </th>
-            <th> Percentage</th>
-            <th> Actions</th>
-        </tr>
-        </thead>
-        <tbody>
-        @foreach (var destination in Split.Destinations)
-        {
-            <tr>
-                <td>
-                    <input type="text" @bind="@destination.Destination" list="destinations" class="form-control dest"/>
+@using BTCPayServer.Lightning
+@using BTCPayServer.Payments
+@inject SatBreaker SatBreaker
+@inject EventAggregator EventAggregator
 
-                    <ValidationMessage2 For="() => destination.Destination" class="text-danger"></ValidationMessage2>
-                </td>
-                <td>
-                    <input type="range" value="@destination.Percentage" @oninput="@((e) => UpdateDestinationValue(destination, e.Value))" min="0" step='0.01' class="form-range" max="100"/>
-                    <div class="input-group input-group-sm">
-                        <input type="number" step='0.01' value="@destination.Percentage" @onchange="@((e) => UpdateDestinationValue(destination, e.Value))" class="form-control form-control-sm"/>
+<div class="card mb-3">
+    <div class="card-body">
+        @if (IsWalletTransfer)
+        {
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="card-title mb-0">
+                    <span class="badge bg-secondary me-2">@WalletPaymentMethod</span>
+                    @if (!string.IsNullOrEmpty(WalletAmount))
+                    {
+                        <span>@WalletAmount sats</span>
+                    }
+                    else
+                    {
+                        <span class="text-muted">Full balance</span>
+                    }
+                    <span class="text-muted ms-2">— @GetScheduleDisplayText()</span>
+                </h6>
+                <div class="btn-group btn-group-sm">
+                    <button type="button" class="btn btn-outline-success" @onclick="SendNow" title="Execute this transfer immediately, ignoring the schedule">Send</button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="ToggleEdit" title="Edit transfer settings">@(ShouldShowEdit ? "Done" : "Edit")</button>
+                    <button type="button" class="btn btn-outline-danger" @onclick="RemoveSplit" title="Remove this wallet transfer">Remove</button>
+                </div>
+            </div>
+
+            @if (ShouldShowEdit)
+            {
+                <div class="row mb-3 border-top pt-3 g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Payment Method</label>
+                        <select class="form-select form-select-sm" @bind="WalletPaymentMethod" @bind:after="UpdateWalletSource"
+                                title="Which wallet balance to transfer from">
+                            <option value="BTC-CHAIN">On-chain</option>
+                            <option value="BTC-LN">Lightning</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Amount (sats)</label>
+                        <input type="text" class="form-control form-control-sm" @bind="WalletAmount" @bind:after="UpdateWalletSource"
+                               placeholder="Full balance"
+                               title="Amount to transfer in satoshis. Leave empty to transfer the entire wallet balance."/>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Frequency</label>
+                        <select class="form-select form-select-sm" @bind="SelectedFrequency" @bind:after="OnFrequencyChanged"
+                                title="How often should this transfer be executed">
+                            <option value="Daily">Daily</option>
+                            <option value="Weekly">Weekly</option>
+                            <option value="Monthly">Monthly</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        @if (SelectedFrequency == "Weekly")
+                        {
+                            <label class="form-label">Day of Week</label>
+                            <select class="form-select form-select-sm" @bind="SelectedDayValue" @bind:after="UpdateWalletSource"
+                                    title="Which day of the week to execute the transfer">
+                                <option value="0">Sunday</option>
+                                <option value="1">Monday</option>
+                                <option value="2">Tuesday</option>
+                                <option value="3">Wednesday</option>
+                                <option value="4">Thursday</option>
+                                <option value="5">Friday</option>
+                                <option value="6">Saturday</option>
+                            </select>
+                        }
+                        else if (SelectedFrequency == "Monthly")
+                        {
+                            <label class="form-label">Day of Month</label>
+                            <select class="form-select form-select-sm" @bind="SelectedDayValue" @bind:after="UpdateWalletSource"
+                                    title="Which day of the month to execute the transfer (1-31)">
+                                @for (int i = 1; i <= 31; i++)
+                                {
+                                    <option value="@i">@i@GetOrdinalSuffix(i)</option>
+                                }
+                            </select>
+                        }
+                    </div>
+                </div>
+            }
+        }
+        else
+        {
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="flex-grow-1 me-2">
+                    <input type="text" @bind="Split.Source" list="users" class="form-control form-control-sm"
+                           placeholder="Lightning address or * for catch-all"
+                           title="The source that triggers this split. Use a lightning address, or * to catch all payments."/>
+                    <ValidationMessage2 For="() => Split.Source" class="text-danger small"></ValidationMessage2>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="RemoveSplit" title="Remove this split">
+                    Remove
+                </button>
+            </div>
+        }
+
+        <div class="destinations-list">
+            @foreach (var destination in Split.Destinations)
+            {
+                <div class="d-flex gap-2 mb-2 align-items-center">
+                    <div class="flex-grow-1">
+                        <input type="text" @bind="destination.Destination" list="@(IsWalletTransfer ? "availableStores" : "destinations")"
+                               class="form-control form-control-sm"
+                               placeholder="@(IsWalletTransfer ? "Select store or enter address..." : "Enter alias, lightning address, or bitcoin address...")"
+                               title="Destination alias or address where funds will be sent"/>
+                    </div>
+                    <div class="input-group input-group-sm" style="width: 100px;">
+                        <input type="number" step="0.01" min="0" max="100" value="@destination.Percentage"
+                               @onchange="@((e) => UpdateDestinationValue(destination, e.Value))"
+                               class="form-control"
+                               placeholder="0"
+                               title="Percentage of the payment to send to this destination"/>
                         <span class="input-group-text">%</span>
                     </div>
-
-                    <ValidationMessage2 For="() => destination.Percentage" class="text-danger"></ValidationMessage2>
-                </td>
-                <td>
-                    <button class="btn btn-link remove-dest btn-danger" type="button" @onclick="@(() => Split.Destinations.Remove(destination))">Remove</button>
-                </td>
-            </tr>
-        }
-        </tbody>
-        <tfoot>
-        @if (Split.Destinations.Count > 1)
-        {
-            <tr>
-                <td colspan="3">
-                    Sending @(100 - Leftover)% to @Split.Destinations.Count destinations
-                </td>
-            </tr>
-        }
-        <tr>
-            <td colspan="3">
-                <button class="btn btn-link add-dest" type="button" @onclick="CreateDestination">Add</button>
-                <button class="btn btn-link remove-prism" type="button" @onclick="RemoveSplit">Remove Prism</button>
-            </td>
-        </tr>
-        </tfoot>
-    </table>
+                    <button type="button" class="btn btn-sm btn-outline-danger"
+                            @onclick="@(() => Split.Destinations.Remove(destination))"
+                            title="Remove this destination">×</button>
+                </div>
+            }
+            @if (!Split.Destinations.Any())
+            {
+                <p class="text-muted small mb-2">No destinations configured. Add at least one destination to split payments.</p>
+            }
+        </div>
+        <button type="button" class="btn btn-sm btn-link p-0" @onclick="CreateDestination">+ Add destination</button>
+    </div>
 </div>
 
 @code {
-    [CascadingParameter]
-    private EditContext CascadedEditContext { get; set; }
+    [Parameter] public Split Split { get; set; }
+    [Parameter] public EventCallback<Split> OnRequestRemove { get; set; }
 
-    public decimal Leftover => 100 - Split.Destinations.Sum(split => split.Percentage);
+    private bool IsWalletTransfer => Split?.Source?.StartsWith("storetransfer:") == true;
+    private bool IsEditing { get; set; } = false;
+    private bool ShouldShowEdit => IsEditing || !Split.Destinations.Any();
 
-    [Parameter]
-    public Split Split { get; set; }
+    private string WalletPaymentMethod { get; set; } = "BTC-CHAIN";
+    private string WalletAmount { get; set; } = "";
+    private string SelectedFrequency { get; set; } = "Monthly";
+    private int SelectedDayValue { get; set; } = 1;
 
-    [Parameter]
-    public EventCallback<Split> OnRequestRemove { get; set; }
+    private static readonly string[] DayNames = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
+
+    protected override void OnParametersSet()
+    {
+        if (IsWalletTransfer)
+        {
+            ParseWalletSource();
+        }
+    }
+
+    private void ParseWalletSource()
+    {
+        var parsed = SatBreaker.ParseSource(Split.Source);
+        if (parsed.HasValue)
+        {
+            WalletPaymentMethod = parsed.Value.paymentMethod.ToString();
+            WalletAmount = parsed.Value.amount?.ToUnit(LightMoneyUnit.Satoshi).ToString() ?? "";
+            SelectedFrequency = parsed.Value.schedule.Frequency.ToString();
+            SelectedDayValue = parsed.Value.schedule.DayValue;
+        }
+    }
+
+    private void ToggleEdit() => IsEditing = !IsEditing;
+
+    private void OnFrequencyChanged()
+    {
+        // Reset day value to sensible default when frequency changes
+        SelectedDayValue = SelectedFrequency switch
+        {
+            "Weekly" => 1, // Monday
+            "Monthly" => 1, // 1st of month
+            _ => 1
+        };
+        UpdateWalletSource();
+    }
+
+    private void UpdateWalletSource()
+    {
+        LightMoney amount = null;
+        if (!string.IsNullOrWhiteSpace(WalletAmount) && long.TryParse(WalletAmount, out var sats) && sats > 0)
+        {
+            amount = LightMoney.Satoshis(sats);
+        }
+
+        var frequency = Enum.Parse<SatBreaker.TransferFrequency>(SelectedFrequency);
+        var schedule = new SatBreaker.TransferSchedule(frequency, SelectedDayValue);
+        Split.Source = SatBreaker.EncodeSource(schedule, PaymentMethodId.Parse(WalletPaymentMethod), amount);
+    }
+
+    private string GetScheduleDisplayText()
+    {
+        return SelectedFrequency switch
+        {
+            "Daily" => "Daily",
+            "Weekly" => $"Weekly on {DayNames[SelectedDayValue]}",
+            "Monthly" => $"Monthly on {SelectedDayValue}{GetOrdinalSuffix(SelectedDayValue)}",
+            _ => "Unknown"
+        };
+    }
+
+    private static string GetOrdinalSuffix(int day)
+    {
+        if (day >= 11 && day <= 13) return "th";
+        return (day % 10) switch
+        {
+            1 => "st",
+            2 => "nd",
+            3 => "rd",
+            _ => "th"
+        };
+    }
 
     private void CreateDestination()
     {
-        Split.Destinations.Add(new Prism.PrismSplit());
+        var usedPercentage = Split.Destinations.Sum(d => d.Percentage);
+        var remaining = Math.Max(0, 100 - usedPercentage);
+        Split.Destinations.Add(new Prism.PrismSplit { Percentage = remaining });
     }
 
-    private void RemoveSplit()
+    private void RemoveSplit() => OnRequestRemove.InvokeAsync(Split);
+
+    private void SendNow()
     {
-        OnRequestRemove.InvokeAsync(Split);
+        if (IsWalletTransfer && !string.IsNullOrEmpty(Split.Source))
+        {
+            EventAggregator.Publish(new SatBreaker.ScheduleDayEvent(forceSplitSource: Split.Source));
+        }
     }
 
     private void UpdateDestinationValue(Prism.PrismSplit destination, object eValue)
     {
-        var newValue = Math.Min(100, Math.Round(Convert.ToDecimal(eValue), 2));
-
-        var allowedMax = Math.Round(destination.Percentage + Leftover, 2);
+        var newValue = Math.Max(0, Math.Min(100, Math.Round(Convert.ToDecimal(eValue), 2)));
+        var leftover = 100 - Split.Destinations.Sum(d => d.Percentage);
+        var allowedMax = Math.Round(destination.Percentage + leftover, 2);
 
         if (newValue > allowedMax)
         {
-            //take the difference from the other destinations proportionally
             var difference = Math.Round(newValue - allowedMax, 2);
-            var otherDestinations = Split.Destinations.Where(split => split != destination).ToList();
-            var totalPercentage = Math.Round(otherDestinations.Sum(split => split.Percentage), 2);
-            foreach (var otherDestination in otherDestinations)
+            var others = Split.Destinations.Where(d => d != destination).ToList();
+            var total = Math.Round(others.Sum(d => d.Percentage), 2);
+            foreach (var other in others)
             {
-                var percentage = otherDestination.Percentage;
-                var newPercentage = Math.Round(percentage - (percentage / totalPercentage * difference), 2);
-                otherDestination.Percentage = newPercentage;
+                other.Percentage = Math.Round(other.Percentage - (other.Percentage / total * difference), 2);
             }
         }
         destination.Percentage = newValue;
     }
-
 }

@@ -18,10 +18,4 @@ public class PrismController : Controller
     {
         return View();
     }
-
-    [HttpGet("auto-transfer")]
-    public IActionResult AutoTransfer(string storeId)
-    {
-        return View();
-    }
 }

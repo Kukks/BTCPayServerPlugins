@@ -12,6 +12,7 @@ using BTCPayServer.Payouts;
 using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using NBitcoin;
 using Newtonsoft.Json.Linq;
 
@@ -23,15 +24,17 @@ internal class StorePrismClaimCreate : IPluginHookFilter
     private readonly IServiceProvider _serviceProvider;
     private readonly BTCPayNetworkProvider _networkProvider;
     private readonly PaymentMethodHandlerDictionary _handlers;
+    private readonly ILogger<StorePrismClaimCreate> _logger;
     public string Hook => "prism-claim-create";
 
-    public StorePrismClaimCreate(StoreRepository storeRepository, PaymentMethodHandlerDictionary handlers, 
-        IServiceProvider serviceProvider, BTCPayNetworkProvider networkProvider)
+    public StorePrismClaimCreate(StoreRepository storeRepository, PaymentMethodHandlerDictionary handlers,
+        IServiceProvider serviceProvider, BTCPayNetworkProvider networkProvider, ILogger<StorePrismClaimCreate> logger)
     {
         _handlers = handlers;
         _serviceProvider = serviceProvider;
         _storeRepository = storeRepository;
         _networkProvider = networkProvider;
+        _logger = logger;
     }
 
     public async Task<object> Execute(object args)
@@ -75,7 +78,11 @@ internal class StorePrismClaimCreate : IPluginHookFilter
             claimRequest.PayoutMethodId = pmi;
             return claimRequest;
         }
-        catch (Exception) { return null; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to create store-prism claim for destination {Destination}", args1);
+            return null;
+        }
     }
 
 

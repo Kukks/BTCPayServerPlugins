@@ -1,12 +1,20 @@
-﻿@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Contracts
 @using BTCPayServer.Abstractions.Models
 @using BTCPayServer.Client.Models
+@using BTCPayServer.Data
 @using BTCPayServer.HostedServices
+@using BTCPayServer.Lightning
 @using BTCPayServer.Payments
 @using BTCPayServer.PayoutProcessors
 @using BTCPayServer.Payouts
+@using BTCPayServer.Plugins.PointOfSale
+@using BTCPayServer.Plugins.Prism.ViewModel
+@using BTCPayServer.Services.Apps
 @using Microsoft.AspNetCore.Http
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.Mvc.Rendering
 @using Microsoft.AspNetCore.Routing
+@using Microsoft.EntityFrameworkCore
 @using Microsoft.Extensions.Logging
 @using NBitcoin
 @using LightningAddressData = BTCPayServer.Data.LightningAddressData
@@ -20,10 +28,19 @@
 @inject PullPaymentHostedService PullPaymentHostedService
 @inject IHttpContextAccessor HttpContextAccessor
 @inject ILogger<PrismEdit> Logger
+@inject EventAggregator EventAggregator
+@inject AppService AppService
+@inject UserManager<ApplicationUser> UserManager
+@inject AuthenticationStateProvider AuthStateProvider
 @implements IDisposable
 
 @if (Loading)
 {
+    <div class="d-flex justify-content-center p-5">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
 }
 else
 {
@@ -43,10 +60,14 @@ else
             <option value="@destination">@destination</option>
         }
     </datalist>
-
+    <datalist id="availableStores">
+        @foreach (var s in AvailableStores)
+        {
+            <option value="@s.Value">@s.Text</option>
+        }
+    </datalist>
 
     <EditForm EditContext="EditContext" OnValidSubmit="Save">
-
 
         <div class="sticky-header-setup"></div>
         <div class="sticky-header d-sm-flex align-items-center justify-content-between">
@@ -56,19 +77,26 @@ else
                     <span class="fa fa-question-circle-o text-secondary" title="More information..."></span>
                 </a>
             </h2>
-            <div class="d-flex gap-3 mt-3 mt-sm-0">
+            <div class="d-flex gap-2 mt-3 mt-sm-0">
                 @if (SelectedDestinationId is null or "null")
                 {
-                    <button type="button" class="btn btn-primary  mx-2" id="add-prism" @onclick="CreateNewPrism">Add Prism</button>
-                    <button type="submit" class="btn btn-primary  mx-2">Save</button>
-                    <select class="form-select mx-2" style="max-width: fit-content" @bind="SelectedDestinationId" disabled="@(SelectedDestinationId is not null && SelectedDestinationId != "null")">
-
-                        <option value="null">Select destination to configure</option>
+                    <div class="btn-group">
+                        <button type="button" class="btn btn-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                            Add
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><button type="button" class="dropdown-item" @onclick="CreateNewPrism">Split</button></li>
+                            <li><button type="button" class="dropdown-item" @onclick="CreateNewWalletTransfer">Wallet Transfer</button></li>
+                        </ul>
+                    </div>
+                    <button type="submit" class="btn btn-success">Save</button>
+                    <select class="form-select" style="max-width: fit-content" @bind="SelectedDestinationId">
+                        <option value="null">Destinations</option>
                         @foreach (var destination in Destinations)
                         {
                             <option value="@destination">@destination</option>
                         }
-                        <option value="">Create new destination</option>
+                        <option value="">+ New</option>
                     </select>
                 }
 
@@ -78,10 +106,6 @@ else
                 }
             </div>
         </div>
-        <p class="text-muted">
-            The prism plugin allows automated value splits for your lightning and onchain payments. You can set up multiple prisms, each with their own source (which is a <a href="@LNAddressLink">lightning address username</a>, or use *, *Onchain or *All as catch-all for all payments made against invoices, excluding ones which Prism can handle explicitly) and destinations (which are other lightning addresses,, lnurls, bitcoin addresses, an xpub, or a custom formaty provided by other plugins). The plugin will automatically credit the configured percentage of the payment to the destination (while also making sure there is 2% reserved to cater for fees, don't worry, once the lightning node tells us the exact fee amount, we credit/debit the balance after the payment), and once the configured threshold is reached, a <a href="@PayoutsLink">payout</a> will be created. Then, a <a href="@PayoutProcessorLink">payout processor</a> will run at intervals and process the payout.
-        </p>
-
 
         @if (NoPayoutProcessors)
         {
@@ -98,54 +122,106 @@ else
             </div>
         }
 
-
-        <div class="row" id="prism-holder">
-
-            <div class="prism col-sm-12 border border-light p-2">
+        <div id="prism-holder">
+            <div class="prism">
                 @if (SelectedDestinationId is null or "null")
                 {
-                    <h2>Global Prism Settings</h2>
-                    <div class="row mb-4">
-                        <div class="col-xl-10 col-xxl-constrain">
-
-
-                            <div class="d-flex align-items-center gap-2">
-                                <input @bind="Settings.Enabled" type="checkbox" class="btcpay-toggle" />
-                                <label asp-for="Enabled" class="mb-0">Enabled</label>
-                                <ValidationMessage2 For="() => Settings.Enabled" class="text-danger"></ValidationMessage2>
-                            </div>
-
-                            <div class="d-flex align-items-center gap-2 my-4">
-                                <input @bind="Settings.EnableScheduledAutomation" type="checkbox" class="btcpay-toggle" />
-                                <label asp-for="EnableScheduledAutomation" class="mb-0">Schedule Automation</label>
-                                <ValidationMessage2 For="() => Settings.EnableScheduledAutomation" class="text-danger"></ValidationMessage2>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Sat Threshold</label>
-                                <input type="number" @bind="Settings.SatThreshold" min="1" class="form-control"/>
-                                <ValidationMessage2 For="() => Settings.SatThreshold" class="text-danger"></ValidationMessage2>
-                                <span class="text-muted">How many sats do you want to accumulate per destination before sending?</span>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Reserve fee</label>
-                                <input type="number" @bind="Settings.Reserve" min="0" max="100" step="any" class="form-control"/>
-                                <ValidationMessage2 For="() => Settings.Reserve" class="text-danger"></ValidationMessage2>
-                                <span class="text-muted">When a payout is being generated, how many of its amount in percentage should be excluded to cover the fee? Once the payment is settled, if the lightning node provides the exact fee, the balance is adjusted accordingly.</span>
-                            </div>
+                    <!-- Settings Row -->
+                    <div class="d-flex align-items-center gap-4 mb-4 p-3 bg-light rounded flex-wrap">
+                        <div class="d-flex align-items-center gap-2" title="Enable or disable all prism processing for this store">
+                            <input @bind="Settings.Enabled" type="checkbox" class="btcpay-toggle" id="prism-enabled"/>
+                            <label for="prism-enabled" class="mb-0">Enabled</label>
                         </div>
-
-
+                        <div class="d-flex align-items-center gap-2">
+                            <label class="mb-0 text-nowrap" title="Minimum sats to accumulate before creating a payout">Threshold:</label>
+                            <input type="number" @bind="Settings.SatThreshold" min="1" class="form-control form-control-sm" style="width: 100px"
+                                   title="Minimum sats to accumulate before creating a payout. Higher values reduce fees but delay payments."/>
+                            <span class="text-muted">sats</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <label class="mb-0 text-nowrap" title="Percentage to reserve from payouts to cover network fees">Reserve:</label>
+                            <input type="number" @bind="Settings.Reserve" min="0" max="100" step="any" class="form-control form-control-sm" style="width: 80px"
+                                   title="Percentage of each payout reserved to cover network fees. Remaining balance carries over."/>
+                            <span class="text-muted">%</span>
+                        </div>
                     </div>
 
-                    var prismSplits = Settings.Splits.Where(IsPrismSource).ToList();
-                    @if (prismSplits.Any())
+                    <!-- Prisms -->
+                    @foreach (var item in Settings.Splits.Where(s => s.Source is null || !s.Source.StartsWith("pos:")))
                     {
-                        <h2>Your Prisms</h2>
-                        @foreach (var item in prismSplits)
-                        {
-                            <PrismSplit Split="@item" OnRequestRemove="@RemovePrism"/>
-                        }
+                        <PrismSplit Split="@item" OnRequestRemove="@RemovePrism"/>
+                    }
+
+                    <!-- POS Product Splits Section -->
+                    @if (PosProducts.Any())
+                    {
+                        <div class="mt-5">
+                            <h2>POS Product Splits</h2>
+                            <p class="text-muted">Configure automatic splits for Point of Sale product purchases.</p>
+
+                            <div class="alert alert-info">
+                                <strong>Note:</strong> Ensure the calculated split amount exceeds the sat threshold, and that you have a payout processor configured for the selected payment method.
+                            </div>
+
+                            <div class="accordion" id="posAccordion">
+                                @for (int i = 0; i < PosProducts.Count; i++)
+                                {
+                                    var app = PosProducts[i];
+                                    <div class="accordion-item mb-3" @key="app.AppId">
+                                        <h2 class="accordion-header">
+                                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#pos-@app.AppId">
+                                                @app.AppTitle
+                                                <span class="badge bg-secondary ms-2">@app.Products.Count products</span>
+                                            </button>
+                                        </h2>
+                                        <div id="pos-@app.AppId" class="accordion-collapse collapse" data-bs-parent="#posAccordion">
+                                            <div class="accordion-body">
+                                                <div class="row g-3">
+                                                    @foreach (var product in app.Products)
+                                                    {
+                                                        <div class="col-md-6 col-lg-4" @key="product.ProductId">
+                                                            <div class="card h-100">
+                                                                <div class="card-body">
+                                                                    <h5 class="card-title">@product.Title</h5>
+                                                                    <p class="text-muted mb-2">Price: @product.Price @product.Currency</p>
+
+                                                                    @foreach (var d in product.Destinations)
+                                                                    {
+                                                                        <div class="row g-2 mb-2 align-items-center">
+                                                                            <div class="col-3">
+                                                                                <input type="number" class="form-control form-control-sm"
+                                                                                       min="0" max="100" placeholder="%"
+                                                                                       @bind="d.Percentage" @bind:event="oninput">
+                                                                            </div>
+                                                                            <div class="col-3">
+                                                                                <select class="form-select form-select-sm" @bind="d.PaymentMethod">
+                                                                                    <option value="BTC-CHAIN">Chain</option>
+                                                                                    <option value="BTC-LN">LN</option>
+                                                                                </select>
+                                                                            </div>
+                                                                            <div class="col-6 d-flex gap-1">
+                                                                                <input type="text" class="form-control form-control-sm"
+                                                                                       @bind="d.Destination" placeholder="Store/Address" />
+                                                                                <button type="button" class="btn btn-sm btn-outline-danger"
+                                                                                        @onclick="() => product.Destinations.Remove(d)">x</button>
+                                                                            </div>
+                                                                        </div>
+                                                                    }
+                                                                    <button type="button" class="btn btn-sm btn-outline-primary w-100"
+                                                                            @onclick="() => product.Destinations.Add(new ProductDestinationRow())">
+                                                                        + Add split
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    }
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
                     }
                 }
                 else
@@ -163,12 +239,13 @@ else
                         }
 
                         <PrismDestinationEditor
+                            StoreId="@StoreId"
                             ValidateId="ValidateId"
                             ValidateDestination="s => ValidateDestination(s, false)"
                             Id="@SelectedDestinationId"
                             Settings="@SelectedDestination"
                             OnUpdate="OnDestinationUpdated"
-                            OnCancel="() =>  SelectedDestinationId = null">
+                            OnCancel="() => SelectedDestinationId = null">
                         </PrismDestinationEditor>
                     }
                 }
@@ -181,14 +258,11 @@ else
             PendingPayouts="Settings.PendingPayouts">
         </PrismBalances>
 
-
     </EditForm>
 }
 
 @code {
-
-    private static bool IsPrismSource(Split split) =>
-       string.IsNullOrEmpty(split.Source) || !(split.Source.StartsWith("pos") || split.Source.StartsWith("storetransfer"));
+    [Parameter] public string StoreId { get; set; }
 
     private void AddDestination()
     {
@@ -209,7 +283,6 @@ else
         }
     }
 
-
     public string[] Destinations => Settings.Destinations.Where(kv => !(kv.Value?.Destination?.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase) ?? false)).Select(kv => kv.Key).ToArray();
 
     public bool Loading { get; set; } = true;
@@ -219,6 +292,12 @@ else
     public bool NoPayoutProcessors { get; set; }
 
     private string PrismEditButtonsFilter { get; set; }
+
+    // Available stores for transfer destinations
+    List<SelectListItem> AvailableStores = new();
+
+    // POS Products
+    List<PosAppProductSplitModel> PosProducts = new();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -240,22 +319,22 @@ else
                 PayoutMethods = new[] {pmi, pmichain}
             });
 
-            var tasks = new Task[]
-            {
-                fetchSettings,
-                fetchLnAddresses,
-                fetchProcessors
-            };
-            await Task.WhenAll(tasks);
+            await Task.WhenAll(fetchSettings, fetchLnAddresses, fetchProcessors);
             Settings = await fetchSettings;
             Users = await fetchLnAddresses;
+
+            // Load available stores for transfer destinations
+            await LoadAvailableStores();
+
+            // Load POS products
+            await LoadPosProducts();
 
             EditContext = new EditContext(Settings);
             MessageStore = new ValidationMessageStore(EditContext);
             EditContext.OnValidationRequested += Validate;
             EditContext.OnFieldChanged += FieldChanged;
             SatBreaker.PrismUpdated += SatBreakerOnPrismUpdated;
-            //set NoPayoutProcessors to true if there are no configured payout processores for pmi and pmichain 
+
             NoPayoutProcessors = PayoutProcessorFactories.Any(factory => factory.GetSupportedPayoutMethods().Contains(pmi)) && (await fetchProcessors).All(data =>
                 !new[] {pmi, pmichain}.Contains(data.GetPayoutMethodId()));
 
@@ -266,6 +345,73 @@ else
         await base.OnAfterRenderAsync(firstRender);
     }
 
+    async Task LoadAvailableStores()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated ?? false)
+        {
+            var userId = UserManager.GetUserId(user);
+            var appUser = await UserManager.Users
+                .Where(c => c.Id == userId)
+                .Include(u => u.UserStores)
+                .ThenInclude(us => us.StoreData)
+                .SingleOrDefaultAsync();
+
+            var stores = appUser?.UserStores
+                .Where(s => s.StoreDataId != StoreId && !s.StoreData.Archived)
+                .Select(s => s.StoreData)
+                .ToList() ?? new();
+
+            AvailableStores = stores.Select(s => new SelectListItem { Value = s.Id, Text = s.StoreName }).ToList();
+        }
+    }
+
+    async Task LoadPosProducts()
+    {
+        var storePosApps = (await AppService.GetApps(PointOfSaleAppType.AppType)).Where(c => c.StoreDataId == StoreId && !c.Archived).ToList();
+        if (storePosApps.Any())
+        {
+            var posSplits = Settings.Splits.Where(s => s.Source.StartsWith("pos:")).ToList();
+            PosProducts = storePosApps.Select(app =>
+            {
+                var settings = app.GetSettings<PointOfSaleSettings>();
+                var products = new List<ProductSplitItemModel>();
+                if (!string.IsNullOrEmpty(settings?.Template))
+                {
+                    var templateItems = AppService.Parse(settings.Template) ?? Array.Empty<AppItem>();
+                    products = templateItems.Select(item =>
+                    {
+                        var split = posSplits.FirstOrDefault(s => s.Source == $"pos:{app.Id}:{item.Id}");
+                        return new ProductSplitItemModel
+                        {
+                            ProductId = item.Id,
+                            Title = item.Title,
+                            Price = item.Price ?? 0m,
+                            Currency = settings.Currency,
+                            Destinations = split?.Destinations
+                                .Select(d =>
+                                {
+                                    var parts = d.Destination.Split(':', 3);
+                                    return new ProductDestinationRow
+                                    {
+                                        Destination = parts.Length > 1 ? parts[1] : string.Empty,
+                                        PaymentMethod = parts.Length > 2 ? parts[2] : "BTC-LN",
+                                        Percentage = (int)d.Percentage
+                                    };
+                                }).ToList() ?? new List<ProductDestinationRow>()
+                        };
+                    }).ToList();
+                }
+                return new PosAppProductSplitModel
+                {
+                    AppId = app.Id,
+                    AppTitle = app.Name,
+                    Products = products
+                };
+            }).ToList();
+        }
+    }
 
     private void FieldChanged(object sender, FieldChangedEventArgs e)
     {
@@ -290,7 +436,7 @@ else
         var previousState = EditContext.GetValidationMessages().Any();
         MessageStore.Clear();
         StatusMessageModel = null;
-        foreach (var prism in Settings.Splits.Where(c => !(c.Source.StartsWith("pos") || c.Source.StartsWith("storetransfer"))))
+        foreach (var prism in Settings.Splits.Where(c => c.Source is null || !(c.Source.StartsWith("pos") || c.Source.StartsWith("storetransfer"))))
         {
             if (string.IsNullOrEmpty(prism.Source))
             {
@@ -340,7 +486,8 @@ else
             return true;
         }
 
-        var result = PluginHookService.ApplyFilter("prism-destination-validate", dest).Result;
+        // Use ConfigureAwait(false) to avoid deadlock in synchronous context
+        var result = PluginHookService.ApplyFilter("prism-destination-validate", dest).ConfigureAwait(false).GetAwaiter().GetResult();
         return result is true or PrismDestinationValidationResult {Success: true};
     }
 
@@ -356,11 +503,17 @@ else
     public string LNAddressLink { get; set; }
     public string PayoutsLink { get; set; }
 
-    [Parameter] public string StoreId { get; set; }
-
     private async Task CreateNewPrism()
     {
         Settings.Splits.Add(new Split());
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task CreateNewWalletTransfer()
+    {
+        // Create a wallet transfer with default schedule (1st of month)
+        var source = SatBreaker.EncodeSource(new SatBreaker.TransferSchedule(SatBreaker.TransferFrequency.Monthly, 1), PaymentMethodId.Parse("BTC-CHAIN"), null);
+        Settings.Splits.Add(new Split { Source = source });
         await InvokeAsync(StateHasChanged);
     }
 
@@ -374,27 +527,79 @@ else
 
     private async Task SaveDestinations()
     {
-        var settz = await SatBreaker.Get(StoreId);
-        settz.Destinations = Settings.Destinations;
-        await UpdateAndShowResult(settz);
+        await SatBreaker.WaitAndLock();
+        try
+        {
+            var settz = SatBreaker.GetInternal(StoreId);
+            settz.Destinations = Settings.Destinations;
+            await UpdateAndShowResult(settz, true);
+        }
+        finally
+        {
+            SatBreaker.Unlock();
+        }
     }
 
     private async Task Save()
     {
-        var settz = await SatBreaker.Get(StoreId);
-        settz.Splits = Settings.Splits;
-        settz.EnableScheduledAutomation = Settings.EnableScheduledAutomation;
-        settz.Destinations = Settings.Destinations;
-        settz.Enabled = Settings.Enabled;
-        settz.SatThreshold = Settings.SatThreshold;
-        settz.Reserve = Settings.Reserve;
-        Settings = settz;
-        await UpdateAndShowResult(settz);
+        await SatBreaker.WaitAndLock();
+        try
+        {
+            var settz = SatBreaker.GetInternal(StoreId);
+            settz.Splits = Settings.Splits;
+            settz.Destinations = Settings.Destinations;
+            settz.Enabled = Settings.Enabled;
+            settz.SatThreshold = Settings.SatThreshold;
+            settz.Reserve = Settings.Reserve;
+
+            // Save POS product splits
+            settz.Splits.RemoveAll(s => s.Source.StartsWith("pos:"));
+            foreach (var app in PosProducts)
+            {
+                foreach (var product in app.Products)
+                {
+                    var validDestinations = product.Destinations
+                        .Where(d => d.Percentage is > 0 && !string.IsNullOrEmpty(d.Destination))
+                        .Select(d => new BTCPayServer.Plugins.Prism.PrismSplit
+                        {
+                            Destination = $"store-prism:{d.Destination}:{d.PaymentMethod}",
+                            Percentage = Math.Min(100, d.Percentage.Value)
+                        }).ToList();
+
+                    if (validDestinations.Any())
+                    {
+                        if (validDestinations.Sum(d => d.Percentage) > 100)
+                        {
+                            StatusMessageModel = new()
+                            {
+                                Severity = StatusMessageModel.StatusSeverity.Error,
+                                Message = $"POS product '{product.Title}': percentages cannot exceed 100%"
+                            };
+                            return;
+                        }
+
+                        settz.Splits.Add(new Split
+                        {
+                            Source = $"pos:{app.AppId}:{product.ProductId}",
+                            Destinations = validDestinations
+                        });
+                    }
+                }
+            }
+
+            Settings = settz;
+            await UpdateAndShowResult(settz, true);
+        }
+        finally
+        {
+            SatBreaker.Unlock();
+        }
+        
     }
 
-    private async Task UpdateAndShowResult(PrismSettings settz)
+    private async Task UpdateAndShowResult(PrismSettings settz, bool skipLock)
     {
-        var updateResult = await SatBreaker.UpdatePrismSettingsForStore(StoreId, settz);
+        var updateResult = await SatBreaker.UpdatePrismSettingsForStore(StoreId, settz, skipLock);
 
         if (!updateResult)
         {
@@ -496,7 +701,6 @@ else
                 {
                     await SatBreaker.WaitAndLock();
 
-                    // find all prisms splits that use this id + all destination balances that use this id + all pending payouts that use this id and rename them
                     foreach (var destination in Settings.Splits.SelectMany(split => split.Destinations.Where(destination => destination.Destination == SelectedDestinationId)))
                     {
                         destination.Destination = obj.Id;
@@ -558,5 +762,4 @@ else
             payout.tcs.TrySetResult();
         }
     }
-
 }

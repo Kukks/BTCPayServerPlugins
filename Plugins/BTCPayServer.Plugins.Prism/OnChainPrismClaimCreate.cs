@@ -4,6 +4,7 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Data;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Payouts;
+using Microsoft.Extensions.Logging;
 using NBitcoin;
 using NBXplorer.DerivationStrategy;
 
@@ -13,12 +14,14 @@ public class OnChainPrismClaimCreate : IPluginHookFilter
 {
     private readonly BTCPayNetworkProvider _networkProvider;
     private readonly ExplorerClientProvider _explorerClientProvider;
+    private readonly ILogger<OnChainPrismClaimCreate> _logger;
     public string Hook => "prism-claim-create";
 
-    public OnChainPrismClaimCreate(BTCPayNetworkProvider networkProvider, ExplorerClientProvider explorerClientProvider)
+    public OnChainPrismClaimCreate(BTCPayNetworkProvider networkProvider, ExplorerClientProvider explorerClientProvider, ILogger<OnChainPrismClaimCreate> logger)
     {
         _networkProvider = networkProvider;
         _explorerClientProvider = explorerClientProvider;
+        _logger = logger;
     }
 
     public async Task<object> Execute(object args)
@@ -49,9 +52,9 @@ public class OnChainPrismClaimCreate : IPluginHookFilter
                     new AddressClaimDestination(add.Address);
                 claimRequest.PayoutMethodId = PayoutTypes.CHAIN.GetPayoutMethodId("BTC");
             }
-            catch (Exception exception)
+            catch (Exception ex)
             {
-                // ignored
+                _logger.LogDebug(ex, "Failed to parse {Destination} as on-chain address or derivation scheme", destStr);
             }
         }
 
