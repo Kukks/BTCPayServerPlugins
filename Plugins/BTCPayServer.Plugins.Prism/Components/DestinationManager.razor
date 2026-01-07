@@ -1,0 +1,249 @@
+@using Microsoft.AspNetCore.Mvc.Rendering
+
+@*
+    Modal component for managing destination aliases.
+    Shows a list of all aliases with edit/remove options.
+    Destinations in use cannot be removed.
+*@
+
+@if (IsOpen)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Manage Destinations</h5>
+                    <button type="button" class="btn-close" @onclick="Close" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    @if (EditingDestinationId != null)
+                    {
+                        @* Editing/Creating a destination *@
+                        <div class="mb-3">
+                            <button type="button" class="btn btn-link p-0" @onclick="CancelEdit">← Back to list</button>
+                        </div>
+                        
+                        <h6 class="mb-3">@(string.IsNullOrEmpty(EditingDestinationId) ? "New Destination" : $"Edit: {EditingDestinationId}")</h6>
+                        
+                        @if (string.IsNullOrEmpty(EditingDestinationId))
+                        {
+                            <div class="form-group mb-3">
+                                <label class="form-label">Destination Name</label>
+                                <input type="text" @bind="NewAliasId" class="form-control" placeholder="e.g., 'Main Wallet', 'Partner Store'" />
+                                @if (!string.IsNullOrEmpty(AliasIdError))
+                                {
+                                    <span class="text-danger small">@AliasIdError</span>
+                                }
+                                <span class="form-text">A friendly name to reference this destination</span>
+                            </div>
+                        }
+                        
+                        <DestinationInput 
+                            @ref="DestinationInputRef"
+                            StoreId="@StoreId"
+                            InitialDestination="@EditingDestination?.Destination"
+                            InitialSatThreshold="@EditingDestination?.SatThreshold"
+                            InitialReserve="@EditingDestination?.Reserve"
+                            ValidateDestination="@ValidateDestination"
+                            ShowThresholdAndReserve="true"
+                            OnChange="@OnDestinationInputChange" />
+                        
+                        <div class="mt-3">
+                            <button type="button" class="btn btn-primary" @onclick="SaveDestination">Save</button>
+                            <button type="button" class="btn btn-secondary" @onclick="CancelEdit">Cancel</button>
+                        </div>
+                    }
+                    else
+                    {
+                        @* List of destinations *@
+                        @if (Destinations?.Any() == true)
+                        {
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Destination</th>
+                                            <th>Settings</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var (aliasId, dest) in Destinations.OrderBy(d => d.Key))
+                                        {
+                                            var isInUse = IsDestinationInUse(aliasId);
+                                            <tr>
+                                                <td><strong>@aliasId</strong></td>
+                                                <td>
+                                                    <DestinationDisplay 
+                                                        Destination="@dest.Destination"
+                                                        Destinations="@Destinations"
+                                                        AvailableStores="@AvailableStores"
+                                                        Truncate="true"
+                                                        ShowAliasIndicator="false" />
+                                                </td>
+                                                <td class="text-muted small">
+                                                    @if (dest.SatThreshold.HasValue)
+                                                    {
+                                                        <span>@dest.SatThreshold sats</span>
+                                                    }
+                                                    @if (dest.Reserve.HasValue)
+                                                    {
+                                                        <span>@dest.Reserve% reserve</span>
+                                                    }
+                                                    @if (!dest.SatThreshold.HasValue && !dest.Reserve.HasValue)
+                                                    {
+                                                        <span>Default</span>
+                                                    }
+                                                </td>
+                                                <td class="text-end">
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary" 
+                                                            @onclick="() => StartEdit(aliasId)">
+                                                        Edit
+                                                    </button>
+                                                    @if (isInUse)
+                                                    {
+                                                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled
+                                                                title="Cannot remove: destination is used in @GetUsageCount(aliasId) split(s)">
+                                                            In use
+                                                        </button>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button type="button" class="btn btn-sm btn-outline-danger" 
+                                                                @onclick="() => RemoveDestination(aliasId)">
+                                                            Remove
+                                                        </button>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="text-muted">No saved destinations yet. Create reusable destinations to simplify managing your splits.</p>
+                        }
+                        
+                        <button type="button" class="btn btn-primary" @onclick="StartCreate">
+                            + New Destination
+                        </button>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="Close">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public EventCallback<bool> IsOpenChanged { get; set; }
+    [Parameter] public string StoreId { get; set; }
+    [Parameter] public Dictionary<string, PrismDestination> Destinations { get; set; }
+    [Parameter] public List<Split> Splits { get; set; }
+    [Parameter] public List<SelectListItem> AvailableStores { get; set; }
+    [Parameter] public Func<string, bool> ValidateDestination { get; set; }
+    [Parameter] public EventCallback<(string aliasId, PrismDestination destination)> OnSave { get; set; }
+    [Parameter] public EventCallback<string> OnRemove { get; set; }
+    
+    private string EditingDestinationId { get; set; }
+    private PrismDestination EditingDestination { get; set; }
+    private string NewAliasId { get; set; }
+    private string AliasIdError { get; set; }
+    private DestinationInput DestinationInputRef { get; set; }
+    private DestinationInput.DestinationInputResult CurrentInputResult { get; set; }
+
+    private async Task Close()
+    {
+        EditingDestinationId = null;
+        EditingDestination = null;
+        await IsOpenChanged.InvokeAsync(false);
+    }
+
+    private void StartCreate()
+    {
+        EditingDestinationId = "";
+        EditingDestination = new PrismDestination();
+        NewAliasId = "";
+        AliasIdError = null;
+    }
+
+    private void StartEdit(string aliasId)
+    {
+        EditingDestinationId = aliasId;
+        EditingDestination = Destinations.GetValueOrDefault(aliasId);
+        NewAliasId = aliasId;
+        AliasIdError = null;
+    }
+
+    private void CancelEdit()
+    {
+        EditingDestinationId = null;
+        EditingDestination = null;
+        NewAliasId = "";
+        AliasIdError = null;
+    }
+
+    private void OnDestinationInputChange(DestinationInput.DestinationInputResult result)
+    {
+        CurrentInputResult = result;
+    }
+
+    private async Task SaveDestination()
+    {
+        var inputResult = DestinationInputRef?.Validate();
+        if (inputResult == null || !inputResult.IsValid)
+            return;
+
+        // For new destinations, validate the alias ID
+        if (string.IsNullOrEmpty(EditingDestinationId))
+        {
+            AliasIdError = null;
+            if (string.IsNullOrWhiteSpace(NewAliasId))
+            {
+                AliasIdError = "Name is required";
+                return;
+            }
+            if (Destinations?.ContainsKey(NewAliasId) == true)
+            {
+                AliasIdError = "This name is already in use";
+                return;
+            }
+        }
+
+        var destination = new PrismDestination
+        {
+            Destination = inputResult.Destination,
+            SatThreshold = inputResult.SatThreshold,
+            Reserve = inputResult.Reserve
+        };
+
+        var aliasId = string.IsNullOrEmpty(EditingDestinationId) ? NewAliasId : EditingDestinationId;
+        await OnSave.InvokeAsync((aliasId, destination));
+        
+        CancelEdit();
+    }
+
+    private async Task RemoveDestination(string aliasId)
+    {
+        if (!IsDestinationInUse(aliasId))
+        {
+            await OnRemove.InvokeAsync(aliasId);
+        }
+    }
+
+    private bool IsDestinationInUse(string aliasId)
+    {
+        return Splits?.Any(s => s.Destinations.Any(d => d.Destination == aliasId)) == true;
+    }
+
+    private int GetUsageCount(string aliasId)
+    {
+        return Splits?.Count(s => s.Destinations.Any(d => d.Destination == aliasId)) ?? 0;
+    }
+}

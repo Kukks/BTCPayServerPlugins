@@ -12,74 +12,24 @@
         <input type="text" @bind="WorkingId" class="form-control"/>
         @if (InvalidId)
         {
-            <span class="text-danger w-100">Invalid</span>
+            <span class="text-danger w-100">@IdValidationError</span>
         }
         <span class="form-text">An alias to reference in destinations of prisms.</span>
     </div>
+    
     @if (WorkingCopy is not null)
     {
-        <div class="form-group">
-            <label class="form-label">Destination Type</label>
-            <select class="form-select" @bind="DestinationType">
-                <option value="address">Lightning Address / LNURL / Address</option>
-                <option value="store">Store Transfer</option>
-            </select>
-        </div>
+        <DestinationInput 
+            @ref="DestinationInputRef"
+            StoreId="@StoreId"
+            InitialDestination="@WorkingCopy.Destination"
+            InitialSatThreshold="@WorkingCopy.SatThreshold"
+            InitialReserve="@WorkingCopy.Reserve"
+            ValidateDestination="@ValidateDestination"
+            OnChange="@OnDestinationInputChange"
+            ShowThresholdAndReserve="true" />
 
-        @if (DestinationType == "address")
-        {
-            <div class="form-group">
-                <label class="form-label">Destination</label>
-                <input type="text" @bind="WorkingCopy.Destination" list="destinations" class="form-control"/>
-                @if (Invalid)
-                {
-                    <span class="text-danger w-100">Invalid</span>
-                }
-                <span class="form-text">Can be a lightning address, LNURL, bitcoin address, or xpub</span>
-            </div>
-        }
-        else
-        {
-            <div class="row">
-                <div class="col-md-8">
-                    <div class="form-group">
-                        <label class="form-label">Destination Store</label>
-                        <select class="form-select" @bind="SelectedStoreId">
-                            <option value="">Select a store...</option>
-                            @foreach (var store in AvailableStores)
-                            {
-                                <option value="@store.Value">@store.Text</option>
-                            }
-                        </select>
-                        @if (Invalid)
-                        {
-                            <span class="text-danger w-100">Please select a store</span>
-                        }
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="form-group">
-                        <label class="form-label">Payment Method</label>
-                        <select class="form-select" @bind="StorePaymentMethod">
-                            <option value="BTC-CHAIN">On-chain</option>
-                            <option value="BTC-LN">Lightning</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-        }
-
-        <div class="form-group">
-            <label class="form-label">Sat Threshold</label>
-            <input type="number" @bind="WorkingCopy.SatThreshold" min="1" class="form-control"/>
-            <span class="form-text">How many sats do you want to accumulate before sending? Leave blank to use default setting.</span>
-        </div>
-        <div class="form-group">
-            <label class="form-label">Reserve fee</label>
-            <input type="number" @bind="WorkingCopy.Reserve" min="0" max="100" class="form-control"/>
-            <span class="form-text">When a payout is being generated, how much of its amount in percentage should be excluded to cover the fee? Leave blank to use default setting.</span>
-        </div>
-        <div>
+        <div class="mt-3">
             <button type="button" class="btn btn-primary" @onclick="Update">@(string.IsNullOrEmpty(OriginalWorkingId) ? "Create" : "Update")</button>
             <button type="button" class="btn btn-secondary" @onclick="Cancel">Cancel</button>
             @if (!string.IsNullOrEmpty(OriginalWorkingId))
@@ -93,17 +43,16 @@
 @code {
     [Parameter] public string StoreId { get; set; }
 
-    public bool Invalid { get; set; } = false;
-
     private PrismDestination WorkingCopy { get; set; }
     private string WorkingId { get; set; }
     private string OriginalWorkingId { get; set; }
 
-    // Store transfer state
-    private string DestinationType { get; set; } = "address";
-    private string SelectedStoreId { get; set; } = "";
-    private string StorePaymentMethod { get; set; } = "BTC-LN";
-    private List<SelectListItem> AvailableStores { get; set; } = new();
+    private bool InvalidId { get; set; }
+    private string IdValidationError { get; set; } = "Invalid";
+    private bool Invalid { get; set; }
+    
+    private DestinationInput DestinationInputRef { get; set; }
+    private DestinationInput.DestinationInputResult CurrentDestinationResult { get; set; }
 
     [Parameter]
     public EventCallback OnCancel { get; set; }
@@ -122,7 +71,6 @@
         {
             WorkingCopy = JObject.FromObject(value ?? new PrismDestination()).ToObject<PrismDestination>();
             Invalid = false;
-            ParseDestination();
         }
     }
 
@@ -141,76 +89,48 @@
         }
     }
 
-    public bool InvalidId { get; set; }
+    [Parameter]
+    public EventCallback<(string Id, PrismDestination? Destination)> OnUpdate { get; set; }
 
-    protected override async Task OnInitializedAsync()
+    private void OnDestinationInputChange(DestinationInput.DestinationInputResult result)
     {
-        await LoadAvailableStores();
-    }
-
-    private async Task LoadAvailableStores()
-    {
-        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
-        var user = authState.User;
-        if (user.Identity?.IsAuthenticated ?? false)
-        {
-            var userId = UserManager.GetUserId(user);
-            var appUser = await UserManager.Users
-                .Where(c => c.Id == userId)
-                .Include(u => u.UserStores)
-                .ThenInclude(us => us.StoreData)
-                .SingleOrDefaultAsync();
-
-            var stores = appUser?.UserStores
-                .Where(s => s.StoreDataId != StoreId && !s.StoreData.Archived)
-                .Select(s => s.StoreData)
-                .ToList() ?? new();
-
-            AvailableStores = stores.Select(s => new SelectListItem { Value = s.Id, Text = s.StoreName }).ToList();
-        }
-    }
-
-    private void ParseDestination()
-    {
-        if (WorkingCopy?.Destination?.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase) == true)
-        {
-            DestinationType = "store";
-            var parts = WorkingCopy.Destination.Split(':', 3);
-            SelectedStoreId = parts.Length > 1 ? parts[1] : "";
-            StorePaymentMethod = parts.Length > 2 ? parts[2] : "BTC-LN";
-        }
-        else
-        {
-            DestinationType = "address";
-        }
+        CurrentDestinationResult = result;
+        Invalid = !result.IsValid;
     }
 
     public async Task Update()
     {
-        if (DestinationType == "store")
+        // Validate the ID
+        InvalidId = false;
+        IdValidationError = "Invalid";
+        
+        if (string.IsNullOrWhiteSpace(WorkingId))
         {
-            Invalid = string.IsNullOrEmpty(SelectedStoreId);
-            if (!Invalid)
-            {
-                WorkingCopy.Destination = $"store-prism:{SelectedStoreId}:{StorePaymentMethod}";
-            }
+            InvalidId = true;
+            IdValidationError = "Destination ID is required";
         }
-        else
+        else if (ValidateId != null && !ValidateId.Invoke(WorkingId))
         {
-            Invalid = !ValidateDestination.Invoke(WorkingCopy.Destination);
+            InvalidId = true;
+            IdValidationError = "This ID is already in use";
         }
 
-        InvalidId = !ValidateId.Invoke(WorkingId);
+        // Validate the destination input
+        var destResult = DestinationInputRef?.Validate();
+        Invalid = destResult == null || !destResult.IsValid;
 
         if (Invalid || InvalidId)
         {
             return;
         }
+
+        // Build the PrismDestination from the input result
+        WorkingCopy.Destination = destResult.Destination;
+        WorkingCopy.SatThreshold = destResult.SatThreshold;
+        WorkingCopy.Reserve = destResult.Reserve;
+
         await OnUpdate.InvokeAsync((WorkingId, WorkingCopy));
     }
-
-    [Parameter]
-    public EventCallback<(string Id, PrismDestination? Destination)> OnUpdate { get; set; }
 
     private Task Cancel()
     {

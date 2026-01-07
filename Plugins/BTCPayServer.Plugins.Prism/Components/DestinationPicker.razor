@@ -1,0 +1,430 @@
+@using Microsoft.AspNetCore.Mvc.Rendering
+
+@*
+    Unified destination picker component.
+    - Lists existing aliases with filtering
+    - Allows editing aliases
+    - Allows creating new destinations (with optional alias)
+    - Returns selected destination (alias name or raw destination)
+*@
+
+<div class="destination-picker">
+    @if (Mode == PickerMode.List)
+    {
+        <div class="destination-list">
+            @if (FilteredDestinations.Any())
+            {
+                <div class="list-group list-group-flush mb-2">
+                    @foreach (var (aliasId, dest) in FilteredDestinations)
+                    {
+                        <div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center p-2 @(SelectedAlias == aliasId ? "active" : "")"
+                             @onclick="() => SelectAlias(aliasId)">
+                            <div class="d-flex align-items-center gap-2">
+                                <DestinationDisplay 
+                                    Destination="@aliasId"
+                                    Destinations="@Destinations"
+                                    AvailableStores="@AvailableStores"
+                                    Truncate="true"
+                                    ShowAliasIndicator="false" />
+                            </div>
+                            <div class="btn-group btn-group-sm">
+                                @if (AllowEdit)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" 
+                                            @onclick:stopPropagation="true"
+                                            @onclick="() => EditAlias(aliasId)"
+                                            title="Edit this destination">
+                                        Edit
+                                    </button>
+                                }
+                                <button type="button" class="btn btn-sm @(SelectedAlias == aliasId ? "btn-light" : "btn-outline-primary")"
+                                        @onclick:stopPropagation="true"
+                                        @onclick="() => ConfirmSelection(aliasId)"
+                                        title="Use this destination">
+                                    Select
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+            else if (Destinations?.Any() == true)
+            {
+                <p class="text-muted small mb-2">No destinations match the current filter.</p>
+            }
+            else
+            {
+                <p class="text-muted small mb-2">No saved destinations yet.</p>
+            }
+            
+            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="StartCreateNew">
+                + New destination
+            </button>
+        </div>
+    }
+    else if (Mode == PickerMode.Create)
+    {
+        <div class="destination-create">
+            <h6 class="mb-3">New Destination</h6>
+            
+            @if (AllowSaveAsAlias)
+            {
+                <div class="form-check mb-3">
+                    <input type="checkbox" class="form-check-input" id="saveAsAlias" @bind="SaveAsAlias" />
+                    <label class="form-check-label" for="saveAsAlias">Save as reusable destination</label>
+                </div>
+                
+                @if (SaveAsAlias)
+                {
+                    <div class="form-group mb-3">
+                        <label class="form-label">Destination Name</label>
+                        <input type="text" @bind="NewAliasId" class="form-control" placeholder="e.g., 'Main Wallet', 'Partner Store'" />
+                        @if (AliasIdError != null)
+                        {
+                            <span class="text-danger small">@AliasIdError</span>
+                        }
+                        <span class="form-text">A friendly name to reference this destination</span>
+                    </div>
+                }
+            }
+            
+            <DestinationInput 
+                @ref="DestinationInputRef"
+                StoreId="@StoreId"
+                ValidateDestination="@ValidateDestination"
+                PaymentMethodFilter="@PaymentMethodFilter"
+                ShowThresholdAndReserve="@(SaveAsAlias || ShowThresholdAndReserve)"
+                OnChange="@OnDestinationInputChange" />
+            
+            <div class="mt-3">
+                <button type="button" class="btn btn-primary" @onclick="ConfirmCreate">
+                    @(SaveAsAlias ? "Save & Select" : "Select")
+                </button>
+                <button type="button" class="btn btn-secondary" @onclick="CancelCreate">Cancel</button>
+            </div>
+        </div>
+    }
+    else if (Mode == PickerMode.Edit)
+    {
+        <div class="destination-edit">
+            <h6 class="mb-3">Edit: @EditingAliasId</h6>
+            
+            <DestinationInput 
+                @ref="DestinationInputRef"
+                StoreId="@StoreId"
+                InitialDestination="@EditingDestination?.Destination"
+                InitialSatThreshold="@EditingDestination?.SatThreshold"
+                InitialReserve="@EditingDestination?.Reserve"
+                ValidateDestination="@ValidateDestination"
+                PaymentMethodFilter="@PaymentMethodFilter"
+                ShowThresholdAndReserve="true"
+                OnChange="@OnDestinationInputChange" />
+            
+            <div class="mt-3">
+                <button type="button" class="btn btn-primary" @onclick="ConfirmEdit">Save</button>
+                <button type="button" class="btn btn-secondary" @onclick="CancelEdit">Cancel</button>
+                <button type="button" class="btn btn-outline-danger" @onclick="DeleteAlias">Delete</button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    public enum PickerMode { List, Create, Edit }
+    
+    [Parameter] public string StoreId { get; set; }
+    
+    /// <summary>
+    /// Dictionary of alias -> PrismDestination
+    /// </summary>
+    [Parameter] public Dictionary<string, PrismDestination> Destinations { get; set; }
+    
+    /// <summary>
+    /// Available stores for store transfer destinations
+    /// </summary>
+    [Parameter] public List<SelectListItem> AvailableStores { get; set; }
+    
+    /// <summary>
+    /// Filter destinations by payment method (e.g., "BTC-LN", "BTC-CHAIN")
+    /// </summary>
+    [Parameter] public string PaymentMethodFilter { get; set; }
+    
+    /// <summary>
+    /// Validation function for raw destinations
+    /// </summary>
+    [Parameter] public Func<string, bool> ValidateDestination { get; set; }
+    
+    /// <summary>
+    /// Whether to allow editing existing aliases
+    /// </summary>
+    [Parameter] public bool AllowEdit { get; set; } = true;
+    
+    /// <summary>
+    /// Whether to show the "save as alias" option when creating
+    /// </summary>
+    [Parameter] public bool AllowSaveAsAlias { get; set; } = true;
+    
+    /// <summary>
+    /// Whether to show threshold/reserve for non-alias destinations
+    /// </summary>
+    [Parameter] public bool ShowThresholdAndReserve { get; set; } = false;
+    
+    /// <summary>
+    /// Currently selected destination (for initial state)
+    /// </summary>
+    [Parameter] public string SelectedDestination { get; set; }
+    
+    /// <summary>
+    /// Called when a destination is selected (alias name or raw destination)
+    /// </summary>
+    [Parameter] public EventCallback<DestinationPickerResult> OnSelect { get; set; }
+    
+    /// <summary>
+    /// Called when an alias is updated/created/deleted
+    /// </summary>
+    [Parameter] public EventCallback<AliasChangeEvent> OnAliasChange { get; set; }
+    
+    /// <summary>
+    /// Called when cancelled
+    /// </summary>
+    [Parameter] public EventCallback OnCancel { get; set; }
+    
+    private PickerMode Mode { get; set; } = PickerMode.List;
+    private string SelectedAlias { get; set; }
+    
+    // Create mode state
+    private bool SaveAsAlias { get; set; } = false;
+    private string NewAliasId { get; set; } = "";
+    private string AliasIdError { get; set; }
+    
+    // Edit mode state
+    private string EditingAliasId { get; set; }
+    private PrismDestination EditingDestination { get; set; }
+    
+    private DestinationInput DestinationInputRef { get; set; }
+    private DestinationInput.DestinationInputResult CurrentInputResult { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        // Set initial selection
+        if (!string.IsNullOrEmpty(SelectedDestination) && Destinations?.ContainsKey(SelectedDestination) == true)
+        {
+            SelectedAlias = SelectedDestination;
+        }
+    }
+
+    private IEnumerable<KeyValuePair<string, PrismDestination>> FilteredDestinations
+    {
+        get
+        {
+            if (Destinations == null) return Enumerable.Empty<KeyValuePair<string, PrismDestination>>();
+            
+            var filtered = Destinations.AsEnumerable();
+            
+            if (!string.IsNullOrEmpty(PaymentMethodFilter))
+            {
+                filtered = filtered.Where(kv => IsDestinationCompatible(kv.Value.Destination, PaymentMethodFilter));
+            }
+            
+            return filtered.OrderBy(kv => kv.Key);
+        }
+    }
+
+    private bool IsDestinationCompatible(string destination, string paymentMethodFilter)
+    {
+        if (string.IsNullOrEmpty(destination) || string.IsNullOrEmpty(paymentMethodFilter))
+            return true;
+            
+        // Store transfers have explicit payment method
+        if (destination.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase))
+        {
+            var parts = destination.Split(':', 3);
+            var destPaymentMethod = parts.Length > 2 ? parts[2] : "";
+            
+            if (paymentMethodFilter.Contains("LN"))
+                return destPaymentMethod.Contains("LN");
+            if (paymentMethodFilter.Contains("CHAIN"))
+                return destPaymentMethod.Contains("CHAIN");
+        }
+        
+        // Lightning addresses/LNURL are lightning only
+        if (destination.Contains("@") || destination.StartsWith("lnurl", StringComparison.OrdinalIgnoreCase))
+        {
+            return paymentMethodFilter.Contains("LN");
+        }
+        
+        // Bitcoin addresses/xpubs are on-chain only
+        if (destination.StartsWith("bc1", StringComparison.OrdinalIgnoreCase) ||
+            destination.StartsWith("1") || destination.StartsWith("3") ||
+            destination.StartsWith("tb1", StringComparison.OrdinalIgnoreCase) ||
+            destination.StartsWith("xpub", StringComparison.OrdinalIgnoreCase) ||
+            destination.StartsWith("tpub", StringComparison.OrdinalIgnoreCase))
+        {
+            return paymentMethodFilter.Contains("CHAIN");
+        }
+        
+        return true; // Unknown type, allow it
+    }
+
+    private void SelectAlias(string aliasId)
+    {
+        SelectedAlias = aliasId;
+    }
+
+    private async Task ConfirmSelection(string aliasId)
+    {
+        await OnSelect.InvokeAsync(new DestinationPickerResult
+        {
+            Destination = aliasId,
+            IsAlias = true,
+            AliasConfig = Destinations?.GetValueOrDefault(aliasId)
+        });
+    }
+
+    private void StartCreateNew()
+    {
+        Mode = PickerMode.Create;
+        SaveAsAlias = false;
+        NewAliasId = "";
+        AliasIdError = null;
+        CurrentInputResult = null;
+    }
+
+    private void OnDestinationInputChange(DestinationInput.DestinationInputResult result)
+    {
+        CurrentInputResult = result;
+    }
+
+    private async Task ConfirmCreate()
+    {
+        var inputResult = DestinationInputRef?.Validate();
+        if (inputResult == null || !inputResult.IsValid)
+            return;
+        
+        if (SaveAsAlias)
+        {
+            // Validate alias ID
+            AliasIdError = null;
+            if (string.IsNullOrWhiteSpace(NewAliasId))
+            {
+                AliasIdError = "Name is required";
+                return;
+            }
+            if (Destinations?.ContainsKey(NewAliasId) == true)
+            {
+                AliasIdError = "This name is already in use";
+                return;
+            }
+            
+            // Create the alias
+            var newDestination = new PrismDestination
+            {
+                Destination = inputResult.Destination,
+                SatThreshold = inputResult.SatThreshold,
+                Reserve = inputResult.Reserve
+            };
+            
+            await OnAliasChange.InvokeAsync(new AliasChangeEvent
+            {
+                Type = AliasChangeType.Created,
+                AliasId = NewAliasId,
+                Destination = newDestination
+            });
+            
+            // Select the new alias
+            await OnSelect.InvokeAsync(new DestinationPickerResult
+            {
+                Destination = NewAliasId,
+                IsAlias = true,
+                AliasConfig = newDestination
+            });
+        }
+        else
+        {
+            // Just return the raw destination
+            await OnSelect.InvokeAsync(new DestinationPickerResult
+            {
+                Destination = inputResult.Destination,
+                IsAlias = false,
+                SatThreshold = inputResult.SatThreshold,
+                Reserve = inputResult.Reserve
+            });
+        }
+        
+        Mode = PickerMode.List;
+    }
+
+    private void CancelCreate()
+    {
+        Mode = PickerMode.List;
+    }
+
+    private void EditAlias(string aliasId)
+    {
+        EditingAliasId = aliasId;
+        EditingDestination = Destinations?.GetValueOrDefault(aliasId);
+        Mode = PickerMode.Edit;
+    }
+
+    private async Task ConfirmEdit()
+    {
+        var inputResult = DestinationInputRef?.Validate();
+        if (inputResult == null || !inputResult.IsValid)
+            return;
+        
+        var updatedDestination = new PrismDestination
+        {
+            Destination = inputResult.Destination,
+            SatThreshold = inputResult.SatThreshold,
+            Reserve = inputResult.Reserve
+        };
+        
+        await OnAliasChange.InvokeAsync(new AliasChangeEvent
+        {
+            Type = AliasChangeType.Updated,
+            AliasId = EditingAliasId,
+            Destination = updatedDestination
+        });
+        
+        Mode = PickerMode.List;
+    }
+
+    private void CancelEdit()
+    {
+        Mode = PickerMode.List;
+        EditingAliasId = null;
+        EditingDestination = null;
+    }
+
+    private async Task DeleteAlias()
+    {
+        await OnAliasChange.InvokeAsync(new AliasChangeEvent
+        {
+            Type = AliasChangeType.Deleted,
+            AliasId = EditingAliasId,
+            Destination = null
+        });
+        
+        Mode = PickerMode.List;
+        EditingAliasId = null;
+        EditingDestination = null;
+    }
+
+    public class DestinationPickerResult
+    {
+        public string Destination { get; set; }
+        public bool IsAlias { get; set; }
+        public PrismDestination AliasConfig { get; set; }
+        public long? SatThreshold { get; set; }
+        public decimal? Reserve { get; set; }
+    }
+    
+    public class AliasChangeEvent
+    {
+        public AliasChangeType Type { get; set; }
+        public string AliasId { get; set; }
+        public PrismDestination Destination { get; set; }
+    }
+    
+    public enum AliasChangeType { Created, Updated, Deleted }
+}

@@ -1,5 +1,6 @@
 @using BTCPayServer.Lightning
 @using BTCPayServer.Payments
+@using Microsoft.AspNetCore.Mvc.Rendering
 @inject SatBreaker SatBreaker
 @inject EventAggregator EventAggregator
 
@@ -115,11 +116,19 @@
         <div class="destinations-list">
             @if (!ShouldShowEdit)
             {
-                @* Read-only view when not editing *@
+                @* Read-only view with friendly destination display *@
                 @foreach (var destination in Split.Destinations)
                 {
                     <div class="d-flex gap-2 mb-2 align-items-center">
-                        <span class="flex-grow-1 text-truncate" title="@destination.Destination">@destination.Destination</span>
+                        <div class="flex-grow-1">
+                            <DestinationDisplay 
+                                Destination="@destination.Destination"
+                                Destinations="@Destinations"
+                                AvailableStores="@AvailableStores"
+                                Truncate="true"
+                                Clickable="@(Destinations?.ContainsKey(destination.Destination) == true)"
+                                OnClick="@(d => StartEditingDestination(destination))" />
+                        </div>
                         <span class="badge bg-secondary">@destination.Percentage%</span>
                     </div>
                 }
@@ -129,32 +138,80 @@
                 @* Editable view *@
                 @foreach (var destination in Split.Destinations)
                 {
+                    var destIndex = Split.Destinations.IndexOf(destination);
                     <div class="d-flex gap-2 mb-2 align-items-center">
-                        <div class="flex-grow-1">
-                            <input type="text" @bind="destination.Destination" list="@(IsWalletTransfer ? "availableStores" : "destinations")"
-                                   class="form-control form-control-sm"
-                                   placeholder="@(IsWalletTransfer ? "Select store or enter address..." : "Enter alias, lightning address, or bitcoin address...")"
-                                   title="Destination alias or address where funds will be sent"/>
-                            <ValidationMessage2 For="() => destination.Destination" class="text-danger small"></ValidationMessage2>
-                        </div>
-                        <div class="input-group input-group-sm" style="width: 120px;">
-                            <input type="number" step="0.01" min="0" max="100" value="@destination.Percentage"
-                                   @onchange="@((e) => UpdateDestinationValue(destination, e.Value))"
-                                   class="form-control"
-                                   placeholder="0"
-                                   title="Percentage of the payment to send to this destination"/>
-                            <span class="input-group-text">%</span>
-                        </div>
-                        <button type="button" class="btn btn-sm btn-outline-danger"
-                                @onclick="@(() => RemoveDestination(destination))"
-                                title="Remove this destination">×</button>
+                        @if (EditingDestinationIndex == destIndex)
+                        {
+                            @* Inline destination picker *@
+                            <div class="flex-grow-1 border rounded p-2 bg-light">
+                                <DestinationPicker
+                                    StoreId="@StoreId"
+                                    Destinations="@Destinations"
+                                    AvailableStores="@AvailableStores"
+                                    PaymentMethodFilter="@GetPaymentMethodFilter()"
+                                    ValidateDestination="@ValidateDestination"
+                                    SelectedDestination="@destination.Destination"
+                                    AllowEdit="true"
+                                    AllowSaveAsAlias="true"
+                                    OnSelect="@(result => OnDestinationSelected(destination, result))"
+                                    OnAliasChange="@OnAliasChanged"
+                                    OnCancel="@(() => EditingDestinationIndex = -1)" />
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="flex-grow-1 d-flex align-items-center gap-2">
+                                <DestinationDisplay 
+                                    Destination="@destination.Destination"
+                                    Destinations="@Destinations"
+                                    AvailableStores="@AvailableStores"
+                                    Truncate="true"
+                                    ShowAliasIndicator="true" />
+                                <button type="button" class="btn btn-sm btn-outline-secondary" 
+                                        @onclick="@(() => EditingDestinationIndex = destIndex)"
+                                        title="Change destination">
+                                    Change
+                                </button>
+                            </div>
+                            <div class="input-group input-group-sm" style="width: 120px;">
+                                <input type="number" step="0.01" min="0" max="100" value="@destination.Percentage"
+                                       @onchange="@((e) => UpdateDestinationValue(destination, e.Value))"
+                                       class="form-control"
+                                       placeholder="0"
+                                       title="Percentage of the payment to send to this destination"/>
+                                <span class="input-group-text">%</span>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-danger"
+                                    @onclick="@(() => RemoveDestination(destination))"
+                                    title="Remove this destination">×</button>
+                        }
                     </div>
                 }
                 @if (!Split.Destinations.Any())
                 {
                     <p class="text-muted small mb-2">No destinations configured. Add at least one destination to split payments.</p>
                 }
-                <button type="button" class="btn btn-sm btn-link p-0" @onclick="CreateDestination">+ Add destination</button>
+                
+                @if (IsAddingNewDestination)
+                {
+                    <div class="border rounded p-2 bg-light mb-2">
+                        <DestinationPicker
+                            StoreId="@StoreId"
+                            Destinations="@Destinations"
+                            AvailableStores="@AvailableStores"
+                            PaymentMethodFilter="@GetPaymentMethodFilter()"
+                            ValidateDestination="@ValidateDestination"
+                            AllowEdit="true"
+                            AllowSaveAsAlias="true"
+                            OnSelect="@OnNewDestinationSelected"
+                            OnAliasChange="@OnAliasChanged"
+                            OnCancel="@(() => IsAddingNewDestination = false)" />
+                    </div>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-sm btn-link p-0" @onclick="StartAddingDestination">+ Add destination</button>
+                }
             }
         </div>
     </div>
@@ -165,6 +222,31 @@
     [Parameter] public EventCallback<Split> OnRequestRemove { get; set; }
     [Parameter] public Func<Task<bool>> OnSave { get; set; }
     [Parameter] public Func<Task> OnSaveForce { get; set; }
+    
+    /// <summary>
+    /// Store ID for the current store (needed for DestinationInput)
+    /// </summary>
+    [Parameter] public string StoreId { get; set; }
+    
+    /// <summary>
+    /// Dictionary of alias -> PrismDestination for resolving and managing aliases
+    /// </summary>
+    [Parameter] public Dictionary<string, PrismDestination> Destinations { get; set; }
+    
+    /// <summary>
+    /// List of available stores for store transfer destinations
+    /// </summary>
+    [Parameter] public List<SelectListItem> AvailableStores { get; set; }
+    
+    /// <summary>
+    /// Validation function for raw destinations
+    /// </summary>
+    [Parameter] public Func<string, bool> ValidateDestination { get; set; }
+    
+    /// <summary>
+    /// Callback when an alias is created/updated/deleted
+    /// </summary>
+    [Parameter] public EventCallback<DestinationPicker.AliasChangeEvent> OnAliasChange { get; set; }
 
     private bool IsWalletTransfer => Split?.Source?.StartsWith("storetransfer:") == true;
     private bool IsEditing { get; set; } = false;
@@ -174,6 +256,10 @@
     private string WalletAmount { get; set; } = "";
     private string SelectedFrequency { get; set; } = "Monthly";
     private int SelectedDayValue { get; set; } = 1;
+    
+    // Destination editing state
+    private int EditingDestinationIndex { get; set; } = -1;
+    private bool IsAddingNewDestination { get; set; } = false;
 
     private static readonly string[] DayNames = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
 
@@ -207,6 +293,9 @@
             {
                 return; // Don't close if save/validation failed
             }
+            // Reset editing state
+            EditingDestinationIndex = -1;
+            IsAddingNewDestination = false;
         }
         IsEditing = !IsEditing;
     }
@@ -259,13 +348,60 @@
         };
     }
 
-    private void CreateDestination()
+    private string GetPaymentMethodFilter()
+    {
+        // For wallet transfers, filter by the selected payment method
+        if (IsWalletTransfer)
+        {
+            return WalletPaymentMethod;
+        }
+        // For regular splits, no filter (allow all types)
+        return null;
+    }
+
+    private void StartAddingDestination()
+    {
+        IsAddingNewDestination = true;
+        EditingDestinationIndex = -1;
+    }
+
+    private void StartEditingDestination(Prism.PrismSplit destination)
+    {
+        if (!ShouldShowEdit)
+        {
+            // If in read-only mode and clicking an alias, enter edit mode
+            IsEditing = true;
+        }
+        EditingDestinationIndex = Split.Destinations.IndexOf(destination);
+        IsAddingNewDestination = false;
+    }
+
+    private void OnDestinationSelected(Prism.PrismSplit destination, DestinationPicker.DestinationPickerResult result)
+    {
+        destination.Destination = result.Destination;
+        EditingDestinationIndex = -1;
+    }
+
+    private void OnNewDestinationSelected(DestinationPicker.DestinationPickerResult result)
     {
         var usedPercentage = Split.Destinations.Sum(d => d.Percentage);
         var remaining = Math.Max(0, 100 - usedPercentage);
-        Split.Destinations.Add(new Prism.PrismSplit { Percentage = remaining });
-        // Ensure we stay in edit mode after adding a destination
-        IsEditing = true;
+        
+        Split.Destinations.Add(new Prism.PrismSplit 
+        { 
+            Destination = result.Destination,
+            Percentage = remaining 
+        });
+        
+        IsAddingNewDestination = false;
+    }
+
+    private async Task OnAliasChanged(DestinationPicker.AliasChangeEvent evt)
+    {
+        if (OnAliasChange.HasDelegate)
+        {
+            await OnAliasChange.InvokeAsync(evt);
+        }
     }
 
     private void RemoveSplit() => OnRequestRemove.InvokeAsync(Split);

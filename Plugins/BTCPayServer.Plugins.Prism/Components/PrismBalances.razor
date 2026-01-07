@@ -1,4 +1,6 @@
-﻿@if (HasData)
+@using Microsoft.AspNetCore.Mvc.Rendering
+
+@if (HasData)
 {
     <div class="card mt-4">
         <div class="card-header d-flex justify-content-between align-items-center">
@@ -19,7 +21,14 @@
                     @foreach (var item in GetUnifiedData())
                     {
                         <tr>
-                            <td class="text-truncate" style="max-width: 200px" title="@item.Destination">@item.Destination</td>
+                            <td style="max-width: 200px">
+                                <DestinationDisplay 
+                                    Destination="@item.Destination"
+                                    Destinations="@Destinations"
+                                    AvailableStores="@AvailableStores"
+                                    Truncate="true"
+                                    ShowAliasIndicator="true" />
+                            </td>
                             <td class="text-end">
                                 @item.Amount.ToString("N0") sats@if (item.FeeCharged > 0)
                                 {<small class="text-muted" title="Reserve fee charged"> (-@item.FeeCharged.ToString("N0") fee)</small>}
@@ -78,6 +87,18 @@
 
     [Parameter]
     public Dictionary<string, PendingPayout> PendingPayouts { get; set; }
+    
+    /// <summary>
+    /// Dictionary of alias -> PrismDestination for resolving aliases
+    /// </summary>
+    [Parameter]
+    public Dictionary<string, PrismDestination> Destinations { get; set; }
+    
+    /// <summary>
+    /// List of available stores for resolving store-prism destinations to friendly names
+    /// </summary>
+    [Parameter]
+    public List<SelectListItem> AvailableStores { get; set; }
 
     [Parameter]
     public EventCallback<(string destination, long newBalance)> OnUpdate { get; set; }
