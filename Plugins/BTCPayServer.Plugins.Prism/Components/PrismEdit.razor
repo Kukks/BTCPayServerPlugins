@@ -515,6 +515,17 @@ else
         {
             rawDestination = aliasedDest.Destination;
         }
+        
+        // For wallet transfers, if the destination is a raw store ID, convert to store-prism format
+        if (expectedPayoutMethod != null && !rawDestination.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase))
+        {
+            var matchingStore = AvailableStores.FirstOrDefault(s => s.Value == rawDestination);
+            if (matchingStore != null)
+            {
+                var paymentMethodStr = expectedPayoutMethod.ToString().Contains("LN") ? "BTC-LN" : "BTC-CHAIN";
+                rawDestination = $"store-prism:{rawDestination}:{paymentMethodStr}";
+            }
+        }
 
         // Validate the raw destination (use Task.Run to avoid sync-over-async deadlock in Blazor)
         var result = Task.Run(() => PluginHookService.ApplyFilter("prism-destination-validate", rawDestination)).GetAwaiter().GetResult();
@@ -601,6 +612,9 @@ else
 
     private async Task<bool> SaveSettings()
     {
+        // Normalize wallet transfer destinations before validation
+        NormalizeWalletTransferDestinations();
+        
         // Trigger validation
         if (EditContext?.Validate() == false)
         {
@@ -623,6 +637,34 @@ else
         finally
         {
             SatBreaker.Unlock();
+        }
+    }
+    
+    private void NormalizeWalletTransferDestinations()
+    {
+        // For wallet transfers, convert raw store IDs to store-prism format
+        foreach (var transfer in Settings.Splits.Where(c => c.Source?.StartsWith("storetransfer") == true))
+        {
+            var parsed = SatBreaker.ParseSource(transfer.Source);
+            if (parsed?.paymentMethod == null) continue;
+            
+            var paymentMethodStr = parsed.Value.paymentMethod.ToString().Contains("LN") ? "BTC-LN" : "BTC-CHAIN";
+            
+            foreach (var destination in transfer.Destinations)
+            {
+                if (string.IsNullOrEmpty(destination.Destination)) continue;
+                if (destination.Destination.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase)) continue;
+                
+                // Check if it's an alias - if so, skip (will be resolved during validation/execution)
+                if (Settings.Destinations.ContainsKey(destination.Destination)) continue;
+                
+                // Check if it's a store ID
+                var matchingStore = AvailableStores.FirstOrDefault(s => s.Value == destination.Destination);
+                if (matchingStore != null)
+                {
+                    destination.Destination = $"store-prism:{destination.Destination}:{paymentMethodStr}";
+                }
+            }
         }
     }
 
