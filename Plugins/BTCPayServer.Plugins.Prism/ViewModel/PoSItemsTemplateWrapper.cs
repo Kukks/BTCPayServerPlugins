@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
@@ -56,26 +56,25 @@ public class DecimalStringConverter : JsonConverter<decimal?>
     }
 }
 
+/// <summary>
+/// Represents a POS app with its products for the split configuration UI.
+/// </summary>
 public class PosAppProductSplitModel
 {
     public string AppId { get; set; }
     public string AppTitle { get; set; }
-    public List<ProductSplitItemModel> Products { get; set; } = new();
+    public List<PosProductInfo> Products { get; set; } = new();
 }
 
-public class ProductDestinationRow
-{
-    public string Destination { get; set; } = "";
-    public int? Percentage { get; set; }
-    public string PaymentMethod { get; set; } = "BTC-CHAIN";
-}
-
-public class ProductSplitItemModel
+/// <summary>
+/// Product metadata for display in the UI. Splits are stored as standard Split objects
+/// with source format: pos:{appId}:{productId} or pos:{appId}:{productId}:{paymentMethod}
+/// </summary>
+public class PosProductInfo
 {
     public string ProductId { get; set; }
     public string Title { get; set; }
     public decimal Price { get; set; }
     public string Currency { get; set; }
-    public List<ProductDestinationRow> Destinations { get; set; } = new();
 }
 

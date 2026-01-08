@@ -165,80 +165,12 @@ else
                                     Destinations="@Settings.Destinations"
                                     AvailableStores="@AvailableStores"
                                     ValidateDestination="@(s => ValidateDestinationSimple(s, false))"
-                                    OnAliasChange="@OnAliasChangeFromPicker"/>
+                                    OnAliasChange="@OnAliasChangeFromPicker"
+                                    PosApps="@PosProducts"
+                                    LnAddresses="@Users"/>
                     }
 
-                    <!-- POS Product Splits Section -->
-                    @if (PosProducts.Any())
-                    {
-                        <div class="mt-5">
-                            <h2>POS Product Splits</h2>
-                            <p class="text-muted">Configure automatic splits for Point of Sale product purchases.</p>
 
-                            <div class="alert alert-info">
-                                <strong>Note:</strong> Ensure the calculated split amount exceeds the sat threshold, and that you have a payout processor configured for the selected payment method.
-                            </div>
-
-                            <div class="accordion" id="posAccordion">
-                                @for (int i = 0; i < PosProducts.Count; i++)
-                                {
-                                    var app = PosProducts[i];
-                                    <div class="accordion-item mb-3" @key="app.AppId">
-                                        <h2 class="accordion-header">
-                                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#pos-@app.AppId">
-                                                @app.AppTitle
-                                                <span class="badge bg-secondary ms-2">@app.Products.Count products</span>
-                                            </button>
-                                        </h2>
-                                        <div id="pos-@app.AppId" class="accordion-collapse collapse" data-bs-parent="#posAccordion">
-                                            <div class="accordion-body">
-                                                <div class="row g-3">
-                                                    @foreach (var product in app.Products)
-                                                    {
-                                                        <div class="col-md-6 col-lg-4" @key="product.ProductId">
-                                                            <div class="card h-100">
-                                                                <div class="card-body">
-                                                                    <h5 class="card-title">@product.Title</h5>
-                                                                    <p class="text-muted mb-2">Price: @product.Price @product.Currency</p>
-
-                                                                    @foreach (var d in product.Destinations)
-                                                                    {
-                                                                        <div class="row g-2 mb-2 align-items-center">
-                                                                            <div class="col-3">
-                                                                                <input type="number" class="form-control form-control-sm"
-                                                                                       min="0" max="100" placeholder="%"
-                                                                                       @bind="d.Percentage" @bind:event="oninput">
-                                                                            </div>
-                                                                            <div class="col-3">
-                                                                                <select class="form-select form-select-sm" @bind="d.PaymentMethod">
-                                                                                    <option value="BTC-CHAIN">Chain</option>
-                                                                                    <option value="BTC-LN">LN</option>
-                                                                                </select>
-                                                                            </div>
-                                                                            <div class="col-6 d-flex gap-1">
-                                                                                <input type="text" class="form-control form-control-sm"
-                                                                                       @bind="d.Destination" placeholder="Store/Address" />
-                                                                                <button type="button" class="btn btn-sm btn-outline-danger"
-                                                                                        @onclick="() => product.Destinations.Remove(d)">x</button>
-                                                                            </div>
-                                                                        </div>
-                                                                    }
-                                                                    <button type="button" class="btn btn-sm btn-outline-primary w-100"
-                                                                            @onclick="() => product.Destinations.Add(new ProductDestinationRow())">
-                                                                        + Add split
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    }
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                }
-                            </div>
-                        </div>
-                    }
                 }
                 else
                 {
@@ -317,7 +249,11 @@ else
 
     public string[] AllDestinationAliases => Settings.Destinations.Keys.ToArray();
     
-    private List<Split> RegularSplits => Settings?.Splits?.Where(s => s.Source is null || !s.Source.StartsWith("pos:")).ToList() ?? new();
+    /// <summary>
+    /// All splits (regular, POS, lightning addresses, catch-alls, wallet transfers).
+    /// Wallet transfers get special UI handling via IsWalletTransfer check in PrismSplit.
+    /// </summary>
+    private List<Split> RegularSplits => Settings?.Splits?.ToList() ?? new();
 
     public bool Loading { get; set; } = true;
     public List<LightningAddressData> Users { get; set; } = new();
@@ -406,35 +342,19 @@ else
         var storePosApps = (await AppService.GetApps(PointOfSaleAppType.AppType)).Where(c => c.StoreDataId == StoreId && !c.Archived).ToList();
         if (storePosApps.Any())
         {
-            var posSplits = Settings.Splits.Where(s => s.Source.StartsWith("pos:")).ToList();
             PosProducts = storePosApps.Select(app =>
             {
                 var settings = app.GetSettings<PointOfSaleSettings>();
-                var products = new List<ProductSplitItemModel>();
+                var products = new List<PosProductInfo>();
                 if (!string.IsNullOrEmpty(settings?.Template))
                 {
                     var templateItems = AppService.Parse(settings.Template) ?? Array.Empty<AppItem>();
-                    products = templateItems.Select(item =>
+                    products = templateItems.Select(item => new PosProductInfo
                     {
-                        var split = posSplits.FirstOrDefault(s => s.Source == $"pos:{app.Id}:{item.Id}");
-                        return new ProductSplitItemModel
-                        {
-                            ProductId = item.Id,
-                            Title = item.Title,
-                            Price = item.Price ?? 0m,
-                            Currency = settings.Currency,
-                            Destinations = split?.Destinations
-                                .Select(d =>
-                                {
-                                    var parts = d.Destination.Split(':', 3);
-                                    return new ProductDestinationRow
-                                    {
-                                        Destination = parts.Length > 1 ? parts[1] : string.Empty,
-                                        PaymentMethod = parts.Length > 2 ? parts[2] : "BTC-LN",
-                                        Percentage = (int)d.Percentage
-                                    };
-                                }).ToList() ?? new List<ProductDestinationRow>()
-                        };
+                        ProductId = item.Id,
+                        Title = item.Title,
+                        Price = item.Price ?? 0m,
+                        Currency = settings.Currency
                     }).ToList();
                 }
                 return new PosAppProductSplitModel
@@ -730,41 +650,6 @@ else
             settz.SatThreshold = Settings.SatThreshold;
             settz.Reserve = Settings.Reserve;
 
-            // Save POS product splits
-            settz.Splits.RemoveAll(s => s.Source.StartsWith("pos:"));
-            foreach (var app in PosProducts)
-            {
-                foreach (var product in app.Products)
-                {
-                    var validDestinations = product.Destinations
-                        .Where(d => d.Percentage is > 0 && !string.IsNullOrEmpty(d.Destination))
-                        .Select(d => new BTCPayServer.Plugins.Prism.PrismSplit
-                        {
-                            Destination = $"store-prism:{d.Destination}:{d.PaymentMethod}",
-                            Percentage = Math.Min(100, d.Percentage.Value)
-                        }).ToList();
-
-                    if (validDestinations.Any())
-                    {
-                        if (validDestinations.Sum(d => d.Percentage) > 100)
-                        {
-                            StatusMessageModel = new()
-                            {
-                                Severity = StatusMessageModel.StatusSeverity.Error,
-                                Message = $"POS product '{product.Title}': percentages cannot exceed 100%"
-                            };
-                            return;
-                        }
-
-                        settz.Splits.Add(new Split
-                        {
-                            Source = $"pos:{app.AppId}:{product.ProductId}",
-                            Destinations = validDestinations
-                        });
-                    }
-                }
-            }
-
             Settings = settz;
             await UpdateAndShowResult(settz, true);
         }
@@ -772,7 +657,6 @@ else
         {
             SatBreaker.Unlock();
         }
-        
     }
 
     private async Task UpdateAndShowResult(PrismSettings settz, bool skipLock)

@@ -501,32 +501,86 @@ namespace BTCPayServer.Plugins.Prism
             }).Where(tuple => tuple.valid).ToDictionary(split => split.pmi, split => split.split);
 
 
-            var posSplits = prismSettings.Splits.Where(split => split.Source.StartsWith("pos", StringComparison.OrdinalIgnoreCase)).ToDictionary(s => s.Source, StringComparer.OrdinalIgnoreCase);
+            var posSplits = prismSettings.Splits
+                .Where(split => split.Source.StartsWith("pos:", StringComparison.OrdinalIgnoreCase))
+                .Select(split =>
+                {
+                    // Parse source: pos:{appId}:{productId} or pos:{appId}:{productId}:{paymentMethod}
+                    var parts = split.Source.Split(':');
+                    if (parts.Length < 3) return (split, appId: (string)null, productId: (string)null, paymentMethodFilter: (PaymentMethodId)null);
+                    
+                    var appId = parts[1];
+                    var productId = parts[2];
+                    PaymentMethodId paymentMethodFilter = null;
+                    
+                    if (parts.Length >= 4 && !string.IsNullOrEmpty(parts[3]))
+                    {
+                        PaymentMethodId.TryParse(parts[3], out paymentMethodFilter);
+                    }
+                    
+                    return (split, appId, productId, paymentMethodFilter);
+                })
+                .Where(x => x.appId != null)
+                .ToList();
+                
             var appItems = GetInvoiceAppIds(entity);
             if (posSplits.Count > 0 && appItems?.Count > 0)
             {
+                var settledPayments = entity.GetPayments(true).Where(p => p.Status == PaymentStatus.Settled).ToList();
+                if (!settledPayments.Any()) goto SkipPos;
+                
                 foreach (var (posId, items) in appItems)
                 {
                     if (items is null || !items.Any()) continue;
                     foreach (var item in items)
                     {
-                        var sourceKey = $"pos:{posId}:{item.Id}";
-                        if (!posSplits.TryGetValue(sourceKey, out var split) || split.Destinations.Count == 0) continue;
+                        // Find matching splits for this app/product (may have multiple with different payment method filters)
+                        var matchingSplits = posSplits
+                            .Where(x => x.appId.Equals(posId, StringComparison.OrdinalIgnoreCase) 
+                                     && x.productId.Equals(item.Id, StringComparison.OrdinalIgnoreCase)
+                                     && x.split.Destinations.Count > 0)
+                            .ToList();
+                        
+                        if (!matchingSplits.Any()) continue;
 
                         var itemTotal = item.Count * item.Price;
-                        var payment = entity.GetPayments(true).FirstOrDefault(p => p.Status == PaymentStatus.Settled);
-                        if (payment == null) continue;
-
-                        var itemTotalInSats = entity.Currency switch
+                        
+                        foreach (var (split, _, _, paymentMethodFilter) in matchingSplits)
                         {
-                            "BTC" => (long)(itemTotal * 100_000_000m),
-                            "SATS" => (long)itemTotal,
-                            _ => (long)((itemTotal / payment.Rate) * 100_000_000m)
-                        };
-                        result.Add((split, LightMoney.FromUnit(itemTotalInSats, LightMoneyUnit.Satoshi)));
+                            // Filter payments by method if specified
+                            var relevantPayments = paymentMethodFilter != null
+                                ? settledPayments.Where(p => p.PaymentMethodId == paymentMethodFilter).ToList()
+                                : settledPayments;
+                            
+                            if (!relevantPayments.Any()) continue;
+                            
+                            // Calculate the proportion of the item paid by relevant payment methods
+                            var totalPaid = settledPayments.Sum(p => p.PaidAmount.Net);
+                            var relevantPaid = relevantPayments.Sum(p => p.PaidAmount.Net);
+                            
+                            if (totalPaid <= 0 || relevantPaid <= 0) continue;
+                            
+                            // Pro-rate the item total based on payment method proportion
+                            var itemPortion = itemTotal * (relevantPaid / totalPaid);
+                            
+                            // Use the first relevant payment for rate conversion
+                            var payment = relevantPayments.First();
+                            var itemPortionInSats = entity.Currency switch
+                            {
+                                "BTC" => (long)(itemPortion * 100_000_000m),
+                                "SATS" => (long)itemPortion,
+                                _ => (long)((itemPortion / payment.Rate) * 100_000_000m)
+                            };
+                            
+                            if (itemPortionInSats > 0)
+                            {
+                                result.Add((split, LightMoney.FromUnit(itemPortionInSats, LightMoneyUnit.Satoshi)));
+                            }
+                        }
                     }
                 }
             }
+            SkipPos:
 
 
             while (payments.Any() && catchAlls.Any())

@@ -1,6 +1,8 @@
 @using BTCPayServer.Lightning
 @using BTCPayServer.Payments
+@using BTCPayServer.Plugins.Prism.ViewModel
 @using Microsoft.AspNetCore.Mvc.Rendering
+@using LightningAddressData = BTCPayServer.Data.LightningAddressData
 @inject SatBreaker SatBreaker
 @inject EventAggregator EventAggregator
 
@@ -93,17 +95,19 @@
                 @if (ShouldShowEdit)
                 {
                     <div class="flex-grow-1 me-2">
-                        <input type="text" @bind="Split.Source" list="users" class="form-control form-control-sm"
-                               placeholder="Lightning address or * for catch-all"
-                               title="The source that triggers this split. Use a lightning address, or * to catch all payments."/>
+                        <SourceEditor 
+                            Source="@Split.Source" 
+                            SourceChanged="@OnSourceChanged"
+                            PosApps="@PosApps"
+                            LnAddresses="@LnAddresses" />
                         <ValidationMessage2 For="() => Split.Source" class="text-danger small"></ValidationMessage2>
                     </div>
                 }
                 else
                 {
                     <h6 class="card-title mb-0 flex-grow-1">
-                        <span class="badge bg-primary me-2">Split</span>
-                        <span>@Split.Source</span>
+                        <span class="badge bg-primary me-2">@GetSourceTypeBadge()</span>
+                        <span>@GetSourceDisplayText()</span>
                     </h6>
                 }
                 <div class="btn-group btn-group-sm">
@@ -189,7 +193,16 @@
                 }
                 @if (!Split.Destinations.Any())
                 {
-                    <p class="text-muted small mb-2">No destinations configured. Add at least one destination to split payments.</p>
+                    <p class="@(ShowValidationError ? "text-danger" : "text-muted") small mb-2">
+                        @if (ShowValidationError)
+                        {
+                            <strong>At least one destination is required.</strong>
+                        }
+                        else
+                        {
+                            <text>No destinations configured. Add at least one destination to split payments.</text>
+                        }
+                    </p>
                 }
                 
                 @if (IsAddingNewDestination)
@@ -247,8 +260,19 @@
     /// Callback when an alias is created/updated/deleted
     /// </summary>
     [Parameter] public EventCallback<DestinationPicker.AliasChangeEvent> OnAliasChange { get; set; }
+    
+    /// <summary>
+    /// POS apps with products for the source editor
+    /// </summary>
+    [Parameter] public List<PosAppProductSplitModel> PosApps { get; set; }
+    
+    /// <summary>
+    /// Lightning addresses for the source editor
+    /// </summary>
+    [Parameter] public List<LightningAddressData> LnAddresses { get; set; }
 
     private bool IsWalletTransfer => Split?.Source?.StartsWith("storetransfer:") == true;
+    private bool IsPosSource => Split?.Source?.StartsWith("pos:") == true;
     private bool IsEditing { get; set; } = false;
     private bool ShouldShowEdit => IsEditing || !Split.Destinations.Any();
 
@@ -260,6 +284,7 @@
     // Destination editing state
     private int EditingDestinationIndex { get; set; } = -1;
     private bool IsAddingNewDestination { get; set; } = false;
+    private bool ShowValidationError { get; set; } = false;
 
     private static readonly string[] DayNames = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
 
@@ -287,10 +312,20 @@
     {
         if (IsEditing)
         {
+            // Check if destinations exist before trying to save
+            if (!Split.Destinations.Any())
+            {
+                ShowValidationError = true;
+                return; // Can't save without destinations
+            }
+            
+            ShowValidationError = false;
+            
             // Closing edit mode - save changes
             var success = OnSave != null ? await OnSave.Invoke() : true;
             if (!success)
             {
+                ShowValidationError = true;
                 return; // Don't close if save/validation failed
             }
             // Reset editing state
@@ -363,6 +398,7 @@
     {
         IsAddingNewDestination = true;
         EditingDestinationIndex = -1;
+        ShowValidationError = false; // Clear error when user starts adding
     }
 
     private void StartEditingDestination(Prism.PrismSplit destination)
@@ -378,7 +414,11 @@
 
     private void OnDestinationSelected(Prism.PrismSplit destination, DestinationPicker.DestinationPickerResult result)
     {
-        destination.Destination = result.Destination;
+        // Only update if we have a valid destination
+        if (!string.IsNullOrEmpty(result?.Destination))
+        {
+            destination.Destination = result.Destination;
+        }
         EditingDestinationIndex = -1;
     }
 
@@ -436,5 +476,65 @@
             }
         }
         destination.Percentage = newValue;
+    }
+
+    private void OnSourceChanged(string newSource)
+    {
+        Split.Source = newSource;
+    }
+
+    private string GetSourceTypeBadge()
+    {
+        if (string.IsNullOrEmpty(Split?.Source)) return "Split";
+        if (Split.Source.StartsWith("storetransfer:")) return "Wallet Transfer";
+        if (Split.Source.StartsWith("pos:")) return "POS";
+        if (Split.Source.StartsWith("*")) return "Catch-all";
+        return "LN Address";
+    }
+
+    private string GetSourceDisplayText()
+    {
+        if (string.IsNullOrEmpty(Split?.Source)) return "(not configured)";
+        
+        // Wallet transfer - show schedule info
+        if (Split.Source.StartsWith("storetransfer:"))
+        {
+            return GetScheduleDisplayText();
+        }
+        
+        // POS source - show friendly name
+        if (Split.Source.StartsWith("pos:"))
+        {
+            var parts = Split.Source.Split(':');
+            if (parts.Length >= 3)
+            {
+                var appId = parts[1];
+                var productId = parts[2];
+                var paymentFilter = parts.Length >= 4 ? parts[3] : null;
+                
+                var app = PosApps?.FirstOrDefault(a => a.AppId == appId);
+                var product = app?.Products.FirstOrDefault(p => p.ProductId == productId);
+                
+                var displayText = product != null 
+                    ? $"{app.AppTitle} / {product.Title}"
+                    : $"{appId} / {productId}";
+                    
+                if (!string.IsNullOrEmpty(paymentFilter))
+                {
+                    displayText += paymentFilter == "BTC-LN" ? " (LN only)" : " (On-chain only)";
+                }
+                
+                return displayText;
+            }
+        }
+        
+        // Catch-all - show friendly name
+        if (Split.Source == "*") return "All Lightning payments";
+        if (Split.Source == "*CHAIN") return "All On-chain payments";
+        if (Split.Source == "*All") return "All payments";
+        if (Split.Source.StartsWith("*")) return $"All {Split.Source[1..]} payments";
+        
+        // Lightning address - show as-is
+        return Split.Source;
     }
 }

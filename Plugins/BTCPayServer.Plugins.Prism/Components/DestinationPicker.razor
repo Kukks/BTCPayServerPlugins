@@ -57,9 +57,17 @@
                 <p class="text-muted small mb-2">No saved destinations yet.</p>
             }
             
-            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="StartCreateNew">
-                + New destination
-            </button>
+            <div class="d-flex gap-2 mt-2">
+                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="StartCreateNew">
+                    + New destination
+                </button>
+                @if (OnCancel.HasDelegate)
+                {
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="Cancel">
+                        Cancel
+                    </button>
+                }
+            </div>
         </div>
     }
     else if (Mode == PickerMode.Create)
@@ -91,6 +99,7 @@
             <DestinationInput 
                 @ref="DestinationInputRef"
                 StoreId="@StoreId"
+                InitialDestination="@_prefilledDestination"
                 ValidateDestination="@ValidateDestination"
                 PaymentMethodFilter="@PaymentMethodFilter"
                 ShowThresholdAndReserve="@(SaveAsAlias || ShowThresholdAndReserve)"
@@ -204,6 +213,9 @@
     private DestinationInput DestinationInputRef { get; set; }
     private DestinationInput.DestinationInputResult CurrentInputResult { get; set; }
 
+    private bool _initialized = false;
+    private string _prefilledDestination;
+    
     protected override void OnParametersSet()
     {
         // Set initial selection
@@ -211,6 +223,15 @@
         {
             SelectedAlias = SelectedDestination;
         }
+        
+        // On first render, if there are no saved destinations and we have a current destination, 
+        // auto-switch to Create mode pre-filled with current destination for editing
+        if (!_initialized && Mode == PickerMode.List && !FilteredDestinations.Any() && !string.IsNullOrEmpty(SelectedDestination))
+        {
+            _prefilledDestination = SelectedDestination;
+            Mode = PickerMode.Create;
+        }
+        _initialized = true;
     }
 
     private IEnumerable<KeyValuePair<string, PrismDestination>> FilteredDestinations
@@ -288,6 +309,7 @@
         NewAliasId = "";
         AliasIdError = null;
         CurrentInputResult = null;
+        _prefilledDestination = null; // Clear any prefilled destination when explicitly creating new
     }
 
     private void OnDestinationInputChange(DestinationInput.DestinationInputResult result)
@@ -351,12 +373,29 @@
             });
         }
         
+        _prefilledDestination = null;
         Mode = PickerMode.List;
     }
 
-    private void CancelCreate()
+    private async Task CancelCreate()
     {
-        Mode = PickerMode.List;
+        // If we auto-switched to Create mode because there were no destinations,
+        // canceling should close the picker entirely
+        if (!FilteredDestinations.Any() && OnCancel.HasDelegate)
+        {
+            _prefilledDestination = null;
+            await OnCancel.InvokeAsync();
+        }
+        else
+        {
+            _prefilledDestination = null;
+            Mode = PickerMode.List;
+        }
+    }
+
+    private async Task Cancel()
+    {
+        await OnCancel.InvokeAsync();
     }
 
     private void EditAlias(string aliasId)
