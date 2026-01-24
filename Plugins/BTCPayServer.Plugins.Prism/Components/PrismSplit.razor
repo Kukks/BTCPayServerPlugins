@@ -120,20 +120,25 @@
         <div class="destinations-list">
             @if (!ShouldShowEdit)
             {
-                @* Read-only view with friendly destination display *@
+                @* Read-only view with friendly destination display and percentage bar *@
                 @foreach (var destination in Split.Destinations)
                 {
-                    <div class="d-flex gap-2 mb-2 align-items-center">
-                        <div class="flex-grow-1">
-                            <DestinationDisplay 
-                                Destination="@destination.Destination"
-                                Destinations="@Destinations"
-                                AvailableStores="@AvailableStores"
-                                Truncate="true"
-                                Clickable="@(Destinations?.ContainsKey(destination.Destination) == true)"
-                                OnClick="@(d => StartEditingDestination(destination))" />
+                    <div class="destination-row position-relative mb-2 rounded overflow-hidden" 
+                         style="background: linear-gradient(to right, rgba(var(--btcpay-primary-rgb, 51, 99, 255), 0.15) @(destination.Percentage)%, transparent @(destination.Percentage)%); border: 1px solid rgba(var(--btcpay-primary-rgb, 51, 99, 255), 0.2);">
+                        <div class="d-flex align-items-center p-2">
+                            <div class="flex-grow-1 d-flex align-items-center gap-2">
+                                <DestinationDisplay 
+                                    Destination="@destination.Destination"
+                                    Destinations="@Destinations"
+                                    AvailableStores="@AvailableStores"
+                                    Truncate="false"
+                                    ShowAliasIndicator="true" />
+                                <span class="text-muted small">@GetDestinationTypeLabel(destination.Destination)</span>
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="fw-bold" style="min-width: 50px; text-align: right;">@destination.Percentage%</span>
+                            </div>
                         </div>
-                        <span class="badge bg-secondary">@destination.Percentage%</span>
                     </div>
                 }
             }
@@ -155,8 +160,9 @@
                                     PaymentMethodFilter="@GetPaymentMethodFilter()"
                                     ValidateDestination="@ValidateDestination"
                                     SelectedDestination="@destination.Destination"
-                                    AllowEdit="true"
+                                    AllowEdit="false"
                                     AllowSaveAsAlias="true"
+                                    Splits="@Splits"
                                     OnSelect="@(result => OnDestinationSelected(destination, result))"
                                     OnAliasChange="@OnAliasChanged"
                                     OnCancel="@(() => EditingDestinationIndex = -1)" />
@@ -216,6 +222,7 @@
                             ValidateDestination="@ValidateDestination"
                             AllowEdit="true"
                             AllowSaveAsAlias="true"
+                            Splits="@Splits"
                             OnSelect="@OnNewDestinationSelected"
                             OnAliasChange="@OnAliasChanged"
                             OnCancel="@(() => IsAddingNewDestination = false)" />
@@ -270,6 +277,11 @@
     /// Lightning addresses for the source editor
     /// </summary>
     [Parameter] public List<LightningAddressData> LnAddresses { get; set; }
+
+    /// <summary>
+    /// List of all splits for checking if a destination is in use (passed to DestinationPicker)
+    /// </summary>
+    [Parameter] public List<Split> Splits { get; set; }
 
     private bool IsWalletTransfer => Split?.Source?.StartsWith("storetransfer:") == true;
     private bool IsPosSource => Split?.Source?.StartsWith("pos:") == true;
@@ -536,5 +548,49 @@
         
         // Lightning address - show as-is
         return Split.Source;
+    }
+
+    private string GetDestinationTypeLabel(string destination)
+    {
+        if (string.IsNullOrEmpty(destination)) return "";
+        
+        // Check if it's an alias
+        if (Destinations?.ContainsKey(destination) == true)
+        {
+            var resolved = Destinations[destination].Destination;
+            return $"→ {GetRawDestinationTypeLabel(resolved)}";
+        }
+        
+        return GetRawDestinationTypeLabel(destination);
+    }
+
+    private string GetRawDestinationTypeLabel(string dest)
+    {
+        if (string.IsNullOrEmpty(dest)) return "";
+        
+        if (dest.StartsWith("store-prism:", StringComparison.OrdinalIgnoreCase))
+        {
+            var parts = dest.Split(':', 3);
+            var paymentMethod = parts.Length > 2 ? parts[2] : "";
+            return paymentMethod.Contains("LN") ? "Store (Lightning)" : "Store (On-chain)";
+        }
+        
+        if (dest.Contains("@") && !dest.Contains("://"))
+            return "Lightning Address";
+        
+        if (dest.StartsWith("lnurl", StringComparison.OrdinalIgnoreCase))
+            return "LNURL";
+        
+        if (dest.StartsWith("bc1", StringComparison.OrdinalIgnoreCase) ||
+            dest.StartsWith("tb1", StringComparison.OrdinalIgnoreCase) ||
+            dest.StartsWith("1") || dest.StartsWith("3") ||
+            dest.StartsWith("m") || dest.StartsWith("n") || dest.StartsWith("2"))
+            return "Bitcoin Address";
+        
+        if (dest.StartsWith("xpub", StringComparison.OrdinalIgnoreCase) ||
+            dest.StartsWith("tpub", StringComparison.OrdinalIgnoreCase))
+            return "Extended Public Key";
+        
+        return "";
     }
 }

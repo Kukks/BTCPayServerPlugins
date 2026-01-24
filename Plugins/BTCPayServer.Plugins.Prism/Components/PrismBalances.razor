@@ -27,16 +27,20 @@
                                     Destinations="@Destinations"
                                     AvailableStores="@AvailableStores"
                                     Truncate="true"
-                                    ShowAliasIndicator="true" />
+                                    ShowAliasIndicator="true"/>
                             </td>
                             <td class="text-end">
-                                @item.Amount.ToString("N0") sats@if (item.FeeCharged > 0)
-                                {<small class="text-muted" title="Reserve fee charged"> (-@item.FeeCharged.ToString("N0") fee)</small>}
+                                @item.Amount.ToString("N0") sats
+                                @if (item.FeeCharged > 0)
+                                {
+                                    <small class="text-muted" title="Reserve fee charged">
+                                        (-@item.FeeCharged.ToString("N0") fee)</small>
+                                }
                             </td>
                             <td>
-                                @if (item.HasPayout)
+                                @if (item.PayoutId is {})
                                 {
-                                    <span class="badge bg-warning text-dark" title="A payout has been created and is waiting to be processed by the payout processor">Payout pending</span>
+                                    <span class="badge bg-warning" title="A payout(@item.PayoutId) has been created and is waiting to be processed by the payout processor">Payout pending</span>
                                 }
                                 else
                                 {
@@ -44,12 +48,12 @@
                                 }
                             </td>
                             <td class="text-end">
-                                @if (item.HasPayout)
+                                @if (item.PayoutId is {})
                                 {
                                     <button type="button" class="btn btn-sm btn-outline-danger"
                                             @onclick="() => CancelPayout(item.PayoutId)"
                                             disabled="@IsActionOngoing"
-                                            title="Cancel this pending payout and return funds to the accumulating balance">Cancel</button>
+                                            title="Cancel this pending payout(@item.PayoutId) and return funds to the accumulating balance">Cancel</button>
                                 }
                                 else if (UpdatingDestination == item.Destination)
                                 {
@@ -108,18 +112,18 @@
 
     private bool HasData => (DestinationBalance?.Any() == true) || (PendingPayouts?.Any() == true);
 
-    private record UnifiedRow(string Destination, decimal Amount, long RawBalance, bool HasPayout, string? PayoutId, long FeeCharged);
+    private record UnifiedRow(string Destination, decimal Amount, long RawBalance, string? PayoutId, long FeeCharged);
 
     private IEnumerable<UnifiedRow> GetUnifiedData()
     {
-        var result = new Dictionary<string, UnifiedRow>();
+        var result = new List<UnifiedRow>();
 
         // Add balances
         if (DestinationBalance != null)
         {
             foreach (var (dest, balance) in DestinationBalance)
             {
-                result[dest] = new UnifiedRow(dest, balance / 1000m, balance, false, null, 0);
+                result.Add(new UnifiedRow(dest, balance / 1000m, balance, null, 0));
             }
         }
 
@@ -130,11 +134,11 @@
             {
                 var dest = payout.DestinationId;
                 var amount = payout.PayoutAmount > 0 ? payout.PayoutAmount : payout.ScheduledTransferAmount;
-                result[dest] = new UnifiedRow(dest, amount, 0, true, payoutId, payout.FeeCharged);
+                result.Add( new UnifiedRow(dest, amount, 0, payoutId, payout.FeeCharged));
             }
         }
 
-        return result.Values.OrderBy(r => r.Destination);
+        return result.OrderBy(r => r.Destination);
     }
 
     private void StartUpdate(string dest, long balance)

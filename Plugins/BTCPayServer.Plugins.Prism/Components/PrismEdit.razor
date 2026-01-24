@@ -157,12 +157,13 @@ else
                     }
                     @foreach (var item in RegularSplits)
                     {
-                        <PrismSplit Split="@item" 
-                                    OnRequestRemove="@RemovePrism" 
-                                    OnSave="@SaveSettings" 
+                        <PrismSplit Split="@item"
+                                    OnRequestRemove="@RemovePrism"
+                                    OnSave="@SaveSettings"
                                     OnSaveForce="@SaveSettingsForce"
                                     StoreId="@StoreId"
                                     Destinations="@Settings.Destinations"
+                                    Splits="@Settings.Splits"
                                     AvailableStores="@AvailableStores"
                                     ValidateDestination="@(s => ValidateDestinationSimple(s, false))"
                                     OnAliasChange="@OnAliasChangeFromPicker"
