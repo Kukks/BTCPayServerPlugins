@@ -1,0 +1,45 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Client
+@using BTCPayServer.Data
+@using BTCPayServer.Payments
+@using BTCPayServer.Plugins.Stripe
+@using BTCPayServer.Plugins.Stripe.PaymentHandler
+@using BTCPayServer.Services.Invoices
+@using BTCPayServer.Services.Stores
+@inject IScopeProvider ScopeProvider
+@inject StoreRepository StoreRepository
+@inject PaymentMethodHandlerDictionary Handlers
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+    StripePaymentMethodConfig? config = null;
+    string status = "pending"; // unconfigured
+
+    if (!string.IsNullOrEmpty(storeId))
+    {
+        var store = await StoreRepository.FindStore(storeId);
+        if (store != null)
+        {
+            config = store.GetPaymentMethodConfig<StripePaymentMethodConfig>(
+                StripePlugin.StripePaymentMethodId, Handlers);
+        }
+
+        if (config?.IsConfigured == true)
+        {
+            status = config.Enabled ? "enabled" : "disabled";
+        }
+    }
+}
+@if (!string.IsNullOrEmpty(storeId))
+{
+    <li class="nav-item">
+        <a permission="@Policies.CanModifyStoreSettings"
+           layout-menu-item="Stripe"
+           asp-controller="Stripe"
+           asp-action="Configure"
+           asp-route-storeId="@storeId">
+            <span class="me-2 btcpay-status btcpay-status--@status"></span>
+            <span>Stripe</span>
+        </a>
+    </li>
+}

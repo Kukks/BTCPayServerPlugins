@@ -1,0 +1,296 @@
+@* This file is loaded via checkout-end to register the StripeCheckout Vue component *@
+@using BTCPayServer.Security
+@model BTCPayServer.Models.InvoicingModels.CheckoutModel
+@inject ContentSecurityPolicies csp 
+@{ 
+    csp.Add("script-src", "https://js.stripe.com");
+}
+
+<template id="StripeCheckout">
+    <div class="payment-box">
+        <div v-if="stripeError" class="alert alert-danger mb-3">
+            {{ stripeError }}
+        </div>
+
+        <div v-if="stripeLoading" class="text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2 text-muted">Loading payment form...</p>
+        </div>
+
+        <div v-show="!stripeLoading && !stripeError && !paymentComplete">
+
+            <form id="stripe-payment-form" v-on:submit.prevent="handleStripeSubmit">
+                <div id="stripe-payment-element" class="mb-3">
+                    <!-- Stripe Payment Element mounts here -->
+                </div>
+
+                <div v-if="paymentError" class="alert alert-danger mb-3">
+                    {{ paymentError }}
+                </div>
+
+                <button type="submit" class="btn btn-primary rounded-pill w-100" :disabled="stripeProcessing">
+                    <span v-if="stripeProcessing">
+                        <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                        Processing...
+                    </span>
+                    <span v-else>
+                        Pay {{ formatAmount(stripeAmount, stripeCurrency) }}
+                    </span>
+                </button>
+            </form>
+
+            <div class="mt-3 text-center">
+                <small class="text-muted">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-lock-fill me-1" viewBox="0 0 16 16">
+                        <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
+                    </svg>
+                    Payments secured by Stripe
+                </small>
+            </div>
+        </div>
+
+        <div v-if="paymentComplete" class="text-center py-4">
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="currentColor" class="bi bi-check-circle text-success mb-3" viewBox="0 0 16 16">
+                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                <path d="M10.97 4.97a.235.235 0 0 0-.02.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-1.071-1.05z"/>
+            </svg>
+            <h4>Payment Successful!</h4>
+            <p class="text-muted">Your payment has been processed.</p>
+        </div>
+    </div>
+</template>
+
+<script src="https://js.stripe.com/v3/" ></script>
+<script>
+(function() {
+    // Wait for Vue and checkout to be ready
+    if (typeof Vue === 'undefined') {
+        console.error('Vue not loaded for Stripe checkout');
+        return;
+    }
+
+    Vue.component('StripeCheckout', {
+        props: ['model', 'nfcSupported', 'nfcScanning', 'nfcErrorMessage', 'nfcWarningMessage'],
+        template: '#StripeCheckout',
+        data() {
+            return {
+                stripe: null,
+                elements: null,
+                paymentElement: null,
+                stripeLoading: true,
+                stripeProcessing: false,
+                stripeError: null,
+                paymentError: null,
+                paymentComplete: false
+            };
+        },
+        computed: {
+            stripePublishableKey() {
+                return this.model.stripePublishableKey;
+            },
+            stripeClientSecret() {
+                return this.model.stripeClientSecret;
+            },
+            stripePaymentIntentId() {
+                return this.model.stripePaymentIntentId;
+            },
+            stripeAmount() {
+                return this.model.stripeAmount;
+            },
+            stripeCurrency() {
+                return this.model.stripeCurrency;
+            },
+            invoiceId() {
+                return this.model.invoiceId;
+            }
+        },
+        watch: {
+            // Re-initialize when payment method changes
+            'model.stripeClientSecret': function(newVal, oldVal) {
+                if (newVal && newVal !== oldVal) {
+                    this.initStripe();
+                }
+            }
+        },
+        mounted() {
+            this.initStripe();
+        },
+        methods: {
+            async initStripe() {
+                this.stripeLoading = true;
+                this.stripeError = null;
+                this.paymentError = null;
+                this.paymentComplete = false;
+
+                try {
+                    if (!this.stripePublishableKey || !this.stripeClientSecret) {
+                        this.stripeError = 'Stripe configuration missing';
+                        this.stripeLoading = false;
+                        return;
+                    }
+
+                    // Initialize Stripe
+                    this.stripe = Stripe(this.stripePublishableKey);
+                    const style = window.getComputedStyle(document.body);
+                    
+                    // Create Elements instance with appearance options
+                    const appearance = {
+                        theme: document.documentElement.getAttribute('data-btcpay-theme') === 'dark' ? 'night' : 'stripe',
+                        variables: {
+                            colorPrimary: style.getPropertyValue("--btcpay-primary"),
+                            colorText: style.getPropertyValue("--btcpay-body-text"),
+                            colorBackground: style.getPropertyValue("--btcpay-body-bg"),
+                            colorDanger: style.getPropertyValue("--btcpay-danger"),
+                        },
+                        
+                    };
+
+                    this.elements = this.stripe.elements({
+                        clientSecret: this.stripeClientSecret,
+                        appearance: appearance
+                    });
+
+                    // Create and mount Payment Element
+                    const paymentElementOptions = {
+                        layout: 'accordion',
+                        wallets: {
+                            applePay: this.model.stripeEnableApplePay ? 'auto' : 'never',
+                            googlePay: this.model.stripeEnableGooglePay ? 'auto' : 'never'
+                        }
+                    };
+
+                    this.paymentElement = this.elements.create('payment', paymentElementOptions);
+
+                    // Wait for mount
+                    await this.$nextTick();
+
+                    const mountElement = document.getElementById('stripe-payment-element');
+                    if (mountElement) {
+                        this.paymentElement.mount('#stripe-payment-element');
+                    }
+
+                    this.stripeLoading = false;
+                } catch (error) {
+                    console.error('Stripe initialization error:', error);
+                    this.stripeError = error.message || 'Failed to initialize payment form';
+                    this.stripeLoading = false;
+                }
+            },
+
+            async handleStripeSubmit() {
+                if (this.stripeProcessing) return;
+
+                this.stripeProcessing = true;
+                this.paymentError = null;
+
+                try {
+                    // Confirm payment with Stripe
+                    const { error, paymentIntent } = await this.stripe.confirmPayment({
+                        elements: this.elements,
+                        confirmParams: {
+                            return_url: window.location.href // For 3DS redirect
+                        },
+                        redirect: 'if_required' // Only redirect if 3DS is needed
+                    });
+
+                    if (error) {
+                        // Payment failed
+                        if (error.type === 'card_error' || error.type === 'validation_error') {
+                            this.paymentError = error.message;
+                        } else {
+                            this.paymentError = 'An unexpected error occurred. Please try again.';
+                        }
+                        this.stripeProcessing = false;
+                        return;
+                    }
+
+                    // Payment succeeded or requires additional action
+                    if (paymentIntent.status === 'succeeded') {
+                        await this.verifyPayment();
+                    } else if (paymentIntent.status === 'requires_action') {
+                        // Will be handled by Stripe's redirect
+                        this.paymentError = 'Additional authentication required';
+                    } else {
+                        this.paymentError = `Payment status: ${paymentIntent.status}`;
+                    }
+                } catch (error) {
+                    console.error('Payment error:', error);
+                    this.paymentError = 'Payment failed. Please try again.';
+                }
+
+                this.stripeProcessing = false;
+            },
+
+            async verifyPayment() {
+                try {
+                    // Call our API to verify and record the payment
+                    const response = await fetch(`/api/plugins/stripe/verify/${this.invoiceId}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            paymentIntentId: this.stripePaymentIntentId
+                        })
+                    });
+
+                    const result = await response.json();
+
+                    if (result.success) {
+                        this.paymentComplete = true;
+                        // Trigger checkout refresh to show paid status
+                        if (window.btcpay && window.btcpay.showCheckout) {
+                            // Refresh invoice state
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 2000);
+                        }
+                    } else {
+                        this.paymentError = result.error || 'Payment verification failed';
+                    }
+                } catch (error) {
+                    console.error('Verification error:', error);
+                    this.paymentError = 'Failed to verify payment';
+                }
+            },
+
+            formatAmount(amount, currency) {
+                if (!amount || !currency) return '';
+                return new Intl.NumberFormat(undefined, {
+                    style: 'currency',
+                    currency: currency.toUpperCase()
+                }).format(amount);
+            }
+        },
+        beforeDestroy() {
+            // Cleanup Stripe elements
+            if (this.paymentElement) {
+                this.paymentElement.destroy();
+            }
+        }
+    });
+})();
+</script>
+
+<style>
+    #stripe-payment-element {
+        min-height: 200px;
+    }
+
+    #stripe-payment-form .btn-primary {
+        background-color: #51b13e;
+        border-color: #51b13e;
+    }
+
+    #stripe-payment-form .btn-primary:hover {
+        background-color: #469234;
+        border-color: #469234;
+    }
+
+    #stripe-payment-form .btn-primary:disabled {
+        background-color: #6c757d;
+        border-color: #6c757d;
+    }
+</style>
