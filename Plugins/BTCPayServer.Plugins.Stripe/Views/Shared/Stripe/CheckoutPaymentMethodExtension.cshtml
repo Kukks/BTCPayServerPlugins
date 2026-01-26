@@ -115,9 +115,34 @@
             }
         },
         mounted() {
-            this.initStripe();
+            this.checkExistingPaymentThenInit();
         },
         methods: {
+            async checkExistingPaymentThenInit() {
+                // First check if payment was already completed (e.g., user completed in another tab, webhook missed)
+                try {
+                    const response = await fetch(`/api/plugins/stripe/status/${this.invoiceId}`);
+                    if (response.ok) {
+                        const status = await response.json();
+                        if (status.status === 'succeeded') {
+                            // Payment already succeeded - verify and record it
+                            console.log('PaymentIntent already succeeded, verifying...');
+                            await this.verifyPayment();
+                            if (this.paymentComplete) {
+                                this.stripeLoading = false;
+                                return; // Don't init Stripe form if already paid
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.warn('Could not check existing payment status:', error);
+                    // Continue with normal init even if status check fails
+                }
+
+                // Initialize Stripe form
+                this.initStripe();
+            },
+
             async initStripe() {
                 this.stripeLoading = true;
                 this.stripeError = null;

@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Data;
@@ -15,14 +16,16 @@ namespace BTCPayServer.Plugins.Stripe.Services;
 
 /// <summary>
 /// Listens for BTCPay invoice events and manages Stripe PaymentIntents accordingly.
+/// - Checks pending PaymentIntents on startup to catch missed payments
 /// - Cancels PaymentIntents when invoices expire, are marked invalid, or complete
-/// - Handles partial payment scenarios by cancelling existing PaymentIntents
+/// - Handles partial payment scenarios by creating new PaymentIntents with remaining amount
 /// </summary>
 public class StripeInvoiceListener : EventHostedServiceBase
 {
     private readonly StripeService _stripeService;
     private readonly StoreRepository _storeRepository;
     private readonly InvoiceRepository _invoiceRepository;
+    private readonly PaymentService _paymentService;
     private readonly PaymentMethodHandlerDictionary _handlers;
     private readonly ILogger<StripeInvoiceListener> _logger;
 
@@ -31,6 +34,7 @@ public class StripeInvoiceListener : EventHostedServiceBase
         StripeService stripeService,
         StoreRepository storeRepository,
         InvoiceRepository invoiceRepository,
+        PaymentService paymentService,
         PaymentMethodHandlerDictionary handlers,
         ILogger<StripeInvoiceListener> logger)
         : base(eventAggregator, logger)
@@ -38,8 +42,150 @@ public class StripeInvoiceListener : EventHostedServiceBase
         _stripeService = stripeService;
         _storeRepository = storeRepository;
         _invoiceRepository = invoiceRepository;
+        _paymentService = paymentService;
         _handlers = handlers;
         _logger = logger;
+    }
+
+    public override async Task StartAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Starting Stripe invoice listener, checking for pending payments...");
+
+        try
+        {
+            await CheckPendingPaymentIntents(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error checking pending Stripe PaymentIntents on startup");
+        }
+
+        await base.StartAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// On startup, check all pending invoices with Stripe PaymentIntents to see if any
+    /// payments were completed while BTCPay was offline (missed webhooks).
+    /// </summary>
+    private async Task CheckPendingPaymentIntents(CancellationToken cancellationToken)
+    {
+        // Get all "New" invoices (waiting for payment)
+        var pendingInvoices = await _invoiceRepository.GetMonitoredInvoices(StripePlugin.StripePaymentMethodId, cancellationToken);
+
+        if (pendingInvoices?.Length is null or 0)
+        {
+            _logger.LogInformation("No pending invoices found for Stripe payment method");
+            return;
+        }
+
+        _logger.LogInformation(
+            "Found {Count} pending invoices with Stripe PaymentIntents, checking status...",
+            pendingInvoices.Length);
+
+        foreach (var invoice in pendingInvoices)
+        {
+            try
+            {
+                await CheckAndRecordPaymentIfSucceeded(invoice, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Error checking PaymentIntent for invoice {InvoiceId}",
+                    invoice.Id);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Check if a PaymentIntent has succeeded and record the payment if so.
+    /// </summary>
+    private async Task CheckAndRecordPaymentIfSucceeded(InvoiceEntity invoice, CancellationToken cancellationToken)
+    {
+        var paymentIntentId = GetPaymentIntentIdFromInvoice(invoice);
+        if (string.IsNullOrEmpty(paymentIntentId))
+            return;
+
+        var store = await _storeRepository.FindStore(invoice.StoreId);
+        if (store == null)
+            return;
+
+        var config = GetConfig(store);
+        if (config is not { IsConfigured: true })
+            return;
+
+        // Fetch the PaymentIntent from Stripe
+        var paymentIntent = await _stripeService.GetPaymentIntent(config, paymentIntentId, cancellationToken);
+
+        if (paymentIntent.Status != "succeeded")
+        {
+            _logger.LogDebug(
+                "PaymentIntent {PaymentIntentId} for invoice {InvoiceId} status is {Status}",
+                paymentIntentId, invoice.Id, paymentIntent.Status);
+            return;
+        }
+
+        // Check if payment was already recorded
+        var existingPayments = invoice.GetPayments(true);
+        if (existingPayments.Any(p =>
+            p.PaymentMethodId == StripePlugin.StripePaymentMethodId &&
+            p.Id == paymentIntentId))
+        {
+            _logger.LogDebug(
+                "Payment for PaymentIntent {PaymentIntentId} already recorded for invoice {InvoiceId}",
+                paymentIntentId, invoice.Id);
+            return;
+        }
+
+        _logger.LogInformation(
+            "Found succeeded PaymentIntent {PaymentIntentId} for invoice {InvoiceId} - recording payment",
+            paymentIntentId, invoice.Id);
+
+        // Record the payment
+        await RecordStripePayment(invoice, paymentIntent, config);
+    }
+
+    /// <summary>
+    /// Record a Stripe payment for an invoice.
+    /// </summary>
+    private async Task RecordStripePayment(
+        InvoiceEntity invoice,
+        global::Stripe.PaymentIntent paymentIntent,
+        StripePaymentMethodConfig config)
+    {
+        if (!_handlers.TryGetValue(StripePlugin.StripePaymentMethodId, out var handler))
+            return;
+
+        var charge = paymentIntent.LatestCharge;
+
+        var paymentData = new StripePaymentData
+        {
+            PaymentIntentId = paymentIntent.Id,
+            ChargeId = charge?.Id,
+            AmountReceived = paymentIntent.AmountReceived,
+            Currency = paymentIntent.Currency,
+            PaymentMethodType = charge?.PaymentMethodDetails?.Type,
+            Last4 = charge?.PaymentMethodDetails?.Card?.Last4,
+            Brand = charge?.PaymentMethodDetails?.Card?.Brand
+        };
+
+        var payment = new PaymentData
+        {
+            Id = paymentIntent.Id,
+            InvoiceDataId = invoice.Id,
+            Currency = config.SettlementCurrency,
+            Amount = StripeService.FromStripeAmount(paymentIntent.AmountReceived, paymentIntent.Currency),
+            Status = PaymentStatus.Settled,
+            Created = DateTimeOffset.UtcNow
+        };
+
+        payment.Set(invoice, handler, paymentData);
+
+        await _paymentService.AddPayment(payment, [paymentIntent.Id]);
+
+        _logger.LogInformation(
+            "Recorded missed Stripe payment for invoice {InvoiceId}: {Amount} {Currency} (PaymentIntent {PaymentIntentId})",
+            invoice.Id, payment.Amount, payment.Currency, paymentIntent.Id);
     }
 
     private StripePaymentMethodConfig? GetConfig(StoreData store)
@@ -124,8 +270,7 @@ public class StripeInvoiceListener : EventHostedServiceBase
 
     /// <summary>
     /// Handle when a partial payment is received via another payment method.
-    /// If Stripe has an active PaymentIntent, it should be cancelled so a new one
-    /// with the correct remaining amount can be created on next checkout view.
+    /// Cancels the existing PaymentIntent and creates a new one with the remaining amount.
     /// </summary>
     private async Task HandlePartialPayment(InvoiceEvent invoiceEvent, CancellationToken cancellationToken)
     {
@@ -134,6 +279,10 @@ public class StripeInvoiceListener : EventHostedServiceBase
 
         // Only process if payment was NOT via Stripe (partial payment via another method)
         if (payment?.PaymentMethodId == StripePlugin.StripePaymentMethodId)
+            return;
+
+        var prompt = invoice.GetPaymentPrompt(StripePlugin.StripePaymentMethodId);
+        if (prompt?.Details == null)
             return;
 
         var paymentIntentId = GetPaymentIntentIdFromInvoice(invoice);
@@ -149,12 +298,51 @@ public class StripeInvoiceListener : EventHostedServiceBase
             return;
 
         _logger.LogInformation(
-            "Partial payment received via {PaymentMethod}. Cancelling Stripe PaymentIntent {PaymentIntentId} for invoice {InvoiceId}",
-            payment?.PaymentMethodId?.ToString() ?? "unknown", paymentIntentId, invoice.Id);
+            "Partial payment received via {PaymentMethod}. Updating Stripe PaymentIntent for invoice {InvoiceId}",
+            payment?.PaymentMethodId?.ToString() ?? "unknown", invoice.Id);
 
-        // Cancel the existing PaymentIntent - a new one will be created with
-        // the updated amount when the checkout is viewed again
+        // Cancel the existing PaymentIntent
         await _stripeService.CancelPaymentIntent(config, paymentIntentId, cancellationToken);
+
+        // Calculate the remaining amount due
+        var accounting = prompt.Calculate();
+        var remainingDue = accounting.Due;
+
+        if (remainingDue <= 0)
+        {
+            _logger.LogInformation(
+                "No remaining balance for Stripe payment on invoice {InvoiceId}",
+                invoice.Id);
+            return;
+        }
+
+        // Create a new PaymentIntent with the remaining amount
+        var newPaymentIntent = await _stripeService.CreatePaymentIntent(
+            config,
+            remainingDue,
+            invoice.Id,
+            cancellationToken: cancellationToken);
+
+        // Update the prompt details with the new PaymentIntent
+        var newPromptDetails = new StripePromptDetails
+        {
+            ClientSecret = newPaymentIntent.ClientSecret,
+            PublishableKey = config.PublishableKey!,
+            PaymentIntentId = newPaymentIntent.Id,
+            Amount = remainingDue,
+            Currency = config.SettlementCurrency,
+            EnableApplePay = config.EnableApplePay,
+            EnableGooglePay = config.EnableGooglePay
+        };
+
+        prompt.Destination = newPaymentIntent.Id;
+        prompt.Details = Newtonsoft.Json.Linq.JObject.FromObject(newPromptDetails);
+
+        await _invoiceRepository.UpdatePrompt(invoice.Id, prompt);
+
+        _logger.LogInformation(
+            "Created new PaymentIntent {NewPaymentIntentId} for remaining amount {Amount} {Currency} on invoice {InvoiceId} (cancelled {OldPaymentIntentId})",
+            newPaymentIntent.Id, remainingDue, config.SettlementCurrency, invoice.Id, paymentIntentId);
     }
 
     /// <summary>
