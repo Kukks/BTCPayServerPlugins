@@ -97,7 +97,6 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
                 return null;
             }
         }
-
         return new BlinkLightningClient(apiKey, uri, walletId, currency, network, client, _loggerFactory.CreateLogger(nameof(BlinkLightningClient)));
     }
 }

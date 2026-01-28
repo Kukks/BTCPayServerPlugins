@@ -122,6 +122,7 @@ query InvoiceByPaymentHash($walletId: WalletId!) {
         ExplicitCurrency = currency;
         _network = network;
         Logger = logger;
+        httpClient.Timeout = PayTimeout + TimeSpan.FromSeconds(2);
         _client = new GraphQLHttpClient(new GraphQLHttpClientOptions() {EndPoint = _apiEndpoint,
             WebSocketEndPoint =
                 new Uri("wss://" + _apiEndpoint.Host.Replace("api.", "ws.") + _apiEndpoint.PathAndQuery),
@@ -653,6 +654,7 @@ query GetWallet($walletId: WalletId!) {
         return await Pay(null, new PayInvoiceParams(), cancellation);
     }
 
+    private static TimeSpan PayTimeout = TimeSpan.FromMinutes(1.0);
     public async Task<PayResponse> Pay(string bolt11, PayInvoiceParams payParams,
         CancellationToken cancellation = default)
     {
@@ -700,9 +702,10 @@ mutation LnInvoicePaymentSend($input: LnInvoicePaymentInput!) {
             }
         };
         var bolt11Parsed = BOLT11PaymentRequest.Parse(bolt11, _network);
-       
-        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation,
-            new CancellationTokenSource(payParams?.SendTimeout ?? PayInvoiceParams.DefaultSendTimeout).Token);
+
+        using var inner = new CancellationTokenSource(payParams?.SendTimeout ?? PayTimeout);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation,inner.Token);
+
         var response =(JObject) (await  _client.SendQueryAsync<dynamic>(request,  cts.Token)).Data.lnInvoicePaymentSend;
         
         var result = new PayResponse();
