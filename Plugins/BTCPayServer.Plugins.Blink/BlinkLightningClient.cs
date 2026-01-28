@@ -302,12 +302,44 @@ query TransactionsByPaymentHash($paymentHash: PaymentHash!, $walletId: WalletId!
         };
         var response = await _client.SendQueryAsync<dynamic>(reques,  cancellation);
         var item = (JArray) response.Data.me.defaultAccount.walletById.transactionsByPaymentHash;
-        return item.Any()? ToLightningPayment((JObject)item.First()): null;
+        return item.Any()? ToLightningPayment(item): null;
     }
 
-    public LightningPayment? ToLightningPayment(JObject transaction)
+    public LightningPayment? ToLightningPayment(JArray transactions)
     {
-        if ((string)transaction["direction"] == "RECEIVE")
+        // [
+        // {
+        //     "createdAt": 1769580990,
+        //     "direction": "RECEIVE",
+        //     "id": "6979a9bef0d9bb45cda8a8ef",
+        //     "initiationVia": {},
+        //     "memo": "fee reimbursement",
+        //     "settlementAmount": 8,
+        //     "settlementCurrency": "BTC",
+        //     "settlementVia": {
+        //         "preImage": null
+        //     },
+        //     "status": "SUCCESS"
+        // },
+        // {
+        //     "createdAt": 1769580988,
+        //     "direction": "SEND",
+        //     "id": "6979a9bcf0d9bb45cda8a866",
+        //     "initiationVia": {
+        //         "paymentHash": "de3073bc40acbbf2948259b7c56212c1e23f030cd113b489aa4805ba46a772bb",
+        //         "paymentRequest": "lnbc1u1p5hn2dmpp5mcc880zq4jal99yztxmu2csjc83r7qcv6yfmfzd2fqzm5348w2ascqzyssp5z3lfcr54z3ssd93q2jyux2lah3v2ay7xs5fnd32j0pa3tfqrehgq9q7sqqqqqqqqqqqqqqqqqqqsqqqqqysgqdq2w3jhxapjxgmqz9gxqyjw5qrzjqwryaup9lh50kkranzgcdnn2fgvx390wgj5jd07rwr3vxeje0glcll7fwunuepcqyyqqqqlgqqqqqeqqjqmwuxa4w3ushqy5687v79zf8zrh3fyhwc7d863j0lu8lj7xf48wl8mtvxz56rr6r8sy3u69e7xndhdrrw6k9vuzd98yw56u07d268d4gq5zj8u0"
+        //     },
+        //     "memo": "test22",
+        //     "settlementAmount": -110,
+        //     "settlementCurrency": "BTC",
+        //     "settlementVia": {
+        //         "preImage": "9d726f2530323bc54c8540481ff9ef20fca22f9da9c39b883a81449aa09ecedd"
+        //     },
+        //     "status": "SUCCESS"
+        // }
+        // ]
+        var transaction = transactions.OfType<JObject>().FirstOrDefault(o => (string)o["direction"]! == "SEND");
+        if (transaction is null)
             return null;
 
         var initiationVia = transaction["initiationVia"];
@@ -393,7 +425,7 @@ query Transactions($walletId: WalletId!) {
         
             
             
-        var result = ((JArray)response.Data.me.defaultAccount.walletById.transactions.edges).Select(o => ToLightningPayment((JObject) o["node"])).Where(o => o is not null && (request.IncludePending is not true || o.Status!= LightningPaymentStatus.Pending)).ToArray();
+        var result = ((JArray)response.Data.me.defaultAccount.walletById.transactions.edges).Select(o => ToLightningPayment(new JArray((JObject) o["node"]!))).Where(o => o is not null && (request.IncludePending is not true || o.Status!= LightningPaymentStatus.Pending)).ToArray();
         return (LightningPayment[]) result;
     }
 
