@@ -353,9 +353,7 @@ public class StripeInvoiceListener : EventHostedServiceBase
             PublishableKey = config.PublishableKey!,
             PaymentIntentId = newPaymentIntent.Id,
             Amount = remainingDue,
-            Currency = config.SettlementCurrency,
-            EnableApplePay = config.EnableApplePay,
-            EnableGooglePay = config.EnableGooglePay
+            Currency = config.SettlementCurrency
         };
 
         prompt.Destination = newPaymentIntent.Id;

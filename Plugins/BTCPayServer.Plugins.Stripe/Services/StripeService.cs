@@ -68,6 +68,9 @@ public class StripeService
                 : descriptor;
         }
 
+        // Apply advanced config overrides if provided
+        ApplyAdvancedConfig(options, config);
+
         var paymentIntent = await service.CreateAsync(options, cancellationToken: cancellationToken);
 
         _logger.LogInformation(
@@ -75,6 +78,59 @@ public class StripeService
             paymentIntent.Id, invoiceId, amount, config.SettlementCurrency);
 
         return paymentIntent;
+    }
+
+    /// <summary>
+    /// Apply advanced JSON config overrides to PaymentIntent options.
+    /// </summary>
+    private void ApplyAdvancedConfig(PaymentIntentCreateOptions options, StripePaymentMethodConfig config)
+    {
+        var advancedConfig = config.GetAdvancedConfigJson();
+        if (advancedConfig == null)
+            return;
+
+        try
+        {
+            // Merge metadata
+            if (advancedConfig["metadata"] is Newtonsoft.Json.Linq.JObject metadata)
+            {
+                foreach (var prop in metadata.Properties())
+                {
+                    options.Metadata[prop.Name] = prop.Value?.ToString() ?? "";
+                }
+            }
+
+            // Override payment_method_types (disables automatic_payment_methods)
+            if (advancedConfig["payment_method_types"] is Newtonsoft.Json.Linq.JArray paymentMethodTypes)
+            {
+                options.AutomaticPaymentMethods = null;
+                options.PaymentMethodTypes = paymentMethodTypes.Select(t => t.ToString()).ToList();
+            }
+
+            // Override statement descriptor suffix
+            if (advancedConfig["statement_descriptor_suffix"]?.ToString() is { } suffix && !string.IsNullOrEmpty(suffix))
+            {
+                options.StatementDescriptorSuffix = suffix.Length > 22 ? suffix[..22] : suffix;
+            }
+
+            // Override capture method
+            if (advancedConfig["capture_method"]?.ToString() is { } captureMethod && !string.IsNullOrEmpty(captureMethod))
+            {
+                options.CaptureMethod = captureMethod;
+            }
+
+            // Override setup_future_usage
+            if (advancedConfig["setup_future_usage"]?.ToString() is { } futureUsage && !string.IsNullOrEmpty(futureUsage))
+            {
+                options.SetupFutureUsage = futureUsage;
+            }
+
+            _logger.LogDebug("Applied advanced config overrides for PaymentIntent");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to apply advanced config overrides");
+        }
     }
 
     /// <summary>

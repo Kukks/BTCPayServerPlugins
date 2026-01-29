@@ -44,8 +44,6 @@ public class StripeCheckoutModelExtension : ICheckoutModelExtension
         context.Model.AdditionalData["stripePaymentIntentId"] = JToken.FromObject(promptDetails.PaymentIntentId);
         context.Model.AdditionalData["stripeAmount"] = JToken.FromObject(promptDetails.Amount);
         context.Model.AdditionalData["stripeCurrency"] = JToken.FromObject(promptDetails.Currency);
-        context.Model.AdditionalData["stripeEnableApplePay"] = JToken.FromObject(promptDetails.EnableApplePay);
-        context.Model.AdditionalData["stripeEnableGooglePay"] = JToken.FromObject(promptDetails.EnableGooglePay);
 
         // Set address to display the payment amount
         context.Model.Address = $"{promptDetails.Amount:F2} {promptDetails.Currency.ToUpperInvariant()}";

@@ -112,9 +112,7 @@ public class StripePaymentMethodHandler : IPaymentMethodHandler
             PublishableKey = config.PublishableKey!,
             PaymentIntentId = paymentIntent.Id,
             Amount = amountInSettlementCurrency,
-            Currency = config.SettlementCurrency,
-            EnableApplePay = config.EnableApplePay,
-            EnableGooglePay = config.EnableGooglePay
+            Currency = config.SettlementCurrency
         };
 
         context.Prompt.Destination = paymentIntent.Id; // Use PaymentIntent ID as destination identifier

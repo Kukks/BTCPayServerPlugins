@@ -179,11 +179,7 @@
 
                     // Create and mount Payment Element
                     const paymentElementOptions = {
-                        layout: 'accordion',
-                        wallets: {
-                            applePay: this.model.stripeEnableApplePay ? 'auto' : 'never',
-                            googlePay: this.model.stripeEnableGooglePay ? 'auto' : 'never'
-                        }
+                        layout: 'accordion'
                     };
 
                     this.paymentElement = this.elements.create('payment', paymentElementOptions);

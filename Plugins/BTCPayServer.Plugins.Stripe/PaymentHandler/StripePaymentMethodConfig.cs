@@ -1,5 +1,6 @@
 #nullable enable
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace BTCPayServer.Plugins.Stripe.PaymentHandler;
 
@@ -36,16 +37,6 @@ public class StripePaymentMethodConfig
     public string? StatementDescriptor { get; set; }
 
     /// <summary>
-    /// Enable Apple Pay in the Payment Element
-    /// </summary>
-    public bool EnableApplePay { get; set; } = true;
-
-    /// <summary>
-    /// Enable Google Pay in the Payment Element
-    /// </summary>
-    public bool EnableGooglePay { get; set; } = true;
-
-    /// <summary>
     /// Stripe webhook endpoint ID (for managing/deleting)
     /// </summary>
     public string? WebhookId { get; set; }
@@ -54,6 +45,12 @@ public class StripePaymentMethodConfig
     /// Stripe webhook signing secret
     /// </summary>
     public string? WebhookSecret { get; set; }
+
+    /// <summary>
+    /// Advanced JSON configuration that gets merged into PaymentIntent creation options.
+    /// Allows customizing Stripe API options like payment_method_types, metadata, etc.
+    /// </summary>
+    public string? AdvancedConfig { get; set; }
 
     /// <summary>
     /// Whether this is a test mode configuration (inferred from API key prefix)
@@ -66,4 +63,22 @@ public class StripePaymentMethodConfig
     /// </summary>
     [JsonIgnore]
     public bool IsConfigured => !string.IsNullOrEmpty(PublishableKey) && !string.IsNullOrEmpty(SecretKey);
+
+    /// <summary>
+    /// Parse the advanced config JSON, returns null if empty or invalid.
+    /// </summary>
+    public JObject? GetAdvancedConfigJson()
+    {
+        if (string.IsNullOrWhiteSpace(AdvancedConfig))
+            return null;
+
+        try
+        {
+            return JObject.Parse(AdvancedConfig);
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }

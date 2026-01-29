@@ -29,14 +29,4 @@ public class StripePromptDetails
     /// Settlement currency code
     /// </summary>
     public string Currency { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Whether Apple Pay is enabled
-    /// </summary>
-    public bool EnableApplePay { get; set; }
-
-    /// <summary>
-    /// Whether Google Pay is enabled
-    /// </summary>
-    public bool EnableGooglePay { get; set; }
 }
