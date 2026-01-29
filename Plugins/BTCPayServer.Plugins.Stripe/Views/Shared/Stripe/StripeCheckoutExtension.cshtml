@@ -1,0 +1,220 @@
+@using BTCPayServer.Data
+@using BTCPayServer.Payments
+@using BTCPayServer.Plugins.Stripe
+@using BTCPayServer.Plugins.Stripe.PaymentHandler
+@using BTCPayServer.Services.Invoices
+@using BTCPayServer.Services.Stores
+@model BTCPayServer.Models.InvoicingModels.CheckoutModel
+@inject StoreRepository StoreRepository
+@inject PaymentMethodHandlerDictionary Handlers
+@inject Safe Safe
+
+@{
+    var store = await StoreRepository.FindStore(Model.StoreId);
+    var config = store?.GetPaymentMethodConfig<StripePaymentMethodConfig>(
+        StripePlugin.StripePaymentMethodId, Handlers);
+
+    var isConfigured = config?.IsConfigured == true;
+}
+
+@if (isConfigured)
+{
+    <script src="https://js.stripe.com/v3/" asp-append-version="true"></script>
+
+    <template id="@StripeCheckoutModelExtension.CheckoutBodyComponentName">
+        <div class="payment-box">
+            <div v-if="loading" class="text-center py-4">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2 text-muted">Initializing payment...</p>
+            </div>
+
+            <div v-else>
+                <div class="d-flex align-items-center mb-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 32 32" fill="none" class="me-2">
+                        <rect width="32" height="32" rx="6" fill="#635BFF"/>
+                        <path fill-rule="evenodd" clip-rule="evenodd" d="M15.296 11.6c0-.88.72-1.22 1.912-1.22 1.71 0 3.87.52 5.58 1.44V7.04c-1.87-.74-3.72-1.04-5.58-1.04-4.56 0-7.6 2.38-7.6 6.36 0 6.2 8.54 5.21 8.54 7.88 0 1.04-.91 1.38-2.18 1.38-1.88 0-4.29-.78-6.19-1.82v4.86c2.1.9 4.24 1.28 6.19 1.28 4.67 0 7.87-2.31 7.87-6.34-.01-6.69-8.57-5.50-8.57-8.02z" fill="white"/>
+                    </svg>
+                    <span class="h5 mb-0">Pay with Card</span>
+                </div>
+
+                <div v-if="error" class="alert alert-danger mb-3">{{ error }}</div>
+
+                <div id="stripe-payment-element" ref="paymentElement"></div>
+
+                <button
+                    type="button"
+                    class="btn btn-primary rounded-pill w-100 mt-4"
+                    :disabled="!ready || submitting"
+                    v-on:click="handleSubmit">
+                    <span v-if="submitting" class="spinner-border spinner-border-sm me-2"></span>
+                    {{ submitting ? 'Processing...' : 'Pay ' + formattedAmount }}
+                </button>
+
+                <p class="text-muted small mt-3 mb-0 text-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" class="me-1" viewBox="0 0 16 16">
+                        <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
+                    </svg>
+                    Payments secured by Stripe
+                </p>
+            </div>
+        </div>
+    </template>
+
+    <script>
+        Vue.component(@Safe.Json(StripeCheckoutModelExtension.CheckoutBodyComponentName), {
+            template: @Safe.Json("#" + StripeCheckoutModelExtension.CheckoutBodyComponentName),
+            props: ["model"],
+            data: function() {
+                return {
+                    loading: true,
+                    ready: false,
+                    submitting: false,
+                    error: null,
+                    stripe: null,
+                    elements: null,
+                    paymentElement: null,
+                    clientSecret: null,
+                    amount: null,
+                    currency: '@config!.SettlementCurrency'
+                };
+            },
+            computed: {
+                formattedAmount: function() {
+                    if (!this.amount) return '';
+                    return this.currency.toUpperCase() + ' ' + this.amount.toFixed(2);
+                }
+            },
+            mounted: function() {
+                this.initializeStripe();
+            },
+            methods: {
+                initializeStripe: async function() {
+                    try {
+                        this.loading = true;
+                        this.error = null;
+
+                        // Initialize Stripe
+                        this.stripe = Stripe('@Html.Raw(config!.PublishableKey)');
+
+                        // Create PaymentIntent on server
+                        const response = await fetch('/plugins/@Model.StoreId/stripe/create-intent', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                invoiceId: '@Model.InvoiceId'
+                            })
+                        });
+
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.error || 'Failed to create payment');
+                        }
+
+                        const data = await response.json();
+                        this.clientSecret = data.clientSecret;
+                        this.amount = data.amount;
+                        this.currency = data.currency;
+
+                        // Create Elements
+                        const appearance = {
+                            theme: document.documentElement.getAttribute('data-btcpay-theme') === 'dark' ? 'night' : 'stripe'
+                        };
+
+                        this.elements = this.stripe.elements({
+                            clientSecret: this.clientSecret,
+                            appearance: appearance
+                        });
+
+                        this.loading = false;
+
+                        // Mount payment element after DOM update
+                        await this.$nextTick();
+
+                        this.paymentElement = this.elements.create('payment');
+                        this.paymentElement.mount(this.$refs.paymentElement);
+
+                        this.paymentElement.on('ready', () => {
+                            this.ready = true;
+                        });
+
+                        this.paymentElement.on('change', (event) => {
+                            if (event.error) {
+                                this.error = event.error.message;
+                            } else {
+                                this.error = null;
+                            }
+                        });
+
+                    } catch (err) {
+                        console.error('Stripe initialization error:', err);
+                        this.error = err.message || 'Failed to initialize payment';
+                        this.loading = false;
+                    }
+                },
+
+                handleSubmit: async function() {
+                    if (!this.stripe || !this.elements || this.submitting) return;
+
+                    this.submitting = true;
+                    this.error = null;
+
+                    try {
+                        const result = await this.stripe.confirmPayment({
+                            elements: this.elements,
+                            confirmParams: {
+                                return_url: window.location.href
+                            },
+                            redirect: 'if_required'
+                        });
+
+                        if (result.error) {
+                            this.error = result.error.message;
+                            this.submitting = false;
+                        } else if (result.paymentIntent && result.paymentIntent.status === 'succeeded') {
+                            // Verify payment on server
+                            await this.verifyPayment(result.paymentIntent.id);
+                        }
+                    } catch (err) {
+                        console.error('Payment error:', err);
+                        this.error = err.message || 'Payment failed';
+                        this.submitting = false;
+                    }
+                },
+
+                verifyPayment: async function(paymentIntentId) {
+                    try {
+                        const response = await fetch('/plugins/@Model.StoreId/stripe/verify', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                invoiceId: '@Model.InvoiceId',
+                                paymentIntentId: paymentIntentId
+                            })
+                        });
+
+                        if (response.ok) {
+                            // Reload to show payment success
+                            window.location.reload();
+                        } else {
+                            const errorData = await response.json();
+                            this.error = errorData.error || 'Payment verification failed';
+                            this.submitting = false;
+                        }
+                    } catch (err) {
+                        console.error('Verification error:', err);
+                        this.error = 'Payment verification failed';
+                        this.submitting = false;
+                    }
+                }
+            }
+        });
+    </script>
+
+    <style>
+        #stripe-payment-element {
+            min-height: 100px;
+        }
+    </style>
+}

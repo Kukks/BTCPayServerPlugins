@@ -1,0 +1,20 @@
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.Contracts
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+}
+<a asp-controller="Stripe" asp-action="UpdateStripeSettings" asp-route-storeId="@storeId" class="list-group-item list-group-item-action d-flex align-items-center">
+    <span class="me-3">
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+            <rect width="32" height="32" rx="6" fill="#635BFF"/>
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M15.296 11.6c0-.88.72-1.22 1.912-1.22 1.71 0 3.87.52 5.58 1.44V7.04c-1.87-.74-3.72-1.04-5.58-1.04-4.56 0-7.6 2.38-7.6 6.36 0 6.2 8.54 5.21 8.54 7.88 0 1.04-.91 1.38-2.18 1.38-1.88 0-4.29-.78-6.19-1.82v4.86c2.1.9 4.24 1.28 6.19 1.28 4.67 0 7.87-2.31 7.87-6.34-.01-6.69-8.57-5.50-8.57-8.02z" fill="white"/>
+        </svg>
+    </span>
+    <span>Stripe</span>
+    <span class="ms-auto">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-chevron-right" viewBox="0 0 16 16">
+            <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/>
+        </svg>
+    </span>
+</a>

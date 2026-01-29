@@ -9,6 +9,11 @@ namespace BTCPayServer.Plugins.Stripe.PaymentHandler;
 /// </summary>
 public class StripeCheckoutModelExtension : ICheckoutModelExtension
 {
+    /// <summary>
+    /// The name of the Vue component used for Stripe checkout.
+    /// </summary>
+    public const string CheckoutBodyComponentName = "StripeCheckout";
+
     public PaymentMethodId PaymentMethodId => StripePlugin.StripePaymentMethodId;
     public string Image { get; }
 
@@ -28,7 +33,7 @@ public class StripeCheckoutModelExtension : ICheckoutModelExtension
             return;
 
         // Use custom Vue component for Stripe checkout
-        context.Model.CheckoutBodyComponentName = "StripeCheckout";
+        context.Model.CheckoutBodyComponentName = CheckoutBodyComponentName;
 
         // Parse the prompt details to get Stripe-specific data
         var promptDetails = (StripePromptDetails)handler.ParsePaymentPromptDetails(context.Prompt.Details);

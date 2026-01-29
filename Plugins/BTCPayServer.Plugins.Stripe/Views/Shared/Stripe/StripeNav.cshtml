@@ -1,0 +1,16 @@
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.Contracts
+@inject IScopeProvider ScopeProvider
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId();
+}
+@if (!string.IsNullOrEmpty(storeId))
+{
+    <a id="StoreNav-Stripe"
+       asp-controller="Stripe"
+       asp-action="UpdateStripeSettings"
+       asp-route-storeId="@storeId"
+       class="nav-link @ViewData.ActivePageClass("Stripe")">
+        Stripe
+    </a>
+}
