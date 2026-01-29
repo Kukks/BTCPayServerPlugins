@@ -324,6 +324,30 @@ public class StripeService
     }
 
     /// <summary>
+    /// Delete a webhook endpoint from Stripe.
+    /// </summary>
+    public async Task DeleteWebhook(
+        StripePaymentMethodConfig config,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(config.WebhookId))
+            return;
+
+        try
+        {
+            var client = new StripeClient(config.SecretKey);
+            var service = new WebhookEndpointService(client);
+            await service.DeleteAsync(config.WebhookId, cancellationToken: cancellationToken);
+            _logger.LogInformation("Deleted Stripe webhook {WebhookId}", config.WebhookId);
+        }
+        catch (StripeException ex) when (ex.StripeError?.Code == "resource_missing")
+        {
+            // Webhook already deleted, that's fine
+            _logger.LogDebug("Webhook {WebhookId} already deleted from Stripe", config.WebhookId);
+        }
+    }
+
+    /// <summary>
     /// Test that API keys are valid.
     /// </summary>
     public async Task<(bool Success, string? Error)> TestConnection(

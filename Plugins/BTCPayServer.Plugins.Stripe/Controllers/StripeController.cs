@@ -66,39 +66,49 @@ public class StripeController : Controller
     [HttpPost("")]
     public async Task<IActionResult> Configure(string storeId, StripePaymentMethodConfig config, string command)
     {
+        var store = await _storeRepository.FindStore(storeId);
+        if (store == null)
+            return NotFound();
+
+        // Get existing config to merge with form data
+        var existingConfig = GetConfig(store);
+
+        // Merge existing secrets if form doesn't provide them (password fields don't submit values)
+        if (existingConfig?.IsConfigured == true)
+        {
+            // Preserve API keys unless explicitly clearing
+            if (string.IsNullOrWhiteSpace(config.PublishableKey))
+                config.PublishableKey = existingConfig.PublishableKey;
+            if (string.IsNullOrWhiteSpace(config.SecretKey))
+                config.SecretKey = existingConfig.SecretKey;
+            // Always preserve webhook secrets
+            if (string.IsNullOrWhiteSpace(config.WebhookId))
+                config.WebhookId = existingConfig.WebhookId;
+            if (string.IsNullOrWhiteSpace(config.WebhookSecret))
+                config.WebhookSecret = existingConfig.WebhookSecret;
+        }
 
         switch (command?.ToLowerInvariant())
         {
             case "save":
-                return await SaveSettings(storeId, config);
+                return await SaveSettings(storeId, store, config);
 
             case "test":
                 return await TestConnection(storeId, config);
 
             case "registerwebhook":
-                return await RegisterWebhook(storeId, config);
+                return await RegisterWebhook(storeId, store, config);
+
+            case "clearcredentials":
+                return await ClearCredentials(storeId, store);
 
             default:
                 return View(config);
         }
     }
 
-    private async Task<IActionResult> SaveSettings(string storeId, StripePaymentMethodConfig config)
+    private async Task<IActionResult> SaveSettings(string storeId, StoreData store, StripePaymentMethodConfig config)
     {
-        var store = await _storeRepository.FindStore(storeId);
-        if (store == null)
-            return NotFound();
-
-        // Get existing config to preserve secrets if not provided
-        var existingConfig = GetConfig(store);
-
-        // Preserve existing secret values if new values are empty (password fields don't submit values)
-        if (string.IsNullOrWhiteSpace(config.SecretKey) && !string.IsNullOrWhiteSpace(existingConfig?.SecretKey))
-            config.SecretKey = existingConfig.SecretKey;
-
-        if (string.IsNullOrWhiteSpace(config.WebhookSecret) && !string.IsNullOrWhiteSpace(existingConfig?.WebhookSecret))
-            config.WebhookSecret = existingConfig.WebhookSecret;
-
         if (config.Enabled)
         {
             // Validate required fields when enabling
@@ -170,7 +180,7 @@ public class StripeController : Controller
         return View(config);
     }
 
-    private async Task<IActionResult> RegisterWebhook(string storeId, StripePaymentMethodConfig config)
+    private async Task<IActionResult> RegisterWebhook(string storeId, StoreData store, StripePaymentMethodConfig config)
     {
         if (string.IsNullOrWhiteSpace(config.SecretKey))
         {
@@ -195,19 +205,17 @@ public class StripeController : Controller
             }
 
             // Save the updated config
-            var store = await _storeRepository.FindStore(storeId);
-            if (store != null)
-            {
-                var handler = _handlers[StripePlugin.StripePaymentMethodId];
-                store.SetPaymentMethodConfig(handler, config);
-                await _storeRepository.UpdateStore(store);
-            }
+            var handler = _handlers[StripePlugin.StripePaymentMethodId];
+            store.SetPaymentMethodConfig(handler, config);
+            await _storeRepository.UpdateStore(store);
 
             TempData.SetStatusMessageModel(new StatusMessageModel
             {
                 Severity = StatusMessageModel.StatusSeverity.Success,
                 Message = result.Message ?? "Webhook registered successfully"
             });
+
+            return RedirectToAction(nameof(Configure), new { storeId });
         }
         else
         {
@@ -219,5 +227,46 @@ public class StripeController : Controller
         }
 
         return View(config);
+    }
+
+    private async Task<IActionResult> ClearCredentials(string storeId, StoreData store)
+    {
+        var existingConfig = GetConfig(store);
+        if (existingConfig == null)
+            return RedirectToAction(nameof(Configure), new { storeId });
+
+        // Try to delete the webhook from Stripe if it exists
+        if (!string.IsNullOrEmpty(existingConfig.WebhookId) && !string.IsNullOrEmpty(existingConfig.SecretKey))
+        {
+            try
+            {
+                await _stripeService.DeleteWebhook(existingConfig);
+            }
+            catch
+            {
+                // Ignore errors - webhook may already be deleted
+            }
+        }
+
+        // Clear all credentials
+        var config = new StripePaymentMethodConfig
+        {
+            Enabled = false,
+            SettlementCurrency = existingConfig.SettlementCurrency,
+            StatementDescriptor = existingConfig.StatementDescriptor,
+            AdvancedConfig = existingConfig.AdvancedConfig
+        };
+
+        var handler = _handlers[StripePlugin.StripePaymentMethodId];
+        store.SetPaymentMethodConfig(handler, config);
+        await _storeRepository.UpdateStore(store);
+
+        TempData.SetStatusMessageModel(new StatusMessageModel
+        {
+            Severity = StatusMessageModel.StatusSeverity.Success,
+            Message = "Stripe credentials cleared"
+        });
+
+        return RedirectToAction(nameof(Configure), new { storeId });
     }
 }
