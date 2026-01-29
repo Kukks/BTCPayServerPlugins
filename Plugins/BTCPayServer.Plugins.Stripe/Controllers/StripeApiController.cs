@@ -154,6 +154,9 @@ public class StripeApiController : ControllerBase
 
             if (await _paymentService.AddPayment(payment, [paymentIntent.Id]) is {} addedPayment)
             {
+                _logger.LogDebug(
+                    "Payment recorded with PaymentMethodId={PaymentMethodId}, Id={PaymentId}",
+                    addedPayment.PaymentMethodId, addedPayment.Id);
                 _aggregator.Publish(new InvoiceEvent(invoice, InvoiceEvent.ReceivedPayment) { Payment = addedPayment });
             }
 
