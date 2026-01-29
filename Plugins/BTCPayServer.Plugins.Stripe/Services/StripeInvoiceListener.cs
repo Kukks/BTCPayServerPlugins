@@ -306,11 +306,32 @@ public class StripeInvoiceListener : EventHostedServiceBase
             return;
 
         _logger.LogInformation(
-            "Partial payment received via {PaymentMethod}. Updating Stripe PaymentIntent for invoice {InvoiceId}",
+            "Partial payment received via {PaymentMethod}. Checking Stripe PaymentIntent for invoice {InvoiceId}",
             payment?.PaymentMethodId?.ToString() ?? "unknown", invoice.Id);
 
-        // Cancel the existing PaymentIntent
-        await _stripeService.CancelPaymentIntent(config, paymentIntentId, cancellationToken);
+        // Check if PaymentIntent has already succeeded (payment was made but not recorded yet)
+        try
+        {
+            var existingPaymentIntent = await _stripeService.GetPaymentIntent(config, paymentIntentId, cancellationToken);
+            if (existingPaymentIntent.Status == "succeeded")
+            {
+                _logger.LogInformation(
+                    "PaymentIntent {PaymentIntentId} already succeeded - recording payment instead of cancelling",
+                    paymentIntentId);
+
+                // Record the payment that was made
+                await RecordStripePayment(invoice, existingPaymentIntent, config);
+                return;
+            }
+
+            // PaymentIntent not yet succeeded, safe to cancel and create new one
+            await _stripeService.CancelPaymentIntent(config, paymentIntentId, cancellationToken);
+        }
+        catch (global::Stripe.StripeException ex) when (ex.StripeError?.Code == "resource_missing")
+        {
+            _logger.LogWarning("PaymentIntent {PaymentIntentId} not found - may have already been cancelled", paymentIntentId);
+            // Continue to create new PaymentIntent
+        }
 
         // Calculate the remaining amount due
         var accounting = prompt.Calculate();
