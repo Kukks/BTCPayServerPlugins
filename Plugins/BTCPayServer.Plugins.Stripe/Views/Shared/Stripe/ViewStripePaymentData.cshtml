@@ -28,9 +28,6 @@
                 <thead>
                 <tr>
                     <th class="w-175px">Intent Id</th>
-                    <th class="w-175px">Charge Id</th>
-                    <th class="text-nowrap">Type</th>
-                    <th class="w-100px">Last 4</th>
                     <th class="w-150px text-end">Paid</th>
                 </tr>
                 </thead>
@@ -40,15 +37,6 @@
                     <tr>
                         <td>
                             <vc:truncate-center text="@payment.PaymentIntentId" classes="truncate-center-id"/>
-                        </td>
-                        <td>
-                            <vc:truncate-center text="@payment.ChargeId" classes="truncate-center-id"/>
-                        </td>
-                        <td>
-                            <span>@payment.PaymentMethodType @(string.IsNullOrEmpty(payment.Brand) ? payment.Brand : "")</span>
-                        </td>
-                        <td>
-                            <vc:truncate-center text="@payment.Last4" classes="truncate-center-id"/>
                         </td>
                         <td class="payment-value text-end text-nowrap">
                             <span data-sensitive

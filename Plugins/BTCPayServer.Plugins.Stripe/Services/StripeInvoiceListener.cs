@@ -156,17 +156,11 @@ public class StripeInvoiceListener : EventHostedServiceBase
         if (!_handlers.TryGetValue(StripePlugin.StripePaymentMethodId, out var handler))
             return;
 
-        var charge = paymentIntent.LatestCharge;
-
         var paymentData = new StripePaymentData
         {
             PaymentIntentId = paymentIntent.Id,
-            ChargeId = charge?.Id,
             AmountReceived = paymentIntent.AmountReceived,
-            Currency = paymentIntent.Currency,
-            PaymentMethodType = charge?.PaymentMethodDetails?.Type,
-            Last4 = charge?.PaymentMethodDetails?.Card?.Last4,
-            Brand = charge?.PaymentMethodDetails?.Card?.Brand
+            Currency = paymentIntent.Currency
         };
 
         var payment = new PaymentData
