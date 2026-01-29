@@ -277,6 +277,14 @@ public class StripeInvoiceListener : EventHostedServiceBase
         var invoice = invoiceEvent.Invoice;
         var payment = invoiceEvent.Payment;
 
+        // DEBUG: Log payment method check
+        _logger.LogInformation(
+            "HandlePartialPayment for invoice {InvoiceId}: Payment={PaymentExists}, PaymentMethodId={PaymentMethodId}, IsStripe={IsStripe}",
+            invoice.Id,
+            payment != null,
+            payment?.PaymentMethodId?.ToString() ?? "null",
+            payment?.PaymentMethodId == StripePlugin.StripePaymentMethodId);
+
         // Only process if payment was NOT via Stripe (partial payment via another method)
         if (payment?.PaymentMethodId == StripePlugin.StripePaymentMethodId)
             return;
