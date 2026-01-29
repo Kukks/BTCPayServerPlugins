@@ -400,11 +400,39 @@ public class StripeInvoiceListener : EventHostedServiceBase
         if (config == null || !config.IsConfigured)
             return;
 
-        _logger.LogInformation(
-            "Invoice {InvoiceId} paid via {PaymentMethod}. Cancelling unused Stripe PaymentIntent {PaymentIntentId}",
-            invoice.Id, payment?.PaymentMethodId?.ToString() ?? "unknown", paymentIntentId);
+        try
+        {
+            // Check if PaymentIntent succeeded but wasn't recorded
+            var existingPaymentIntent = await _stripeService.GetPaymentIntent(config, paymentIntentId, cancellationToken);
+            if (existingPaymentIntent.Status == "succeeded")
+            {
+                // Check if payment already recorded
+                var existingPayments = invoice.GetPayments(true);
+                var alreadyRecorded = existingPayments.Any(p =>
+                    p.PaymentMethodId == StripePlugin.StripePaymentMethodId &&
+                    p.Id == paymentIntentId);
 
-        await _stripeService.CancelPaymentIntent(config, paymentIntentId, cancellationToken);
+                if (!alreadyRecorded)
+                {
+                    _logger.LogInformation(
+                        "Invoice {InvoiceId} marked paid but Stripe PaymentIntent {PaymentIntentId} succeeded - recording missed payment",
+                        invoice.Id, paymentIntentId);
+                    await RecordStripePayment(invoice, existingPaymentIntent, config);
+                    return;
+                }
+            }
+
+            // PaymentIntent not succeeded or already recorded - safe to cancel
+            _logger.LogInformation(
+                "Invoice {InvoiceId} paid via {PaymentMethod}. Cancelling unused Stripe PaymentIntent {PaymentIntentId}",
+                invoice.Id, payment?.PaymentMethodId?.ToString() ?? "unknown", paymentIntentId);
+
+            await _stripeService.CancelPaymentIntent(config, paymentIntentId, cancellationToken);
+        }
+        catch (global::Stripe.StripeException ex) when (ex.StripeError?.Code == "resource_missing")
+        {
+            _logger.LogDebug("PaymentIntent {PaymentIntentId} not found - already cancelled or processed", paymentIntentId);
+        }
     }
 
     /// <summary>
