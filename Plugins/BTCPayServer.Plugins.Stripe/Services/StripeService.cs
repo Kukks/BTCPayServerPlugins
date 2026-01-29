@@ -198,6 +198,76 @@ public class StripeService
     }
 
     /// <summary>
+    /// Check the status of a configured webhook.
+    /// </summary>
+    public async Task<WebhookStatus> GetWebhookStatus(
+        StripePaymentMethodConfig config,
+        string storeId,
+        string btcpayExternalUrl,
+        CancellationToken cancellationToken = default)
+    {
+        var expectedUrl = $"{btcpayExternalUrl.TrimEnd('/')}/plugins/stripe/webhook/{storeId}";
+
+        // No webhook ID configured
+        if (string.IsNullOrEmpty(config.WebhookId))
+        {
+            return new WebhookStatus
+            {
+                IsConfigured = false,
+                IsValid = false,
+                Status = "Not configured",
+                HasSigningSecret = !string.IsNullOrEmpty(config.WebhookSecret)
+            };
+        }
+
+        try
+        {
+            var client = new StripeClient(config.SecretKey);
+            var service = new WebhookEndpointService(client);
+            var webhook = await service.GetAsync(config.WebhookId, cancellationToken: cancellationToken);
+
+            var urlMatches = webhook.Url.Equals(expectedUrl, StringComparison.OrdinalIgnoreCase);
+
+            return new WebhookStatus
+            {
+                IsConfigured = true,
+                IsValid = webhook.Status == "enabled" && urlMatches,
+                WebhookId = webhook.Id,
+                WebhookUrl = webhook.Url,
+                Status = webhook.Status == "enabled"
+                    ? (urlMatches ? "Active" : "URL mismatch")
+                    : webhook.Status,
+                HasSigningSecret = !string.IsNullOrEmpty(config.WebhookSecret),
+                Error = !urlMatches ? $"Expected URL: {expectedUrl}" : null
+            };
+        }
+        catch (StripeException ex) when (ex.StripeError?.Code == "resource_missing")
+        {
+            return new WebhookStatus
+            {
+                IsConfigured = true,
+                IsValid = false,
+                WebhookId = config.WebhookId,
+                Status = "Not found in Stripe",
+                Error = "Webhook was deleted from Stripe. Please re-register.",
+                HasSigningSecret = !string.IsNullOrEmpty(config.WebhookSecret)
+            };
+        }
+        catch (StripeException ex)
+        {
+            return new WebhookStatus
+            {
+                IsConfigured = true,
+                IsValid = false,
+                WebhookId = config.WebhookId,
+                Status = "Error",
+                Error = ex.Message,
+                HasSigningSecret = !string.IsNullOrEmpty(config.WebhookSecret)
+            };
+        }
+    }
+
+    /// <summary>
     /// Test that API keys are valid.
     /// </summary>
     public async Task<(bool Success, string? Error)> TestConnection(
@@ -260,4 +330,18 @@ public class WebhookRegistrationResult
     public string? WebhookSecret { get; set; }
     public string? Message { get; set; }
     public string? Reason { get; set; }
+}
+
+/// <summary>
+/// Status of webhook configuration.
+/// </summary>
+public class WebhookStatus
+{
+    public bool IsConfigured { get; set; }
+    public bool IsValid { get; set; }
+    public string? WebhookId { get; set; }
+    public string? WebhookUrl { get; set; }
+    public string? Status { get; set; }
+    public string? Error { get; set; }
+    public bool HasSigningSecret { get; set; }
 }

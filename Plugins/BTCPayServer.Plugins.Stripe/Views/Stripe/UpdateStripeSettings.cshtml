@@ -1,10 +1,12 @@
 @using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Plugins.Stripe
 @using BTCPayServer.Plugins.Stripe.PaymentHandler
+@using BTCPayServer.Plugins.Stripe.Services
 @model StripePaymentMethodConfig
 
 @{
     ViewData.SetActivePage("Stripe", "Stripe Settings", "Stripe");
+    var webhookStatus = ViewBag.WebhookStatus as WebhookStatus;
 }
 
 <form method="post" asp-action="Configure">
@@ -50,6 +52,63 @@
                 <div class="form-text">The currency Stripe will charge customers in (e.g., USD, EUR, GBP).</div>
             </div>
 
+            <h4 class="mt-5 mb-3">Webhook Configuration</h4>
+
+            @if (webhookStatus != null)
+            {
+                @if (webhookStatus.IsValid)
+                {
+                    <div class="alert alert-success d-flex align-items-center" role="alert">
+                        <vc:icon symbol="checkmark" />
+                        <div class="ms-2">
+                            <strong>Webhook Active</strong>
+                            <p class="mb-0 small">
+                                ID: <code>@webhookStatus.WebhookId</code>
+                                @if (webhookStatus.HasSigningSecret)
+                                {
+                                    <span class="badge bg-success ms-2">Signing secret configured</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-warning ms-2">No signing secret</span>
+                                }
+                            </p>
+                        </div>
+                    </div>
+                }
+                else if (webhookStatus.IsConfigured)
+                {
+                    <div class="alert alert-warning" role="alert">
+                        <strong>Webhook Issue: @webhookStatus.Status</strong>
+                        @if (!string.IsNullOrEmpty(webhookStatus.Error))
+                        {
+                            <p class="mb-2 small">@webhookStatus.Error</p>
+                        }
+                        <p class="mb-0">
+                            <button name="command" type="submit" value="registerwebhook" class="btn btn-sm btn-warning">
+                                Re-register Webhook
+                            </button>
+                        </p>
+                    </div>
+                }
+                else
+                {
+                    <div class="alert alert-info" role="alert">
+                        <strong>Webhook not configured</strong>
+                        <p class="mb-2 small">Webhooks provide reliable payment notifications. Without a webhook, payments are verified synchronously.</p>
+                        <button name="command" type="submit" value="registerwebhook" class="btn btn-sm btn-info">
+                            Register Webhook
+                        </button>
+                    </div>
+                }
+            }
+            else if (!Model.IsConfigured)
+            {
+                <div class="alert alert-secondary" role="alert">
+                    <p class="mb-0">Save your API keys first to configure webhooks.</p>
+                </div>
+            }
+
             <h4 class="mt-5 mb-3">Advanced Settings</h4>
 
             <div class="form-group">
@@ -74,15 +133,6 @@
                 </div>
                 <div class="form-text">Allow customers to pay with Google Pay when available.</div>
             </div>
-
-            @if (!string.IsNullOrEmpty(Model.WebhookId))
-            {
-                <h4 class="mt-5 mb-3">Webhook Configuration</h4>
-                <div class="alert alert-success">
-                    <strong>Webhook configured</strong>
-                    <p class="mb-0">Webhook ID: <code>@Model.WebhookId</code></p>
-                </div>
-            }
         </div>
     </div>
 

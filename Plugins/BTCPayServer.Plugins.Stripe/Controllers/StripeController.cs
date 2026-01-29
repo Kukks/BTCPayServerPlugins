@@ -51,6 +51,15 @@ public class StripeController : Controller
             return NotFound();
 
         var config = GetConfig(store) ?? new StripePaymentMethodConfig();
+
+        // Check webhook status if configured
+        if (config.IsConfigured)
+        {
+            var externalUrl = Request.GetAbsoluteRoot();
+            var webhookStatus = await _stripeService.GetWebhookStatus(config, storeId, externalUrl);
+            ViewBag.WebhookStatus = webhookStatus;
+        }
+
         return View(config);
     }
 
