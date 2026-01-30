@@ -1,0 +1,99 @@
+@using BTCPayServer.Abstractions.Extensions
+@model BTCPayServer.Plugins.SwapMiddleware.SwapMiddlewareSettings
+@{
+    ViewData.SetActivePage("SwapMiddleware", "Swap Middleware Settings", "SwapMiddleware");
+}
+
+<form method="post">
+    <div class="sticky-header-setup"></div>
+    <div class="sticky-header d-sm-flex align-items-center justify-content-between">
+        <h2 class="mb-0">@ViewData["Title"]</h2>
+        <div class="d-flex gap-3 mt-3 mt-sm-0">
+            <button name="command" type="submit" value="save" class="btn btn-primary">Save</button>
+        </div>
+    </div>
+
+    <partial name="_StatusMessage"/>
+
+    <div class="alert alert-info mb-4" role="alert">
+        <strong>Swap Middleware</strong> acts as a proxy for swap services, allowing you to inject your own referral/affiliate codes
+        into requests. Configure your codes below, then point your swap plugins to use this middleware's API endpoints.
+    </div>
+
+    <div class="row">
+        <div class="col-xl-8 col-xxl-constrain">
+            <div class="form-group">
+                <div class="d-flex align-items-center">
+                    <input asp-for="Enabled" type="checkbox" class="btcpay-toggle me-2"/>
+                    <label asp-for="Enabled" class="form-label mb-0">Enable Swap Middleware</label>
+                </div>
+                <span asp-validation-for="Enabled" class="text-danger"></span>
+            </div>
+
+            <h4 class="mt-4 mb-3">SideShift Configuration</h4>
+
+            <div class="form-group">
+                <label asp-for="SideShiftAffiliateId" class="form-label">Affiliate ID</label>
+                <input asp-for="SideShiftAffiliateId" type="text" class="form-control" placeholder="e.g., abc123XYZ"/>
+                <span asp-validation-for="SideShiftAffiliateId" class="text-danger"></span>
+                <div class="form-text">
+                    Your SideShift affiliate ID. This will be injected into all shift requests.
+                    <a href="https://sideshift.ai/affiliates" target="_blank" rel="noopener">Get your affiliate ID</a>
+                </div>
+            </div>
+
+            <h4 class="mt-5 mb-3">FixedFloat Configuration</h4>
+
+            <div class="form-group">
+                <label asp-for="FixedFloatRefCode" class="form-label">Referral Code</label>
+                <input asp-for="FixedFloatRefCode" type="text" class="form-control" placeholder="e.g., abc123"/>
+                <span asp-validation-for="FixedFloatRefCode" class="text-danger"></span>
+                <div class="form-text">
+                    Your FixedFloat referral code. This will be provided to consuming plugins for widget URLs.
+                    <a href="https://ff.io/affiliate" target="_blank" rel="noopener">Get your referral code</a>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="FixedFloatApiKey" class="form-label">API Key (Optional)</label>
+                <input asp-for="FixedFloatApiKey" type="password" class="form-control"/>
+                <span asp-validation-for="FixedFloatApiKey" class="text-danger"></span>
+                <div class="form-text">
+                    For future API integration. Leave empty if using widget only.
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="FixedFloatApiSecret" class="form-label">API Secret (Optional)</label>
+                <input asp-for="FixedFloatApiSecret" type="password" class="form-control"/>
+                <span asp-validation-for="FixedFloatApiSecret" class="text-danger"></span>
+            </div>
+
+            <h4 class="mt-5 mb-3">Advanced Settings</h4>
+
+            <div class="form-group">
+                <label asp-for="CacheDurationMinutes" class="form-label">Cache Duration (minutes)</label>
+                <input asp-for="CacheDurationMinutes" type="number" min="1" max="60" class="form-control" style="max-width: 100px;"/>
+                <span asp-validation-for="CacheDurationMinutes" class="text-danger"></span>
+                <div class="form-text">
+                    How long to cache responses from coins/facts endpoints (default: 5 minutes)
+                </div>
+            </div>
+
+            <h4 class="mt-5 mb-3">API Endpoints</h4>
+
+            <div class="alert alert-secondary">
+                <p class="mb-2"><strong>SideShift proxy endpoints:</strong></p>
+                <ul class="mb-3 font-monospace small">
+                    <li><code>GET /plugins/swap-middleware/api/sideshift/coins</code></li>
+                    <li><code>GET /plugins/swap-middleware/api/sideshift/facts</code></li>
+                    <li><code>POST /plugins/swap-middleware/api/sideshift/shifts/variable</code></li>
+                </ul>
+                <p class="mb-2"><strong>FixedFloat config endpoint:</strong></p>
+                <ul class="mb-0 font-monospace small">
+                    <li><code>GET /plugins/swap-middleware/api/fixedfloat/config</code></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</form>

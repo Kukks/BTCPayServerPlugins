@@ -1,0 +1,13 @@
+@using BTCPayServer.Client
+@using BTCPayServer.Plugins.SwapMiddleware.Controllers
+@{
+    var isActive = ViewContext.RouteData.Values.TryGetValue("Controller", out var controller) &&
+                   controller is not null &&
+                   nameof(SwapMiddlewareController).StartsWith(controller?.ToString(), StringComparison.InvariantCultureIgnoreCase);
+}
+
+<li class="nav-item nav-item-sub" permission="@Policies.CanModifyServerSettings">
+    <a class="nav-link @(isActive ? "active" : string.Empty)" asp-action="Configure" asp-controller="SwapMiddleware">
+        Swap Middleware
+    </a>
+</li>
