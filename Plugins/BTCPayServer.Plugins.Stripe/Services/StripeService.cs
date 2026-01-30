@@ -58,14 +58,12 @@ public class StripeService
             }
         };
 
-        // Set statement descriptor if provided
+        // Set statement descriptor if provided and valid
         var descriptor = statementDescriptor ?? config.StatementDescriptor;
-        if (!string.IsNullOrEmpty(descriptor))
+        var sanitizedDescriptor = SanitizeStatementDescriptor(descriptor);
+        if (!string.IsNullOrEmpty(sanitizedDescriptor))
         {
-            // Stripe limits to 22 characters, alphanumeric + some special chars
-            options.StatementDescriptor = descriptor.Length > 22
-                ? descriptor[..22]
-                : descriptor;
+            options.StatementDescriptor = sanitizedDescriptor;
         }
 
         // Apply advanced config overrides if provided
@@ -107,10 +105,14 @@ public class StripeService
                 options.PaymentMethodTypes = paymentMethodTypes.Select(t => t.ToString()).ToList();
             }
 
-            // Override statement descriptor suffix
-            if (advancedConfig["statement_descriptor_suffix"]?.ToString() is { } suffix && !string.IsNullOrEmpty(suffix))
+            // Override statement descriptor suffix (same sanitization rules apply)
+            if (advancedConfig["statement_descriptor_suffix"]?.ToString() is { } suffix)
             {
-                options.StatementDescriptorSuffix = suffix.Length > 22 ? suffix[..22] : suffix;
+                var sanitizedSuffix = SanitizeStatementDescriptor(suffix);
+                if (!string.IsNullOrEmpty(sanitizedSuffix))
+                {
+                    options.StatementDescriptorSuffix = sanitizedSuffix;
+                }
             }
 
             // Override capture method
@@ -397,6 +399,44 @@ public class StripeService
     public static bool IsZeroDecimalCurrency(string currency)
     {
         return ZeroDecimalCurrencies.Contains(currency);
+    }
+
+    /// <summary>
+    /// Sanitize a statement descriptor for Stripe.
+    /// Stripe requires: 5-22 chars, alphanumeric + . * - ' " _ and space only.
+    /// Cannot be only numbers.
+    /// </summary>
+    private static string? SanitizeStatementDescriptor(string? descriptor)
+    {
+        if (string.IsNullOrWhiteSpace(descriptor))
+            return null;
+
+        // Remove invalid characters, keep only allowed: alphanumeric, space, . * - ' " _
+        var sanitized = new System.Text.StringBuilder();
+        foreach (var c in descriptor)
+        {
+            if (char.IsLetterOrDigit(c) || c == ' ' || c == '.' || c == '*' ||
+                c == '-' || c == '\'' || c == '"' || c == '_')
+            {
+                sanitized.Append(c);
+            }
+        }
+
+        var result = sanitized.ToString().Trim();
+
+        // Must be at least 5 characters
+        if (result.Length < 5)
+            return null;
+
+        // Truncate to 22 characters max
+        if (result.Length > 22)
+            result = result[..22].TrimEnd();
+
+        // Cannot consist solely of numbers
+        if (result.All(char.IsDigit))
+            return null;
+
+        return result;
     }
 }
 

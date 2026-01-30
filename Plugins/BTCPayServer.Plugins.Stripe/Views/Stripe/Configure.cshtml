@@ -148,9 +148,12 @@
 
             <div class="form-group">
                 <label asp-for="StatementDescriptor" class="form-label">Statement Descriptor</label>
-                <input asp-for="StatementDescriptor" type="text" class="form-control" maxlength="22"/>
+                <input asp-for="StatementDescriptor" type="text" class="form-control" maxlength="22" placeholder="e.g., MYSTORE"/>
                 <span asp-validation-for="StatementDescriptor" class="text-danger"></span>
-                <div class="form-text">Text that appears on customer bank statements (max 22 characters)</div>
+                <div class="form-text">
+                    Text on customer bank statements. Must be 5-22 characters, letters/numbers/spaces and <code>. * - ' " _</code> only.
+                    Invalid descriptors are silently ignored.
+                </div>
             </div>
 
             <div class="form-group">
