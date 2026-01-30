@@ -36,7 +36,6 @@ public class StripeService
         StripePaymentMethodConfig config,
         decimal amount,
         string invoiceId,
-        string? statementDescriptor = null,
         CancellationToken cancellationToken = default)
     {
         var client = new StripeClient(config.SecretKey);
@@ -57,14 +56,6 @@ public class StripeService
                 Enabled = true
             }
         };
-
-        // Set statement descriptor if provided and valid
-        var descriptor = statementDescriptor ?? config.StatementDescriptor;
-        var sanitizedDescriptor = SanitizeStatementDescriptor(descriptor);
-        if (!string.IsNullOrEmpty(sanitizedDescriptor))
-        {
-            options.StatementDescriptor = sanitizedDescriptor;
-        }
 
         // Apply advanced config overrides if provided
         ApplyAdvancedConfig(options, config);

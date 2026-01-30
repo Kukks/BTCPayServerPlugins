@@ -32,11 +32,6 @@ public class StripePaymentMethodConfig
     public string SettlementCurrency { get; set; } = "USD";
 
     /// <summary>
-    /// Custom statement descriptor shown on customer bank statements
-    /// </summary>
-    public string? StatementDescriptor { get; set; }
-
-    /// <summary>
     /// Stripe webhook endpoint ID (for managing/deleting)
     /// </summary>
     public string? WebhookId { get; set; }

@@ -253,7 +253,6 @@ public class StripeController : Controller
         {
             Enabled = false,
             SettlementCurrency = existingConfig.SettlementCurrency,
-            StatementDescriptor = existingConfig.StatementDescriptor,
             AdvancedConfig = existingConfig.AdvancedConfig
         };
 
