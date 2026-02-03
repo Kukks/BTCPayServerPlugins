@@ -81,9 +81,10 @@ public class StripeController : Controller
                 config.PublishableKey = existingConfig.PublishableKey;
             if (string.IsNullOrWhiteSpace(config.SecretKey))
                 config.SecretKey = existingConfig.SecretKey;
-            // Always preserve webhook secrets
+            // Always preserve webhook ID (managed internally)
             if (string.IsNullOrWhiteSpace(config.WebhookId))
                 config.WebhookId = existingConfig.WebhookId;
+            // Preserve webhook secret if not provided (user can now manually enter/update it)
             if (string.IsNullOrWhiteSpace(config.WebhookSecret))
                 config.WebhookSecret = existingConfig.WebhookSecret;
         }

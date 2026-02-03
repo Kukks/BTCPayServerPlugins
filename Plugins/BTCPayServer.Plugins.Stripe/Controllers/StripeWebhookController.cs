@@ -56,12 +56,18 @@ public class StripeWebhookController : ControllerBase
     [HttpPost("{storeId}")]
     public async Task<IActionResult> HandleWebhook(string storeId)
     {
+        _logger.LogDebug("Received Stripe webhook request for store path: {StoreId}", storeId);
+
         var store = await _storeRepository.FindStore(storeId);
         if (store == null)
         {
-            _logger.LogWarning("Received webhook for unknown store {StoreId}", storeId);
+            _logger.LogWarning(
+                "Received webhook for unknown store {StoreId}. Verify the webhook URL in Stripe dashboard matches the store ID.",
+                storeId);
             return BadRequest("Store not found");
         }
+
+        _logger.LogDebug("Found store {StoreName} ({StoreId}) for webhook", store.StoreName, store.Id);
 
         var config = GetConfig(store);
         if (config == null || !config.IsConfigured)
@@ -73,6 +79,11 @@ public class StripeWebhookController : ControllerBase
         // Read the raw body for signature verification
         using var reader = new StreamReader(Request.Body);
         var json = await reader.ReadToEndAsync();
+
+        _logger.LogDebug(
+            "Webhook body received. Length: {Length}, Has WebhookSecret: {HasSecret}",
+            json.Length,
+            !string.IsNullOrEmpty(config.WebhookSecret));
 
         Event stripeEvent;
 
@@ -88,11 +99,26 @@ public class StripeWebhookController : ControllerBase
                     return BadRequest("Missing signature");
                 }
 
+                _logger.LogDebug(
+                    "Verifying webhook signature for store {StoreId}. Secret prefix: {SecretPrefix}, Signature header: {SignatureHeader}, Body length: {BodyLength}",
+                    storeId,
+                    config.WebhookSecret.Length > 10 ? config.WebhookSecret[..10] + "..." : "[short]",
+                    signatureHeader.Length > 50 ? signatureHeader[..50] + "..." : signatureHeader,
+                    json.Length);
+
                 stripeEvent = EventUtility.ConstructEvent(json, signatureHeader, config.WebhookSecret);
             }
             catch (StripeException ex)
             {
-                _logger.LogWarning(ex, "Invalid webhook signature for store {StoreId}", storeId);
+                _logger.LogWarning(
+                    ex,
+                    "Invalid webhook signature for store {StoreId}. Error: {Error}. Secret configured: {HasSecret} (prefix: {SecretPrefix})",
+                    storeId,
+                    ex.Message,
+                    !string.IsNullOrEmpty(config.WebhookSecret),
+                    !string.IsNullOrEmpty(config.WebhookSecret) && config.WebhookSecret.Length > 10
+                        ? config.WebhookSecret[..10] + "..."
+                        : "[short/empty]");
                 return BadRequest("Invalid signature");
             }
         }

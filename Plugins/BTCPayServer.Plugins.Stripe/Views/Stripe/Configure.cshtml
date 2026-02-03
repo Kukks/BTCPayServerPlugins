@@ -105,9 +105,13 @@
                                 }
                                 else
                                 {
-                                    <span class="badge bg-warning ms-2">No signing secret</span>
+                                    <span class="badge bg-warning ms-2">No signing secret - add below</span>
                                 }
                             </p>
+                            @if (!string.IsNullOrEmpty(webhookStatus.WebhookUrl))
+                            {
+                                <p class="mb-0 small mt-1">URL: <code class="user-select-all">@webhookStatus.WebhookUrl</code></p>
+                            }
                         </div>
                     </div>
                 }
@@ -136,6 +140,22 @@
                         </button>
                     </div>
                 }
+
+                <div class="form-group mt-3">
+                    <label asp-for="WebhookSecret" class="form-label">Webhook Signing Secret</label>
+                    <div class="input-group">
+                        <input asp-for="WebhookSecret" type="password" class="form-control" placeholder="whsec_..."/>
+                        <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility(this)">
+                            <vc:icon symbol="view" />
+                        </button>
+                    </div>
+                    <span asp-validation-for="WebhookSecret" class="text-danger"></span>
+                    <div class="form-text">
+                        The webhook signing secret from Stripe (starts with <code>whsec_</code>).
+                        Required for secure webhook verification.
+                        <a href="https://dashboard.stripe.com/webhooks" target="_blank" rel="noreferrer noopener">Get from Stripe Dashboard</a> → select webhook → "Signing secret" → Reveal.
+                    </div>
+                </div>
             }
             else if (!Model.IsConfigured)
             {
@@ -161,5 +181,15 @@
     </div>
 
     <input type="hidden" asp-for="WebhookId" />
-    <input type="hidden" asp-for="WebhookSecret" />
 </form>
+
+<script>
+function togglePasswordVisibility(button) {
+    var input = button.parentElement.querySelector('input[type="password"], input[type="text"]');
+    if (input.type === 'password') {
+        input.type = 'text';
+    } else {
+        input.type = 'password';
+    }
+}
+</script>
