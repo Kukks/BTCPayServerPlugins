@@ -213,7 +213,7 @@ public class StripeService
                 };
             }
 
-            // Create new webhook
+            // Create new webhook with explicit API version matching the library
             var createService = new WebhookEndpointService(client);
             var webhook = await createService.CreateAsync(new WebhookEndpointCreateOptions
             {
@@ -224,7 +224,9 @@ public class StripeService
                     "payment_intent.payment_failed",
                     "charge.refunded",
                     "charge.dispute.created"
-                }
+                },
+                // Use the API version expected by the Stripe.net library to avoid deserialization issues
+                ApiVersion = StripeConfiguration.ApiVersion
             }, cancellationToken: cancellationToken);
 
             return new WebhookRegistrationResult
