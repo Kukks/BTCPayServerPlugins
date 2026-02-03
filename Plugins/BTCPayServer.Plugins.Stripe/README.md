@@ -9,6 +9,7 @@ Accept fiat payments via Stripe alongside cryptocurrency payments in BTCPay Serv
 - Automatic webhook configuration for payment notifications
 - Works alongside cryptocurrency payment methods
 - Test mode support for development
+- **In-Store QR Mode**: Display a QR code for customers to pay on their own device
 
 ## Requirements
 
@@ -73,6 +74,38 @@ The plugin automatically configures Stripe webhooks when you save your settings.
 - `payment_intent.payment_failed` - Logs failed payment attempts
 - `charge.refunded` - Logs refund notifications
 - `charge.dispute.created` - Logs dispute notifications
+
+## In-Store QR Mode
+
+For point-of-sale (POS) scenarios, the plugin supports a QR code mode that allows customers to pay on their own device instead of the merchant's terminal.
+
+### How It Works
+
+1. **Merchant's device** shows a QR code with the Stripe logo
+2. **Customer scans** the QR code with their phone
+3. **Customer's phone** opens the checkout and displays the Stripe payment form
+4. Customer enters their card details and completes payment
+
+### Enabling QR Mode
+
+QR mode is automatically enabled when the store's **"Show pay in wallet button"** checkout setting is disabled (typical for in-store/POS setups).
+
+To configure:
+1. Go to **Store Settings > Checkout Appearance**
+2. Disable **"Show pay in wallet button"**
+3. Stripe checkout will now default to QR mode
+
+### Manual Toggle
+
+A toggle link is always available at the bottom of the Stripe checkout:
+- In QR mode: "Enter card on this device instead"
+- In form mode: "Show QR code for customer to scan"
+
+This allows flexibility regardless of the store setting.
+
+### URL Parameter
+
+You can also force form mode by adding `?instore=1` to the checkout URL. This is automatically added when customers scan the QR code.
 
 ## Test Mode
 
