@@ -10,7 +10,7 @@
   <PropertyGroup>
     <Product>Stripe</Product>
     <Description>Adds Stripe as a payment method to BTCPay Server, enabling merchants to accept fiat payments alongside cryptocurrency.</Description>
-    <Version>1.0.6</Version>
+    <Version>1.0.9</Version>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 

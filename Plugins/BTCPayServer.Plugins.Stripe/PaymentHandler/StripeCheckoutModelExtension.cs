@@ -50,6 +50,5 @@ public class StripeCheckoutModelExtension : ICheckoutModelExtension
 
         // Hide Bitcoin-specific UI elements
         context.Model.ShowRecommendedFee = false;
-        context.Model.ShowPayInWalletButton = false;
     }
 }

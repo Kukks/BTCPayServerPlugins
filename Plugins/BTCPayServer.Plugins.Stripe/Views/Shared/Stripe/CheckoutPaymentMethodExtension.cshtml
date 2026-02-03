@@ -1,8 +1,8 @@
 @* This file is loaded via checkout-end to register the StripeCheckout Vue component *@
 @using BTCPayServer.Security
 @model BTCPayServer.Models.InvoicingModels.CheckoutModel
-@inject ContentSecurityPolicies csp 
-@{ 
+@inject ContentSecurityPolicies csp
+@{
     csp.Add("script-src", "https://js.stripe.com");
 }
 
@@ -12,14 +12,32 @@
             {{ stripeError }}
         </div>
 
-        <div v-if="stripeLoading" class="text-center py-4">
+        <div v-if="stripeLoading && !showQrMode" class="text-center py-4">
             <div class="spinner-border text-primary" role="status">
                 <span class="visually-hidden">Loading...</span>
             </div>
             <p class="mt-2 text-muted">Loading payment form...</p>
         </div>
 
-        <div v-show="!stripeLoading && !stripeError && !paymentComplete">
+        <!-- QR Mode: Show QR code for customer to scan -->
+        <div v-if="showQrMode && !paymentComplete" class="text-center">
+            <div class="qr-container">
+                <div>
+                    <qrcode v-if="qrUrl" :value="qrUrl" :options="qrOptions"></qrcode>
+                </div>
+                <!-- Stripe logo overlay in center of QR -->
+                <img class="qr-icon" src="~/Resources/stripe.svg" alt="Stripe" />
+            </div>
+
+            <p class="text-muted mt-3 mb-2">Scan to pay with card on your device</p>
+
+            <a href="#" v-on:click.prevent="toggleQrMode" class="small text-muted d-block">
+                Enter card on this device instead
+            </a>
+        </div>
+
+        <!-- Form Mode: Show Stripe payment form -->
+        <div v-show="!showQrMode && !stripeLoading && !stripeError && !paymentComplete">
 
             <form id="stripe-payment-form" v-on:submit.prevent="handleStripeSubmit">
                 <div id="stripe-payment-element" class="mb-3">
@@ -49,6 +67,12 @@
                     Payments secured by Stripe
                 </small>
             </div>
+
+            <div class="mt-2 text-center">
+                <a href="#" v-on:click.prevent="toggleQrMode" class="small text-muted">
+                    Show QR code for customer to scan
+                </a>
+            </div>
         </div>
 
         <div v-if="paymentComplete" class="text-center py-4">
@@ -63,6 +87,7 @@
 </template>
 
 <script src="https://js.stripe.com/v3/" ></script>
+<script src="~/vendor/vue-qrcode/vue-qrcode.min.js"></script>
 <script>
 (function() {
     // Wait for Vue and checkout to be ready
@@ -74,6 +99,9 @@
     Vue.component('StripeCheckout', {
         props: ['model', 'nfcSupported', 'nfcScanning', 'nfcErrorMessage', 'nfcWarningMessage'],
         template: '#StripeCheckout',
+        components: {
+            qrcode: window.VueQrcode
+        },
         data() {
             return {
                 stripe: null,
@@ -83,7 +111,18 @@
                 stripeProcessing: false,
                 stripeError: null,
                 paymentError: null,
-                paymentComplete: false
+                paymentComplete: false,
+                // QR Mode
+                showQrMode: false,
+                instoreParam: false,
+                qrOptions: {
+                    width: 256,
+                    margin: 1,
+                    color: {
+                        dark: '#000000',
+                        light: '#ffffff'
+                    }
+                }
             };
         },
         computed: {
@@ -104,6 +143,11 @@
             },
             invoiceId() {
                 return this.model.invoiceId;
+            },
+            qrUrl() {
+                // Generate URL with instore parameter for customer to scan
+                const base = window.location.href.split('?')[0];
+                return base + '?instore=1';
             }
         },
         watch: {
@@ -115,9 +159,41 @@
             }
         },
         mounted() {
+            this.initQrMode();
             this.checkExistingPaymentThenInit();
         },
         methods: {
+            initQrMode() {
+                // Check URL for instore parameter
+                const params = new URLSearchParams(window.location.search);
+                this.instoreParam = params.get('instore') === '1';
+
+                // Get showPayInWalletButton from parent checkout app's srvModel
+                // This is a store-level setting that determines in-store vs online checkout
+                const showPayInWalletButton = this.$parent?.srvModel?.showPayInWalletButton ?? true;
+
+                // Determine initial mode
+                if (this.instoreParam) {
+                    // Customer scanned QR - show form directly
+                    this.showQrMode = false;
+                } else if (showPayInWalletButton === false) {
+                    // In-store checkout setting - show QR by default
+                    this.showQrMode = true;
+                } else {
+                    // Normal online checkout - show form
+                    this.showQrMode = false;
+                }
+            },
+
+            toggleQrMode() {
+                this.showQrMode = !this.showQrMode;
+
+                // Initialize Stripe if switching to form mode and not yet initialized
+                if (!this.showQrMode && !this.stripe && !this.stripeLoading) {
+                    this.initStripe();
+                }
+            },
+
             async checkExistingPaymentThenInit() {
                 // First check if payment was already completed (e.g., user completed in another tab, webhook missed)
                 try {
@@ -139,8 +215,13 @@
                     // Continue with normal init even if status check fails
                 }
 
-                // Initialize Stripe form
-                this.initStripe();
+                // Only initialize Stripe form if not in QR mode
+                if (!this.showQrMode) {
+                    this.initStripe();
+                } else {
+                    // In QR mode, we don't need to load Stripe yet
+                    this.stripeLoading = false;
+                }
             },
 
             async initStripe() {
