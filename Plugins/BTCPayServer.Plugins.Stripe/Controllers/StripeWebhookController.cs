@@ -106,7 +106,8 @@ public class StripeWebhookController : ControllerBase
                     signatureHeader.Length > 50 ? signatureHeader[..50] + "..." : signatureHeader,
                     json.Length);
 
-                stripeEvent = EventUtility.ConstructEvent(json, signatureHeader, config.WebhookSecret);
+                // Allow API version mismatch - webhook may use older API version than Stripe.net library
+                stripeEvent = EventUtility.ConstructEvent(json, signatureHeader, config.WebhookSecret, throwOnApiVersionMismatch: false);
             }
             catch (StripeException ex)
             {
@@ -127,7 +128,8 @@ public class StripeWebhookController : ControllerBase
             // No webhook secret configured, parse without verification
             try
             {
-                stripeEvent = EventUtility.ParseEvent(json);
+                // Allow API version mismatch - webhook may use older API version than Stripe.net library
+                stripeEvent = EventUtility.ParseEvent(json, throwOnApiVersionMismatch: false);
             }
             catch (StripeException ex)
             {
