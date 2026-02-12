@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,31 +30,46 @@ public class McpPlugin : BaseBTCPayServerPlugin
             {
                 ServerCertificateCustomValidationCallback = (_, _, _, _) => true
             });
+        // Insert token middleware before authentication in the pipeline
+        services.AddTransient<IStartupFilter, McpTokenStartupFilter>();
         base.Execute(services);
     }
 
     public override void Execute(IApplicationBuilder applicationBuilder,
         IServiceProvider applicationBuilderApplicationServices)
     {
-        // Middleware to promote ?token= query parameter to Authorization header.
-        // This enables Claude Connectors (web/mobile) which can only pass a URL, not custom headers.
-        applicationBuilder.UseWhen(
-            context => context.Request.Path.StartsWithSegments("/plugins/mcp"),
-            app => app.Use(async (context, next) =>
-            {
-                if (!context.Request.Headers.ContainsKey("Authorization") &&
-                    context.Request.Query.TryGetValue("token", out var token) &&
-                    !string.IsNullOrEmpty(token))
-                {
-                    context.Request.Headers["Authorization"] = $"token {token}";
-                }
-                await next();
-            }));
-
         applicationBuilder.UseEndpoints(endpoints =>
         {
             McpEndpointRegistration.MapMcpEndpoint(endpoints);
         });
         base.Execute(applicationBuilder, applicationBuilderApplicationServices);
+    }
+}
+
+/// <summary>
+/// Inserts middleware early in the pipeline (before authentication) to promote
+/// ?token= query parameter to Authorization header for MCP requests.
+/// This enables Claude Connectors (web/mobile) which can only pass a URL, not custom headers.
+/// </summary>
+public class McpTokenStartupFilter : IStartupFilter
+{
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)
+    {
+        return app =>
+        {
+            app.UseWhen(
+                context => context.Request.Path.StartsWithSegments("/plugins/mcp"),
+                branch => branch.Use(async (context, next2) =>
+                {
+                    if (!context.Request.Headers.ContainsKey("Authorization") &&
+                        context.Request.Query.TryGetValue("token", out var token) &&
+                        !string.IsNullOrEmpty(token))
+                    {
+                        context.Request.Headers["Authorization"] = $"token {token}";
+                    }
+                    await next2();
+                }));
+            next(app);
+        };
     }
 }
