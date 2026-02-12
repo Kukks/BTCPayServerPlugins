@@ -279,10 +279,9 @@ public class StripeWebhookController : ControllerBase
                 "Payment recorded with PaymentMethodId={PaymentMethodId}, Id={PaymentId}",
                 addedPayment.PaymentMethodId, addedPayment.Id);
             _aggregator.Publish(new InvoiceEvent(invoice, InvoiceEvent.ReceivedPayment) { Payment = addedPayment });
+            
         }
 
-        _logger.LogInformation(
-            "Recorded payment for invoice {InvoiceId}: {Amount} {Currency}",
-            invoice.Id, payment.Amount, payment.Currency);
+        
     }
 }
