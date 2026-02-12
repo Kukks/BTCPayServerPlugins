@@ -1,0 +1,215 @@
+@{
+    ViewData["Title"] = "MCP Setup";
+    var mcpUrl = ViewData["McpEndpointUrl"]?.ToString();
+    var apiKey = ViewData["McpApiKey"]?.ToString();
+    var hasKey = !string.IsNullOrEmpty(apiKey);
+    var tokenDisplay = hasKey ? apiKey : "YOUR_API_KEY";
+}
+
+<style>
+    .mcp-code pre {
+        background: var(--btcpay-bg-tile);
+        color: var(--btcpay-code-text);
+        padding: var(--btcpay-space-m);
+        border-radius: 4px;
+        margin: 0;
+    }
+    .mcp-code pre code {
+        background: none;
+        padding: 0;
+        color: inherit;
+    }
+</style>
+
+<div class="row">
+    <div class="col-xl-8">
+        <h2 class="mb-4">@ViewData["Title"]</h2>
+
+        <div class="alert alert-info">
+            The MCP (Model Context Protocol) plugin lets you connect LLM clients like Claude Desktop, Cursor, or VS Code
+            to your BTCPay Server instance. You can then interact with your server using natural language.
+        </div>
+
+        <h4 class="mt-4">1. API Key</h4>
+        @if (hasKey)
+        {
+            <p>
+                Your MCP API key: <code>@apiKey</code>
+            </p>
+            <div class="d-flex gap-2 mb-2">
+                <form asp-controller="McpSetup" asp-action="RevokeKey" method="post">
+                    <input type="hidden" name="keyId" value="@apiKey" />
+                    <button type="submit" class="btn btn-outline-danger btn-sm">Revoke Key</button>
+                </form>
+                <a asp-controller="UIManage" asp-action="APIKeys" class="btn btn-outline-secondary btn-sm">Manage API Keys</a>
+            </div>
+        }
+        else
+        {
+            <p>Generate an unrestricted API key for MCP, or create one manually with specific permissions.</p>
+            <div class="d-flex gap-2 mb-2">
+                <form asp-controller="McpSetup" asp-action="CreateKey" method="post">
+                    <button type="submit" class="btn btn-primary btn-sm">Generate MCP API Key</button>
+                </form>
+                <a asp-controller="UIManage" asp-action="AddApiKey" class="btn btn-outline-secondary btn-sm">Create Custom Key</a>
+            </div>
+        }
+
+        <h4 class="mt-4">2. Configure Your LLM Client</h4>
+        @if (!hasKey)
+        {
+            <p>Copy the configuration below and paste it into your LLM client's config file. Replace <code>YOUR_API_KEY</code> with your key.</p>
+        }
+        else
+        {
+            <p>Copy the configuration below and paste it into your LLM client's config file. Your API key is already filled in.</p>
+        }
+
+        <ul class="nav nav-tabs" role="tablist">
+            <li class="nav-item">
+                <a class="nav-link active" data-bs-toggle="tab" href="#claude" role="tab">Claude Desktop / Claude Code</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#claude-connector" role="tab">Claude Web / Mobile</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#cursor" role="tab">Cursor</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#vscode" role="tab">VS Code</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#other" role="tab">Other</a>
+            </li>
+        </ul>
+
+        <div class="tab-content mt-3">
+            <div class="tab-pane active" id="claude" role="tabpanel">
+                <p class="text-muted">Add to <code>claude_desktop_config.json</code> or <code>.claude/mcp.json</code>:</p>
+                <div class="mcp-code position-relative">
+                    <pre><code id="claude-config">{
+  "mcpServers": {
+    "btcpayserver": {
+      "type": "streamable-http",
+      "url": "@mcpUrl",
+      "headers": {
+        "Authorization": "token @tokenDisplay"
+      }
+    }
+  }
+}</code></pre>
+                    <button class="btn btn-sm btn-outline-secondary position-absolute top-0 end-0 m-2"
+                            onclick="navigator.clipboard.writeText(document.getElementById('claude-config').textContent)">
+                        Copy
+                    </button>
+                </div>
+            </div>
+
+            <div class="tab-pane" id="claude-connector" role="tabpanel">
+                <p class="text-muted">Use Claude's built-in Connectors to connect from the web or mobile app — no config files needed.</p>
+                <ol>
+                    <li>Go to <strong>Settings &gt; Connectors</strong> in Claude (or <a href="https://claude.ai/settings/connectors" target="_blank" rel="noopener">open directly</a>)</li>
+                    <li>Click <strong>Add custom connector</strong></li>
+                    <li>Enter a name (e.g. <code>BTCPay Server</code>)</li>
+                    <li>Paste the following URL as the MCP server URL:</li>
+                </ol>
+                <div class="mcp-code position-relative">
+                    <pre><code id="connector-url">@(mcpUrl)?token=@tokenDisplay</code></pre>
+                    <button class="btn btn-sm btn-outline-secondary position-absolute top-0 end-0 m-2"
+                            onclick="navigator.clipboard.writeText(document.getElementById('connector-url').textContent)">
+                        Copy
+                    </button>
+                </div>
+                @if (!hasKey)
+                {
+                    <p class="text-muted mt-2">
+                        Replace <code>YOUR_API_KEY</code> with your API key from step 1. The token is passed as a query parameter and promoted to an authorization header automatically.
+                    </p>
+                }
+            </div>
+
+            <div class="tab-pane" id="cursor" role="tabpanel">
+                <p class="text-muted">Add to <code>.cursor/mcp.json</code>:</p>
+                <div class="mcp-code position-relative">
+                    <pre><code id="cursor-config">{
+  "mcpServers": {
+    "btcpayserver": {
+      "type": "streamable-http",
+      "url": "@mcpUrl",
+      "headers": {
+        "Authorization": "token @tokenDisplay"
+      }
+    }
+  }
+}</code></pre>
+                    <button class="btn btn-sm btn-outline-secondary position-absolute top-0 end-0 m-2"
+                            onclick="navigator.clipboard.writeText(document.getElementById('cursor-config').textContent)">
+                        Copy
+                    </button>
+                </div>
+            </div>
+
+            <div class="tab-pane" id="vscode" role="tabpanel">
+                <p class="text-muted">Add to <code>.vscode/mcp.json</code>:</p>
+                <div class="mcp-code position-relative">
+                    <pre><code id="vscode-config">{
+  "servers": {
+    "btcpayserver": {
+      "type": "http",
+      "url": "@mcpUrl",
+      "headers": {
+        "Authorization": "token @tokenDisplay"
+      }
+    }
+  }
+}</code></pre>
+                    <button class="btn btn-sm btn-outline-secondary position-absolute top-0 end-0 m-2"
+                            onclick="navigator.clipboard.writeText(document.getElementById('vscode-config').textContent)">
+                        Copy
+                    </button>
+                </div>
+            </div>
+
+            <div class="tab-pane" id="other" role="tabpanel">
+                <p class="text-muted">Use these connection details with any MCP-compatible client (Windsurf, Cline, ChatWise, etc.):</p>
+                <table class="table">
+                    <tbody>
+                        <tr>
+                            <th>Transport</th>
+                            <td>Streamable HTTP</td>
+                        </tr>
+                        <tr>
+                            <th>Endpoint URL</th>
+                            <td><code id="other-url">@mcpUrl</code>
+                                <button class="btn btn-sm btn-outline-secondary ms-2"
+                                        onclick="navigator.clipboard.writeText(document.getElementById('other-url').textContent)">
+                                    Copy
+                                </button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Auth Header</th>
+                            <td><code>Authorization: token @tokenDisplay</code></td>
+                        </tr>
+                    </tbody>
+                </table>
+                @if (!hasKey)
+                {
+                    <p class="text-muted">
+                        Your client needs to send an <code>Authorization</code> header with every request.
+                        The format is <code>token &lt;api-key&gt;</code> where <code>&lt;api-key&gt;</code> is a BTCPay Server API key from step 1.
+                    </p>
+                }
+            </div>
+        </div>
+
+        <h4 class="mt-4">3. Start Chatting</h4>
+        <p>Once configured, you can ask your LLM things like:</p>
+        <ul>
+            <li>"Show me today's invoices"</li>
+            <li>"Create an invoice for $50 USD"</li>
+            <li>"What's my wallet balance?"</li>
+            <li>"List my lightning channels"</li>
+        </ul>
+    </div>
+</div>
