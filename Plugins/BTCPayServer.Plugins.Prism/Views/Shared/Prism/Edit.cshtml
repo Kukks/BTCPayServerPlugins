@@ -1,0 +1,301 @@
+@using BTCPayServer.Plugins.Prism.ViewModels
+@model PrismViewModel
+@{
+    ViewData.SetActivePage("Prism", "Prism", "Prism");
+}
+
+<form method="post" asp-action="Edit" asp-route-storeId="@Model.StoreId">
+    <input type="hidden" asp-for="Version" />
+    <input type="hidden" asp-for="StoreId" />
+
+    <div class="sticky-header-setup"></div>
+    <div class="sticky-header d-sm-flex align-items-center justify-content-between">
+        <h2 class="mb-0">
+            Prism
+            <a href="https://dergigi.com/2023/03/12/lightning-prisms/" class="ms-1" target="_blank" rel="noreferrer noopener">
+                <span class="fa fa-question-circle-o text-secondary" title="More information..."></span>
+            </a>
+        </h2>
+        <div class="d-flex gap-3 mt-3 mt-sm-0">
+            <div class="btn-group">
+                <button type="button" class="btn btn-primary dropdown-toggle" data-bs-toggle="dropdown">Add</button>
+                <ul class="dropdown-menu">
+                    <li><button name="command" type="submit" value="add-split" class="dropdown-item">Split</button></li>
+                    <li><button name="command" type="submit" value="add-wallettransfer" class="dropdown-item">Wallet Transfer</button></li>
+                </ul>
+            </div>
+            <a asp-action="EditDestination" asp-route-storeId="@Model.StoreId" class="btn btn-secondary">
+                Manage Destinations @(Model.Destinations.Any() ? $"({Model.Destinations.Count})" : "")
+            </a>
+            <button name="command" type="submit" value="save" class="btn btn-primary" id="save-btn">Save</button>
+        </div>
+    </div>
+
+    <partial name="_StatusMessage" />
+
+    <div class="row">
+        <div class="col-xl-8 col-xxl-constrain">
+
+            @* GLOBAL SETTINGS *@
+            <div class="form-group d-flex align-items-center">
+                <input asp-for="Enabled" type="checkbox" class="btcpay-toggle me-3" />
+                <label asp-for="Enabled" class="form-label mb-0">Enable Prism</label>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="SatThreshold" class="form-label">Sat Threshold</label>
+                <input asp-for="SatThreshold" class="form-control" type="number" min="1" />
+                <div class="form-text">Minimum sats to accumulate before creating a payout (per destination).</div>
+                <span asp-validation-for="SatThreshold" class="text-danger"></span>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="Reserve" class="form-label">Reserve %</label>
+                <input asp-for="Reserve" class="form-control" type="number" min="0" max="100" step="0.01" />
+                <div class="form-text">Percentage of each payout withheld to cover fees. Difference is credited back after payout completes.</div>
+                <span asp-validation-for="Reserve" class="text-danger"></span>
+            </div>
+
+            @if (!Model.HasLnProcessor && !Model.HasChainProcessor)
+            {
+                <div class="alert alert-warning">
+                    No payout processors are configured. Prism will accumulate balances but cannot send payouts automatically.
+                </div>
+            }
+
+            @* SPLITS *@
+            @if (Model.Splits.Any())
+            {
+                <h3 class="mt-4 mb-3">Splits</h3>
+
+                @for (var i = 0; i < Model.Splits.Count; i++)
+                {
+                    var split = Model.Splits[i];
+                    <div class="card mb-3" data-split-card>
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-3">
+                                <h5 class="card-title mb-0">
+                                    @(split.SourceType == "wallettransfer" ? "Wallet Transfer" : $"Split #{i + 1}")
+                                </h5>
+                                <button name="command" type="submit" value="remove-split:@i"
+                                        class="btn btn-sm btn-outline-danger">Remove</button>
+                            </div>
+
+                            @* SOURCE TYPE SELECTOR *@
+                            <div class="form-group">
+                                <label class="form-label">Source Type</label>
+                                <select name="Splits[@i].SourceType" class="form-select source-type-select" data-split-index="@i">
+                                    <option value="catchall" selected="@(split.SourceType == "catchall")">Catch-all</option>
+                                    <option value="lnaddress" selected="@(split.SourceType == "lnaddress")">Lightning Address</option>
+                                    <option value="pos" selected="@(split.SourceType == "pos")">POS Product</option>
+                                    <option value="wallettransfer" selected="@(split.SourceType == "wallettransfer")">Wallet Transfer</option>
+                                </select>
+                            </div>
+
+                            @* CATCH-ALL FIELDS *@
+                            <div data-source-fields="catchall" style="@(split.SourceType != "catchall" ? "display:none" : "")">
+                                <div class="form-group">
+                                    <label class="form-label">Payment Type</label>
+                                    <select name="Splits[@i].CatchAllType" class="form-select">
+                                        <option value="*All" selected="@(split.CatchAllType == "*All")">All payments</option>
+                                        <option value="*" selected="@(split.CatchAllType == "*")">Lightning only</option>
+                                        <option value="*CHAIN" selected="@(split.CatchAllType == "*CHAIN")">On-chain only</option>
+                                    </select>
+                                    <div class="form-text">Catch all payments of the selected type made to invoices in your store.</div>
+                                </div>
+                            </div>
+
+                            @* LN ADDRESS FIELDS *@
+                            <div data-source-fields="lnaddress" style="@(split.SourceType != "lnaddress" ? "display:none" : "")">
+                                <div class="form-group">
+                                    <label class="form-label">Lightning Address</label>
+                                    <input name="Splits[@i].LnAddress" type="text" class="form-control"
+                                           value="@split.LnAddress" placeholder="username or user@domain.com"
+                                           list="ln-addresses" />
+                                    <datalist id="ln-addresses">
+                                        @foreach (var addr in Model.AvailableLnAddresses)
+                                        {
+                                            <option value="@addr.Value">@addr.Text</option>
+                                        }
+                                    </datalist>
+                                    <div class="form-text">Split payments received via this lightning address.</div>
+                                </div>
+                            </div>
+
+                            @* POS FIELDS *@
+                            <div data-source-fields="pos" style="@(split.SourceType != "pos" ? "display:none" : "")">
+                                <div class="form-group">
+                                    <label class="form-label">POS App</label>
+                                    <select name="Splits[@i].PosAppId" class="form-select">
+                                        <option value="">-- Select app --</option>
+                                        @foreach (var app in Model.AvailableApps)
+                                        {
+                                            <option value="@app.Value" selected="@(split.PosAppId == app.Value)">@app.Text</option>
+                                        }
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Product</label>
+                                    <select name="Splits[@i].PosProductId" class="form-select">
+                                        <option value="">-- Select product --</option>
+                                        @if (!string.IsNullOrEmpty(split.PosAppId) && Model.AppProducts.TryGetValue(split.PosAppId, out var products))
+                                        {
+                                            foreach (var product in products)
+                                            {
+                                                <option value="@product.Value" selected="@(split.PosProductId == product.Value)">@product.Text</option>
+                                            }
+                                        }
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Payment Filter</label>
+                                    <select name="Splits[@i].PosPaymentFilter" class="form-select">
+                                        <option value="" selected="@(string.IsNullOrEmpty(split.PosPaymentFilter))">Any payment</option>
+                                        <option value="BTC-LN" selected="@(split.PosPaymentFilter == "BTC-LN")">Lightning only</option>
+                                        <option value="BTC-CHAIN" selected="@(split.PosPaymentFilter == "BTC-CHAIN")">On-chain only</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            @* WALLET TRANSFER FIELDS *@
+                            <div data-source-fields="wallettransfer" style="@(split.SourceType != "wallettransfer" ? "display:none" : "")">
+                                <div class="form-group">
+                                    <label class="form-label">Payment Method</label>
+                                    <select name="Splits[@i].TransferPaymentMethod" class="form-select">
+                                        <option value="BTC-LN" selected="@(split.TransferPaymentMethod == "BTC-LN")">Lightning</option>
+                                        <option value="BTC-CHAIN" selected="@(split.TransferPaymentMethod == "BTC-CHAIN")">On-chain</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Amount (sats)</label>
+                                    <input name="Splits[@i].TransferAmount" type="number" class="form-control" min="0"
+                                           value="@split.TransferAmount" placeholder="Leave empty for full balance" />
+                                    <div class="form-text">Amount in sats to transfer. Leave empty to transfer full wallet balance.</div>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Frequency</label>
+                                    <select name="Splits[@i].TransferFrequency" class="form-select">
+                                        <option value="D" selected="@(split.TransferFrequency == "D")">Daily</option>
+                                        <option value="W" selected="@(split.TransferFrequency == "W")">Weekly</option>
+                                        <option value="M" selected="@(split.TransferFrequency == "M")">Monthly</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Day</label>
+                                    @if (split.TransferFrequency == "W")
+                                    {
+                                        <select name="Splits[@i].TransferDay" class="form-select">
+                                            <option value="0" selected="@(split.TransferDay == "0")">Sunday</option>
+                                            <option value="1" selected="@(split.TransferDay == "1")">Monday</option>
+                                            <option value="2" selected="@(split.TransferDay == "2")">Tuesday</option>
+                                            <option value="3" selected="@(split.TransferDay == "3")">Wednesday</option>
+                                            <option value="4" selected="@(split.TransferDay == "4")">Thursday</option>
+                                            <option value="5" selected="@(split.TransferDay == "5")">Friday</option>
+                                            <option value="6" selected="@(split.TransferDay == "6")">Saturday</option>
+                                        </select>
+                                    }
+                                    else if (split.TransferFrequency == "M")
+                                    {
+                                        <select name="Splits[@i].TransferDay" class="form-select">
+                                            @for (var d = 1; d <= 31; d++)
+                                            {
+                                                <option value="@d" selected="@(split.TransferDay == d.ToString())">@d</option>
+                                            }
+                                        </select>
+                                    }
+                                    else
+                                    {
+                                        <input type="hidden" name="Splits[@i].TransferDay" value="1" />
+                                        <span class="form-text">Daily transfers run every day.</span>
+                                    }
+                                </div>
+
+                                @if (!string.IsNullOrEmpty(split.Source))
+                                {
+                                    <div class="mt-2">
+                                        <button type="submit" formaction="@Url.Action("SendNow", "Prism", new { storeId = Model.StoreId })"
+                                                name="splitSource" value="@split.Source"
+                                                class="btn btn-sm btn-outline-secondary"
+                                                onclick="return confirm('Send this transfer now?')">
+                                            Send Now
+                                        </button>
+                                    </div>
+                                }
+                            </div>
+
+                            @* VALIDATION ERRORS FOR SOURCE *@
+                            <span asp-validation-for="Splits[@i].Source" class="text-danger"></span>
+
+                            @* DESTINATIONS *@
+                            <h6 class="mt-3">Destinations</h6>
+                            <span asp-validation-for="Splits[@i].Destinations" class="text-danger d-block mb-2"></span>
+
+                            @for (var j = 0; j < split.Destinations.Count; j++)
+                            {
+                                var dest = split.Destinations[j];
+                                <div class="d-flex gap-2 mb-2 align-items-start">
+                                    <div class="flex-grow-1">
+                                        <select name="Splits[@i].Destinations[@j].Destination" class="form-select">
+                                            <option value="">-- Select destination --</option>
+                                            @foreach (var alias in Model.Destinations)
+                                            {
+                                                var displayDest = alias.Value.Destination;
+                                                if (displayDest.Length > 30)
+                                                {
+                                                    displayDest = displayDest.Substring(0, 15) + "..." + displayDest.Substring(displayDest.Length - 10);
+                                                }
+                                                <option value="@alias.Key" selected="@(dest.Destination == alias.Key)">@alias.Key (@displayDest)</option>
+                                            }
+                                        </select>
+                                        <span asp-validation-for="Splits[@i].Destinations[@j].Destination" class="text-danger"></span>
+                                    </div>
+                                    <div style="width: 120px;">
+                                        <div class="input-group">
+                                            <input name="Splits[@i].Destinations[@j].Percentage" type="number"
+                                                   min="0" max="100" step="0.01" class="form-control"
+                                                   value="@dest.Percentage" />
+                                            <span class="input-group-text">%</span>
+                                        </div>
+                                    </div>
+                                    <button name="command" type="submit" value="remove-destination:@i:@j"
+                                            class="btn btn-sm btn-outline-danger">Remove</button>
+                                </div>
+                            }
+
+                            <button name="command" type="submit" value="add-destination:@i"
+                                    class="btn btn-sm btn-link p-0">+ Add Destination</button>
+                        </div>
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="alert alert-info mt-4">
+                    No splits configured. Use the Add button above to create a split or wallet transfer.
+                </div>
+            }
+        </div>
+    </div>
+</form>
+
+@* BALANCES & PAYOUTS (separate from main form) *@
+<partial name="Prism/_BalancesSection" model="@Model" />
+
+<vc:ui-extension-point location="prism-edit" model="@Model" />
+
+@section PageFootContent {
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            document.querySelectorAll(".source-type-select").forEach(function (select) {
+                function toggle() {
+                    var card = select.closest("[data-split-card]");
+                    var type = select.value;
+                    card.querySelectorAll("[data-source-fields]").forEach(function (el) {
+                        el.style.display = el.getAttribute("data-source-fields") === type ? "" : "none";
+                    });
+                }
+                select.addEventListener("change", toggle);
+            });
+        });
+    </script>
+}

@@ -1,0 +1,109 @@
+@using BTCPayServer.Plugins.Prism.ViewModels
+@model EditDestinationViewModel
+@{
+    var isNew = string.IsNullOrEmpty(Model.OriginalId);
+    ViewData.SetActivePage("Prism", isNew ? "New Destination" : "Edit Destination", "PrismDestination");
+}
+
+<form method="post" asp-action="EditDestination" asp-route-storeId="@Model.StoreId">
+    <input type="hidden" asp-for="OriginalId" />
+    <input type="hidden" asp-for="StoreId" />
+
+    <div class="sticky-header-setup"></div>
+    <div class="sticky-header d-sm-flex align-items-center justify-content-between">
+        <h2 class="mb-0">@ViewData["Title"]</h2>
+        <div class="d-flex gap-3 mt-3 mt-sm-0">
+            @if (!isNew && !Model.IsInUse)
+            {
+                <button name="command" type="submit" value="delete" class="btn btn-outline-danger"
+                        onclick="return confirm('Delete this destination?')">Delete</button>
+            }
+            <a asp-action="Edit" asp-route-storeId="@Model.StoreId" class="btn btn-secondary">Cancel</a>
+            <button name="command" type="submit" value="save" class="btn btn-primary">Save</button>
+        </div>
+    </div>
+
+    <partial name="_StatusMessage" />
+
+    <div class="row">
+        <div class="col-xl-8 col-xxl-constrain">
+            @if (!isNew && Model.IsInUse)
+            {
+                <div class="alert alert-info">
+                    This destination is used by one or more splits and cannot be deleted.
+                </div>
+            }
+
+            <div class="form-group">
+                <label asp-for="Id" class="form-label" data-required>Destination Name</label>
+                <input asp-for="Id" class="form-control" placeholder="e.g. alice-lightning" />
+                <span asp-validation-for="Id" class="text-danger"></span>
+                <div class="form-text">A short name to identify this destination in split configurations.</div>
+            </div>
+
+            <div class="form-group">
+                <label asp-for="DestinationType" class="form-label">Type</label>
+                <select asp-for="DestinationType" class="form-select" id="dest-type-select">
+                    <option value="address">Address (Lightning / Bitcoin / LNURL / xpub)</option>
+                    <option value="store">Store Transfer</option>
+                </select>
+            </div>
+
+            @* Address mode *@
+            <div data-dest-type="address" style="@(Model.DestinationType != "address" ? "display:none" : "")">
+                <div class="form-group">
+                    <label asp-for="AddressValue" class="form-label" data-required>Destination Address</label>
+                    <input asp-for="AddressValue" class="form-control"
+                           placeholder="Lightning address, LNURL, Bitcoin address, or xpub" />
+                    <span asp-validation-for="AddressValue" class="text-danger"></span>
+                </div>
+            </div>
+
+            @* Store mode *@
+            <div data-dest-type="store" style="@(Model.DestinationType != "store" ? "display:none" : "")">
+                <div class="form-group">
+                    <label asp-for="SelectedStoreId" class="form-label" data-required>Store</label>
+                    <select asp-for="SelectedStoreId" asp-items="Model.AvailableStores" class="form-select">
+                        <option value="">-- Select store --</option>
+                    </select>
+                    <span asp-validation-for="SelectedStoreId" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <label asp-for="StorePaymentMethod" class="form-label">Payment Method</label>
+                    <select asp-for="StorePaymentMethod" class="form-select">
+                        <option value="BTC-LN">Lightning</option>
+                        <option value="BTC-CHAIN">On-chain</option>
+                    </select>
+                </div>
+            </div>
+
+            @* Optional overrides *@
+            <h5 class="mt-4">Optional Overrides</h5>
+            <div class="form-text mb-3">These override the global Prism settings for this destination only. Leave empty to use global defaults.</div>
+
+            <div class="form-group">
+                <label asp-for="SatThreshold" class="form-label">Sat Threshold</label>
+                <input asp-for="SatThreshold" class="form-control" type="number" min="1" placeholder="Default: use global setting" />
+            </div>
+            <div class="form-group">
+                <label asp-for="Reserve" class="form-label">Reserve %</label>
+                <input asp-for="Reserve" class="form-control" type="number" min="0" max="100" step="0.01" placeholder="Default: use global setting" />
+            </div>
+        </div>
+    </div>
+</form>
+
+@section PageFootContent {
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            var typeSelect = document.getElementById("dest-type-select");
+            function toggleDestType() {
+                var val = typeSelect.value;
+                document.querySelectorAll("[data-dest-type]").forEach(function (el) {
+                    el.style.display = el.getAttribute("data-dest-type") === val ? "" : "none";
+                });
+            }
+            typeSelect.addEventListener("change", toggleDestType);
+        });
+    </script>
+}

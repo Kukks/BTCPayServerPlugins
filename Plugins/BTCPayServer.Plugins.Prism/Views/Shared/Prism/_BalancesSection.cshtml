@@ -1,0 +1,89 @@
+@using BTCPayServer.Plugins.Prism.ViewModels
+@model PrismViewModel
+
+@{
+    // Merge balances and pending payouts into unified list
+    var unifiedRows = new List<(string destination, long amountSats, string status, string payoutId, long feeCharged)>();
+
+    foreach (var (dest, balance) in Model.DestinationBalances)
+    {
+        if (!Model.PendingPayouts.Values.Any(p => p.DestinationId == dest))
+        {
+            unifiedRows.Add((dest, balance / 1000, "Accumulating", null, 0));
+        }
+    }
+    foreach (var (payoutId, payout) in Model.PendingPayouts)
+    {
+        var amount = payout.PayoutAmount > 0 ? payout.PayoutAmount : payout.ScheduledTransferAmount;
+        unifiedRows.Add((payout.DestinationId, amount, "Payout pending", payoutId, payout.FeeCharged));
+    }
+}
+
+@if (unifiedRows.Any())
+{
+    <div class="row mt-4">
+        <div class="col-xl-8 col-xxl-constrain">
+            <h3 class="mb-3">Balances &amp; Payouts</h3>
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Destination</th>
+                            <th>Amount (sats)</th>
+                            <th>Status</th>
+                            <th class="text-end">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in unifiedRows)
+                        {
+                            var displayName = row.destination;
+                            if (Model.Destinations.TryGetValue(row.destination, out var aliasInfo))
+                            {
+                                displayName = row.destination;
+                            }
+                            else if (row.destination.Length > 25)
+                            {
+                                displayName = row.destination.Substring(0, 10) + "..." + row.destination.Substring(row.destination.Length - 8);
+                            }
+
+                            <tr>
+                                <td title="@row.destination">@displayName</td>
+                                <td>
+                                    @row.amountSats.ToString("N0")
+                                    @if (row.feeCharged > 0)
+                                    {
+                                        <span class="text-muted">(fee: @row.feeCharged)</span>
+                                    }
+                                </td>
+                                <td>
+                                    <span class="badge @(row.status == "Accumulating" ? "bg-info" : "bg-warning")">
+                                        @row.status
+                                    </span>
+                                </td>
+                                <td class="text-end">
+                                    @if (row.status == "Accumulating")
+                                    {
+                                        <form method="post" asp-action="UpdateBalance" asp-route-storeId="@Model.StoreId" class="d-inline-flex gap-2 align-items-center">
+                                            <input type="hidden" name="destinationId" value="@row.destination" />
+                                            <input type="number" name="newBalance" value="@row.amountSats" class="form-control form-control-sm" style="width:120px" />
+                                            <button type="submit" class="btn btn-sm btn-outline-primary">Update</button>
+                                        </form>
+                                    }
+                                    else
+                                    {
+                                        <form method="post" asp-action="CancelPayout" asp-route-storeId="@Model.StoreId" class="d-inline">
+                                            <input type="hidden" name="payoutId" value="@row.payoutId" />
+                                            <button type="submit" class="btn btn-sm btn-outline-danger"
+                                                    onclick="return confirm('Cancel this payout? Funds will return to the balance.')">Cancel</button>
+                                        </form>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+}
