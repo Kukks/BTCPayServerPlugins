@@ -407,7 +407,7 @@ public class PrismController : Controller
     [HttpPost("update-balance")]
     public async Task<IActionResult> UpdateBalance(string storeId, string destinationId, long newBalance)
     {
-        await _satBreaker.WaitAndLock();
+        await _satBreaker.WaitAndLock(storeId);
         try
         {
             var settings = _satBreaker.GetInternal(storeId);
@@ -427,7 +427,7 @@ public class PrismController : Controller
         }
         finally
         {
-            _satBreaker.Unlock();
+            _satBreaker.Unlock(storeId);
         }
 
         TempData[WellKnownTempData.SuccessMessage] = "Balance updated";

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -60,7 +61,7 @@ namespace BTCPayServer.Plugins.Prism
         private readonly IPluginHookService _pluginHookService;
         private readonly BTCPayWalletProvider _walletProvider;
 
-        private Dictionary<string, PrismSettings> _prismSettings;
+        private ConcurrentDictionary<string, PrismSettings> _prismSettings;
 
         public event EventHandler<PrismPaymentDetectedEventArgs> PrismUpdated;
 
@@ -95,7 +96,8 @@ namespace BTCPayServer.Plugins.Prism
 
         public override async Task StartAsync(CancellationToken cancellationToken)
         {
-            _prismSettings = await _storeRepository.GetSettingsAsync<PrismSettings>(nameof(PrismSettings));
+            _prismSettings = new ConcurrentDictionary<string, PrismSettings>(
+                await _storeRepository.GetSettingsAsync<PrismSettings>(nameof(PrismSettings)));
             foreach (var keyValuePair in _prismSettings)
             {
                 keyValuePair.Value.Splits ??= new List<Split>();
@@ -110,7 +112,11 @@ namespace BTCPayServer.Plugins.Prism
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
             await base.StopAsync(cancellationToken);
-            _updateLock.Dispose();
+            foreach (var kvp in _storeLocks)
+            {
+                kvp.Value.Dispose();
+            }
+            _storeLocks.Clear();
         }
 
         public record GlobalPrismSettings
@@ -255,94 +261,102 @@ namespace BTCPayServer.Plugins.Prism
                 var payoutsByStore = payouts.GroupBy(data => data.StoreDataId);
                 foreach (var storePayouts in payoutsByStore)
                 {
-                    if (!_prismSettings.TryGetValue(storePayouts.Key, out var prismSettings))
+                    await WaitAndLock(storePayouts.Key, cancellationToken);
+                    try
                     {
-                        continue;
-                    }
-
-                    if (!payoutsToCheck.TryGetValue(storePayouts.Key, out var pendingPayouts))
-                    {
-                        continue;
-                    }
-                    
-                    foreach (var payout in storePayouts)
-                    {
-                        
-                        if (!pendingPayouts.TryGetValue(payout.Id, out var pendingPayout))
+                        if (!_prismSettings.TryGetValue(storePayouts.Key, out var prismSettings))
                         {
                             continue;
                         }
-                        
-                        if(payout.GetPayoutMethodId() is not { } payoutMethodId)
-                            continue;
 
-                        if (!_payoutMethodHandlerDictionary.TryGetValue(payoutMethodId, out var handler))
+                        if (!payoutsToCheck.TryGetValue(storePayouts.Key, out var pendingPayouts))
                         {
                             continue;
                         }
-                        long toCredit = 0;
-                        switch (payout.State)
-                        {
-                            case PayoutState.Completed:
-                                
-                                var proof = handler.ParseProof(payout) as PayoutLightningBlob;
 
-                                long? feePaid = null;
-                                if (!string.IsNullOrEmpty(proof?.PaymentHash))
-                                {
-                                    if (!lnClients.TryGetValue(payout.StoreDataId, out var lnClient))
+                        foreach (var payout in storePayouts)
+                        {
+
+                            if (!pendingPayouts.TryGetValue(payout.Id, out var pendingPayout))
+                            {
+                                continue;
+                            }
+
+                            if(payout.GetPayoutMethodId() is not { } payoutMethodId)
+                                continue;
+
+                            if (!_payoutMethodHandlerDictionary.TryGetValue(payoutMethodId, out var handler))
+                            {
+                                continue;
+                            }
+                            long toCredit = 0;
+                            switch (payout.State)
+                            {
+                                case PayoutState.Completed:
+
+                                    var proof = handler.ParseProof(payout) as PayoutLightningBlob;
+
+                                    long? feePaid = null;
+                                    if (!string.IsNullOrEmpty(proof?.PaymentHash))
                                     {
-                                        lnClient = await ConstructLightningClient(payout.StoreDataId);
+                                        if (!lnClients.TryGetValue(payout.StoreDataId, out var lnClient))
+                                        {
+                                            lnClient = await ConstructLightningClient(payout.StoreDataId);
 
-                                        lnClients.Add(payout.StoreDataId, lnClient);
+                                            lnClients.Add(payout.StoreDataId, lnClient);
+                                        }
+
+                                        if (lnClient is not null && proof?.PaymentHash is not null)
+                                        {
+                                            try
+                                            {
+                                                var p = await lnClient.GetPayment(proof.PaymentHash, CancellationToken);
+                                                feePaid = (long) p?.Fee?.ToUnit(LightMoneyUnit.Satoshi);
+                                            }
+                                            catch (Exception e)
+                                            {
+                                                _logger.LogError(e,
+                                                    "The payment fee could not be fetched from the lightning node due to an error, so we will use the allocated 2% as the fee.");
+                                            }
+                                        }
                                     }
 
-                                    if (lnClient is not null && proof?.PaymentHash is not null)
+                                    if (feePaid is not null)
                                     {
-                                        try
-                                        {
-                                            var p = await lnClient.GetPayment(proof.PaymentHash, CancellationToken);
-                                            feePaid = (long) p?.Fee?.ToUnit(LightMoneyUnit.Satoshi);
-                                        }
-                                        catch (Exception e)
-                                        {
-                                            _logger.LogError(e,
-                                                "The payment fee could not be fetched from the lightning node due to an error, so we will use the allocated 2% as the fee.");
-                                        }
+                                        toCredit = pendingPayout.FeeCharged - feePaid.Value;
                                     }
-                                }
 
-                                if (feePaid is not null)
-                                {
-                                    toCredit = pendingPayout.FeeCharged - feePaid.Value;
-                                }
+                                    break;
+                                case PayoutState.Cancelled:
+                                    toCredit = pendingPayout.PayoutAmount + pendingPayout.FeeCharged - pendingPayout.ScheduledTransferAmount;
+                                    break;
+                            }
 
-                                break;
-                            case PayoutState.Cancelled:
-                                toCredit = pendingPayout.PayoutAmount + pendingPayout.FeeCharged - pendingPayout.ScheduledTransferAmount;
-                                break;
+                            var destinationId = pendingPayout.DestinationId ??
+                                                payout.GetBlob(_btcPayNetworkJsonSerializerSettings).Destination;
+                            if (prismSettings.DestinationBalance.TryGetValue(destinationId,
+                                    out var currentBalance))
+                            {
+                                prismSettings.DestinationBalance[destinationId] =
+                                    currentBalance + (toCredit * 1000);
+                            }
+                            else
+                            {
+                                prismSettings.DestinationBalance.Add(destinationId,
+                                    (toCredit * 1000));
+                            }
+
+                            prismSettings.PendingPayouts.Remove(payout.Id);
                         }
 
-                        var destinationId = pendingPayout.DestinationId ??
-                                            payout.GetBlob(_btcPayNetworkJsonSerializerSettings).Destination;
-                        if (prismSettings.DestinationBalance.TryGetValue(destinationId,
-                                out var currentBalance))
+                        if (await CreatePayouts(storePayouts.Key, prismSettings, new()))
                         {
-                            prismSettings.DestinationBalance[destinationId] =
-                                currentBalance + (toCredit * 1000);
+                            await UpdatePrismSettingsForStore(storePayouts.Key, prismSettings, true);
                         }
-                        else
-                        {
-                            prismSettings.DestinationBalance.Add(destinationId,
-                                (toCredit * 1000));
-                        }
-
-                        prismSettings.PendingPayouts.Remove(payout.Id);
                     }
-
-                    if (await CreatePayouts(storePayouts.Key, prismSettings, new()))
+                    finally
                     {
-                        await UpdatePrismSettingsForStore(storePayouts.Key, prismSettings, true);
+                        Unlock(storePayouts.Key);
                     }
                 }
 
@@ -360,28 +374,43 @@ namespace BTCPayServer.Plugins.Prism
                 }, cancellationToken);
         }
 
-        public async Task WaitAndLock(CancellationToken cancellationToken = default)
-        
+        private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(30);
+        private readonly ConcurrentDictionary<string, SemaphoreSlim> _storeLocks = new();
+
+        private SemaphoreSlim GetStoreLock(string storeId)
         {
-            await _updateLock.WaitAsync(cancellationToken);
+            return _storeLocks.GetOrAdd(storeId, _ => new SemaphoreSlim(1, 1));
         }
 
-        public void Unlock()
+        public async Task WaitAndLock(string storeId, CancellationToken cancellationToken = default)
         {
-            _updateLock.Release();
+            var storeLock = GetStoreLock(storeId);
+            _logger.LogDebug("Acquiring lock for store {StoreId}", storeId);
+            if (!await storeLock.WaitAsync(LockTimeout, cancellationToken))
+            {
+                _logger.LogError("Lock acquisition TIMED OUT for store {StoreId} after {Timeout}s", storeId, LockTimeout.TotalSeconds);
+                throw new TimeoutException($"Failed to acquire lock for store {storeId} within {LockTimeout.TotalSeconds}s");
+            }
+            _logger.LogDebug("Lock acquired for store {StoreId}", storeId);
         }
-        private readonly SemaphoreSlim _updateLock = new(1, 1);
+
+        public void Unlock(string storeId)
+        {
+            var storeLock = GetStoreLock(storeId);
+            _logger.LogDebug("Releasing lock for store {StoreId}", storeId);
+            storeLock.Release();
+        }
 
         public async Task<PrismSettings> Get(string storeId)
         {
-            await WaitAndLock();
+            await WaitAndLock(storeId);
             try
             {
                 return GetInternal(storeId);
             }
             finally
             {
-                Unlock();
+                Unlock(storeId);
             }
         }
 
@@ -400,18 +429,21 @@ namespace BTCPayServer.Plugins.Prism
             try
             {
                 if (!skipLock)
-                    await WaitAndLock();
-                var currentSettings = skipLock ? GetInternal(storeId) : await Get(storeId);
+                    await WaitAndLock(storeId);
+                // Always use GetInternal — we already hold the lock (or the caller does when skipLock=true)
+                var currentSettings = GetInternal(storeId);
 
                 if (currentSettings.Version != updatedSettings.Version)
                 {
+                    _logger.LogWarning("Version mismatch for store {StoreId}: current={Current}, update={Update}",
+                        storeId, currentSettings.Version, updatedSettings.Version);
                     return false; // Indicate that the update failed due to a version mismatch
                 }
 
                 updatedSettings.Version++; // Increment the version number
 
                 // Update the settings in the dictionary
-                _prismSettings.AddOrReplace(storeId, updatedSettings);
+                _prismSettings[storeId] = updatedSettings;
 
                 // Update the settings in the StoreRepository
                 await _storeRepository.UpdateSetting(storeId, nameof(PrismSettings), updatedSettings);
@@ -420,7 +452,7 @@ namespace BTCPayServer.Plugins.Prism
             finally
             {
                 if (!skipLock)
-                    Unlock();
+                    Unlock(storeId);
             }
 
             var prismPaymentDetectedEventArgs = new PrismPaymentDetectedEventArgs()
@@ -678,17 +710,29 @@ namespace BTCPayServer.Plugins.Prism
         {
             try
             {
-                await WaitAndLock(cancellationToken);
-
                 switch (evt)
                 {
                     case StoreEvent.Removed storeRemovedEvent:
-                        _prismSettings.Remove(storeRemovedEvent.StoreId);
+                        await WaitAndLock(storeRemovedEvent.StoreId, cancellationToken);
+                        try
+                        {
+                            _prismSettings.TryRemove(storeRemovedEvent.StoreId, out _);
+                        }
+                        finally
+                        {
+                            Unlock(storeRemovedEvent.StoreId);
+                        }
+                        if (_storeLocks.TryRemove(storeRemovedEvent.StoreId, out var removedLock))
+                            removedLock.Dispose();
                         return;
+
                     case ScheduleDayEvent scheduleDayEvent:
                         // Use ToList() to create a snapshot, preventing "Collection was modified" if stores are removed during async iteration
                         foreach (var (storeId, prismSettings) in _prismSettings.ToList())
                         {
+                            await WaitAndLock(storeId, cancellationToken);
+                            try
+                            {
                                 if (!prismSettings.EnableScheduledAutomation && string.IsNullOrEmpty(scheduleDayEvent.forceSplitSource)) continue;
 
                                 var prisms = await DetermineMatches(storeId, prismSettings, DateTimeOffset.UtcNow, scheduleDayEvent.forceSplitSource);
@@ -720,60 +764,72 @@ namespace BTCPayServer.Plugins.Prism
                                     }
                                 }
 
-
-                            if (await CreatePayouts(storeId, prismSettings, destinationAmounts))
+                                if (await CreatePayouts(storeId, prismSettings, destinationAmounts))
+                                {
+                                    await UpdatePrismSettingsForStore(storeId, prismSettings, true);
+                                }
+                            }
+                            finally
                             {
-                                await UpdatePrismSettingsForStore(storeId, prismSettings, true);
+                                Unlock(storeId);
                             }
                         }
-
                         break;
 
                     case InvoiceEvent invoiceEvent when
                         new[] {InvoiceEventCode.Confirmed, InvoiceEventCode.MarkedCompleted}.Contains(
                             invoiceEvent.EventCode):
                     {
-                        if (_prismSettings.TryGetValue(invoiceEvent.Invoice.StoreId, out var prismSettings) && prismSettings.Enabled)
-                        {   
-                            var prisms = DetermineMatches(prismSettings, invoiceEvent.Invoice);
-                            foreach (var prism in prisms)
+                        var invoiceStoreId = invoiceEvent.Invoice.StoreId;
+                        await WaitAndLock(invoiceStoreId, cancellationToken);
+                        try
+                        {
+                            if (_prismSettings.TryGetValue(invoiceStoreId, out var prismSettings) && prismSettings.Enabled)
                             {
-                                if (prism.Item2 is not { } msats || msats <= 0)
-                                    continue;
-                                var splits = prism.Item1?.Destinations;
-                                if (splits?.Any() is not true)
-                                    continue;
-
-                                //compute the sats for each destination  based on splits percentage
-                                var msatsPerDestination =
-                                    splits.ToDictionary(s => s.Destination, s => (long)(msats.MilliSatoshi * (s.Percentage / 100)));
-
-                                prismSettings.DestinationBalance ??= new Dictionary<string, long>();
-                                foreach (var (destination, splitMSats) in msatsPerDestination)
+                                var prisms = DetermineMatches(prismSettings, invoiceEvent.Invoice);
+                                foreach (var prism in prisms)
                                 {
-                                    if (prismSettings.DestinationBalance.TryGetValue(destination, out var currentBalance))
+                                    if (prism.Item2 is not { } msats || msats <= 0)
+                                        continue;
+                                    var splits = prism.Item1?.Destinations;
+                                    if (splits?.Any() is not true)
+                                        continue;
+
+                                    //compute the sats for each destination  based on splits percentage
+                                    var msatsPerDestination =
+                                        splits.ToDictionary(s => s.Destination, s => (long)(msats.MilliSatoshi * (s.Percentage / 100)));
+
+                                    prismSettings.DestinationBalance ??= new Dictionary<string, long>();
+                                    foreach (var (destination, splitMSats) in msatsPerDestination)
                                     {
-                                        prismSettings.DestinationBalance[destination] = currentBalance + splitMSats;
-                                    }
-                                    else if (splitMSats > 0)
-                                    {
-                                        prismSettings.DestinationBalance.Add(destination, splitMSats);
+                                        if (prismSettings.DestinationBalance.TryGetValue(destination, out var currentBalance))
+                                        {
+                                            prismSettings.DestinationBalance[destination] = currentBalance + splitMSats;
+                                        }
+                                        else if (splitMSats > 0)
+                                        {
+                                            prismSettings.DestinationBalance.Add(destination, splitMSats);
+                                        }
                                     }
                                 }
-                            }
 
-                            await UpdatePrismSettingsForStore(invoiceEvent.Invoice.StoreId, prismSettings, true);
-                            if (await CreatePayouts(invoiceEvent.Invoice.StoreId, prismSettings, new()))
-                            {
-                                await UpdatePrismSettingsForStore(invoiceEvent.Invoice.StoreId, prismSettings, true);
+                                await UpdatePrismSettingsForStore(invoiceStoreId, prismSettings, true);
+                                if (await CreatePayouts(invoiceStoreId, prismSettings, new()))
+                                {
+                                    await UpdatePrismSettingsForStore(invoiceStoreId, prismSettings, true);
+                                }
                             }
+                        }
+                        finally
+                        {
+                            Unlock(invoiceStoreId);
                         }
                         break;
                     }
                     case CheckPayoutsEvt:
                         await CheckPayouts(cancellationToken);
                         break;
-                    case PayoutEvent payoutEvent when !_prismSettings.TryGetValue(payoutEvent.Payout.StoreDataId, out var prismSettings) || payoutEvent.Type != PayoutEvent.PayoutEventType.Approved:
+                    case PayoutEvent payoutEvent when !_prismSettings.TryGetValue(payoutEvent.Payout.StoreDataId, out _) || payoutEvent.Type != PayoutEvent.PayoutEventType.Approved:
                         return;
                     case PayoutEvent payoutEvent:
                         _checkPayoutTcs?.TrySetResult();
@@ -783,10 +839,6 @@ namespace BTCPayServer.Plugins.Prism
             catch (Exception e)
             {
                 Logs.PayServer.LogWarning(e, "Error while processing prism event");
-            }
-            finally
-            {
-                Unlock();
             }
         }
 
