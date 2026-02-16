@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using System.ComponentModel;
 using Microsoft.AspNetCore.Http;
@@ -11,7 +13,7 @@ namespace BTCPayServer.Plugins.MCP.Tools;
 public static class InvoiceTools
 {
     [McpServerTool(Name = "btcpay_invoices_list"),
-     Description("List invoices for a store with optional filters for status, date range, order ID, and text search")]
+     Description("List invoices for a store with optional filters. Use btcpay_invoices_summary instead if you need totals or counts.")]
     public static async Task<string> ListInvoices(
         McpHttpClient client,
         [Description("The store ID")] string storeId,
@@ -22,7 +24,7 @@ public static class InvoiceTools
         [Description("Full-text search across invoice fields")] string? textSearch = null,
         [Description("Include archived invoices")] bool includeArchived = false,
         [Description("Number of records to skip")] int? skip = null,
-        [Description("Number of records to return (default 50)")] int? take = 50)
+        [Description("Number of records to return (default 50, max 250)")] int? take = 50)
     {
         var q = new QueryBuilder();
         if (status != null) foreach (var s in status) q.Add("status", s);
@@ -34,6 +36,80 @@ public static class InvoiceTools
         if (skip.HasValue) q.Add("skip", skip.Value.ToString());
         if (take.HasValue) q.Add("take", take.Value.ToString());
         return await client.GetAsync($"/api/v1/stores/{storeId}/invoices{q}");
+    }
+
+    [McpServerTool(Name = "btcpay_invoices_summary"),
+     Description("Get aggregated invoice statistics: total count, sum of amounts grouped by currency and status. Use this instead of listing all invoices when you need totals, counts, or sums.")]
+    public static async Task<string> InvoicesSummary(
+        McpHttpClient client,
+        [Description("The store ID")] string storeId,
+        [Description("Filter by status (can specify multiple): New, Processing, Expired, Invalid, Settled")] string[]? status = null,
+        [Description("Only include invoices created after this date (ISO 8601)")] string? startDate = null,
+        [Description("Only include invoices created before this date (ISO 8601)")] string? endDate = null,
+        [Description("Full-text search across invoice fields")] string? textSearch = null,
+        [Description("Include archived invoices")] bool includeArchived = false)
+    {
+        // Fetch all matching invoices in pages of 250
+        var allInvoices = new List<JsonElement>();
+        var skip = 0;
+        const int pageSize = 250;
+        while (true)
+        {
+            var q = new QueryBuilder();
+            if (status != null) foreach (var s in status) q.Add("status", s);
+            if (startDate != null) q.Add("startDate", startDate);
+            if (endDate != null) q.Add("endDate", endDate);
+            if (textSearch != null) q.Add("textSearch", textSearch);
+            if (includeArchived) q.Add("includeArchived", "true");
+            q.Add("skip", skip.ToString());
+            q.Add("take", pageSize.ToString());
+
+            var json = await client.GetAsync($"/api/v1/stores/{storeId}/invoices{q}");
+            using var doc = JsonDocument.Parse(json);
+            var invoices = doc.RootElement.EnumerateArray().ToList();
+            if (invoices.Count == 0) break;
+
+            allInvoices.AddRange(invoices.Select(i => i.Clone()));
+            if (invoices.Count < pageSize) break;
+            skip += pageSize;
+        }
+
+        // Aggregate: group by currency and status
+        var byCurrencyAndStatus = new Dictionary<string, Dictionary<string, (int count, decimal sum)>>();
+        var byStatus = new Dictionary<string, int>();
+
+        foreach (var inv in allInvoices)
+        {
+            var currency = inv.TryGetProperty("currency", out var c) ? c.GetString() ?? "?" : "?";
+            var invStatus = inv.TryGetProperty("status", out var s) ? s.GetString() ?? "?" : "?";
+            var amount = inv.TryGetProperty("amount", out var a) ? a.GetDecimal() : 0m;
+
+            if (!byCurrencyAndStatus.ContainsKey(currency))
+                byCurrencyAndStatus[currency] = new Dictionary<string, (int, decimal)>();
+
+            var statusDict = byCurrencyAndStatus[currency];
+            if (!statusDict.ContainsKey(invStatus))
+                statusDict[invStatus] = (0, 0m);
+            var (cnt, sm) = statusDict[invStatus];
+            statusDict[invStatus] = (cnt + 1, sm + amount);
+
+            byStatus[invStatus] = byStatus.GetValueOrDefault(invStatus) + 1;
+        }
+
+        var result = new
+        {
+            totalCount = allInvoices.Count,
+            byStatus,
+            byCurrency = byCurrencyAndStatus.ToDictionary(
+                kvp => kvp.Key,
+                kvp => kvp.Value.ToDictionary(
+                    s => s.Key,
+                    s => new { count = s.Value.count, totalAmount = s.Value.sum }
+                )
+            )
+        };
+
+        return JsonSerializer.Serialize(result);
     }
 
     [McpServerTool(Name = "btcpay_invoice_get"),
