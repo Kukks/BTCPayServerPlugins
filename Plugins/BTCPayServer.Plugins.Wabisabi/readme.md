@@ -1,6 +1,6 @@
 # The BTCPay Server Coinjoin plugin
 
-This plugin allows every BTCPay Server instance to integrate with the Wabisabi coinjoin protocol developed by [zkSNACKS](https://zksnacks.com/) ([Wasabi Wallet](https://wasabiwallet.io/)).
+This plugin allows every BTCPay Server instance to integrate with the Wabisabi coinjoin protocol developed by zkSNACKS ([Wasabi Wallet](https://wasabiwallet.io/)).
 
 
 <p align="center">
