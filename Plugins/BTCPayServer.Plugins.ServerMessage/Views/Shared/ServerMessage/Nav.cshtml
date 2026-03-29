@@ -1,0 +1,12 @@
+@using BTCPayServer.Client
+@using BTCPayServer.Plugins.ServerMessage
+@{
+    var isActive = ViewContext.RouteData.Values.TryGetValue("Controller", out var controller)
+                   && controller is not null
+                   && nameof(ServerMessageController).StartsWith(controller.ToString()!, StringComparison.InvariantCultureIgnoreCase);
+}
+
+<li class="nav-item nav-item-sub" permission="@Policies.CanModifyServerSettings">
+    <a class="nav-link @(isActive ? "active" : string.Empty)"
+       asp-action="Update" asp-controller="ServerMessage">Server Message</a>
+</li>

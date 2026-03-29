@@ -1,0 +1,34 @@
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Plugins.ServerMessage
+@inject ISettingsRepository SettingsRepository
+
+@{
+    var settings = await SettingsRepository.GetSettingAsync<ServerMessageSettings>();
+    if (settings is not { AdminEnabled: true } || string.IsNullOrWhiteSpace(settings.AdminMessage))
+    {
+        return;
+    }
+    var style = settings.AdminStyle ?? "info";
+    var bannerId = "server-message-admin-" + Guid.NewGuid().ToString("N")[..8];
+}
+
+<script>
+(function() {
+    function inject() {
+        if (document.getElementById('@bannerId')) return;
+        var target = document.getElementById('mainContent') || document.body;
+        var d = document.createElement('div');
+        d.id = '@bannerId';
+        d.className = 'alert alert-@style text-center mb-0';
+        d.setAttribute('role', 'alert');
+        d.style.cssText = 'border-radius:0;position:sticky;top:0;z-index:1050;';
+        d.innerHTML = @Safe.Json(settings.AdminMessage);
+        target.prepend(d);
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', inject);
+    } else {
+        inject();
+    }
+})();
+</script>

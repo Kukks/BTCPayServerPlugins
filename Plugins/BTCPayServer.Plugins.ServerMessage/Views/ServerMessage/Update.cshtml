@@ -1,0 +1,61 @@
+@using BTCPayServer.Plugins.ServerMessage
+@model ServerMessageSettings
+
+<h2 class="mb-4">Server Message</h2>
+<p class="text-secondary">Display banners on public-facing pages (checkout, POS, pull payments, crowdfund) and backend pages (dashboard, settings, etc.).</p>
+
+<form method="post">
+    <div class="row">
+        <div class="col-xl-8 col-xxl-constrain">
+            <h4 class="mt-4 mb-3">Public Message</h4>
+            <p class="text-secondary">Shown to customers on checkout, point of sale, pull payment, and crowdfund pages.</p>
+
+            <div class="form-check mb-3">
+                <input asp-for="PublicEnabled" type="checkbox" class="form-check-input" />
+                <label asp-for="PublicEnabled" class="form-check-label">Enable public message</label>
+            </div>
+
+            <div class="form-group mb-3">
+                <label asp-for="PublicStyle" class="form-label">Style</label>
+                <select asp-for="PublicStyle" class="form-select w-auto">
+                    <option value="warning">Warning (yellow)</option>
+                    <option value="danger">Danger (red)</option>
+                    <option value="info">Info (blue)</option>
+                </select>
+            </div>
+
+            <div class="form-group mb-3">
+                <label asp-for="PublicMessage" class="form-label">Message (HTML allowed)</label>
+                <textarea asp-for="PublicMessage" class="form-control" rows="4"
+                          placeholder="&#x26a0;&#xfe0f; This is a demo server. Do NOT send real payments here."></textarea>
+            </div>
+
+            <hr class="my-4" />
+
+            <h4 class="mb-3">Admin Message</h4>
+            <p class="text-secondary">Shown to logged-in users on all backend pages.</p>
+
+            <div class="form-check mb-3">
+                <input asp-for="AdminEnabled" type="checkbox" class="form-check-input" />
+                <label asp-for="AdminEnabled" class="form-check-label">Enable admin message</label>
+            </div>
+
+            <div class="form-group mb-3">
+                <label asp-for="AdminStyle" class="form-label">Style</label>
+                <select asp-for="AdminStyle" class="form-select w-auto">
+                    <option value="info">Info (blue)</option>
+                    <option value="warning">Warning (yellow)</option>
+                    <option value="danger">Danger (red)</option>
+                </select>
+            </div>
+
+            <div class="form-group mb-3">
+                <label asp-for="AdminMessage" class="form-label">Message (HTML allowed)</label>
+                <textarea asp-for="AdminMessage" class="form-control" rows="4"
+                          placeholder="This server is for testing only."></textarea>
+            </div>
+        </div>
+    </div>
+
+    <button name="command" type="submit" value="save" class="btn btn-primary mt-2">Save</button>
+</form>
