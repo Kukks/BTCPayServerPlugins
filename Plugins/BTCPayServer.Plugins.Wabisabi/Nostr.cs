@@ -90,7 +90,7 @@ public class Nostr
         await nostrClient.Connect(cts.Token);
 
         
-        result = await nostrClient.SubscribeForEvents(
+        var nostrEvents = nostrClient.SubscribeForEvents(
             new[]
             {
                 new NostrSubscriptionFilter()
@@ -103,7 +103,11 @@ public class Nostr
                     },
                     Limit = 1000
                 }
-            }, true, cts.Token).ToListAsync(cancellationToken);
+            }, true, cts.Token);
+        var nostrEventsList = new List<NostrEvent>();
+        await foreach (var evt in nostrEvents.WithCancellation(cancellationToken))
+            nostrEventsList.Add(evt);
+        result = nostrEventsList;
 
         nostrClient.Dispose();
 var network = new []{currentNetwork.ChainName.ToString().ToLower(), currentNetwork.Name.ToLower()};

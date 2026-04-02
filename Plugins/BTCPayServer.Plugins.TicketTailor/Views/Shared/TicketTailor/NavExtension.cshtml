@@ -8,7 +8,7 @@
 @inject AppService AppService;
 @model BTCPayServer.Components.MainNav.MainNavViewModel
 @{
-    var store = Context.GetStoreData();
+    var store = Context.GetStoreDataOrNull();
 }
 
 @if (store != null)

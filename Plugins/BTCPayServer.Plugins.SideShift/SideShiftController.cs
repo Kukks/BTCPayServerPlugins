@@ -93,6 +93,7 @@ namespace BTCPayServer.Plugins.SideShift
 
         [HttpPost("~/plugins/sidehift/{pullPaymentId}/payouts")]
         [AllowAnonymous]
+        [IgnoreAntiforgeryToken]
         public async Task<IActionResult> CreatePayout(string pullPaymentId,
             [FromBody] CreateSideShiftPayoutRequest request)
         {

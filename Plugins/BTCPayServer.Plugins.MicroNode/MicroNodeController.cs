@@ -58,7 +58,7 @@ public class MicroNodeController : Controller
     public async Task<IActionResult> Configure(string storeId, string command, MicroNodeStoreSettings settings,
         string? masterStoreId)
     {
-        var store = HttpContext.GetStoreData();
+        var store = HttpContext.GetStoreDataOrNull();
         var network = _networkProvider.GetNetwork<BTCPayNetwork>("BTC");
         if (network is null)
         {
@@ -173,7 +173,7 @@ public class MicroNodeController : Controller
     [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie, Policy = Policies.CanModifyServerSettings)]
     public async Task<IActionResult> ConfigureMaster(string storeId, string command, MicroNodeSettings settings)
     {
-        var store = HttpContext.GetStoreData();
+        var store = HttpContext.GetStoreDataOrNull();
         var network = _networkProvider.GetNetwork<BTCPayNetwork>("BTC");
         if (network is null)
         {

@@ -10,7 +10,7 @@ public class DynamicRateLimitsPlugin : BaseBTCPayServerPlugin
 {
     public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
     {
-        new() { Identifier = nameof(BTCPayServer), Condition = ">=2.0.0" }
+        new() { Identifier = nameof(BTCPayServer), Condition = ">=2.3.7" }
     };
     public override void Execute(IServiceCollection applicationBuilder)
     {

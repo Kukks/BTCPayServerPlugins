@@ -211,7 +211,7 @@ namespace BTCPayServer.Plugins.LiquidPlus.Controllers
                     continue;
                 }
 
-                var der = HttpContext.GetStoreData()
+                var der = HttpContext.GetStoreDataOrNull()
                     .GetDerivationSchemeSettings(_paymentMethodHandlerDictionary, wallet.CryptoCode).AccountDerivation;
 
                 if (der.GetExtPubKeys().Count() > 1)

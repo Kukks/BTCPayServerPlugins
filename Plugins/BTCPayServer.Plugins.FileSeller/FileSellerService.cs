@@ -118,7 +118,7 @@ namespace BTCPayServer.Plugins.FileSeller
                     Id = fileIds.ToArray()
                 });
                 var productLinkTasks = loadedFiles.ToDictionary(file => file,
-                    file => _fileService.GetTemporaryFileUrl(UrlToUse, file.Id, DateTimeOffset.MaxValue, true));
+                    file => _fileService.GetFileUrl(UrlToUse, file.Id));
 
                 var res = await Task.WhenAll(productLinkTasks.Values);
 

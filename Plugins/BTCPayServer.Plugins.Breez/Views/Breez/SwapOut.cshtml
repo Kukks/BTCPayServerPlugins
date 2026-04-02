@@ -30,7 +30,7 @@
     if (sdk is null)
         return;
     var inProgressSwaps = sdk.InProgressOnchainPayments();
-    var deriv = Context.GetStoreData().GetDerivationSchemeSettings(PaymentMethodHandlerDictionary, "BTC");
+    var deriv = Context.GetStoreDataOrNull()?.GetDerivationSchemeSettings(PaymentMethodHandlerDictionary, "BTC");
     var f = sdk.RecommendedFees();
     var swapOutRec = sdk.FetchReverseSwapFees(new ReverseSwapFeesRequest());
 }

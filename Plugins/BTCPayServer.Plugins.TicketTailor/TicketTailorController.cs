@@ -104,6 +104,7 @@ namespace BTCPayServer.Plugins.TicketTailor
 
         [AllowAnonymous]
         [HttpPost("plugins/TicketTailor/{appId}")]
+        [IgnoreAntiforgeryToken]
         public async Task<IActionResult> Purchase(string appId, TicketTailorViewModel request, bool preview = false)
         {
             var app = await _appService.GetApp(appId, TicketTailorApp.AppType, true);

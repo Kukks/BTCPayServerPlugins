@@ -3,7 +3,8 @@ using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
-using BTCPayServer.HostedServices.Webhooks;
+using BTCPayServer.Plugins.Webhooks;
+using BTCPayServer.Plugins.Webhooks.Views;
 using BTCPayServer.Services.Apps;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,15 +17,17 @@ namespace BTCPayServer.Plugins.Subscriptions
     {
         public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
         [
-            new() {Identifier = nameof(BTCPayServer), Condition = ">=2.0.0"}
+            new() {Identifier = nameof(BTCPayServer), Condition = ">=2.3.7"}
         ];
 
         public override void Execute(IServiceCollection applicationBuilder)
         {
             applicationBuilder.AddSingleton<ISwaggerProvider, SubscriptionsSwaggerProvider>();
             applicationBuilder.AddSingleton<SubscriptionService>();
-            applicationBuilder.AddSingleton<IWebhookProvider>(o => o.GetRequiredService<SubscriptionService>());
             applicationBuilder.AddHostedService(s => s.GetRequiredService<SubscriptionService>());
+            applicationBuilder.AddWebhookTriggerProvider<SubscriptionWebhookTriggerProvider>();
+            applicationBuilder.AddSingleton(new AvailableWebhookViewModel(SubscriptionService.SubscriptionStatusUpdated, "A subscription status has been updated"));
+            applicationBuilder.AddSingleton(new AvailableWebhookViewModel(SubscriptionService.SubscriptionRenewalRequested, "A subscription has generated a payment request for renewal"));
 
             applicationBuilder.AddUIExtension("header-nav", "Subscriptions/NavExtension");
             applicationBuilder.AddSingleton<AppBaseType, SubscriptionApp>();

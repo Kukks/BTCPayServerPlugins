@@ -54,6 +54,7 @@ public class StripeWebhookController : ControllerBase
     }
 
     [HttpPost("{storeId}")]
+    [IgnoreAntiforgeryToken]
     public async Task<IActionResult> HandleWebhook(string storeId)
     {
         _logger.LogDebug("Received Stripe webhook request for store path: {StoreId}", storeId);

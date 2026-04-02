@@ -10,7 +10,7 @@
 @inject PaymentMethodHandlerDictionary PaymentMethodHandlerDictionary
 @{
     ViewData.SetActivePage("FixedFloat", "FixedFloat", "FixedFloat");
-    var store = Context.GetStoreData();
+    var store = Context.GetStoreDataOrNull();
     var allowedPaymentMethods = store.GetEnabledPaymentIds()
         .Select(pmi => new SelectListItem(pmi.ToString(), pmi.ToString()))
         .Prepend(new SelectListItem("Any", ""));

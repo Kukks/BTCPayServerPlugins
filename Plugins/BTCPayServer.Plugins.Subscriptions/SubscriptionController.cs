@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Extensions;
@@ -12,7 +11,6 @@ using BTCPayServer.Services.Apps;
 using BTCPayServer.Services.PaymentRequests;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Newtonsoft.Json.Linq;
 using PaymentRequestData = BTCPayServer.Data.PaymentRequestData;
 
 namespace BTCPayServer.Plugins.Subscriptions;
@@ -95,23 +93,19 @@ public class SubscriptionController : Controller
         {
             StoreDataId = app.StoreDataId,
             Archived = false,
-            Status = Client.Models.PaymentRequestData.PaymentRequestStatus.Pending
-        };
-        pr.SetBlob(new CreatePaymentRequestRequest()
-        {
+            Status = PaymentRequestStatus.Pending,
             Amount = ss.Price,
             Currency = ss.Currency,
-            ExpiryDate = DateTimeOffset.UtcNow.AddDays(1),
-            Description = ss.Description,
             Title = ss.SubscriptionName,
+            Expiry = DateTimeOffset.UtcNow.AddDays(1),
+            ReferenceId = SubscriptionService.EncodeReferenceId(appId, null),
+        };
+        pr.SetBlob(new PaymentRequestBlob()
+        {
+            Description = ss.Description,
             FormId = ss.FormId,
             AllowCustomPaymentAmounts = false,
-            AdditionalData = new Dictionary<string, JToken>()
-            {
-                {"source", JToken.FromObject("subscription")},
-                {"appId", JToken.FromObject(appId)},
-                {"url", HttpContext.Request.GetAbsoluteRoot()}
-            },
+            RequestBaseUrl = HttpContext.Request.GetAbsoluteRoot(),
         });
 
         pr = await _paymentRequestRepository.CreateOrUpdatePaymentRequest(pr);

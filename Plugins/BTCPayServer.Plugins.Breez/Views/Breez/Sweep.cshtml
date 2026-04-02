@@ -25,7 +25,7 @@
     var sdk = BreezService.GetClient(storeId)?.Sdk;
     if (sdk is null)
         return;
-    var deriv = Context.GetStoreData().GetDerivationSchemeSettings(PaymentMethodHandlerDictionary, "BTC");
+    var deriv = Context.GetStoreDataOrNull()?.GetDerivationSchemeSettings(PaymentMethodHandlerDictionary, "BTC");
     var f = sdk.RecommendedFees();
 }
 <datalist id="fees">

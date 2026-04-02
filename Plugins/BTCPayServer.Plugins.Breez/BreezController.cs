@@ -115,7 +115,7 @@ public class BreezController : Controller
 
         if (address.Equals("store", StringComparison.InvariantCultureIgnoreCase))
         {
-            var store = ControllerContext.HttpContext.GetStoreData()
+            var store = ControllerContext.HttpContext.GetStoreDataOrNull()
                 .GetDerivationSchemeSettings(_paymentMethodHandlerDictionary, "BTC");
             var res = await _btcWalletProvider.GetWallet(storeId)
                 .ReserveAddressAsync(storeId, store.AccountDerivation, "Breez");
@@ -266,7 +266,7 @@ public class BreezController : Controller
 
         if (address.Equals("store", StringComparison.InvariantCultureIgnoreCase))
         {
-            var store = ControllerContext.HttpContext.GetStoreData()
+            var store = ControllerContext.HttpContext.GetStoreDataOrNull()
                 .GetDerivationSchemeSettings(_paymentMethodHandlerDictionary, "BTC");
             var res = await _btcWalletProvider.GetWallet(storeId)
                 .ReserveAddressAsync(storeId, store.AccountDerivation, "Breez");
@@ -348,7 +348,7 @@ public class BreezController : Controller
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> Configure(string storeId, string command, BreezSettings settings)
     {
-        var store = HttpContext.GetStoreData();
+        var store = HttpContext.GetStoreDataOrNull();
         var pmi = PaymentTypes.LN.GetPaymentMethodId("BTC");
         var existing = store.GetPaymentMethodConfig<LightningPaymentMethodConfig>(pmi, _paymentMethodHandlerDictionary);
        

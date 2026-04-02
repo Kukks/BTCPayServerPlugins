@@ -12,7 +12,7 @@
     var address = Context.GetRouteValue("address").ToString();
     ViewData.SetActivePage("Breez", "Create Swapin Refund", "SwapIn");
 
-    var deriv = Context.GetStoreData().GetDerivationSchemeSettings(PaymentMethodHandlerDictionary, "BTC");
+    var deriv = Context.GetStoreDataOrNull()?.GetDerivationSchemeSettings(PaymentMethodHandlerDictionary, "BTC");
     var sdk = BreezService.GetClient(storeId)?.Sdk;
     var f = sdk.RecommendedFees();
 }

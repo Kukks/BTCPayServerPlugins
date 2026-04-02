@@ -38,7 +38,7 @@
     }
 
     var refundables = sdk.ListRefundables();
-    var deriv = Context.GetStoreData().GetDerivationSchemeSettings(PaymentMethodHandlerDictionary, "BTC");
+    var deriv = Context.GetStoreDataOrNull()?.GetDerivationSchemeSettings(PaymentMethodHandlerDictionary, "BTC");
     var ni = sdk.NodeInfo();
     var f = sdk.RecommendedFees();
 }

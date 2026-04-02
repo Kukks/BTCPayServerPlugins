@@ -51,6 +51,7 @@ public class BringinController : Controller
     [HttpPost("callback")]
     [HttpGet("callback")]
     [AllowAnonymous]
+    [IgnoreAntiforgeryToken]
     public async Task<IActionResult> Callback(string storeId, string code, [FromBody]BringinVerificationUpdate content)
     {
         var vm = await _bringinService.Update(storeId);
