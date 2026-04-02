@@ -1,4 +1,5 @@
 #nullable enable
+using System;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Extensions;
@@ -6,9 +7,9 @@ using BTCPayServer.Client;
 using BTCPayServer.Data;
 using BTCPayServer.Payments;
 using BTCPayServer.Plugins.Stripe.Models.Api;
-using BTCPayServer.Services.Invoices;
 using BTCPayServer.Plugins.Stripe.PaymentHandler;
 using BTCPayServer.Plugins.Stripe.Services;
+using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
@@ -16,10 +17,6 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace BTCPayServer.Plugins.Stripe.Controllers;
 
-/// <summary>
-/// Greenfield API controller for managing Stripe settings.
-/// Enables remote control of Stripe configuration via API key authentication.
-/// </summary>
 [ApiController]
 [Authorize(AuthenticationSchemes = AuthenticationSchemes.Greenfield, Policy = Policies.CanViewStoreSettings)]
 [EnableCors(CorsPolicies.All)]
@@ -69,31 +66,19 @@ public class GreenfieldStripeController : ControllerBase
         };
     }
 
-    /// <summary>
-    /// Get Stripe settings for a store.
-    /// </summary>
     [HttpGet("~/api/v1/stores/{storeId}/stripe/settings")]
-    public async Task<IActionResult> GetSettings(string storeId)
+    public IActionResult GetSettings(string storeId)
     {
         var store = HttpContext.GetStoreData();
-        if (store == null)
-            return StoreNotFound();
-
         var config = GetConfig(store, _handlers) ?? new StripePaymentMethodConfig();
         return Ok(ToStripeSettingsData(config));
     }
 
-    /// <summary>
-    /// Update Stripe settings for a store.
-    /// </summary>
     [HttpPut("~/api/v1/stores/{storeId}/stripe/settings")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]
     public async Task<IActionResult> UpdateSettings(string storeId, [FromBody] UpdateStripeSettingsRequest? request)
     {
         var store = HttpContext.GetStoreData();
-        if (store == null)
-            return StoreNotFound();
-
         if (request == null)
         {
             ModelState.AddModelError(string.Empty, "Request body is required");
@@ -142,17 +127,11 @@ public class GreenfieldStripeController : ControllerBase
         return Ok(ToStripeSettingsData(config));
     }
 
-    /// <summary>
-    /// Clear Stripe credentials for a store.
-    /// </summary>
     [HttpDelete("~/api/v1/stores/{storeId}/stripe/settings")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]
     public async Task<IActionResult> DeleteSettings(string storeId)
     {
         var store = HttpContext.GetStoreData();
-        if (store == null)
-            return StoreNotFound();
-
         var existingConfig = GetConfig(store, _handlers);
         if (existingConfig == null)
             return Ok();
@@ -163,9 +142,9 @@ public class GreenfieldStripeController : ControllerBase
             {
                 await _stripeService.DeleteWebhook(existingConfig);
             }
-            catch
+            catch (Exception)
             {
-                // Ignore - webhook may already be deleted
+                // Ignore - webhook may already be deleted on Stripe's side
             }
         }
 
@@ -183,17 +162,11 @@ public class GreenfieldStripeController : ControllerBase
         return Ok();
     }
 
-    /// <summary>
-    /// Test connection to Stripe API.
-    /// </summary>
     [HttpPost("~/api/v1/stores/{storeId}/stripe/test")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]
     public async Task<IActionResult> TestConnection(string storeId)
     {
         var store = HttpContext.GetStoreData();
-        if (store == null)
-            return StoreNotFound();
-
         var config = GetConfig(store, _handlers);
         if (config == null || !config.IsConfigured)
         {
@@ -213,17 +186,11 @@ public class GreenfieldStripeController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// Register webhook endpoint with Stripe.
-    /// </summary>
     [HttpPost("~/api/v1/stores/{storeId}/stripe/webhook/register")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]
     public async Task<IActionResult> RegisterWebhook(string storeId)
     {
         var store = HttpContext.GetStoreData();
-        if (store == null)
-            return StoreNotFound();
-
         var config = GetConfig(store, _handlers);
         if (config == null || !config.IsConfigured)
         {
@@ -234,35 +201,29 @@ public class GreenfieldStripeController : ControllerBase
         var externalUrl = Request.GetAbsoluteRoot();
         var result = await _stripeService.TryRegisterWebhook(config, storeId, externalUrl);
 
-        if (result.Success)
+        if (!result.Success)
+            return this.CreateAPIError(422, "webhook-registration-failed", result.Reason ?? "Failed to register webhook");
+
+        config.WebhookId = result.WebhookId;
+        if (!string.IsNullOrEmpty(result.WebhookSecret))
+            config.WebhookSecret = result.WebhookSecret;
+
+        var handler = _handlers[StripePlugin.StripePaymentMethodId];
+        store.SetPaymentMethodConfig(handler, config);
+        await _storeRepository.UpdateStore(store);
+
+        return Ok(new WebhookStatusData
         {
-            config.WebhookId = result.WebhookId;
-            if (!string.IsNullOrEmpty(result.WebhookSecret))
-                config.WebhookSecret = result.WebhookSecret;
-
-            var handler = _handlers[StripePlugin.StripePaymentMethodId];
-            store.SetPaymentMethodConfig(handler, config);
-            await _storeRepository.UpdateStore(store);
-        }
-
-        if (result.Success)
-        {
-            return Ok(new { success = true, message = result.Message });
-        }
-
-        return this.CreateAPIError(422, "webhook-registration-failed", result.Reason ?? "Failed to register webhook");
+            Configured = true,
+            WebhookId = result.WebhookId,
+            Message = result.Message
+        });
     }
 
-    /// <summary>
-    /// Get webhook status for a store.
-    /// </summary>
     [HttpGet("~/api/v1/stores/{storeId}/stripe/webhook/status")]
     public async Task<IActionResult> GetWebhookStatus(string storeId)
     {
         var store = HttpContext.GetStoreData();
-        if (store == null)
-            return StoreNotFound();
-
         var config = GetConfig(store, _handlers);
         if (config == null || !config.IsConfigured)
         {
@@ -285,10 +246,5 @@ public class GreenfieldStripeController : ControllerBase
                 ? "Webhook is active"
                 : (status.Error ?? status.Status ?? "Not configured")
         });
-    }
-
-    private IActionResult StoreNotFound()
-    {
-        return this.CreateAPIError(404, "store-not-found", "The store was not found");
     }
 }
