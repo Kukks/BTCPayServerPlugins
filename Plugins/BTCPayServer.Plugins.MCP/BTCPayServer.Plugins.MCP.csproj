@@ -9,7 +9,7 @@
   <PropertyGroup>
     <Product>MCP</Product>
     <Description>Exposes a Model Context Protocol (MCP) server, allowing LLM clients to interact with BTCPay Server through natural language.</Description>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
