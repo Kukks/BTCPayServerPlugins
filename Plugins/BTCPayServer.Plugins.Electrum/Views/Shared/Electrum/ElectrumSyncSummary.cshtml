@@ -1,0 +1,20 @@
+@using BTCPayServer.Plugins.Electrum.Services
+@model IEnumerable<BTCPayServer.Abstractions.Contracts.ISyncStatus>
+
+@foreach (var status in Model.OfType<ElectrumSyncStatus>())
+{
+    <tr>
+        <td>@status.PaymentMethodId (Electrum)</td>
+        <td>
+            @if (status.Available)
+            {
+                <span class="badge bg-success">Connected</span>
+            }
+            else
+            {
+                <span class="badge bg-warning">Disconnected</span>
+            }
+        </td>
+        <td>@status.ChainHeight / @status.SyncHeight</td>
+    </tr>
+}

@@ -1,0 +1,43 @@
+@model BTCPayServer.Plugins.Electrum.ElectrumSettings
+@using BTCPayServer.Abstractions.Extensions
+@{
+    ViewData["Title"] = "Electrum Settings";
+    ViewData.SetActivePage("electrum-settings", "Electrum", "Electrum Settings");
+    Layout = "_Layout";
+}
+
+<h3 class="mb-4">@ViewData["Title"]</h3>
+
+<div class="row">
+    <div class="col-xxl-constrain col-xl-8">
+        <form method="post">
+            <div class="form-group">
+                <label asp-for="Server" class="form-label">Electrum Server</label>
+                <input asp-for="Server" class="form-control" placeholder="electrum.example.com:50002" />
+                <span class="text-muted">Host and port of the ElectrumX or Fulcrum server</span>
+            </div>
+
+            <div class="form-group mt-3">
+                <label class="form-label d-flex align-items-center gap-2">
+                    <input asp-for="UseTls" type="checkbox" class="btcpay-toggle me-0" />
+                    Use TLS/SSL
+                </label>
+                <span class="text-muted">Most public servers require TLS on port 50002</span>
+            </div>
+
+            <div class="form-group mt-3">
+                <label asp-for="GapLimit" class="form-label">Gap Limit</label>
+                <input asp-for="GapLimit" class="form-control" type="number" min="5" max="100" />
+                <span class="text-muted">Number of unused addresses to maintain per chain (default: 20)</span>
+            </div>
+
+            <button type="submit" class="btn btn-primary mt-4" id="SaveElectrumSettings">Save</button>
+            <button type="submit" name="command" value="test" class="btn btn-secondary mt-4">Test Connection</button>
+        </form>
+
+        @if (ViewBag.StatusMessage != null)
+        {
+            <div class="alert alert-info mt-3">@ViewBag.StatusMessage</div>
+        }
+    </div>
+</div>
