@@ -114,7 +114,8 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
         services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService, ElectrumListener>();
 
         // Sync summary
-        services.AddSingleton<ISyncSummaryProvider, ElectrumSyncSummaryProvider>();
+        services.AddSingleton<ElectrumSyncSummaryProvider>();
+        services.AddSingleton<ISyncSummaryProvider>(sp => sp.GetRequiredService<ElectrumSyncSummaryProvider>());
 
         // ──────────────────────────────────────────────
         // 5. Admin UI
