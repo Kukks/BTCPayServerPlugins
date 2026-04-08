@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
-using BTCPayServer.Common;
+using System.Reflection;
 using BTCPayServer.HostedServices;
 using NBXplorer;
 
@@ -12,19 +12,23 @@ namespace BTCPayServer.Plugins.Electrum.Services;
 /// Replaces ExplorerClientProvider. Creates ExplorerClient instances backed by
 /// ElectrumHttpHandler, so all NBXplorer HTTP calls are intercepted and routed
 /// to our Electrum engine.
+///
+/// Since ExplorerClientProvider's methods (GetExplorerClient, IsAvailable, GetAll)
+/// are NOT virtual, we can't override them. Instead, we populate the base class's
+/// private _Clients dictionary via reflection so the base methods work correctly.
 /// </summary>
 public class ElectrumExplorerClientProvider : ExplorerClientProvider
 {
-    private readonly NBXplorerDashboard _dashboard;
-    private readonly Dictionary<string, ExplorerClient> _clients = new();
-
     public ElectrumExplorerClientProvider(
         BTCPayNetworkProvider networkProvider,
         NBXplorerDashboard dashboard,
         ElectrumHttpHandler handler)
-        : base(CreateEmptyHttpClientFactory(), networkProvider, CreateEmptyOptions(), dashboard, CreateEmptyLogs())
+        : base(new NullHttpClientFactory(), networkProvider, CreateEmptyOptions(), dashboard, CreateEmptyLogs())
     {
-        _dashboard = dashboard;
+        // Access the base class's private _Clients dictionary
+        var clientsField = typeof(ExplorerClientProvider)
+            .GetField("_Clients", BindingFlags.NonPublic | BindingFlags.Instance);
+        var clients = (Dictionary<string, ExplorerClient>)clientsField!.GetValue(this);
 
         foreach (var network in networkProvider.GetAll().OfType<BTCPayNetwork>())
         {
@@ -39,47 +43,8 @@ public class ElectrumExplorerClientProvider : ExplorerClientProvider
             explorerClient.SetClient(httpClient);
             explorerClient.SetNoAuth();
 
-            _clients[network.CryptoCode.ToUpperInvariant()] = explorerClient;
+            clients[network.CryptoCode.ToUpperInvariant()] = explorerClient;
         }
-    }
-
-    public new ExplorerClient GetExplorerClient(string cryptoCode)
-    {
-        if (cryptoCode == null) return null;
-        _clients.TryGetValue(cryptoCode.ToUpperInvariant(), out var client);
-        return client;
-    }
-
-    public new ExplorerClient GetExplorerClient(BTCPayNetworkBase network)
-    {
-        if (network == null) return null;
-        return GetExplorerClient(network.CryptoCode);
-    }
-
-    public new bool IsAvailable(BTCPayNetworkBase network)
-    {
-        return IsAvailable(network.CryptoCode);
-    }
-
-    public new bool IsAvailable(string cryptoCode)
-    {
-        cryptoCode = cryptoCode.ToUpperInvariant();
-        return _clients.ContainsKey(cryptoCode) && _dashboard.IsFullySynched(cryptoCode, out _);
-    }
-
-    public new IEnumerable<(BTCPayNetwork, ExplorerClient)> GetAll()
-    {
-        foreach (var kvp in _clients)
-        {
-            var network = NetworkProviders.GetNetwork<BTCPayNetwork>(kvp.Key);
-            if (network != null)
-                yield return (network, kvp.Value);
-        }
-    }
-
-    private static IHttpClientFactory CreateEmptyHttpClientFactory()
-    {
-        return new NullHttpClientFactory();
     }
 
     private static Microsoft.Extensions.Options.IOptions<BTCPayServer.Configuration.NBXplorerOptions> CreateEmptyOptions()
