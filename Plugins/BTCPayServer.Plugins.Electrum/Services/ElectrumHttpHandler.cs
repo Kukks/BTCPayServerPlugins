@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using NBitcoin;
 using NBXplorer.DerivationStrategy;
 using NBXplorer.Models;
+using NBXplorer;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -109,8 +110,30 @@ public class ElectrumHttpHandler : HttpMessageHandler
                 var derivationScheme = factory.CreateDirectDerivationStrategy(accountExtPubKey,
                     new DerivationStrategyOptions { ScriptPubKeyType = scriptPubKeyType });
 
+                var derivationSchemeStr = derivationScheme.ToString();
+
                 // Track the wallet
-                await _tracker.TrackWalletAsync(derivationScheme.ToString(), cancellationToken);
+                await _tracker.TrackWalletAsync(derivationSchemeStr, cancellationToken);
+
+                // Store metadata (same keys NBXplorer stores during GenerateWallet)
+                if (savePrivateKeys)
+                {
+                    await _tracker.SetMetadataAsync(derivationSchemeStr, "Mnemonic",
+                        mnemonic.ToString(), cancellationToken);
+                    await _tracker.SetMetadataAsync(derivationSchemeStr, "MasterHDKey",
+                        masterKey.GetWif(nbNetwork).ToString(), cancellationToken);
+                    await _tracker.SetMetadataAsync(derivationSchemeStr, "AccountHDKey",
+                        accountKey.GetWif(nbNetwork).ToString(), cancellationToken);
+                }
+
+                var rootedKeyPath = new RootedKeyPath(masterKey.Neuter().GetPublicKey().GetHDFingerPrint(), accountKeyPath);
+                await _tracker.SetMetadataAsync(derivationSchemeStr, "AccountKeyPath",
+                    rootedKeyPath.ToString(), cancellationToken);
+                await _tracker.SetMetadataAsync(derivationSchemeStr, "AccountDescriptor",
+                    $"wpkh([{masterKey.Neuter().GetPublicKey().GetHDFingerPrint()}/{accountKeyPath}]{accountExtPubKey})",
+                    cancellationToken);
+                await _tracker.SetMetadataAsync(derivationSchemeStr, "Birthdate",
+                    DateTimeOffset.UtcNow.ToString("O"), cancellationToken);
 
                 var response = new JObject
                 {
@@ -120,9 +143,9 @@ public class ElectrumHttpHandler : HttpMessageHandler
                     ["wordCount"] = (int)wordCount,
                     ["masterHDKey"] = masterKey.GetWif(nbNetwork).ToString(),
                     ["accountHDKey"] = accountKey.GetWif(nbNetwork).ToString(),
-                    ["accountKeyPath"] = new RootedKeyPath(masterKey.Neuter().GetPublicKey().GetHDFingerPrint(), accountKeyPath).ToString(),
+                    ["accountKeyPath"] = rootedKeyPath.ToString(),
                     ["accountDescriptor"] = $"wpkh([{masterKey.Neuter().GetPublicKey().GetHDFingerPrint()}/{accountKeyPath}]{accountExtPubKey})",
-                    ["derivationScheme"] = derivationScheme.ToString()
+                    ["derivationScheme"] = derivationSchemeStr
                 };
 
                 return OkResponse(response);
@@ -233,6 +256,57 @@ public class ElectrumHttpHandler : HttpMessageHandler
                 return OkResponse(status);
             }
 
+            // GET /v1/cryptos/{code}/derivations/{scheme}/metadata/{key} — GetMetadata
+            if (method == HttpMethod.Get && Regex.IsMatch(path, @"/derivations/[^/]+/metadata/[^/]+$"))
+            {
+                var strategy = ExtractStrategy(path);
+                var key = ExtractMetadataKey(path);
+                if (strategy != null && key != null)
+                {
+                    var value = await _tracker.GetMetadataAsync(strategy, key, cancellationToken);
+                    if (value != null)
+                        return OkResponse(value);
+                }
+                return NotFoundResponse();
+            }
+
+            // POST /v1/cryptos/{code}/derivations/{scheme}/metadata/{key} — SetMetadata
+            if (method == HttpMethod.Post && Regex.IsMatch(path, @"/derivations/[^/]+/metadata/[^/]+$"))
+            {
+                var strategy = ExtractStrategy(path);
+                var key = ExtractMetadataKey(path);
+                if (strategy != null && key != null)
+                {
+                    var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+                    // NBXplorer sends the value JSON-serialized, so deserialize it
+                    var value = JsonConvert.DeserializeObject<string>(body);
+                    await _tracker.SetMetadataAsync(strategy, key, value, cancellationToken);
+                    return OkResponse(new { });
+                }
+                return NotFoundResponse();
+            }
+
+            // POST /v1/cryptos/{code}/derivations/{strategy}/psbt/create — CreatePSBT
+            if (method == HttpMethod.Post && path.EndsWith("/psbt/create"))
+            {
+                var strategy = ExtractStrategy(path);
+                if (strategy != null)
+                {
+                    var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+                    var result = await HandleCreatePSBTAsync(strategy, body, cancellationToken);
+                    return OkResponse(result);
+                }
+                return NotFoundResponse();
+            }
+
+            // POST /v1/cryptos/{code}/psbt/update — UpdatePSBT
+            if (method == HttpMethod.Post && path.EndsWith("/psbt/update"))
+            {
+                var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+                var result = HandleUpdatePSBT(body);
+                return OkResponse(result);
+            }
+
             _logger.LogWarning("Unhandled ExplorerClient request: {Method} {Path}", method, path);
             return new HttpResponseMessage(HttpStatusCode.NotImplemented);
         }
@@ -262,6 +336,14 @@ public class ElectrumHttpHandler : HttpMessageHandler
         return null;
     }
 
+    private string ExtractMetadataKey(string path)
+    {
+        var match = Regex.Match(path, @"/metadata/([^/]+)$");
+        if (match.Success)
+            return Uri.UnescapeDataString(match.Groups[1].Value);
+        return null;
+    }
+
     private string ExtractTxId(string path)
     {
         var match = Regex.Match(path, @"/transactions/([0-9a-fA-F]{64})");
@@ -282,6 +364,144 @@ public class ElectrumHttpHandler : HttpMessageHandler
             _ => 84
         };
         return new KeyPath($"{purpose}'/{coinType}'/{accountNumber}'");
+    }
+
+    private async Task<object> HandleCreatePSBTAsync(string strategyStr, string body, CancellationToken ct)
+    {
+        var network = _networkProvider.GetNetwork<BTCPayNetwork>("BTC");
+        var nbNetwork = network.NBitcoinNetwork;
+        var factory = new DerivationStrategyFactory(nbNetwork);
+        var strategy = factory.Parse(strategyStr);
+        var jsonSettings = network.NBXplorerNetwork.JsonSerializerSettings;
+
+        var request = JsonConvert.DeserializeObject<CreatePSBTRequest>(body, jsonSettings);
+
+        // Get available UTXOs
+        var utxoChanges = await _tracker.GetUTXOChangesAsync(strategyStr, ct);
+        var allUtxos = utxoChanges.Confirmed.UTXOs
+            .Concat(utxoChanges.Unconfirmed.UTXOs)
+            .Where(u => request.MinConfirmations <= 0 || u.Confirmations >= request.MinConfirmations)
+            .Where(u => request.MinValue == null || (u.Value is Money m && m >= request.MinValue))
+            .ToList();
+
+        if (request.ExcludeOutpoints?.Count > 0)
+            allUtxos = allUtxos.Where(u => !request.ExcludeOutpoints.Contains(u.Outpoint)).ToList();
+
+        if (request.IncludeOnlyOutpoints?.Count > 0)
+            allUtxos = allUtxos.Where(u => request.IncludeOnlyOutpoints.Contains(u.Outpoint)).ToList();
+
+        // Get fee rate
+        var feeRate = request.FeePreference?.ExplicitFeeRate;
+        if (feeRate == null)
+        {
+            var blockTarget = request.FeePreference?.BlockTarget ?? 1;
+            var feeResult = await _tracker.GetFeeRateAsync(blockTarget, ct);
+            var feeJson = JObject.FromObject(feeResult);
+            feeRate = feeJson["feeRate"]?.ToObject<FeeRate>() ?? new FeeRate(10m);
+        }
+
+        // Build transaction using NBitcoin's TransactionBuilder
+        var txBuilder = nbNetwork.CreateTransactionBuilder();
+        txBuilder.SetSigningOptions(SigHash.All);
+
+        if (request.RBF == true || request.LockTime.HasValue)
+            txBuilder.OptInRBF = true;
+
+        // Add coins from UTXOs
+        foreach (var utxo in allUtxos)
+        {
+            var coin = utxo.AsCoin(strategy);
+            if (coin != null)
+                txBuilder.AddCoins(coin);
+        }
+
+        // Add destinations
+        var isSweep = false;
+        foreach (var dest in request.Destinations ?? new List<CreatePSBTDestination>())
+        {
+            if (dest.SweepAll)
+            {
+                isSweep = true;
+                txBuilder.SendAll(dest.Destination.ScriptPubKey);
+            }
+            else
+            {
+                txBuilder.Send(dest.Destination.ScriptPubKey, dest.Amount);
+            }
+        }
+
+        // Set change address
+        BitcoinAddress changeAddress = null;
+        if (!isSweep)
+        {
+            if (request.ExplicitChangeAddress?.ScriptPubKey != null)
+            {
+                changeAddress = request.ExplicitChangeAddress.ScriptPubKey.GetDestinationAddress(nbNetwork);
+            }
+            else
+            {
+                var changeInfo = await _tracker.GetNextUnusedAddressAsync(strategyStr, true,
+                    request.ReserveChangeAddress, ct);
+                if (changeInfo != null)
+                    changeAddress = BitcoinAddress.Create(changeInfo.Address.ToString(), nbNetwork);
+            }
+
+            if (changeAddress != null)
+                txBuilder.SetChange(changeAddress);
+        }
+
+        txBuilder.SendEstimatedFees(feeRate);
+
+        var psbt = txBuilder.BuildPSBT(false);
+
+        // Add HD key path info to PSBT inputs
+        foreach (var input in psbt.Inputs)
+        {
+            var utxo = allUtxos.FirstOrDefault(u => u.Outpoint == input.PrevOut);
+            if (utxo?.KeyPath != null)
+            {
+                var feature = utxo.KeyPath.Indexes[0] == 1
+                    ? DerivationFeature.Change : DerivationFeature.Deposit;
+                var line = strategy.GetLineFor(feature);
+                var derivation = line.Derive(utxo.KeyPath.Indexes.Last());
+                var pubKeys = strategy.GetExtPubKeys().ToArray();
+                foreach (var pubKey in pubKeys)
+                {
+                    var derived = pubKey.Derive(utxo.KeyPath);
+                    input.AddKeyPath(derived.GetPublicKey(),
+                        new RootedKeyPath(pubKey.GetPublicKey().GetHDFingerPrint(), utxo.KeyPath));
+                }
+            }
+        }
+
+        var response = new JObject
+        {
+            ["psbt"] = psbt.ToBase64(),
+            ["changeAddress"] = changeAddress?.ToString()
+        };
+
+        return response;
+    }
+
+    private object HandleUpdatePSBT(string body)
+    {
+        var network = _networkProvider.GetNetwork<BTCPayNetwork>("BTC");
+        var jsonSettings = network.NBXplorerNetwork.JsonSerializerSettings;
+
+        var request = JsonConvert.DeserializeObject<UpdatePSBTRequest>(body, jsonSettings);
+
+        var psbt = request.PSBT;
+
+        // Rebase key paths if requested
+        if (request.RebaseKeyPaths?.Count > 0)
+        {
+            foreach (var rebase in request.RebaseKeyPaths)
+            {
+                psbt.RebaseKeyPaths(rebase.AccountKey, rebase.AccountKeyPath);
+            }
+        }
+
+        return new JObject { ["psbt"] = psbt.ToBase64() };
     }
 
     private HttpResponseMessage OkResponse(object data)
