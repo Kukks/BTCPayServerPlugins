@@ -9,7 +9,6 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using NBitcoin;
 using NBXplorer.Models;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -26,15 +25,12 @@ public class ElectrumHttpHandler : HttpMessageHandler
 {
     private readonly ElectrumWalletTracker _tracker;
     private readonly ILogger<ElectrumHttpHandler> _logger;
-    private readonly Network _network;
 
     public ElectrumHttpHandler(
         ElectrumWalletTracker tracker,
-        Network network,
         ILogger<ElectrumHttpHandler> logger)
     {
         _tracker = tracker;
-        _network = network;
         _logger = logger;
     }
 
