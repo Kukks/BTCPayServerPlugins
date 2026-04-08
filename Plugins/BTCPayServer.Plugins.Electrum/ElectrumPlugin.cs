@@ -48,6 +48,7 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
         // FeeProviderFactory (singleton + interface + scheduled task)
         RemoveByImplementation<FeeProviderFactory>(services);
         RemoveByServiceType<IFeeProviderFactory>(services);
+        RemoveScheduledTask<FeeProviderFactory>(services);
 
         // ──────────────────────────────────────────────
         // 2. Register Electrum settings & config
@@ -136,6 +137,28 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
         var descriptors = services.Where(d => d.ServiceType == typeof(T)).ToList();
         foreach (var d in descriptors)
             services.Remove(d);
+    }
+
+    private static void RemoveScheduledTask<T>(IServiceCollection services)
+    {
+        var descriptors = services.Where(d =>
+            d.ServiceType == typeof(ScheduledTask) &&
+            d.ImplementationFactory != null).ToList();
+        foreach (var d in descriptors)
+        {
+            // ScheduledTask factories capture the type in their closure.
+            // Instantiate to check PeriodicTaskType.
+            try
+            {
+                var instance = (ScheduledTask)d.ImplementationFactory(null!);
+                if (instance.PeriodicTaskType == typeof(T))
+                    services.Remove(d);
+            }
+            catch
+            {
+                // Factory might need a real provider — skip
+            }
+        }
     }
 
     private static void RemoveHostedService<T>(IServiceCollection services)
