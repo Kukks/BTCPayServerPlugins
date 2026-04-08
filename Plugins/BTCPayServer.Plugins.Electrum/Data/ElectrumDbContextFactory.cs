@@ -1,6 +1,7 @@
 using System;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
+using BTCPayServer.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.Extensions.Options;
@@ -18,6 +19,7 @@ public class ElectrumDbContextFactory : BaseDbContextFactory<ElectrumDbContext>
     public override ElectrumDbContext CreateContext(Action<NpgsqlDbContextOptionsBuilder> npgsqlOptionsAction = null)
     {
         var builder = new DbContextOptionsBuilder<ElectrumDbContext>();
+        builder.AddInterceptors(MigrationInterceptor.Instance);
         ConfigureBuilder(builder, npgsqlOptionsAction);
         return new ElectrumDbContext(builder.Options);
     }
