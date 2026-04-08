@@ -6,8 +6,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Plugins.Electrum.Data;
 using Microsoft.EntityFrameworkCore;
+using BTCPayServer.Services;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using NBitcoin;
 using NBXplorer.DerivationStrategy;
 using NBXplorer.Models;
@@ -32,14 +32,16 @@ public class ElectrumWalletTracker
         ElectrumClient client,
         ElectrumDbContextFactory dbFactory,
         BTCPayNetworkProvider networkProvider,
-        IOptions<ElectrumSettings> settings,
+        SettingsRepository settingsRepository,
         ILogger<ElectrumWalletTracker> logger)
     {
         _client = client;
         _dbFactory = dbFactory;
         _networkProvider = networkProvider;
-        _settings = settings.Value;
         _logger = logger;
+        // Load settings synchronously from the repo at first use
+        _settings = settingsRepository.GetSettingAsync<ElectrumSettings>().GetAwaiter().GetResult()
+                    ?? new ElectrumSettings();
 
         var btcNetwork = _networkProvider.GetNetwork<BTCPayNetwork>(_settings.CryptoCode ?? "BTC");
         if (btcNetwork != null)

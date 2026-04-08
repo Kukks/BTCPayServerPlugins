@@ -8,8 +8,8 @@ using System.Net.Sockets;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using BTCPayServer.Services;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace BTCPayServer.Plugins.Electrum;
 
@@ -42,9 +42,10 @@ public class ElectrumBalance
 
 public class ElectrumClient : IAsyncDisposable
 {
-    private readonly ElectrumSettings _settings;
+    private readonly SettingsRepository _settingsRepository;
     private readonly ILogger<ElectrumClient> _logger;
 
+    private ElectrumSettings _settings;
     private TcpClient _tcpClient;
     private Stream _stream;
     private StreamReader _reader;
@@ -63,9 +64,18 @@ public class ElectrumClient : IAsyncDisposable
     public event Action<string, string> OnScripthashNotification;
     public event Func<Task> OnReconnected;
 
-    public ElectrumClient(IOptions<ElectrumSettings> settings, ILogger<ElectrumClient> logger)
+    public ElectrumClient(SettingsRepository settingsRepository, ILogger<ElectrumClient> logger)
     {
-        _settings = settings.Value;
+        _settingsRepository = settingsRepository;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Creates a client with explicit settings (for test connections).
+    /// </summary>
+    public ElectrumClient(ElectrumSettings settings, ILogger<ElectrumClient> logger)
+    {
+        _settings = settings;
         _logger = logger;
     }
 
@@ -73,7 +83,13 @@ public class ElectrumClient : IAsyncDisposable
     {
         if (IsConnected) return;
 
-        var parts = _settings.Server?.Split(':') ?? throw new InvalidOperationException("Electrum server not configured");
+        // Load settings from DB if not provided via constructor
+        _settings ??= await _settingsRepository.GetSettingAsync<ElectrumSettings>();
+
+        if (string.IsNullOrEmpty(_settings?.Server))
+            throw new InvalidOperationException("Electrum server not configured. Go to Server Settings > Electrum.");
+
+        var parts = _settings.Server.Split(':');
         if (parts.Length != 2 || !int.TryParse(parts[1], out var port))
             throw new InvalidOperationException($"Invalid server format: {_settings.Server}. Expected host:port");
 

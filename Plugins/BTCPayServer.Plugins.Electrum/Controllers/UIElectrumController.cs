@@ -40,7 +40,7 @@ public class UIElectrumController : Controller
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                 var testClient = new ElectrumClient(
-                    Microsoft.Extensions.Options.Options.Create(settings),
+                    settings,
                     Microsoft.Extensions.Logging.Abstractions.NullLogger<ElectrumClient>.Instance);
                 await testClient.ConnectAsync(cts.Token);
                 var (sw, pv) = await testClient.ServerVersionAsync("BTCPayServer-Electrum", "1.4", cts.Token);

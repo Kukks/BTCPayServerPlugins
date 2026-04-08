@@ -51,24 +51,7 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
         RemoveScheduledTask<FeeProviderFactory>(services);
 
         // ──────────────────────────────────────────────
-        // 2. Register Electrum settings & config
-        // ──────────────────────────────────────────────
-
-        services.AddOptions<ElectrumSettings>()
-            .Configure<SettingsRepository>(async (settings, repo) =>
-            {
-                var saved = await repo.GetSettingAsync<ElectrumSettings>();
-                if (saved != null)
-                {
-                    settings.Server = saved.Server;
-                    settings.UseTls = saved.UseTls;
-                    settings.GapLimit = saved.GapLimit;
-                    settings.CryptoCode = saved.CryptoCode;
-                }
-            });
-
-        // ──────────────────────────────────────────────
-        // 3. Register Electrum engine
+        // 2. Register Electrum engine
         // ──────────────────────────────────────────────
 
         services.AddSingleton<ElectrumClient>();
