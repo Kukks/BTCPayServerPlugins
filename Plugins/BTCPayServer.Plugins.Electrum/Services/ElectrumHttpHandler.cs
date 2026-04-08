@@ -1,10 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -56,9 +54,22 @@ public class ElectrumHttpHandler : HttpMessageHandler
                 var strategy = ExtractStrategy(path);
                 if (strategy != null)
                 {
-                    // Track existing wallet
-                    await _tracker.TrackWalletAsync(strategy, cancellationToken);
-                    return OkResponse(new { });
+                    // Track in background — subscriptions are slow
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await _tracker.TrackWalletAsync(strategy, CancellationToken.None);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Background tracking failed for {Strategy}", strategy);
+                        }
+                    });
+                    // Return empty 200 — ExplorerClient.TrackAsync uses SendAsync<string>,
+                    // which returns default(string) when ContentLength == 0.
+                    // Returning JSON like {} would fail string deserialization.
+                    return new HttpResponseMessage(HttpStatusCode.OK);
                 }
 
                 // Generate new wallet
@@ -112,10 +123,8 @@ public class ElectrumHttpHandler : HttpMessageHandler
 
                 var derivationSchemeStr = derivationScheme.ToString();
 
-                // Track the wallet
-                await _tracker.TrackWalletAsync(derivationSchemeStr, cancellationToken);
-
-                // Store metadata (same keys NBXplorer stores during GenerateWallet)
+                // Store metadata first (fast DB writes, use request token)
+                var rootedKeyPath = new RootedKeyPath(masterKey.Neuter().GetPublicKey().GetHDFingerPrint(), accountKeyPath);
                 if (savePrivateKeys)
                 {
                     await _tracker.SetMetadataAsync(derivationSchemeStr, "Mnemonic",
@@ -125,27 +134,39 @@ public class ElectrumHttpHandler : HttpMessageHandler
                     await _tracker.SetMetadataAsync(derivationSchemeStr, "AccountHDKey",
                         accountKey.GetWif(nbNetwork).ToString(), cancellationToken);
                 }
-
-                var rootedKeyPath = new RootedKeyPath(masterKey.Neuter().GetPublicKey().GetHDFingerPrint(), accountKeyPath);
                 await _tracker.SetMetadataAsync(derivationSchemeStr, "AccountKeyPath",
                     rootedKeyPath.ToString(), cancellationToken);
                 await _tracker.SetMetadataAsync(derivationSchemeStr, "AccountDescriptor",
-                    $"wpkh([{masterKey.Neuter().GetPublicKey().GetHDFingerPrint()}/{accountKeyPath}]{accountExtPubKey})",
+                    $"wpkh([{masterKey.Neuter().GetPublicKey().GetHDFingerPrint()}/{accountKeyPath}]{accountExtPubKey.GetWif(nbNetwork)})",
                     cancellationToken);
                 await _tracker.SetMetadataAsync(derivationSchemeStr, "Birthdate",
                     DateTimeOffset.UtcNow.ToString("O"), cancellationToken);
 
-                var response = new JObject
+                // Track the wallet in the background — address derivation + Electrum
+                // subscriptions are slow (40+ network calls), so don't block the response
+                _ = Task.Run(async () =>
                 {
-                    ["mnemonic"] = mnemonic.ToString(),
-                    ["passphrase"] = passphrase,
-                    ["wordList"] = "English",
-                    ["wordCount"] = (int)wordCount,
-                    ["masterHDKey"] = masterKey.GetWif(nbNetwork).ToString(),
-                    ["accountHDKey"] = accountKey.GetWif(nbNetwork).ToString(),
-                    ["accountKeyPath"] = rootedKeyPath.ToString(),
-                    ["accountDescriptor"] = $"wpkh([{masterKey.Neuter().GetPublicKey().GetHDFingerPrint()}/{accountKeyPath}]{accountExtPubKey})",
-                    ["derivationScheme"] = derivationSchemeStr
+                    try
+                    {
+                        await _tracker.TrackWalletAsync(derivationSchemeStr, CancellationToken.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Background wallet tracking failed for {Strategy}", derivationSchemeStr);
+                    }
+                });
+
+                var response = new GenerateWalletResponse
+                {
+                    Mnemonic = mnemonic.ToString(),
+                    Passphrase = passphrase,
+                    WordList = Wordlist.English,
+                    WordCount = wordCount,
+                    MasterHDKey = masterKey.GetWif(nbNetwork),
+                    AccountHDKey = accountKey.GetWif(nbNetwork),
+                    AccountKeyPath = rootedKeyPath,
+                    AccountDescriptor = $"wpkh([{masterKey.Neuter().GetPublicKey().GetHDFingerPrint()}/{accountKeyPath}]{accountExtPubKey.GetWif(nbNetwork)})",
+                    DerivationScheme = derivationScheme
                 };
 
                 return OkResponse(response);
@@ -506,10 +527,9 @@ public class ElectrumHttpHandler : HttpMessageHandler
 
     private HttpResponseMessage OkResponse(object data)
     {
-        var json = JsonConvert.SerializeObject(data, new JsonSerializerSettings
-        {
-            NullValueHandling = NullValueHandling.Ignore
-        });
+        var network = _networkProvider.GetNetwork<BTCPayNetwork>("BTC");
+        var jsonSettings = network.NBXplorerNetwork.JsonSerializerSettings;
+        var json = JsonConvert.SerializeObject(data, jsonSettings);
         return new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
