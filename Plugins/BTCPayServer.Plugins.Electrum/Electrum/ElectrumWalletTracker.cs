@@ -590,6 +590,40 @@ public class ElectrumWalletTracker
     }
 
     // ─────────────────────────────────────────────
+    // Metadata storage (replaces NBXplorer metadata)
+    // ─────────────────────────────────────────────
+
+    public async Task SetMetadataAsync(string derivationScheme, string key, string value, CancellationToken ct)
+    {
+        await using var ctx = _dbFactory.CreateContext();
+        var metaKey = $"metadata:{derivationScheme}:{key}";
+        var existing = await ctx.SyncStates.FindAsync(new object[] { metaKey }, ct);
+        if (existing != null)
+        {
+            existing.Value = value;
+            existing.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+        else
+        {
+            ctx.SyncStates.Add(new Data.SyncState
+            {
+                Key = metaKey,
+                Value = value,
+                UpdatedAt = DateTimeOffset.UtcNow
+            });
+        }
+        await ctx.SaveChangesAsync(ct);
+    }
+
+    public async Task<string> GetMetadataAsync(string derivationScheme, string key, CancellationToken ct)
+    {
+        await using var ctx = _dbFactory.CreateContext();
+        var metaKey = $"metadata:{derivationScheme}:{key}";
+        var state = await ctx.SyncStates.FindAsync(new object[] { metaKey }, ct);
+        return state?.Value;
+    }
+
+    // ─────────────────────────────────────────────
     // Private helpers
     // ─────────────────────────────────────────────
 
