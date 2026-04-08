@@ -1,6 +1,4 @@
-@using BTCPayServer.Abstractions.Extensions
-<li class="nav-item">
-    <a asp-controller="UIElectrum" asp-action="Settings" class="nav-link @ViewData.ActivePageClass("electrum-settings")" id="ElectrumNav">
-        Electrum
-    </a>
+@using BTCPayServer.Client
+<li class="nav-item nav-item-sub" permission="@Policies.CanModifyServerSettings">
+    <a class="nav-link" asp-controller="UIElectrum" asp-action="Settings" id="ElectrumNav">Electrum</a>
 </li>

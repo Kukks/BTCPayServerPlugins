@@ -1,17 +1,32 @@
 @model BTCPayServer.Plugins.Electrum.ElectrumSettings
 @using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.Plugins.Electrum
 @{
-    ViewData["Title"] = "Electrum Settings";
-    ViewData.SetActivePage("electrum-settings", "Electrum", "Electrum Settings");
-    Layout = "_Layout";
-}
+    ViewData.SetLayoutModel(new LayoutModel("electrum-settings", "Electrum Settings")
+        .SetCategory(WellKnownCategories.Server));
 
-<h3 class="mb-4">@ViewData["Title"]</h3>
+    var currentServer = Model.Server ?? "";
+    var isTrusted = ElectrumSettings.TrustedServers.Any(s => $"{s.Host}:{s.Port}" == currentServer);
+}
 
 <div class="row">
     <div class="col-xxl-constrain col-xl-8">
         <form method="post">
             <div class="form-group">
+                <label class="form-label">Trusted Servers</label>
+                <select id="trustedServer" class="form-select">
+                    <option value="">Custom server...</option>
+                    @foreach (var server in ElectrumSettings.TrustedServers)
+                    {
+                        var val = $"{server.Host}:{server.Port}";
+                        <option value="@val" selected="@(val == currentServer)">@val</option>
+                    }
+                </select>
+                <span class="text-muted">Public Electrum servers sourced from Sparrow Wallet</span>
+            </div>
+
+            <div class="form-group mt-3">
                 <label asp-for="Server" class="form-label">Electrum Server</label>
                 <input asp-for="Server" class="form-control" placeholder="electrum.example.com:50002" />
                 <span class="text-muted">Host and port of the ElectrumX or Fulcrum server</span>
@@ -41,3 +56,14 @@
         }
     </div>
 </div>
+
+<script>
+    document.getElementById('trustedServer').addEventListener('change', function () {
+        const serverInput = document.getElementById('Server');
+        const useTls = document.getElementById('UseTls');
+        if (this.value) {
+            serverInput.value = this.value;
+            useTls.checked = true;
+        }
+    });
+</script>

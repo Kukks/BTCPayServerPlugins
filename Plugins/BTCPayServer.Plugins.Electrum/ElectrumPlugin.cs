@@ -121,7 +121,7 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
         // 5. Admin UI
         // ──────────────────────────────────────────────
 
-        services.AddUIExtension("header-nav", "Electrum/NavExtension");
+        services.AddUIExtension("server-nav", "Electrum/NavExtension");
     }
 
     private static void RemoveByImplementation<T>(IServiceCollection services)
