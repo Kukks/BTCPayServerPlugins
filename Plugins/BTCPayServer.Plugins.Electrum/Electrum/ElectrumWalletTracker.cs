@@ -56,7 +56,7 @@ public class ElectrumWalletTracker
         await _lock.WaitAsync(ct);
         try
         {
-            // Ensure schema exists
+            // Ensure schema and tables exist via EF migrations
             await using var ctx = _dbFactory.CreateContext();
             await ctx.Database.MigrateAsync(ct);
 
