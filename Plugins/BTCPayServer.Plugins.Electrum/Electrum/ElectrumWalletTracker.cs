@@ -22,8 +22,11 @@ public class ElectrumWalletTracker
     private readonly ElectrumSettings _settings;
     private readonly ILogger<ElectrumWalletTracker> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly SemaphoreSlim _migrationLock = new(1, 1);
+    private bool _migrated;
 
     private readonly ConcurrentDictionary<string, DerivationStrategyBase> _trackedStrategies = new();
+    private readonly ConcurrentDictionary<string, ScanUTXOInformation> _scanStates = new();
     private Network _network;
     private DerivationStrategyFactory _derivationFactory;
     private int _tipHeight;
@@ -51,38 +54,116 @@ public class ElectrumWalletTracker
         }
     }
 
+    /// <summary>
+    /// Ensures DB migrations have run. Safe to call multiple times — only migrates once.
+    /// Does NOT require Electrum connection.
+    /// </summary>
+    private async Task EnsureMigratedAsync(CancellationToken ct)
+    {
+        if (_migrated) return;
+        await _migrationLock.WaitAsync(ct);
+        try
+        {
+            if (_migrated) return;
+            await using var ctx = _dbFactory.CreateContext();
+            await ctx.Database.MigrateAsync(ct);
+            _migrated = true;
+            _logger.LogInformation("Electrum DB schema migrated");
+        }
+        finally
+        {
+            _migrationLock.Release();
+        }
+    }
+
+    public void SetTipHeight(int height)
+    {
+        _tipHeight = height;
+    }
+
     public async Task InitializeAsync(CancellationToken ct)
     {
+        await EnsureMigratedAsync(ct);
+
+        // Load wallets and their addresses from DB (fast, no Electrum calls)
+        List<(string walletId, List<TrackedAddress> addresses)> walletsToSubscribe;
         await _lock.WaitAsync(ct);
         try
         {
-            // Ensure schema and tables exist via EF migrations
             await using var ctx = _dbFactory.CreateContext();
-            await ctx.Database.MigrateAsync(ct);
 
-            // Load all tracked wallets and re-subscribe
+            var tipState = await ctx.SyncStates.FindAsync(new object[] { "tip_height" }, ct);
+            if (tipState != null && int.TryParse(tipState.Value, out var savedTip))
+                _tipHeight = savedTip;
+
             var wallets = await ctx.TrackedWallets.ToListAsync(ct);
+            walletsToSubscribe = new();
+
             foreach (var wallet in wallets)
             {
                 var strategy = ParseStrategy(wallet.DerivationStrategy);
                 if (strategy == null) continue;
-
                 _trackedStrategies[wallet.Id] = strategy;
 
                 var addresses = await ctx.TrackedAddresses
                     .Where(a => a.WalletId == wallet.Id)
                     .ToListAsync(ct);
+                walletsToSubscribe.Add((wallet.Id, addresses));
+            }
 
-                foreach (var addr in addresses)
+            _logger.LogInformation("Loaded {Count} tracked wallets from DB", wallets.Count);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        // Subscribe to Electrum + sync state OUTSIDE the lock — these are slow network calls
+        foreach (var (walletId, addresses) in walletsToSubscribe)
+        {
+            foreach (var addr in addresses)
+            {
+                try
                 {
                     await _client.ScripthashSubscribeAsync(addr.Scripthash, ct);
                 }
-
-                // Diff state for each address
-                await SyncWalletStateAsync(wallet.Id, addresses, ct);
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to subscribe scripthash {Scripthash}", addr.Scripthash);
+                }
             }
 
-            _logger.LogInformation("Initialized {Count} tracked wallets", wallets.Count);
+            try
+            {
+                await SyncWalletStateAsync(walletId, addresses, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to sync wallet state for {WalletId}", walletId);
+            }
+        }
+
+        _logger.LogInformation("Initialized {Count} tracked wallets", walletsToSubscribe.Count);
+    }
+
+    public async Task TrackWalletAsync(string strategyStr, CancellationToken ct)
+    {
+        // Phase 1: derive addresses locally (fast, no network)
+        var addresses = await EnsureAddressesDerivedAsync(strategyStr, ct);
+        if (addresses == null)
+            return; // wallet already existed
+
+        // Phase 2: subscribe on Electrum + sync state (slow, needs network)
+        await _lock.WaitAsync(ct);
+        try
+        {
+            foreach (var addr in addresses)
+            {
+                await _client.ScripthashSubscribeAsync(addr.Scripthash, ct);
+            }
+
+            await SyncWalletStateAsync(strategyStr, addresses, ct);
+            _logger.LogInformation("Now tracking wallet {Strategy}", strategyStr);
         }
         finally
         {
@@ -90,12 +171,18 @@ public class ElectrumWalletTracker
         }
     }
 
-    public async Task TrackWalletAsync(string strategyStr, CancellationToken ct)
+    /// <summary>
+    /// Fast, local-only address derivation. Creates the wallet and derives
+    /// gap-limit addresses in the DB without any Electrum network calls.
+    /// Returns the new addresses, or null if the wallet already existed.
+    /// </summary>
+    private async Task<List<TrackedAddress>> EnsureAddressesDerivedAsync(string strategyStr, CancellationToken ct)
     {
         var strategy = ParseStrategy(strategyStr);
         if (strategy == null)
             throw new InvalidOperationException($"Cannot parse derivation strategy: {strategyStr}");
 
+        await EnsureMigratedAsync(ct);
         await _lock.WaitAsync(ct);
         try
         {
@@ -105,7 +192,7 @@ public class ElectrumWalletTracker
             if (existing != null)
             {
                 _trackedStrategies[strategyStr] = strategy;
-                return;
+                return null;
             }
 
             var wallet = new TrackedWallet
@@ -119,7 +206,6 @@ public class ElectrumWalletTracker
 
             ctx.TrackedWallets.Add(wallet);
 
-            // Derive initial addresses
             var addresses = DeriveAddresses(strategy, false, 0, _settings.GapLimit);
             addresses.AddRange(DeriveAddresses(strategy, true, 0, _settings.GapLimit));
 
@@ -132,16 +218,7 @@ public class ElectrumWalletTracker
             await ctx.SaveChangesAsync(ct);
             _trackedStrategies[strategyStr] = strategy;
 
-            // Subscribe all addresses
-            foreach (var addr in addresses)
-            {
-                await _client.ScripthashSubscribeAsync(addr.Scripthash, ct);
-            }
-
-            // Fetch initial state
-            await SyncWalletStateAsync(strategyStr, addresses, ct);
-
-            _logger.LogInformation("Now tracking wallet {Strategy}", strategyStr);
+            return addresses;
         }
         finally
         {
@@ -154,6 +231,7 @@ public class ElectrumWalletTracker
     {
         var newTxs = new List<NewTransactionInfo>();
 
+        await EnsureMigratedAsync(ct);
         await _lock.WaitAsync(ct);
         try
         {
@@ -234,6 +312,7 @@ public class ElectrumWalletTracker
     {
         _tipHeight = height;
 
+        await EnsureMigratedAsync(ct);
         await _lock.WaitAsync(ct);
         try
         {
@@ -314,6 +393,7 @@ public class ElectrumWalletTracker
     public async Task<KeyPathInformation> GetNextUnusedAddressAsync(
         string strategyStr, bool isChange, bool reserve, CancellationToken ct)
     {
+        await EnsureMigratedAsync(ct);
         await using var ctx = _dbFactory.CreateContext();
 
         var addr = await ctx.TrackedAddresses
@@ -323,8 +403,9 @@ public class ElectrumWalletTracker
 
         if (addr == null)
         {
-            // Might need to track first
-            await TrackWalletAsync(strategyStr, ct);
+            // Derive addresses locally (fast, no Electrum calls).
+            // Background TrackWalletAsync will subscribe them later.
+            await EnsureAddressesDerivedAsync(strategyStr, ct);
             addr = await ctx.TrackedAddresses
                 .Where(a => a.WalletId == strategyStr && a.IsChange == isChange && !a.IsUsed)
                 .OrderBy(a => a.KeyPath)
@@ -354,6 +435,7 @@ public class ElectrumWalletTracker
 
     public async Task<UTXOChanges> GetUTXOChangesAsync(string strategyStr, CancellationToken ct)
     {
+        await EnsureMigratedAsync(ct);
         await using var ctx = _dbFactory.CreateContext();
 
         var utxos = await ctx.Utxos
@@ -395,6 +477,7 @@ public class ElectrumWalletTracker
 
     public async Task<GetBalanceResponse> GetBalanceAsync(string strategyStr, CancellationToken ct)
     {
+        await EnsureMigratedAsync(ct);
         await using var ctx = _dbFactory.CreateContext();
 
         var utxos = await ctx.Utxos
@@ -415,6 +498,7 @@ public class ElectrumWalletTracker
 
     public async Task<TransactionResult> GetTransactionResultAsync(string txId, CancellationToken ct)
     {
+        await EnsureMigratedAsync(ct);
         await using var ctx = _dbFactory.CreateContext();
 
         var tx = await ctx.Transactions
@@ -459,6 +543,7 @@ public class ElectrumWalletTracker
     public async Task<TransactionInformation> GetTransactionInfoAsync(
         string strategyStr, string txId, CancellationToken ct)
     {
+        await EnsureMigratedAsync(ct);
         await using var ctx = _dbFactory.CreateContext();
 
         var tx = await ctx.Transactions
@@ -485,6 +570,7 @@ public class ElectrumWalletTracker
     public async Task<GetTransactionsResponse> GetTransactionsResponseAsync(
         string strategyStr, CancellationToken ct)
     {
+        await EnsureMigratedAsync(ct);
         await using var ctx = _dbFactory.CreateContext();
 
         var txs = await ctx.Transactions
@@ -585,8 +671,168 @@ public class ElectrumWalletTracker
             SyncHeight = _tipHeight,
             Version = "electrum-plugin-1.0.0",
             SupportedCryptoCodes = new[] { _settings.CryptoCode ?? "BTC" },
-            NetworkType = _network?.ChainName ?? ChainName.Mainnet
+            NetworkType = _network?.ChainName ?? ChainName.Mainnet,
+            BitcoinStatus = new BitcoinStatus
+            {
+                Blocks = _tipHeight,
+                Headers = _tipHeight,
+                VerificationProgress = 1.0,
+                IsSynched = _client.IsConnected,
+                MinRelayTxFee = new FeeRate(1.0m),
+                IncrementalRelayFee = new FeeRate(1.0m),
+                Capabilities = new NodeCapabilities
+                {
+                    CanScanTxoutSet = true,
+                    CanSupportSegwit = true,
+                    CanSupportTaproot = true,
+                    CanSupportTransactionCheck = true
+                }
+            }
         };
+    }
+
+    // ─────────────────────────────────────────────
+    // UTXO Set Scan (replaces Bitcoin Core's scantxoutset)
+    // ─────────────────────────────────────────────
+
+    public ScanUTXOInformation GetScanState(string strategyStr)
+    {
+        _scanStates.TryGetValue(strategyStr, out var state);
+        return state;
+    }
+
+    public void StartScan(string strategyStr, int gapLimit, int startingIndex, int batchSize)
+    {
+        var info = new ScanUTXOInformation
+        {
+            Status = ScanUTXOStatus.Queued,
+            QueuedAt = DateTimeOffset.UtcNow,
+            Progress = new ScanUTXOProgress
+            {
+                StartedAt = DateTimeOffset.UtcNow,
+                From = startingIndex,
+                Count = gapLimit,
+                OverallProgress = 0
+            }
+        };
+        _scanStates[strategyStr] = info;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                info.Status = ScanUTXOStatus.Pending;
+                info.Progress.StartedAt = DateTimeOffset.UtcNow;
+                await RescanWalletAsync(strategyStr, gapLimit, startingIndex, info, CancellationToken.None);
+                info.Status = ScanUTXOStatus.Complete;
+                info.Progress.CompletedAt = DateTimeOffset.UtcNow;
+                info.Progress.OverallProgress = 100;
+            }
+            catch (Exception ex)
+            {
+                info.Status = ScanUTXOStatus.Error;
+                info.Error = ex.Message;
+                _logger.LogError(ex, "Scan failed for {Strategy}", strategyStr);
+            }
+        });
+    }
+
+    private async Task RescanWalletAsync(
+        string strategyStr, int gapLimit, int startingIndex,
+        ScanUTXOInformation scanInfo, CancellationToken ct)
+    {
+        await EnsureMigratedAsync(ct);
+
+        var strategy = ParseStrategy(strategyStr);
+        if (strategy == null)
+            throw new InvalidOperationException($"Cannot parse derivation strategy: {strategyStr}");
+
+        await _lock.WaitAsync(ct);
+        List<TrackedAddress> newAddresses;
+        try
+        {
+            await using var ctx = _dbFactory.CreateContext();
+
+            var wallet = await ctx.TrackedWallets.FindAsync(new object[] { strategyStr }, ct);
+            if (wallet == null)
+            {
+                wallet = new TrackedWallet
+                {
+                    Id = strategyStr,
+                    CryptoCode = _settings.CryptoCode ?? "BTC",
+                    DerivationStrategy = strategyStr,
+                    ReceiveGapIndex = startingIndex + gapLimit - 1,
+                    ChangeGapIndex = startingIndex + gapLimit - 1
+                };
+                ctx.TrackedWallets.Add(wallet);
+            }
+            else
+            {
+                wallet.ReceiveGapIndex = Math.Max(wallet.ReceiveGapIndex, startingIndex + gapLimit - 1);
+                wallet.ChangeGapIndex = Math.Max(wallet.ChangeGapIndex, startingIndex + gapLimit - 1);
+            }
+
+            var existingHashes = await ctx.TrackedAddresses
+                .Where(a => a.WalletId == strategyStr)
+                .Select(a => a.Scripthash)
+                .ToHashSetAsync(ct);
+
+            var receiveAddrs = DeriveAddresses(strategy, false, startingIndex, gapLimit);
+            var changeAddrs = DeriveAddresses(strategy, true, startingIndex, gapLimit);
+            newAddresses = new List<TrackedAddress>();
+
+            foreach (var addr in receiveAddrs.Concat(changeAddrs))
+            {
+                if (!existingHashes.Contains(addr.Scripthash))
+                {
+                    addr.WalletId = strategyStr;
+                    ctx.TrackedAddresses.Add(addr);
+                    newAddresses.Add(addr);
+                }
+            }
+
+            await ctx.SaveChangesAsync(ct);
+            _trackedStrategies[strategyStr] = strategy;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        var total = newAddresses.Count;
+        var done = 0;
+
+        foreach (var addr in newAddresses)
+        {
+            try
+            {
+                if (_client.IsConnected)
+                    await _client.ScripthashSubscribeAsync(addr.Scripthash, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to subscribe {Scripthash} during scan", addr.Scripthash);
+            }
+
+            done++;
+            if (total > 0)
+                scanInfo.Progress.OverallProgress = done * 100 / total;
+        }
+
+        if (_client.IsConnected)
+        {
+            var allAddresses = new List<TrackedAddress>();
+            await using (var ctx = _dbFactory.CreateContext())
+            {
+                allAddresses = await ctx.TrackedAddresses
+                    .Where(a => a.WalletId == strategyStr)
+                    .ToListAsync(ct);
+            }
+            await SyncWalletStateAsync(strategyStr, allAddresses, ct);
+        }
+
+        scanInfo.Progress.TotalSearched = total;
+        scanInfo.Progress.Found = total;
     }
 
     // ─────────────────────────────────────────────
@@ -595,6 +841,7 @@ public class ElectrumWalletTracker
 
     public async Task SetMetadataAsync(string derivationScheme, string key, string value, CancellationToken ct)
     {
+        await EnsureMigratedAsync(ct);
         await using var ctx = _dbFactory.CreateContext();
         var metaKey = $"metadata:{derivationScheme}:{key}";
         var existing = await ctx.SyncStates.FindAsync(new object[] { metaKey }, ct);
@@ -617,6 +864,7 @@ public class ElectrumWalletTracker
 
     public async Task<string> GetMetadataAsync(string derivationScheme, string key, CancellationToken ct)
     {
+        await EnsureMigratedAsync(ct);
         await using var ctx = _dbFactory.CreateContext();
         var metaKey = $"metadata:{derivationScheme}:{key}";
         var state = await ctx.SyncStates.FindAsync(new object[] { metaKey }, ct);
@@ -674,23 +922,21 @@ public class ElectrumWalletTracker
         string walletId, List<TrackedAddress> addresses, CancellationToken ct)
     {
         await using var ctx = _dbFactory.CreateContext();
+        var existingTxids = await ctx.Transactions
+            .Where(t => t.WalletId == walletId)
+            .Select(t => t.Txid)
+            .ToHashSetAsync(ct);
 
         foreach (var addr in addresses)
         {
             try
             {
-                // Get current history
                 var history = await _client.ScripthashGetHistoryAsync(addr.Scripthash, ct);
-                var existingTxids = await ctx.Transactions
-                    .Where(t => t.WalletId == walletId)
-                    .Select(t => t.Txid)
-                    .ToHashSetAsync(ct);
 
                 foreach (var item in history)
                 {
                     if (existingTxids.Contains(item.TxHash))
                     {
-                        // Update height if confirmed
                         var existing = await ctx.Transactions
                             .FirstOrDefaultAsync(t => t.Txid == item.TxHash && t.WalletId == walletId, ct);
                         if (existing != null && item.Height > 0 && existing.BlockHeight != item.Height)
@@ -713,6 +959,7 @@ public class ElectrumWalletTracker
                         Fee = item.Fee > 0 ? item.Fee : null,
                         BalanceChange = balanceChange
                     });
+                    existingTxids.Add(item.TxHash);
 
                     if (!addr.IsUsed)
                     {
@@ -928,4 +1175,5 @@ public class ElectrumWalletTracker
         (ConcurrentDictionary<string, string>)typeof(ElectrumClient)
             .GetField("_subscribedScripthashes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
             ?.GetValue(_client) ?? new ConcurrentDictionary<string, string>();
+
 }

@@ -1,10 +1,18 @@
+using System;
+
 namespace BTCPayServer.Plugins.Electrum;
 
 public class ElectrumSettings
 {
     public string Server { get; set; }
     public bool UseTls { get; set; } = true;
-    public int GapLimit { get; set; } = 20;
+    public const int MaxGapLimit = 1000;
+    private int _gapLimit = 20;
+    public int GapLimit
+    {
+        get => _gapLimit;
+        set => _gapLimit = Math.Clamp(value, 1, MaxGapLimit);
+    }
     public string CryptoCode { get; set; } = "BTC";
 
     /// <summary>
