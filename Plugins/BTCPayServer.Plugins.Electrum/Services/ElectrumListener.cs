@@ -103,6 +103,7 @@ public class ElectrumListener : IHostedService
 
             var header = await _electrumClient.HeadersSubscribeAsync(ct);
             _statusMonitor.UpdateTipHeight(header.Height);
+            _tracker.SetTipHeight(header.Height);
 
             await FindPaymentsViaPolling(ct);
 
@@ -182,6 +183,7 @@ public class ElectrumListener : IHostedService
             await _tracker.InitializeAsync(ct);
             var header = await _electrumClient.HeadersSubscribeAsync(ct);
             _statusMonitor.UpdateTipHeight(header.Height);
+            _tracker.SetTipHeight(header.Height);
         }
         catch (Exception ex)
         {

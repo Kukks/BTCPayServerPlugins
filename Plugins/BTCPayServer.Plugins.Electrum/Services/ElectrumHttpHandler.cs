@@ -328,6 +328,41 @@ public class ElectrumHttpHandler : HttpMessageHandler
                 return OkResponse(result);
             }
 
+            // GET /v1/cryptos/{code}/derivations/{strategy}/utxos/scan — GetScanUTXOSetInformation
+            if (method == HttpMethod.Get && path.EndsWith("/utxos/scan"))
+            {
+                var strategy = ExtractStrategy(path);
+                if (strategy != null)
+                {
+                    var scanState = _tracker.GetScanState(strategy);
+                    if (scanState != null)
+                        return OkResponse(scanState);
+                }
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            // POST /v1/cryptos/{code}/derivations/{strategy}/utxos/scan — ScanUTXOSetAsync
+            if (method == HttpMethod.Post && path.EndsWith("/utxos/scan"))
+            {
+                var strategy = ExtractStrategy(path);
+                if (strategy != null)
+                {
+                    var query = request.RequestUri?.Query ?? "";
+                    var gapLimit = ExtractQueryInt(query, "gapLimit") ?? 10000;
+                    var batchSize = ExtractQueryInt(query, "batchSize") ?? 3000;
+                    var from = ExtractQueryInt(query, "from") ?? 0;
+                    _tracker.StartScan(strategy, gapLimit, from, batchSize);
+                    return new HttpResponseMessage(HttpStatusCode.OK);
+                }
+                return NotFoundResponse();
+            }
+
+            // POST /v1/cryptos/{code}/derivations/{strategy}/utxos/wipe — WipeAsync
+            if (method == HttpMethod.Post && path.EndsWith("/utxos/wipe"))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            }
+
             _logger.LogWarning("Unhandled ExplorerClient request: {Method} {Path}", method, path);
             return new HttpResponseMessage(HttpStatusCode.NotImplemented);
         }
@@ -363,6 +398,12 @@ public class ElectrumHttpHandler : HttpMessageHandler
         if (match.Success)
             return Uri.UnescapeDataString(match.Groups[1].Value);
         return null;
+    }
+
+    private int? ExtractQueryInt(string query, string key)
+    {
+        var match = Regex.Match(query, $@"[?&]{key}=(\d+)", RegexOptions.IgnoreCase);
+        return match.Success && int.TryParse(match.Groups[1].Value, out var val) ? val : null;
     }
 
     private string ExtractTxId(string path)

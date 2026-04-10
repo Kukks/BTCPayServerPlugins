@@ -50,6 +50,7 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
         RemoveByServiceType<IFeeProviderFactory>(services);
         RemoveScheduledTask<FeeProviderFactory>(services);
 
+
         // ──────────────────────────────────────────────
         // 2. Register Electrum engine
         // ──────────────────────────────────────────────

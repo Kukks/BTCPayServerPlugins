@@ -129,7 +129,20 @@ public class ElectrumStatusMonitor : IHostedService
             SyncHeight = TipHeight,
             Version = ServerVersion ?? "electrum-plugin",
             SupportedCryptoCodes = new[] { "BTC" },
-            NetworkType = GetChainName()
+            NetworkType = GetChainName(),
+            BitcoinStatus = new BitcoinStatus
+            {
+                Blocks = TipHeight,
+                Headers = TipHeight,
+                VerificationProgress = 1.0,
+                IsSynched = State == NBXplorerState.Ready,
+                MinRelayTxFee = new NBitcoin.FeeRate(1.0m),
+                IncrementalRelayFee = new NBitcoin.FeeRate(1.0m),
+                Capabilities = new NodeCapabilities
+                {
+                    CanScanTxoutSet = true
+                }
+            }
         };
     }
 
