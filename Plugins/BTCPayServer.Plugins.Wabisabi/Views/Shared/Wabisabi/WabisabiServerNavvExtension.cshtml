@@ -1,8 +1,0 @@
-@using BTCPayServer.Plugins.Wabisabi
-
-@{
-    var isActive = ViewContext.RouteData.Values.TryGetValue("Controller", out var controller) &&  controller is not null && 
-                   nameof(WabisabiCoordinatorConfigController).StartsWith(controller?.ToString(), StringComparison.InvariantCultureIgnoreCase);
-}
-
-<a class="nav-link @(isActive ? "active" : string.Empty)" asp-action="UpdateWabisabiSettings" asp-controller="WabisabiCoordinatorConfig">Coinjoin coordinator</a>
