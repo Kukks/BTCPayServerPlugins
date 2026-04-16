@@ -1,0 +1,223 @@
+@using BTCPayServer.Plugins.Conference
+@using BTCPayServer.Plugins.Conference.ViewModels
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Views.Apps
+@using BTCPayServer
+@using BTCPayServer.Client
+@model ConferenceDashboardViewModel
+@{
+    var appId = Model.AppId;
+    ViewData.SetActivePage(AppsNavPages.Update.ToString(), typeof(AppsNavPages).ToString(), Model.AppName, appId);
+}
+
+<div class="sticky-header-setup"></div>
+<div class="sticky-header d-sm-flex align-items-center justify-content-between">
+    <h2 class="mb-0">@Model.AppName</h2>
+    <div class="d-flex gap-3 mt-3 mt-sm-0" permission="@Policies.CanModifyStoreSettings">
+        <a class="btn btn-secondary" asp-action="UpdateSettings" asp-route-appId="@appId">Settings</a>
+    </div>
+</div>
+
+<partial name="_StatusMessage" />
+
+<!-- Time Range Selector -->
+<div class="btn-group mb-4" role="group">
+    @foreach (var range in new[] { ReportTimeRange.Today, ReportTimeRange.Yesterday, ReportTimeRange.Last7Days })
+    {
+        var label = range switch
+        {
+            ReportTimeRange.Today => "Today",
+            ReportTimeRange.Yesterday => "Yesterday",
+            ReportTimeRange.Last7Days => "Last 7 Days",
+            _ => range.ToString()
+        };
+        <a asp-action="Dashboard" asp-route-appId="@appId" asp-route-timeRange="@range"
+           class="btn @(Model.SelectedTimeRange == range ? "btn-primary" : "btn-outline-primary")">
+            @label
+        </a>
+    }
+</div>
+
+<!-- Summary Cards -->
+@if (Model.Report != null)
+{
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h6 class="card-subtitle mb-2 text-muted">Total Invoices</h6>
+                    <h3>@Model.Report.TotalInvoices</h3>
+                </div>
+            </div>
+        </div>
+        @foreach (var total in Model.Report.TotalsByStoreCurrency)
+        {
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Total (@total.Key)</h6>
+                        <h3>@total.Value.ToString("N2") @total.Key</h3>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+<!-- Merchant Table -->
+@if (Model.Merchants.Count > 0)
+{
+    <div class="table-responsive">
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th>Merchant</th>
+                    <th>Currency</th>
+                    <th>Spread</th>
+                    <th>POS</th>
+                    <th>Login</th>
+                    <th class="text-end">Invoices</th>
+                    <th class="text-end">Sales</th>
+                    <th class="text-end">Payments</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var merchant in Model.Merchants)
+                {
+                    <tr class="@(merchant.HasError ? "table-danger" : "")">
+                        <td>
+                            @if (!string.IsNullOrEmpty(merchant.StoreLink))
+                            {
+                                <a href="@merchant.StoreLink">@merchant.StoreName</a>
+                            }
+                            else
+                            {
+                                @merchant.StoreName
+                            }
+                            @if (merchant.HasError)
+                            {
+                                <br /><span class="badge bg-danger">@merchant.Status</span>
+                            }
+                        </td>
+                        <td>@merchant.StoreCurrency</td>
+                        <td>@merchant.Spread.ToString("0.##")%</td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(merchant.PosLink))
+                            {
+                                <a href="@merchant.PosLink" target="_blank" class="me-1">Open</a>
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        data-bs-toggle="modal" data-bs-target="#qrModal-@merchant.PosAppId"
+                                        title="Show QR Code">
+                                    <vc:icon symbol="scan-qr" />
+                                </button>
+                            }
+                        </td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(merchant.LoginCodeUrl))
+                            {
+                                var loginModalId = merchant.Email.Replace("@", "_").Replace(".", "_").Replace("+", "_");
+                                <button type="button" class="btn btn-sm btn-outline-primary"
+                                        data-bs-toggle="modal" data-bs-target="#loginModal-@loginModalId"
+                                        title="Login QR Code">
+                                    Login
+                                </button>
+                            }
+                        </td>
+                        <td class="text-end">@(merchant.MerchantReport?.InvoiceCount ?? 0)</td>
+                        <td class="text-end">
+                            @if (merchant.MerchantReport != null && merchant.MerchantReport.TotalStoreCurrency > 0)
+                            {
+                                @merchant.MerchantReport.TotalStoreCurrency.ToString("N2")
+                                @merchant.MerchantReport.StoreCurrency
+                            }
+                            else
+                            {
+                                <span class="text-muted">-</span>
+                            }
+                        </td>
+                        <td class="text-end">
+                            @if (merchant.MerchantReport?.PaymentBreakdown?.Count > 0)
+                            {
+                                @foreach (var payment in merchant.MerchantReport.PaymentBreakdown.Values)
+                                {
+                                    <span class="d-block">@payment.TotalAmount.ToString("N8") @payment.Currency</span>
+                                }
+                            }
+                            else
+                            {
+                                <span class="text-muted">-</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+            <tfoot>
+                <tr class="fw-bold">
+                    <td colspan="5">Total</td>
+                    <td class="text-end">@(Model.Report?.TotalInvoices ?? 0)</td>
+                    <td class="text-end">
+                        @if (Model.Report?.TotalsByStoreCurrency?.Count > 0)
+                        {
+                            @foreach (var total in Model.Report.TotalsByStoreCurrency)
+                            {
+                                <span class="d-block">@total.Value.ToString("N2") @total.Key</span>
+                            }
+                        }
+                    </td>
+                    <td></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+}
+else
+{
+    <div class="alert alert-info">
+        No merchants configured. <a asp-action="UpdateSettings" asp-route-appId="@appId">Add merchants</a> to get started.
+    </div>
+}
+
+<!-- QR Code Modals for POS -->
+@foreach (var merchant in Model.Merchants.Where(m => !string.IsNullOrEmpty(m.PosLink)))
+{
+    <div class="modal fade" id="qrModal-@merchant.PosAppId" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@merchant.StoreName - POS QR</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <vc:qr-code data="@($"{Context.Request.Scheme}://{Context.Request.Host}{merchant.PosLink}")" />
+                    <p class="mt-2 text-muted">Scan to open the Point of Sale</p>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Login Code Modals -->
+@foreach (var merchant in Model.Merchants.Where(m => m.HasLoginCode))
+{
+    var loginModalId = merchant.Email.Replace("@", "_").Replace(".", "_").Replace("+", "_");
+    <div class="modal fade" id="loginModal-@loginModalId" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@merchant.StoreName - Login</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <vc:qr-code data="@merchant.LoginCodeUrl" />
+                    <p class="mt-2 text-muted">Scan to login as this merchant (expires in 60s)</p>
+                    <a href="@Url.Action("Dashboard", "Conference", new { appId, timeRange = Model.SelectedTimeRange })"
+                       class="btn btn-outline-primary btn-sm mt-2">
+                        Refresh Code
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
