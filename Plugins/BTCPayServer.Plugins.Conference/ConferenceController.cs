@@ -353,7 +353,8 @@ public class ConferenceController : Controller
                 Email = merchant.Email,
                 StoreName = merchant.StoreName,
                 StoreId = merchant.StoreId,
-                PosAppId = merchant.PosAppId
+                PosAppId = merchant.PosAppId,
+                IsExistingUser = !merchant.UserCreatedByPlugin && !string.IsNullOrEmpty(merchant.UserId)
             };
 
             // Fetch live data from store
@@ -400,8 +401,12 @@ public class ConferenceController : Controller
                 }
             }
 
-            // Generate login code URL server-side (SECURITY: never expose userId to client)
-            if (!string.IsNullOrEmpty(merchant.UserId) && !string.IsNullOrEmpty(dashMerchant.PosLink))
+            // SECURITY: Only generate login codes for users the plugin created.
+            // Pre-existing users (e.g., server admins) must NOT get login codes
+            // generated for them — that would be a privilege escalation exploit.
+            if (merchant.UserCreatedByPlugin &&
+                !string.IsNullOrEmpty(merchant.UserId) &&
+                !string.IsNullOrEmpty(dashMerchant.PosLink))
             {
                 dashMerchant.LoginCodeUrl = GenerateLoginCodeUrl(merchant.UserId, dashMerchant.PosLink);
             }

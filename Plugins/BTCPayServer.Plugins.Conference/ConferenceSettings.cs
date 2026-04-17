@@ -22,6 +22,13 @@ public class ConferenceMerchant
     public string StoreId { get; set; }
     public string PosAppId { get; set; }
 
+    /// <summary>
+    /// True only when the plugin created this user account.
+    /// Login codes are NEVER generated for pre-existing users
+    /// to prevent privilege escalation (e.g., targeting a server admin's email).
+    /// </summary>
+    public bool UserCreatedByPlugin { get; set; }
+
     public bool IsProvisioned => !string.IsNullOrEmpty(UserId) &&
                                  !string.IsNullOrEmpty(StoreId) &&
                                  !string.IsNullOrEmpty(PosAppId);

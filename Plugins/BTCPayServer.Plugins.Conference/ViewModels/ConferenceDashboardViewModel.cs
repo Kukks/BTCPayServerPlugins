@@ -32,6 +32,10 @@ public class DashboardMerchantViewModel
     public string LoginCodeUrl { get; set; }
     public bool HasLoginCode => !string.IsNullOrEmpty(LoginCodeUrl);
 
+    // True when the user account existed before provisioning —
+    // login codes are disabled for security (prevents privilege escalation)
+    public bool IsExistingUser { get; set; }
+
     // Health
     public string Status { get; set; }
     public bool HasError { get; set; }
