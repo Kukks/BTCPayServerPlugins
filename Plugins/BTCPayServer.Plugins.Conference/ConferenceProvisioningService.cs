@@ -43,8 +43,9 @@ public class ConferenceProvisioningService
             // Step 1: Create or find user
             if (string.IsNullOrEmpty(merchant.UserId))
             {
-                var userId = await CreateOrFindUser(merchant.Email, merchant.Password);
+                var (userId, wasCreated) = await CreateOrFindUser(merchant.Email, merchant.Password);
                 merchant.UserId = userId;
+                merchant.UserCreatedByPlugin = wasCreated;
                 merchant.Password = null; // Clear password after use
             }
 
@@ -236,14 +237,15 @@ public class ConferenceProvisioningService
         }
     }
 
-    private async Task<string> CreateOrFindUser(string email, string password)
+    /// <returns>(userId, wasCreated) — wasCreated is false when an existing account was found</returns>
+    private async Task<(string UserId, bool WasCreated)> CreateOrFindUser(string email, string password)
     {
         using var scope = _serviceProvider.CreateScope();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
 
         var existingUser = await userManager.FindByEmailAsync(email);
         if (existingUser != null)
-            return existingUser.Id;
+            return (existingUser.Id, false);
 
         var user = new ApplicationUser
         {
@@ -265,7 +267,7 @@ public class ConferenceProvisioningService
                 $"Failed to create user {email}: {errorMessages}");
         }
 
-        return user.Id;
+        return (user.Id, true);
     }
 
     private async Task<string> CreateStore(

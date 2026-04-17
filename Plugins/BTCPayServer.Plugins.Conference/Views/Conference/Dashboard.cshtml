@@ -123,6 +123,10 @@
                                     Login
                                 </button>
                             }
+                            else if (merchant.IsExistingUser)
+                            {
+                                <span class="text-muted" title="Login codes are disabled for pre-existing accounts for security reasons. This user must log in with their own credentials.">N/A</span>
+                            }
                         </td>
                         <td class="text-end">@(merchant.MerchantReport?.InvoiceCount ?? 0)</td>
                         <td class="text-end">
