@@ -9,14 +9,16 @@ foreach (var plugin in plugins)
     {
         var assemblyConfigurationAttribute = typeof(Program).Assembly.GetCustomAttribute<AssemblyConfigurationAttribute>();
         var buildConfigurationName = assemblyConfigurationAttribute?.Configuration;
-        var x = Directory.GetDirectories(Path.Combine(plugin, "bin"));
+        
+        var binPath = Path.Combine(plugin, "bin");
+        if (!Directory.Exists(binPath)) continue;
 
-        var f = $"{Path.GetFullPath(plugin)}/bin/{buildConfigurationName}/net8.0/{Path.GetFileName(plugin)}.dll";
+        var f = $"{Path.GetFullPath(plugin)}/bin/{buildConfigurationName}/net10.0/{Path.GetFileName(plugin)}.dll";
         if (File.Exists(f))
             p += $"{f};";
         else
         {
-            f = $"{Path.GetFullPath(plugin)}/bin/Debug/net8.0/{Path.GetFileName(plugin)}.dll";
+            f = $"{Path.GetFullPath(plugin)}/bin/Debug/net10.0/{Path.GetFileName(plugin)}.dll";
             if (File.Exists(f))
                 p += $"{f};";
         }
