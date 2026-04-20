@@ -57,4 +57,10 @@ public class MerchantViewModel
     public string Status { get; set; }
     public bool IsProvisioned { get; set; }
     public bool HasError { get; set; }
+
+    // Login code (generated server-side for plugin-created users)
+    public string LoginCodeUrl { get; set; }
+    public bool HasLoginCode => !string.IsNullOrEmpty(LoginCodeUrl);
+    public string PosLink { get; set; }
+    public bool IsExistingUser { get; set; }
 }

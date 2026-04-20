@@ -90,36 +90,64 @@ public class ConferenceController : Controller
     // ─── Merchant CRUD ─────────────────────────────────────────────
 
     [HttpPost("~/plugins/Conference/{appId}/merchants/add")]
-    public async Task<IActionResult> AddMerchant(string appId, MerchantViewModel merchant)
+    public async Task<IActionResult> AddMerchant(string appId,
+        [FromForm] List<string> emails,
+        [FromForm] List<string> storeNames,
+        [FromForm] List<string> currencies,
+        [FromForm] List<string> spreads,
+        [FromForm] List<string> passwords)
     {
         var app = await GetConferenceApp(appId);
         if (app == null) return NotFound();
 
         var settings = app.GetSettings<ConferenceSettings>();
+        var added = 0;
+        var skipped = new List<string>();
+        var count = emails?.Count ?? 0;
 
-        if (settings.Merchants.Any(m => m.Email.Equals(merchant.Email, StringComparison.OrdinalIgnoreCase)))
+        for (var i = 0; i < count; i++)
         {
-            TempData[WellKnownTempData.ErrorMessage] = $"Merchant with email {merchant.Email} already exists";
-            return RedirectToAction(nameof(UpdateSettings), new { appId });
+            var email = emails[i]?.Trim();
+            var storeName = storeNames != null && i < storeNames.Count ? storeNames[i]?.Trim() : null;
+
+            if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(storeName))
+                continue;
+
+            if (settings.Merchants.Any(m => m.Email.Equals(email, StringComparison.OrdinalIgnoreCase)))
+            {
+                skipped.Add($"{email} (exists)");
+                continue;
+            }
+
+            var currency = currencies != null && i < currencies.Count ? currencies[i]?.Trim() : null;
+            var spreadStr = spreads != null && i < spreads.Count ? spreads[i]?.Trim() : null;
+            var password = passwords != null && i < passwords.Count ? passwords[i]?.Trim() : null;
+
+            settings.Merchants.Add(new ConferenceMerchant
+            {
+                Email = email,
+                StoreName = storeName,
+                Currency = string.IsNullOrWhiteSpace(currency) ? null : currency,
+                Spread = decimal.TryParse(spreadStr, out var sp) ? sp : null,
+                Password = string.IsNullOrWhiteSpace(password) ? null : password
+            });
+            added++;
         }
 
-        settings.Merchants.Add(new ConferenceMerchant
+        if (added == 0 && skipped.Count == 0)
         {
-            Email = merchant.Email,
-            StoreName = merchant.StoreName,
-            Currency = string.IsNullOrWhiteSpace(merchant.Currency) ? null : merchant.Currency,
-            Spread = merchant.Spread,
-            LightningConnectionString = string.IsNullOrWhiteSpace(merchant.LightningConnectionString)
-                ? null
-                : merchant.LightningConnectionString,
-            Password = merchant.Password
-        });
+            TempData[WellKnownTempData.ErrorMessage] = "No merchants to add";
+            return RedirectToAction(nameof(UpdateSettings), new { appId, tab = "merchants" });
+        }
 
         app.SetSettings(settings);
         await _appService.UpdateOrCreateApp(app);
 
-        TempData[WellKnownTempData.SuccessMessage] = $"Merchant {merchant.Email} added";
-        return RedirectToAction(nameof(UpdateSettings), new { appId });
+        var msg = added == 1 ? $"Merchant {emails[0]?.Trim()} added" : $"Added {added} merchant(s)";
+        if (skipped.Count > 0)
+            msg += $", skipped {skipped.Count}: {string.Join("; ", skipped)}";
+        TempData[added > 0 ? WellKnownTempData.SuccessMessage : WellKnownTempData.ErrorMessage] = msg;
+        return RedirectToAction(nameof(UpdateSettings), new { appId, tab = "merchants" });
     }
 
     [HttpPost("~/plugins/Conference/{appId}/merchants/update")]
@@ -135,7 +163,7 @@ public class ConferenceController : Controller
         if (merchant == null)
         {
             TempData[WellKnownTempData.ErrorMessage] = "Merchant not found";
-            return RedirectToAction(nameof(UpdateSettings), new { appId });
+            return RedirectToAction(nameof(UpdateSettings), new { appId, tab = "merchants" });
         }
 
         merchant.StoreName = updated.StoreName;
@@ -157,7 +185,7 @@ public class ConferenceController : Controller
         await _appService.UpdateOrCreateApp(app);
 
         TempData[WellKnownTempData.SuccessMessage] = $"Merchant {email} updated";
-        return RedirectToAction(nameof(UpdateSettings), new { appId });
+        return RedirectToAction(nameof(UpdateSettings), new { appId, tab = "merchants" });
     }
 
     [HttpPost("~/plugins/Conference/{appId}/merchants/remove")]
@@ -173,7 +201,7 @@ public class ConferenceController : Controller
         if (merchant == null)
         {
             TempData[WellKnownTempData.ErrorMessage] = "Merchant not found";
-            return RedirectToAction(nameof(UpdateSettings), new { appId });
+            return RedirectToAction(nameof(UpdateSettings), new { appId, tab = "merchants" });
         }
 
         // Archive store and POS rather than deleting
@@ -184,7 +212,7 @@ public class ConferenceController : Controller
         await _appService.UpdateOrCreateApp(app);
 
         TempData[WellKnownTempData.SuccessMessage] = $"Merchant {email} removed and store archived";
-        return RedirectToAction(nameof(UpdateSettings), new { appId });
+        return RedirectToAction(nameof(UpdateSettings), new { appId, tab = "merchants" });
     }
 
     // ─── CSV ───────────────────────────────────────────────────────
@@ -206,7 +234,7 @@ public class ConferenceController : Controller
         if (file == null || file.Length == 0)
         {
             TempData[WellKnownTempData.ErrorMessage] = "No file uploaded";
-            return RedirectToAction(nameof(UpdateSettings), new { appId });
+            return RedirectToAction(nameof(UpdateSettings), new { appId, tab = "merchants" });
         }
 
         var settings = app.GetSettings<ConferenceSettings>();
@@ -217,7 +245,7 @@ public class ConferenceController : Controller
         if (result.HasErrors)
         {
             TempData[WellKnownTempData.ErrorMessage] = string.Join("; ", result.Errors);
-            return RedirectToAction(nameof(UpdateSettings), new { appId });
+            return RedirectToAction(nameof(UpdateSettings), new { appId, tab = "merchants" });
         }
 
         app.SetSettings(settings);
@@ -225,7 +253,7 @@ public class ConferenceController : Controller
 
         TempData[WellKnownTempData.SuccessMessage] =
             $"CSV imported: {result.Added} added, {result.Updated} updated";
-        return RedirectToAction(nameof(UpdateSettings), new { appId });
+        return RedirectToAction(nameof(UpdateSettings), new { appId, tab = "merchants" });
     }
 
     // ─── Provisioning ──────────────────────────────────────────────
@@ -267,7 +295,42 @@ public class ConferenceController : Controller
             TempData[WellKnownTempData.SuccessMessage] = $"Provisioned {succeeded} merchants";
         }
 
-        return RedirectToAction(nameof(UpdateSettings), new { appId });
+        return RedirectToAction(nameof(UpdateSettings), new { appId, tab = "merchants" });
+    }
+
+    [HttpPost("~/plugins/Conference/{appId}/merchants/provision")]
+    public async Task<IActionResult> ProvisionMerchant(string appId, [FromForm] string email)
+    {
+        var app = await GetConferenceApp(appId);
+        if (app == null) return NotFound();
+
+        var settings = app.GetSettings<ConferenceSettings>();
+        var merchant = settings.Merchants.FirstOrDefault(
+            m => m.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+
+        if (merchant == null)
+        {
+            TempData[WellKnownTempData.ErrorMessage] = "Merchant not found";
+            return RedirectToAction(nameof(UpdateSettings), new { appId, tab = "merchants" });
+        }
+
+        if (merchant.IsProvisioned)
+        {
+            TempData[WellKnownTempData.ErrorMessage] = $"{email} is already provisioned";
+            return RedirectToAction(nameof(UpdateSettings), new { appId, tab = "merchants" });
+        }
+
+        var result = await _provisioningService.ProvisionMerchant(GetUserId(), merchant, settings);
+
+        app.SetSettings(settings);
+        await _appService.UpdateOrCreateApp(app);
+
+        if (result.Success)
+            TempData[WellKnownTempData.SuccessMessage] = $"Provisioned {email}";
+        else
+            TempData[WellKnownTempData.ErrorMessage] = $"Failed to provision {email}: {result.Error}";
+
+        return RedirectToAction(nameof(UpdateSettings), new { appId, tab = "merchants" });
     }
 
     [HttpPost("~/plugins/Conference/{appId}/merchants/repair")]
@@ -283,7 +346,7 @@ public class ConferenceController : Controller
         if (merchant == null)
         {
             TempData[WellKnownTempData.ErrorMessage] = "Merchant not found";
-            return RedirectToAction(nameof(UpdateSettings), new { appId });
+            return RedirectToAction(nameof(UpdateSettings), new { appId, tab = "merchants" });
         }
 
         var result = await _provisioningService.RepairMerchant(GetUserId(), merchant, settings);
@@ -301,7 +364,7 @@ public class ConferenceController : Controller
             TempData[WellKnownTempData.ErrorMessage] = $"Repair failed: {result.Error}";
         }
 
-        return RedirectToAction(nameof(UpdateSettings), new { appId });
+        return RedirectToAction(nameof(UpdateSettings), new { appId, tab = "merchants" });
     }
 
     [HttpPost("~/plugins/Conference/{appId}/reapply")]
@@ -457,7 +520,7 @@ public class ConferenceController : Controller
         foreach (var merchant in settings.Merchants)
         {
             var health = await _provisioningService.CheckMerchantHealth(merchant);
-            vm.Merchants.Add(new MerchantViewModel
+            var mvm = new MerchantViewModel
             {
                 Email = merchant.Email,
                 StoreName = merchant.StoreName,
@@ -469,8 +532,26 @@ public class ConferenceController : Controller
                 PosAppId = merchant.PosAppId,
                 Status = health.Summary,
                 IsProvisioned = merchant.IsProvisioned,
-                HasError = !health.IsHealthy && !health.IsNotProvisioned
-            });
+                HasError = !health.IsHealthy && !health.IsNotProvisioned,
+                IsExistingUser = !merchant.UserCreatedByPlugin && !string.IsNullOrEmpty(merchant.UserId)
+            };
+
+            if (!string.IsNullOrEmpty(merchant.PosAppId))
+            {
+                mvm.PosLink = _linkGenerator.GetPathByAction(
+                    "ViewPointOfSale", "UIPointOfSale",
+                    new { appId = merchant.PosAppId },
+                    _btcPayOptions.Value.RootPath);
+            }
+
+            if (merchant.UserCreatedByPlugin &&
+                !string.IsNullOrEmpty(merchant.UserId) &&
+                !string.IsNullOrEmpty(mvm.PosLink))
+            {
+                mvm.LoginCodeUrl = GenerateLoginCodeUrl(merchant.UserId, mvm.PosLink);
+            }
+
+            vm.Merchants.Add(mvm);
         }
 
         return vm;

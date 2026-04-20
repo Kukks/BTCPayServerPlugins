@@ -4,7 +4,8 @@ namespace BTCPayServer.Plugins.Electrum;
 
 public class ElectrumSettings
 {
-    public string Server { get; set; }
+    public const string RandomServer = "random";
+    public string Server { get; set; } = RandomServer;
     public bool UseTls { get; set; } = true;
     public const int MaxGapLimit = 1000;
     private int _gapLimit = 20;

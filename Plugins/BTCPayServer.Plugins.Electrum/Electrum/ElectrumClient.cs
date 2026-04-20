@@ -89,11 +89,22 @@ public class ElectrumClient : IAsyncDisposable
         if (string.IsNullOrEmpty(_settings?.Server))
             throw new InvalidOperationException("Electrum server not configured. Go to Server Settings > Electrum.");
 
-        var parts = _settings.Server.Split(':');
-        if (parts.Length != 2 || !int.TryParse(parts[1], out var port))
-            throw new InvalidOperationException($"Invalid server format: {_settings.Server}. Expected host:port");
-
-        var host = parts[0];
+        string host;
+        int port;
+        if (_settings.Server.Equals(ElectrumSettings.RandomServer, StringComparison.OrdinalIgnoreCase))
+        {
+            var servers = ElectrumSettings.TrustedServers;
+            var pick = servers[Random.Shared.Next(servers.Length)];
+            host = pick.Host;
+            port = pick.Port;
+        }
+        else
+        {
+            var parts = _settings.Server.Split(':');
+            if (parts.Length != 2 || !int.TryParse(parts[1], out port))
+                throw new InvalidOperationException($"Invalid server format: {_settings.Server}. Expected host:port");
+            host = parts[0];
+        }
 
         _tcpClient = new TcpClient();
         await _tcpClient.ConnectAsync(host, port, ct);
@@ -114,7 +125,7 @@ public class ElectrumClient : IAsyncDisposable
         IsConnected = true;
         _readLoop = Task.Run(() => ReadLoopAsync(_cts.Token));
 
-        _logger.LogInformation("Connected to Electrum server {Server}", _settings.Server);
+        _logger.LogInformation("Connected to Electrum server {Host}:{Port}", host, port);
     }
 
     public async Task DisconnectAsync()

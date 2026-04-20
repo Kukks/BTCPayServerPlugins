@@ -43,7 +43,7 @@ public class ConferenceReportService
             StoreId = storeIds,
             StartDate = startDate,
             EndDate = endDate,
-            Status = new[] { "Settled", "Processing" },
+            Status = ["Settled", "Processing"],
             IncludeArchived = false
         }, cancellationToken);
 

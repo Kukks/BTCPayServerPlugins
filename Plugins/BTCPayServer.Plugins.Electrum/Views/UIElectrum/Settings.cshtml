@@ -7,16 +7,18 @@
         .SetCategory(WellKnownCategories.Server));
 
     var currentServer = Model.Server ?? "";
-    var isTrusted = ElectrumSettings.TrustedServers.Any(s => $"{s.Host}:{s.Port}" == currentServer);
+    var isRandom = currentServer.Equals(ElectrumSettings.RandomServer, StringComparison.OrdinalIgnoreCase);
+    var isTrusted = isRandom || ElectrumSettings.TrustedServers.Any(s => $"{s.Host}:{s.Port}" == currentServer);
 }
 
 <div class="row">
     <div class="col-xxl-constrain col-xl-8">
         <form method="post">
             <div class="form-group">
-                <label class="form-label">Trusted Servers</label>
+                <label class="form-label">Server Selection</label>
                 <select id="trustedServer" class="form-select">
                     <option value="">Custom server...</option>
+                    <option value="@ElectrumSettings.RandomServer" selected="@isRandom">Random (picks a different trusted server each connection)</option>
                     @foreach (var server in ElectrumSettings.TrustedServers)
                     {
                         var val = $"{server.Host}:{server.Port}";
@@ -29,7 +31,7 @@
             <div class="form-group mt-3">
                 <label asp-for="Server" class="form-label">Electrum Server</label>
                 <input asp-for="Server" class="form-control" placeholder="electrum.example.com:50002" />
-                <span class="text-muted">Host and port of the ElectrumX or Fulcrum server</span>
+                <span class="text-muted">Host and port, or "random" to pick a random trusted server on each connection</span>
             </div>
 
             <div class="form-group mt-3">
@@ -66,4 +68,12 @@
             useTls.checked = true;
         }
     });
+    // If current value is "random", show it in the server input on load
+    (function() {
+        const select = document.getElementById('trustedServer');
+        const serverInput = document.getElementById('Server');
+        if (select.value === '@ElectrumSettings.RandomServer' && !serverInput.value) {
+            serverInput.value = '@ElectrumSettings.RandomServer';
+        }
+    })();
 </script>
