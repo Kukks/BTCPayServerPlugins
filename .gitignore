@@ -8,3 +8,6 @@ CLAUDE.md
 .claude
 nul
 docs/plans
+.playwright-mcp
+docs/superpowers
+.mcp.json

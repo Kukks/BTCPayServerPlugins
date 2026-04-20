@@ -42,9 +42,16 @@ public class ElectrumWalletTracker
         _dbFactory = dbFactory;
         _networkProvider = networkProvider;
         _logger = logger;
-        // Load settings synchronously from the repo at first use
-        _settings = settingsRepository.GetSettingAsync<ElectrumSettings>().GetAwaiter().GetResult()
-                    ?? new ElectrumSettings();
+        ElectrumSettings settings = null;
+        try
+        {
+            settings = settingsRepository.GetSettingAsync<ElectrumSettings>().GetAwaiter().GetResult();
+        }
+        catch
+        {
+            // Database may not exist yet (first run, migrations pending)
+        }
+        _settings = settings ?? new ElectrumSettings();
 
         var btcNetwork = _networkProvider.GetNetwork<BTCPayNetwork>(_settings.CryptoCode ?? "BTC");
         if (btcNetwork != null)

@@ -42,25 +42,37 @@
 <!-- Summary Cards -->
 @if (Model.Report != null)
 {
-    <div class="row mb-4">
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-body text-center">
-                    <h6 class="card-subtitle mb-2 text-muted">Total Invoices</h6>
-                    <h3>@Model.Report.TotalInvoices</h3>
-                </div>
-            </div>
+    <div class="widget store-numbers mb-4">
+        <div class="store-number">
+            <header>
+                <h6>Invoices</h6>
+            </header>
+            <div class="h3">@Model.Report.TotalInvoices</div>
         </div>
         @foreach (var total in Model.Report.TotalsByStoreCurrency)
         {
-            <div class="col-md-4">
-                <div class="card">
-                    <div class="card-body text-center">
-                        <h6 class="card-subtitle mb-2 text-muted">Total (@total.Key)</h6>
-                        <h3>@total.Value.ToString("N2") @total.Key</h3>
-                    </div>
-                </div>
+            <div class="store-number">
+                <header>
+                    <h6>Sales (@total.Key)</h6>
+                </header>
+                <div class="h3">@total.Value.ToString("N2") <span class="text-secondary fw-semibold" style="font-size: .65em">@total.Key</span></div>
             </div>
+        }
+        @if (Model.Report.MerchantReports.Count > 0)
+        {
+            @foreach (var group in Model.Report.MerchantReports
+                .Where(r => r.PaymentBreakdown.Count > 0)
+                .SelectMany(r => r.PaymentBreakdown.Values)
+                .GroupBy(p => p.Currency)
+                .Select(g => new { Currency = g.Key, Total = g.Sum(p => p.TotalAmount) }))
+            {
+                <div class="store-number">
+                    <header>
+                        <h6>Received (@group.Currency)</h6>
+                    </header>
+                    <div class="h3">@group.Total.ToString("N8") <span class="text-secondary fw-semibold" style="font-size: .65em">@group.Currency</span></div>
+                </div>
+            }
         }
     </div>
 }
@@ -68,118 +80,121 @@
 <!-- Merchant Table -->
 @if (Model.Merchants.Count > 0)
 {
-    <div class="table-responsive">
-        <table class="table table-hover">
-            <thead>
-                <tr>
-                    <th>Merchant</th>
-                    <th>Currency</th>
-                    <th>Spread</th>
-                    <th>POS</th>
-                    <th>Login</th>
-                    <th class="text-end">Invoices</th>
-                    <th class="text-end">Sales</th>
-                    <th class="text-end">Payments</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var merchant in Model.Merchants)
-                {
-                    <tr class="@(merchant.HasError ? "table-danger" : "")">
-                        <td>
-                            @if (!string.IsNullOrEmpty(merchant.StoreLink))
-                            {
-                                <a href="@merchant.StoreLink">@merchant.StoreName</a>
-                            }
-                            else
-                            {
-                                @merchant.StoreName
-                            }
-                            @if (merchant.HasError)
-                            {
-                                <br /><span class="badge bg-danger">@merchant.Status</span>
-                            }
-                        </td>
-                        <td>@merchant.StoreCurrency</td>
-                        <td>@merchant.Spread.ToString("0.##")%</td>
-                        <td>
-                            @if (!string.IsNullOrEmpty(merchant.PosLink))
-                            {
-                                <a href="@merchant.PosLink" target="_blank" class="me-1">Open</a>
-                                <button type="button" class="btn btn-sm btn-outline-secondary"
-                                        data-bs-toggle="modal" data-bs-target="#qrModal-@merchant.PosAppId"
-                                        title="Show QR Code">
-                                    <vc:icon symbol="scan-qr" />
-                                </button>
-                            }
-                        </td>
-                        <td>
-                            @if (!string.IsNullOrEmpty(merchant.LoginCodeUrl))
-                            {
-                                var loginModalId = merchant.Email.Replace("@", "_").Replace(".", "_").Replace("+", "_");
-                                <button type="button" class="btn btn-sm btn-outline-primary"
-                                        data-bs-toggle="modal" data-bs-target="#loginModal-@loginModalId"
-                                        title="Login QR Code">
-                                    Login
-                                </button>
-                            }
-                            else if (merchant.IsExistingUser)
-                            {
-                                <span class="text-muted" title="Login codes are disabled for pre-existing accounts for security reasons. This user must log in with their own credentials.">N/A</span>
-                            }
-                        </td>
-                        <td class="text-end">@(merchant.MerchantReport?.InvoiceCount ?? 0)</td>
-                        <td class="text-end">
-                            @if (merchant.MerchantReport != null && merchant.MerchantReport.TotalStoreCurrency > 0)
-                            {
-                                @merchant.MerchantReport.TotalStoreCurrency.ToString("N2")
-                                @merchant.MerchantReport.StoreCurrency
-                            }
-                            else
-                            {
-                                <span class="text-muted">-</span>
-                            }
-                        </td>
-                        <td class="text-end">
-                            @if (merchant.MerchantReport?.PaymentBreakdown?.Count > 0)
-                            {
-                                @foreach (var payment in merchant.MerchantReport.PaymentBreakdown.Values)
+    <div class="widget">
+        <header>
+            <h3>Merchants</h3>
+        </header>
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Merchant</th>
+                        <th>Currency</th>
+                        <th>Spread</th>
+                        <th>POS</th>
+                        <th>Login</th>
+                        <th class="text-end">Invoices</th>
+                        <th class="text-end">Sales</th>
+                        <th class="text-end">Payments</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var merchant in Model.Merchants)
+                    {
+                        <tr class="@(merchant.HasError ? "table-danger" : "")">
+                            <td>
+                                @if (!string.IsNullOrEmpty(merchant.StoreLink))
                                 {
-                                    <span class="d-block">@payment.TotalAmount.ToString("N8") @payment.Currency</span>
+                                    <a href="@merchant.StoreLink">@merchant.StoreName</a>
+                                }
+                                else
+                                {
+                                    @merchant.StoreName
+                                }
+                                @if (merchant.HasError)
+                                {
+                                    <br /><span class="badge text-bg-danger">@merchant.Status</span>
+                                }
+                            </td>
+                            <td>@merchant.StoreCurrency</td>
+                            <td>@merchant.Spread.ToString("0.##")%</td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(merchant.PosLink))
+                                {
+                                    <a href="@merchant.PosLink" target="_blank" class="me-1">Open</a>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                                            data-bs-toggle="modal" data-bs-target="#qrModal-@merchant.PosAppId"
+                                            title="Show QR Code">
+                                        <vc:icon symbol="scan-qr" />
+                                    </button>
+                                }
+                            </td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(merchant.LoginCodeUrl))
+                                {
+                                    var loginModalId = merchant.Email.Replace("@", "_").Replace(".", "_").Replace("+", "_");
+                                    <button type="button" class="btn btn-sm btn-outline-primary"
+                                            data-bs-toggle="modal" data-bs-target="#loginModal-@loginModalId"
+                                            title="Login QR Code">
+                                        Login
+                                    </button>
+                                }
+                                else if (merchant.IsExistingUser)
+                                {
+                                    <span class="text-muted" title="Login codes are disabled for pre-existing accounts for security reasons. This user must log in with their own credentials.">N/A</span>
+                                }
+                            </td>
+                            <td class="text-end">@(merchant.MerchantReport?.InvoiceCount ?? 0)</td>
+                            <td class="text-end">
+                                @if (merchant.MerchantReport != null && merchant.MerchantReport.TotalStoreCurrency > 0)
+                                {
+                                    @merchant.MerchantReport.TotalStoreCurrency.ToString("N2")
+                                    <span class="text-secondary">@merchant.MerchantReport.StoreCurrency</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">-</span>
+                                }
+                            </td>
+                            <td class="text-end">
+                                @if (merchant.MerchantReport?.PaymentBreakdown?.Count > 0)
+                                {
+                                    @foreach (var payment in merchant.MerchantReport.PaymentBreakdown.Values)
+                                    {
+                                        <span class="d-block">@payment.TotalAmount.ToString("N8") <span class="text-secondary">@payment.Currency</span></span>
+                                    }
+                                }
+                                else
+                                {
+                                    <span class="text-muted">-</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot>
+                    <tr class="fw-bold">
+                        <td colspan="5">Total</td>
+                        <td class="text-end">@(Model.Report?.TotalInvoices ?? 0)</td>
+                        <td class="text-end">
+                            @if (Model.Report?.TotalsByStoreCurrency?.Count > 0)
+                            {
+                                @foreach (var total in Model.Report.TotalsByStoreCurrency)
+                                {
+                                    <span class="d-block">@total.Value.ToString("N2") <span class="text-secondary">@total.Key</span></span>
                                 }
                             }
-                            else
-                            {
-                                <span class="text-muted">-</span>
-                            }
                         </td>
+                        <td></td>
                     </tr>
-                }
-            </tbody>
-            <tfoot>
-                <tr class="fw-bold">
-                    <td colspan="5">Total</td>
-                    <td class="text-end">@(Model.Report?.TotalInvoices ?? 0)</td>
-                    <td class="text-end">
-                        @if (Model.Report?.TotalsByStoreCurrency?.Count > 0)
-                        {
-                            @foreach (var total in Model.Report.TotalsByStoreCurrency)
-                            {
-                                <span class="d-block">@total.Value.ToString("N2") @total.Key</span>
-                            }
-                        }
-                    </td>
-                    <td></td>
-                </tr>
-            </tfoot>
-        </table>
+                </tfoot>
+            </table>
+        </div>
     </div>
 }
 else
 {
-    <div class="alert alert-info">
-        No merchants configured. <a asp-action="UpdateSettings" asp-route-appId="@appId">Add merchants</a> to get started.
-    </div>
+    <p class="text-secondary mt-3">No merchants configured. <a asp-action="UpdateSettings" asp-route-appId="@appId">Add merchants</a> to get started.</p>
 }
 
 <!-- QR Code Modals for POS -->
@@ -215,7 +230,7 @@ else
                 <div class="modal-body text-center">
                     <vc:qr-code data="@merchant.LoginCodeUrl" />
                     <p class="mt-2 text-muted">Scan to login as this merchant (expires in 60s)</p>
-                    <a href="@Url.Action("Dashboard", "Conference", new { appId, timeRange = Model.SelectedTimeRange })"
+                    <a asp-action="Dashboard" asp-route-appId="@appId" asp-route-timeRange="@Model.SelectedTimeRange"
                        class="btn btn-outline-primary btn-sm mt-2">
                         Refresh Code
                     </a>
