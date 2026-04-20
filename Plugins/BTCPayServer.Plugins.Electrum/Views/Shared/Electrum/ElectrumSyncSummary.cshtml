@@ -1,0 +1,22 @@
+@using BTCPayServer.Plugins.Electrum.Services
+@inject ElectrumSyncSummaryProvider SyncProvider
+
+@foreach (var status in SyncProvider.GetStatuses().OfType<ElectrumSyncStatus>())
+{
+    <h5 class="d-flex align-items-center fw-semibold">
+        <span class="me-2 btcpay-status btcpay-status--@(status.Available ? "enabled" : "disabled")"></span>
+        @status.PaymentMethodId (Electrum)
+    </h5>
+    <ul>
+        @if (status.Available)
+        {
+            <li>Connected to Electrum server</li>
+            <li>Chain height: @status.ChainHeight</li>
+        }
+        else
+        {
+            <li>Disconnected from Electrum server</li>
+        }
+        <li><a asp-controller="UIElectrum" asp-action="Settings">Configure Electrum server</a></li>
+    </ul>
+}

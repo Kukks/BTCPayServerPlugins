@@ -24,7 +24,7 @@ foreach (var plugin in plugins)
         }
         // if (x.Any(s => s.EndsWith("Altcoins-Debug")))
         // {
-        //     p += $"{Path.GetFullPath(plugin)}/bin/Altcoins-Debug/net8.0/{Path.GetFileName(plugin)}.dll;";
+        //     p += $"{Path.GetFullPath(plugin)}/bin/Altcoins-Debug/net10.0/{Path.GetFileName(plugin)}.dll;";
         // }
         // else
         // {

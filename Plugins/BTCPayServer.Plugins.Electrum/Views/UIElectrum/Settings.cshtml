@@ -1,0 +1,79 @@
+@model BTCPayServer.Plugins.Electrum.ElectrumSettings
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.Plugins.Electrum
+@{
+    ViewData.SetLayoutModel(new LayoutModel("electrum-settings", "Electrum Settings")
+        .SetCategory(WellKnownCategories.Server));
+
+    var currentServer = Model.Server ?? "";
+    var isRandom = currentServer.Equals(ElectrumSettings.RandomServer, StringComparison.OrdinalIgnoreCase);
+    var isTrusted = isRandom || ElectrumSettings.TrustedServers.Any(s => $"{s.Host}:{s.Port}" == currentServer);
+}
+
+<div class="row">
+    <div class="col-xxl-constrain col-xl-8">
+        <form method="post">
+            <div class="form-group">
+                <label class="form-label">Server Selection</label>
+                <select id="trustedServer" class="form-select">
+                    <option value="">Custom server...</option>
+                    <option value="@ElectrumSettings.RandomServer" selected="@isRandom">Random (picks a different trusted server each connection)</option>
+                    @foreach (var server in ElectrumSettings.TrustedServers)
+                    {
+                        var val = $"{server.Host}:{server.Port}";
+                        <option value="@val" selected="@(val == currentServer)">@val</option>
+                    }
+                </select>
+                <span class="text-muted">Public Electrum servers sourced from Sparrow Wallet</span>
+            </div>
+
+            <div class="form-group mt-3">
+                <label asp-for="Server" class="form-label">Electrum Server</label>
+                <input asp-for="Server" class="form-control" placeholder="electrum.example.com:50002" />
+                <span class="text-muted">Host and port, or "random" to pick a random trusted server on each connection</span>
+            </div>
+
+            <div class="form-group mt-3">
+                <label class="form-label d-flex align-items-center gap-2">
+                    <input asp-for="UseTls" type="checkbox" class="btcpay-toggle me-0" />
+                    Use TLS/SSL
+                </label>
+                <span class="text-muted">Most public servers require TLS on port 50002</span>
+            </div>
+
+            <div class="form-group mt-3">
+                <label asp-for="GapLimit" class="form-label">Gap Limit</label>
+                <input asp-for="GapLimit" class="form-control" type="number" min="5" max="100" />
+                <span class="text-muted">Number of unused addresses to maintain per chain (default: 20)</span>
+            </div>
+
+            <button type="submit" class="btn btn-primary mt-4" id="SaveElectrumSettings">Save</button>
+            <button type="submit" name="command" value="test" class="btn btn-secondary mt-4">Test Connection</button>
+        </form>
+
+        @if (ViewBag.StatusMessage != null)
+        {
+            <div class="alert alert-info mt-3">@ViewBag.StatusMessage</div>
+        }
+    </div>
+</div>
+
+<script>
+    document.getElementById('trustedServer').addEventListener('change', function () {
+        const serverInput = document.getElementById('Server');
+        const useTls = document.getElementById('UseTls');
+        if (this.value) {
+            serverInput.value = this.value;
+            useTls.checked = true;
+        }
+    });
+    // If current value is "random", show it in the server input on load
+    (function() {
+        const select = document.getElementById('trustedServer');
+        const serverInput = document.getElementById('Server');
+        if (select.value === '@ElectrumSettings.RandomServer' && !serverInput.value) {
+            serverInput.value = '@ElectrumSettings.RandomServer';
+        }
+    })();
+</script>
