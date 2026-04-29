@@ -21,13 +21,9 @@ public class ConferenceSettingsViewModel
 
     public List<MerchantViewModel> Merchants { get; set; } = new();
 
-    // Re-apply options
-    public bool ReapplyLightning { get; set; }
-    public bool ReapplyCurrency { get; set; }
-    public bool ReapplySpread { get; set; }
-
-    // CSV import result
-    public string StatusMessage { get; set; }
+    // Dashboard / report data (shown in Merchants tab)
+    public ReportTimeRange SelectedTimeRange { get; set; } = ReportTimeRange.Today;
+    public ConferenceReport Report { get; set; }
 }
 
 public class MerchantViewModel
@@ -58,9 +54,10 @@ public class MerchantViewModel
     public bool IsProvisioned { get; set; }
     public bool HasError { get; set; }
 
-    // Login code (generated server-side for plugin-created users)
-    public string LoginCodeUrl { get; set; }
-    public bool HasLoginCode => !string.IsNullOrEmpty(LoginCodeUrl);
     public string PosLink { get; set; }
     public bool IsExistingUser { get; set; }
+    public bool CanGenerateLoginCode { get; set; }
+
+    // Report data for this merchant
+    public MerchantReport MerchantReport { get; set; }
 }

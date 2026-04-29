@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Extensions;
@@ -15,7 +14,6 @@ using BTCPayServer.Plugins.PointOfSale;
 using BTCPayServer.Services.Apps;
 using BTCPayServer.Services.Stores;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -59,13 +57,13 @@ public class ConferenceController : Controller
     // ─── Settings / Admin ──────────────────────────────────────────
 
     [HttpGet("~/plugins/Conference/{appId}/update")]
-    public async Task<IActionResult> UpdateSettings(string appId)
+    public async Task<IActionResult> UpdateSettings(string appId, ReportTimeRange? timeRange)
     {
         var app = await GetConferenceApp(appId);
         if (app == null) return NotFound();
 
         var settings = app.GetSettings<ConferenceSettings>();
-        var vm = await BuildSettingsViewModel(app, settings);
+        var vm = await BuildSettingsViewModel(app, settings, timeRange ?? ReportTimeRange.Today);
         return View("UpdateConferenceSettings", vm);
     }
 
@@ -85,6 +83,13 @@ public class ConferenceController : Controller
 
         TempData[WellKnownTempData.SuccessMessage] = "Conference settings updated";
         return RedirectToAction(nameof(UpdateSettings), new { appId });
+    }
+
+    // Backwards-compat redirect for old Dashboard bookmarks
+    [HttpGet("~/plugins/Conference/{appId}")]
+    public IActionResult Dashboard(string appId, ReportTimeRange? timeRange)
+    {
+        return RedirectToAction(nameof(UpdateSettings), new { appId, timeRange, tab = "merchants" });
     }
 
     // ─── Merchant CRUD ─────────────────────────────────────────────
@@ -384,111 +389,45 @@ public class ConferenceController : Controller
         return RedirectToAction(nameof(UpdateSettings), new { appId });
     }
 
-    // ─── Dashboard ─────────────────────────────────────────────────
+    // ─── Login Code (AJAX) ────────────────────────────────────────
 
-    [HttpGet("~/plugins/Conference/{appId}")]
-    public async Task<IActionResult> Dashboard(string appId, ReportTimeRange? timeRange)
+    [HttpPost("~/plugins/Conference/{appId}/merchants/logincode")]
+    public async Task<IActionResult> GenerateLoginCode(string appId, [FromForm] string email)
     {
         var app = await GetConferenceApp(appId);
         if (app == null) return NotFound();
 
         var settings = app.GetSettings<ConferenceSettings>();
-        var selectedRange = timeRange ?? ReportTimeRange.Today;
+        var merchant = settings.Merchants.FirstOrDefault(
+            m => m.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
 
-        // Generate report
-        var report = await _reportService.GenerateReport(
-            settings.Merchants, selectedRange, HttpContext.RequestAborted);
+        if (merchant == null)
+            return NotFound();
 
-        // Build dashboard view model with live store data
-        var vm = new ConferenceDashboardViewModel
+        if (!merchant.UserCreatedByPlugin || string.IsNullOrEmpty(merchant.UserId))
+            return BadRequest("Login codes are only available for plugin-created users");
+
+        string posLink = null;
+        if (!string.IsNullOrEmpty(merchant.PosAppId))
         {
-            AppId = appId,
-            AppName = app.Name,
-            StoreId = app.StoreDataId,
-            SelectedTimeRange = selectedRange,
-            Report = report
-        };
-
-        foreach (var merchant in settings.Merchants)
-        {
-            var dashMerchant = new DashboardMerchantViewModel
-            {
-                Email = merchant.Email,
-                StoreName = merchant.StoreName,
-                StoreId = merchant.StoreId,
-                PosAppId = merchant.PosAppId,
-                IsExistingUser = !merchant.UserCreatedByPlugin && !string.IsNullOrEmpty(merchant.UserId)
-            };
-
-            // Fetch live data from store
-            if (!string.IsNullOrEmpty(merchant.StoreId))
-            {
-                var store = await _storeRepository.FindStore(merchant.StoreId);
-                if (store != null)
-                {
-                    var blob = store.GetStoreBlob();
-                    dashMerchant.StoreCurrency = blob.DefaultCurrency;
-                    dashMerchant.Spread = blob.Spread * 100m;
-                    dashMerchant.StoreLink = _linkGenerator.GetPathByAction(
-                        "Dashboard", "UIStores", new { storeId = merchant.StoreId },
-                        _btcPayOptions.Value.RootPath);
-                    dashMerchant.Status = "Ready";
-                }
-                else
-                {
-                    dashMerchant.Status = "Store deleted";
-                    dashMerchant.HasError = true;
-                }
-            }
-            else
-            {
-                dashMerchant.Status = "Not provisioned";
-                dashMerchant.HasError = true;
-            }
-
-            // POS link
-            if (!string.IsNullOrEmpty(merchant.PosAppId))
-            {
-                var posApp = await _appService.GetApp(merchant.PosAppId, null, includeArchived: true);
-                if (posApp != null)
-                {
-                    dashMerchant.PosLink = _linkGenerator.GetPathByAction(
-                        "ViewPointOfSale", "UIPointOfSale",
-                        new { appId = merchant.PosAppId },
-                        _btcPayOptions.Value.RootPath);
-                }
-                else
-                {
-                    dashMerchant.Status = "POS deleted";
-                    dashMerchant.HasError = true;
-                }
-            }
-
-            // SECURITY: Only generate login codes for users the plugin created.
-            // Pre-existing users (e.g., server admins) must NOT get login codes
-            // generated for them — that would be a privilege escalation exploit.
-            if (merchant.UserCreatedByPlugin &&
-                !string.IsNullOrEmpty(merchant.UserId) &&
-                !string.IsNullOrEmpty(dashMerchant.PosLink))
-            {
-                dashMerchant.LoginCodeUrl = GenerateLoginCodeUrl(merchant.UserId, dashMerchant.PosLink);
-            }
-
-            // Attach merchant report if available
-            dashMerchant.MerchantReport = report.MerchantReports.FirstOrDefault(
-                r => r.StoreId == merchant.StoreId);
-
-            vm.Merchants.Add(dashMerchant);
+            posLink = _linkGenerator.GetPathByAction(
+                "ViewPointOfSale", "UIPointOfSale",
+                new { appId = merchant.PosAppId },
+                _btcPayOptions.Value.RootPath);
         }
 
-        return View("Dashboard", vm);
+        if (string.IsNullOrEmpty(posLink))
+            return BadRequest("Merchant has no POS configured");
+
+        var loginCodeUrl = GenerateLoginCodeUrl(merchant.UserId, posLink);
+        return PartialView("_LoginCodePartial", loginCodeUrl);
     }
 
     // ─── Helpers ───────────────────────────────────────────────────
 
     private async Task<AppData> GetConferenceApp(string appId)
     {
-        return await _appService.GetApp(appId, ConferenceApp.AppType);
+        return await _appService.GetAppDataIfOwner(GetUserId(), appId, ConferenceApp.AppType);
     }
 
     private string GetUserId() => User.GetId();
@@ -506,7 +445,7 @@ public class ConferenceController : Controller
     }
 
     private async Task<ConferenceSettingsViewModel> BuildSettingsViewModel(
-        AppData app, ConferenceSettings settings)
+        AppData app, ConferenceSettings settings, ReportTimeRange timeRange)
     {
         var vm = new ConferenceSettingsViewModel
         {
@@ -514,8 +453,17 @@ public class ConferenceController : Controller
             AppName = app.Name,
             DefaultLightningConnectionString = settings.DefaultLightningConnectionString,
             DefaultCurrency = settings.DefaultCurrency,
-            DefaultSpread = settings.DefaultSpread
+            DefaultSpread = settings.DefaultSpread,
+            SelectedTimeRange = timeRange
         };
+
+        // Generate sales report for provisioned merchants
+        var provisionedMerchants = settings.Merchants.Where(m => m.IsProvisioned).ToList();
+        if (provisionedMerchants.Count > 0)
+        {
+            vm.Report = await _reportService.GenerateReport(
+                settings.Merchants, timeRange, HttpContext.RequestAborted);
+        }
 
         foreach (var merchant in settings.Merchants)
         {
@@ -533,7 +481,8 @@ public class ConferenceController : Controller
                 Status = health.Summary,
                 IsProvisioned = merchant.IsProvisioned,
                 HasError = !health.IsHealthy && !health.IsNotProvisioned,
-                IsExistingUser = !merchant.UserCreatedByPlugin && !string.IsNullOrEmpty(merchant.UserId)
+                IsExistingUser = !merchant.UserCreatedByPlugin && !string.IsNullOrEmpty(merchant.UserId),
+                CanGenerateLoginCode = merchant.UserCreatedByPlugin && !string.IsNullOrEmpty(merchant.UserId)
             };
 
             if (!string.IsNullOrEmpty(merchant.PosAppId))
@@ -544,11 +493,13 @@ public class ConferenceController : Controller
                     _btcPayOptions.Value.RootPath);
             }
 
-            if (merchant.UserCreatedByPlugin &&
-                !string.IsNullOrEmpty(merchant.UserId) &&
-                !string.IsNullOrEmpty(mvm.PosLink))
+            mvm.CanGenerateLoginCode = mvm.CanGenerateLoginCode && !string.IsNullOrEmpty(mvm.PosLink);
+
+            // Attach merchant report if available
+            if (vm.Report != null)
             {
-                mvm.LoginCodeUrl = GenerateLoginCodeUrl(merchant.UserId, mvm.PosLink);
+                mvm.MerchantReport = vm.Report.MerchantReports.FirstOrDefault(
+                    r => r.StoreId == merchant.StoreId);
             }
 
             vm.Merchants.Add(mvm);

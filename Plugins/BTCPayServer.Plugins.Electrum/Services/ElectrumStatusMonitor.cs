@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Events;
 using BTCPayServer.HostedServices;
+using BTCPayServer.Services;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NBXplorer.Models;
@@ -20,6 +21,7 @@ public class ElectrumStatusMonitor : IHostedService
     private readonly NBXplorerDashboard _dashboard;
     private readonly BTCPayNetworkProvider _networkProvider;
     private readonly EventAggregator _eventAggregator;
+    private readonly SettingsRepository _settingsRepository;
     private readonly ILogger<ElectrumStatusMonitor> _logger;
     private CancellationTokenSource _cts;
     private Task _monitorLoop;
@@ -27,18 +29,22 @@ public class ElectrumStatusMonitor : IHostedService
     public NBXplorerState State { get; private set; } = NBXplorerState.NotConnected;
     public int TipHeight { get; private set; }
     public string ServerVersion { get; private set; }
+    public string ConnectedServer => _client.ConnectedServer;
+    public string ConfiguredServer { get; private set; }
 
     public ElectrumStatusMonitor(
         ElectrumClient client,
         NBXplorerDashboard dashboard,
         BTCPayNetworkProvider networkProvider,
         EventAggregator eventAggregator,
+        SettingsRepository settingsRepository,
         ILogger<ElectrumStatusMonitor> logger)
     {
         _client = client;
         _dashboard = dashboard;
         _networkProvider = networkProvider;
         _eventAggregator = eventAggregator;
+        _settingsRepository = settingsRepository;
         _logger = logger;
     }
 
@@ -83,6 +89,8 @@ public class ElectrumStatusMonitor : IHostedService
     private async Task StepAsync(CancellationToken ct)
     {
         var oldState = State;
+        var settings = await _settingsRepository.GetSettingAsync<ElectrumSettings>();
+        ConfiguredServer = settings?.Server;
 
         if (!_client.IsConnected)
         {

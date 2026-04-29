@@ -1,22 +1,25 @@
-@using BTCPayServer.Plugins.Electrum.Services
-@inject ElectrumSyncSummaryProvider SyncProvider
+@using BTCPayServer.Plugins.Electrum.Controllers
+<div id="electrum-sync-status">
+    <partial name="Electrum/_SyncStatusContent" />
+</div>
 
-@foreach (var status in SyncProvider.GetStatuses().OfType<ElectrumSyncStatus>())
-{
-    <h5 class="d-flex align-items-center fw-semibold">
-        <span class="me-2 btcpay-status btcpay-status--@(status.Available ? "enabled" : "disabled")"></span>
-        @status.PaymentMethodId (Electrum)
-    </h5>
-    <ul>
-        @if (status.Available)
-        {
-            <li>Connected to Electrum server</li>
-            <li>Chain height: @status.ChainHeight</li>
+<script>
+(function () {
+    var container = document.getElementById('electrum-sync-status');
+    if (!container) return;
+    var interval = setInterval(function () {
+        if (!document.getElementById('electrum-sync-status')) {
+            clearInterval(interval);
+            return;
         }
-        else
-        {
-            <li>Disconnected from Electrum server</li>
-        }
-        <li><a asp-controller="UIElectrum" asp-action="Settings">Configure Electrum server</a></li>
-    </ul>
-}
+        fetch('@Url.Action("SyncStatus", "UIElectrum")')
+            .then(function (r) { return r.ok ? r.text() : null; })
+            .then(function (html) {
+                if (html && document.getElementById('electrum-sync-status')) {
+                    container.innerHTML = html;
+                }
+            })
+            .catch(function () {});
+    }, 10000);
+})();
+</script>

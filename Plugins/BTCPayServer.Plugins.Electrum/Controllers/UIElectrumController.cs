@@ -58,4 +58,11 @@ public class UIElectrumController : Controller
         TempData[WellKnownTempData.SuccessMessage] = "Electrum settings updated.";
         return RedirectToAction(nameof(Settings));
     }
+
+    [HttpGet("~/server/electrum/sync-status")]
+    [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie)]
+    public IActionResult SyncStatus()
+    {
+        return PartialView("Electrum/_SyncStatusContent");
+    }
 }

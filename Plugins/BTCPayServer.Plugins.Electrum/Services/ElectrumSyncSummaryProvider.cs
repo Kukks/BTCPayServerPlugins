@@ -9,13 +9,16 @@ public class ElectrumSyncSummaryProvider : ISyncSummaryProvider
 {
     private readonly NBXplorerDashboard _dashboard;
     private readonly BTCPayNetworkProvider _networkProvider;
+    private readonly ElectrumStatusMonitor _monitor;
 
     public ElectrumSyncSummaryProvider(
         NBXplorerDashboard dashboard,
-        BTCPayNetworkProvider networkProvider)
+        BTCPayNetworkProvider networkProvider,
+        ElectrumStatusMonitor monitor)
     {
         _dashboard = dashboard;
         _networkProvider = networkProvider;
+        _monitor = monitor;
     }
 
     public bool AllAvailable()
@@ -35,7 +38,9 @@ public class ElectrumSyncSummaryProvider : ISyncSummaryProvider
             {
                 PaymentMethodId = network.CryptoCode + "-CHAIN",
                 ChainHeight = summary?.Status?.ChainHeight ?? 0,
-                SyncHeight = summary?.Status?.SyncHeight ?? 0
+                SyncHeight = summary?.Status?.SyncHeight ?? 0,
+                ConnectedServer = _monitor.ConnectedServer,
+                ConfiguredServer = _monitor.ConfiguredServer
             };
         }
     }
@@ -47,6 +52,24 @@ public class ElectrumSyncStatus : ISyncStatus
     public bool Available { get; }
     public int ChainHeight { get; set; }
     public int SyncHeight { get; set; }
+    public string ConnectedServer { get; set; }
+    public string ConfiguredServer { get; set; }
+
+    public bool IsConfigured => !string.IsNullOrEmpty(ConfiguredServer);
+
+    public string ServerDisplay
+    {
+        get
+        {
+            if (Available && !string.IsNullOrEmpty(ConnectedServer))
+                return ConnectedServer;
+            if (string.IsNullOrEmpty(ConfiguredServer))
+                return null;
+            return ConfiguredServer.Equals(ElectrumSettings.RandomServer, System.StringComparison.OrdinalIgnoreCase)
+                ? "random server"
+                : ConfiguredServer;
+        }
+    }
 
     public ElectrumSyncStatus(bool available)
     {
