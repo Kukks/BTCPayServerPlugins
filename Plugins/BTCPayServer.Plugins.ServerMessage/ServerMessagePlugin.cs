@@ -9,7 +9,7 @@ public class ServerMessagePlugin : BaseBTCPayServerPlugin
 {
     public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
     {
-        new() { Identifier = nameof(BTCPayServer), Condition = ">=2.3.7" }
+        new() { Identifier = nameof(BTCPayServer), Condition = ">=2.3.8" }
     };
 
     public override void Execute(IServiceCollection services)
@@ -18,7 +18,7 @@ public class ServerMessagePlugin : BaseBTCPayServerPlugin
         services.AddUIExtension("server-nav", "ServerMessage/Nav");
 
         // Admin banner on all authenticated backend pages
-        services.AddUIExtension("header-nav", "ServerMessage/AdminBanner");
+        services.AddUIExtension("layout-banner", "ServerMessage/AdminBanner");
 
         // Public banners on customer-facing pages
         services.AddUIExtension("checkout-end", "ServerMessage/PublicBanner");

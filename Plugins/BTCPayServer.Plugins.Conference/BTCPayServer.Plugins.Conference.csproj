@@ -9,7 +9,7 @@
     <PropertyGroup>
         <Product>Conference</Product>
         <Description>Manage conference merchant stores, POS terminals, and sales reporting from a single app</Description>
-        <Version>1.0.0</Version>
+        <Version>1.1.0</Version>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->

@@ -1,7 +1,7 @@
+@using BTCPayServer.Plugins.Conference
 @using BTCPayServer.Plugins.Conference.ViewModels
 @using Microsoft.AspNetCore.Mvc.TagHelpers
 @using BTCPayServer.Abstractions.Extensions
-@using BTCPayServer.Views.Apps
 @using BTCPayServer
 @using BTCPayServer.Abstractions.Models
 @using BTCPayServer.Services.Apps
@@ -10,22 +10,19 @@
     var appId = Model.AppId;
     var storeId = Context.GetCurrentStoreId();
     var activeTab = Context.Request.Query["tab"].FirstOrDefault();
-    ViewData.SetActivePage(AppsNavPages.Update.ToString(), typeof(AppsNavPages).ToString(), "Conference: " + Model.AppName, appId);
+    ViewData.SetLayoutModel(new LayoutModel($"{nameof(ConferencePlugin)}-{appId}", "Conference: " + Model.AppName));
 }
 
 <div class="sticky-header-setup"></div>
 <div class="sticky-header d-sm-flex align-items-center justify-content-between">
     <h2 class="mb-0">@ViewData["Title"]</h2>
-    <div class="d-flex gap-3 mt-3 mt-sm-0">
-        <a class="btn btn-secondary" asp-action="Dashboard" asp-route-appId="@appId">Dashboard</a>
-    </div>
 </div>
 
 <partial name="_StatusMessage" />
 
 <ul class="nav nav-tabs mb-4" role="tablist">
     <li class="nav-item" role="presentation">
-        <button class="nav-link @(activeTab != "merchants" ? "active" : "")" data-bs-toggle="tab" data-bs-target="#settings-tab" type="button" role="tab">Settings</button>
+        <button class="nav-link @(activeTab is not ("merchants" or "reports") ? "active" : "")" data-bs-toggle="tab" data-bs-target="#settings-tab" type="button" role="tab">Settings</button>
     </li>
     <li class="nav-item" role="presentation">
         <button class="nav-link @(activeTab == "merchants" ? "active" : "")" data-bs-toggle="tab" data-bs-target="#merchants-tab" type="button" role="tab">
@@ -36,11 +33,17 @@
             }
         </button>
     </li>
+    @if (Model.Merchants.Any(m => m.IsProvisioned))
+    {
+        <li class="nav-item" role="presentation">
+            <button class="nav-link @(activeTab == "reports" ? "active" : "")" data-bs-toggle="tab" data-bs-target="#reports-tab" type="button" role="tab">Reports</button>
+        </li>
+    }
 </ul>
 
 <div class="tab-content">
     <!-- Settings Tab -->
-    <div class="tab-pane fade @(activeTab != "merchants" ? "show active" : "")" id="settings-tab" role="tabpanel">
+    <div class="tab-pane fade @(activeTab is not ("merchants" or "reports") ? "show active" : "")" id="settings-tab" role="tabpanel">
         <form method="post" asp-action="UpdateSettings" asp-route-appId="@appId">
             <div class="row">
                 <div class="col-xl-8 col-xxl-constrain">
@@ -92,259 +95,345 @@
 
     <!-- Merchants Tab -->
     <div class="tab-pane fade @(activeTab == "merchants" ? "show active" : "")" id="merchants-tab" role="tabpanel">
-        <!-- CSV Import -->
-        <div class="d-flex gap-3 mb-4 align-items-center">
-            <form method="post" asp-action="ImportCsv" asp-route-appId="@appId" enctype="multipart/form-data" class="d-flex gap-2 align-items-center">
-                <input type="file" name="file" accept=".csv" class="form-control" style="max-width: 300px;" />
-                <button type="submit" class="btn btn-outline-primary">Import CSV</button>
-            </form>
-            <a asp-action="DownloadCsvTemplate" asp-route-appId="@appId" class="btn btn-outline-secondary">Download Template</a>
-            @if (Model.Merchants.Any(m => !m.IsProvisioned))
-            {
-                <form method="post" asp-action="ProvisionAll" asp-route-appId="@appId">
+        @if (Model.Merchants.Any(m => !m.IsProvisioned))
+        {
+            <div class="mb-4">
+                <form method="post" asp-action="ProvisionAll" asp-route-appId="@appId" class="d-inline">
                     <button type="submit" class="btn btn-success">Provision All</button>
                 </form>
-            }
-        </div>
-
-        <!-- Add Merchants -->
-        <div class="card mb-4">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">Add Merchants</h5>
-                <button type="button" class="btn btn-sm btn-outline-secondary" id="addMerchantRow">+ Add Row</button>
             </div>
-            <div class="card-body">
-                <form method="post" asp-action="AddMerchant" asp-route-appId="@appId" id="addMerchantsForm">
-                    <div id="merchantRows">
-                        <div class="row g-3 mb-2 merchant-row">
-                            <div class="col-md-3">
-                                <label class="form-label" data-required>Email</label>
-                                <input type="email" name="emails" class="form-control" required />
-                            </div>
-                            <div class="col-md-3">
-                                <label class="form-label" data-required>Store Name</label>
-                                <input type="text" name="storeNames" class="form-control" required />
-                            </div>
-                            <div class="col-md-2">
-                                <label class="form-label">Currency</label>
-                                <input type="text" name="currencies" class="form-control" placeholder="Default" />
-                            </div>
-                            <div class="col-md-1">
-                                <label class="form-label">Spread</label>
-                                <input type="number" name="spreads" class="form-control" step="0.01" min="0" max="100" />
-                            </div>
-                            <div class="col-md-2">
-                                <label class="form-label">Password</label>
-                                <input type="text" name="passwords" class="form-control" placeholder="Auto" />
-                            </div>
-                            <div class="col-md-1 d-flex align-items-end">
-                                <button type="button" class="btn btn-outline-danger w-100 remove-row" style="visibility:hidden">
-                                    <vc:icon symbol="cross" />
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    <button type="submit" class="btn btn-primary mt-2">Add</button>
-                </form>
-            </div>
-        </div>
+        }
 
-        <!-- Merchant List -->
-        @if (Model.Merchants.Count > 0)
-        {
+        <form method="post" asp-action="AddMerchant" asp-route-appId="@appId" id="addMerchantsForm">
             <div class="table-responsive">
                 <table class="table table-hover">
-                    <thead>
-                        <tr>
-                            <th>Email</th>
-                            <th>Store Name</th>
-                            <th>Currency</th>
-                            <th>Spread</th>
-                            <th>Status</th>
-                            <th>POS</th>
-                            <th>Login</th>
-                            <th class="text-end">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var merchant in Model.Merchants)
-                        {
-                            <tr class="@(merchant.HasError ? "table-danger" : "")">
-                                <td>@merchant.Email</td>
-                                <td>
-                                    @if (!string.IsNullOrEmpty(merchant.StoreId))
-                                    {
-                                        <a asp-controller="UIStores" asp-action="Dashboard" asp-route-storeId="@merchant.StoreId">@merchant.StoreName</a>
-                                    }
-                                    else
-                                    {
-                                        @merchant.StoreName
-                                    }
-                                </td>
-                                <td>@(merchant.Currency ?? "Default")</td>
-                                <td>@(merchant.Spread?.ToString("0.##") ?? "Default")%</td>
-                                <td>
-                                    @if (merchant.HasError)
-                                    {
-                                        <span class="badge text-bg-danger">@merchant.Status</span>
-                                    }
-                                    else if (merchant.IsProvisioned)
-                                    {
-                                        <span class="badge text-bg-success">@merchant.Status</span>
-                                    }
-                                    else
-                                    {
-                                        <span class="badge text-bg-warning">@merchant.Status</span>
-                                    }
-                                </td>
-                                <td>
-                                    @if (!string.IsNullOrEmpty(merchant.PosLink))
-                                    {
-                                        <a href="@merchant.PosLink" target="_blank" class="me-1">Open</a>
-                                        <button type="button" class="btn btn-sm btn-outline-secondary"
-                                                data-bs-toggle="modal" data-bs-target="#posQrModal-@merchant.PosAppId"
-                                                title="POS QR Code">
-                                            <vc:icon symbol="scan-qr" />
-                                        </button>
-                                    }
-                                </td>
-                                <td>
-                                    @if (merchant.HasLoginCode)
-                                    {
-                                        var loginBtnModalId = merchant.Email.Replace("@", "_").Replace(".", "_").Replace("+", "_");
-                                        <button type="button" class="btn btn-sm btn-outline-primary"
-                                                data-bs-toggle="modal" data-bs-target="#loginModal-@loginBtnModalId"
-                                                title="Login QR Code">
-                                            <vc:icon symbol="scan-qr" />
-                                        </button>
-                                    }
-                                    else if (merchant.IsExistingUser)
-                                    {
-                                        <span class="text-muted" title="Login codes are disabled for pre-existing accounts for security reasons.">N/A</span>
-                                    }
-                                </td>
-                                <td class="text-end">
-                                    <div class="d-flex gap-1 justify-content-end">
+                    @if (Model.Merchants.Count > 0)
+                    {
+                        <thead>
+                            <tr>
+                                <th>Email</th>
+                                <th>Store Name</th>
+                                <th>Currency</th>
+                                <th>Spread</th>
+                                <th>Status</th>
+                                <th>POS</th>
+                                <th>Login</th>
+                                <th class="text-end">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var merchant in Model.Merchants)
+                            {
+                                <tr class="@(merchant.HasError ? "table-danger" : "")">
+                                    <td>@merchant.Email</td>
+                                    <td>
+                                        @if (!string.IsNullOrEmpty(merchant.StoreId))
+                                        {
+                                            <a asp-controller="UIStores" asp-action="Dashboard" asp-route-storeId="@merchant.StoreId">@merchant.StoreName</a>
+                                        }
+                                        else
+                                        {
+                                            @merchant.StoreName
+                                        }
+                                    </td>
+                                    <td>@(merchant.Currency ?? "Default")</td>
+                                    <td>@(merchant.Spread?.ToString("0.##") ?? "Default")%</td>
+                                    <td>
+                                        @if (merchant.HasError)
+                                        {
+                                            <span class="badge text-bg-danger">@merchant.Status</span>
+                                        }
+                                        else if (merchant.IsProvisioned)
+                                        {
+                                            <span class="badge text-bg-success">@merchant.Status</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge text-bg-warning">@merchant.Status</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        @if (!string.IsNullOrEmpty(merchant.PosLink))
+                                        {
+                                            <a href="@merchant.PosLink" target="_blank">Link</a>
+                                            <span class="text-muted mx-1">·</span>
+                                            <a href="#" data-bs-toggle="modal" data-bs-target="#posQrModal-@merchant.PosAppId">QR</a>
+                                        }
+                                    </td>
+                                    <td>
+                                        @if (merchant.CanGenerateLoginCode)
+                                        {
+                                            <a href="#" class="login-code-btn"
+                                               data-bs-toggle="modal" data-bs-target="#loginCodeModal"
+                                               data-email="@merchant.Email"
+                                               data-store-name="@merchant.StoreName">Login</a>
+                                        }
+                                        else if (merchant.IsExistingUser)
+                                        {
+                                            <span class="text-muted" title="Login codes are disabled for pre-existing accounts for security reasons.">N/A</span>
+                                        }
+                                    </td>
+                                    <td class="text-end">
                                         @if (!merchant.IsProvisioned && !merchant.HasError)
                                         {
-                                            <form method="post" asp-action="ProvisionMerchant" asp-route-appId="@appId">
+                                            <form method="post" asp-action="ProvisionMerchant" asp-route-appId="@appId" class="d-inline">
                                                 <input type="hidden" name="email" value="@merchant.Email" />
-                                                <button type="submit" class="btn btn-sm btn-outline-success">Provision</button>
+                                                <button type="submit" class="btn btn-link btn-sm p-0 text-success">Provision</button>
                                             </form>
                                         }
                                         @if (merchant.HasError)
                                         {
-                                            <form method="post" asp-action="RepairMerchant" asp-route-appId="@appId">
+                                            <form method="post" asp-action="RepairMerchant" asp-route-appId="@appId" class="d-inline">
                                                 <input type="hidden" name="email" value="@merchant.Email" />
-                                                <button type="submit" class="btn btn-sm btn-outline-warning">Recreate</button>
+                                                <button type="submit" class="btn btn-link btn-sm p-0 text-warning">Repair</button>
                                             </form>
                                         }
-                                        @{var editBtnModalId = merchant.Email.Replace("@", "_").Replace(".", "_").Replace("+", "_");}
-                                        <button type="button" class="btn btn-sm btn-outline-primary"
-                                                data-bs-toggle="modal" data-bs-target="#editMerchant-@editBtnModalId">
-                                            Edit
-                                        </button>
-                                        <form method="post" asp-action="RemoveMerchant" asp-route-appId="@appId"
+                                        @{var editBtnModalId = merchant.Email.Replace("@@", "_").Replace(".", "_").Replace("+", "_");}
+                                        <a href="#" data-bs-toggle="modal" data-bs-target="#editMerchant-@editBtnModalId">Edit</a>
+                                        <span class="text-muted mx-1">·</span>
+                                        <form method="post" asp-action="RemoveMerchant" asp-route-appId="@appId" class="d-inline"
                                               onsubmit="return confirm('Remove this merchant? Their store will be archived.');">
                                             <input type="hidden" name="email" value="@merchant.Email" />
-                                            <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                                            <button type="submit" class="btn btn-link btn-sm p-0 text-danger">Remove</button>
                                         </form>
-                                    </div>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    }
+                    <tbody id="merchantRows"></tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="@(Model.Merchants.Count > 0 ? 8 : 1)">
+                                <button type="button" class="btn btn-link btn-sm p-0" id="addMerchantRow">+ Add Row</button>
+                                <button type="submit" class="btn btn-primary btn-sm ms-2 d-none" id="addMerchantSubmit">Add</button>
+                            </td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
+        </form>
 
-            <!-- Edit Modals -->
-            @foreach (var merchant in Model.Merchants)
-            {
-                var editModalId = merchant.Email.Replace("@", "_").Replace(".", "_").Replace("+", "_");
-                <div class="modal fade" id="editMerchant-@editModalId" tabindex="-1">
-                    <div class="modal-dialog">
-                        <div class="modal-content">
-                            <form method="post" asp-action="UpdateMerchant" asp-route-appId="@appId">
-                                <input type="hidden" name="email" value="@merchant.Email" />
-                                <div class="modal-header">
-                                    <h5 class="modal-title">Edit @merchant.Email</h5>
-                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                </div>
-                                <div class="modal-body">
-                                    <div class="form-group">
-                                        <label class="form-label">Store Name</label>
-                                        <input type="text" name="StoreName" class="form-control" value="@merchant.StoreName" required />
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">Currency (leave blank for default)</label>
-                                        <input type="text" name="Currency" class="form-control" value="@merchant.Currency" />
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">Spread %</label>
-                                        <input type="number" name="Spread" class="form-control" step="0.01" min="0" max="100" value="@merchant.Spread" />
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">Lightning Connection String (leave blank for default)</label>
-                                        <input type="text" name="LightningConnectionString" class="form-control" value="@merchant.LightningConnectionString" />
-                                    </div>
-                                </div>
-                                <div class="modal-footer">
-                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                                    <button type="submit" class="btn btn-primary">Save</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-            }
+        <div class="d-flex gap-2 align-items-center mt-2 mb-3">
+            <form method="post" asp-action="ImportCsv" asp-route-appId="@appId" enctype="multipart/form-data" class="d-flex gap-2 align-items-center">
+                <input type="file" name="file" accept=".csv" class="form-control form-control-sm" style="max-width: 220px;" />
+                <button type="submit" class="btn btn-link btn-sm p-0">Import CSV</button>
+            </form>
+            <a asp-action="DownloadCsvTemplate" asp-route-appId="@appId" class="btn btn-link btn-sm p-0">Template</a>
+        </div>
 
-            <!-- POS QR Modals -->
-            @foreach (var merchant in Model.Merchants.Where(m => !string.IsNullOrEmpty(m.PosLink)))
-            {
-                <div class="modal fade" id="posQrModal-@merchant.PosAppId" tabindex="-1">
-                    <div class="modal-dialog modal-dialog-centered">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title">@merchant.StoreName - POS QR</h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                            </div>
-                            <div class="modal-body text-center">
-                                <vc:qr-code data="@($"{Context.Request.Scheme}://{Context.Request.Host}{merchant.PosLink}")" />
-                                <p class="mt-2 text-muted">Scan to open the Point of Sale</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            }
-
-            <!-- Login Code Modals -->
-            @foreach (var merchant in Model.Merchants.Where(m => m.HasLoginCode))
-            {
-                var loginModalId = merchant.Email.Replace("@", "_").Replace(".", "_").Replace("+", "_");
-                <div class="modal fade" id="loginModal-@loginModalId" tabindex="-1">
-                    <div class="modal-dialog modal-dialog-centered">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title">@merchant.StoreName - Login</h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                            </div>
-                            <div class="modal-body text-center">
-                                <vc:qr-code data="@merchant.LoginCodeUrl" />
-                                <p class="mt-2 text-muted">Scan to login as this merchant and open their POS (expires in 60s)</p>
-                                <a asp-action="UpdateSettings" asp-route-appId="@appId" asp-route-tab="merchants"
-                                   class="btn btn-outline-primary btn-sm mt-2">
-                                    Refresh Code
-                                </a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            }
-        }
-        else
+        <!-- Edit Modals -->
+        @foreach (var merchant in Model.Merchants)
         {
-            <p class="text-muted">No merchants added yet. Import a CSV or add merchants manually above.</p>
+            var editModalId = merchant.Email.Replace("@@", "_").Replace(".", "_").Replace("+", "_");
+            <div class="modal fade" id="editMerchant-@editModalId" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <form method="post" asp-action="UpdateMerchant" asp-route-appId="@appId">
+                            <input type="hidden" name="email" value="@merchant.Email" />
+                            <div class="modal-header">
+                                <h5 class="modal-title">Edit @merchant.Email</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="form-group">
+                                    <label class="form-label">Store Name</label>
+                                    <input type="text" name="StoreName" class="form-control" value="@merchant.StoreName" required />
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Currency (leave blank for default)</label>
+                                    <input type="text" name="Currency" class="form-control" value="@merchant.Currency" />
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Spread %</label>
+                                    <input type="number" name="Spread" class="form-control" step="0.01" min="0" max="100" value="@merchant.Spread" />
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Lightning Connection String (leave blank for default)</label>
+                                    <input type="text" name="LightningConnectionString" class="form-control" value="@merchant.LightningConnectionString" />
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                <button type="submit" class="btn btn-primary">Save</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
         }
+
+        <!-- POS QR Modals -->
+        @foreach (var merchant in Model.Merchants.Where(m => !string.IsNullOrEmpty(m.PosLink)))
+        {
+            <div class="modal fade" id="posQrModal-@merchant.PosAppId" tabindex="-1">
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">@merchant.StoreName - POS QR</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body text-center">
+                            <vc:qr-code data="@($"{Context.Request.Scheme}://{Context.Request.Host}{merchant.PosLink}")" />
+                            <p class="mt-2 text-muted">Scan to open the Point of Sale</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+
+    <!-- Reports Tab -->
+    @if (Model.Merchants.Any(m => m.IsProvisioned))
+    {
+        <div class="tab-pane fade @(activeTab == "reports" ? "show active" : "")" id="reports-tab" role="tabpanel">
+            <div class="btn-group mb-4" role="group">
+                @foreach (var range in new[] { ReportTimeRange.Today, ReportTimeRange.Yesterday, ReportTimeRange.Last7Days })
+                {
+                    var label = range switch
+                    {
+                        ReportTimeRange.Today => "Today",
+                        ReportTimeRange.Yesterday => "Yesterday",
+                        ReportTimeRange.Last7Days => "Last 7 Days",
+                        _ => range.ToString()
+                    };
+                    <a asp-action="UpdateSettings" asp-route-appId="@appId" asp-route-tab="reports" asp-route-timeRange="@range"
+                       class="btn @(Model.SelectedTimeRange == range ? "btn-primary" : "btn-outline-primary")">
+                        @label
+                    </a>
+                }
+            </div>
+
+            @if (Model.Report != null)
+            {
+                <div class="widget store-numbers mb-4">
+                    <div class="store-number">
+                        <header><h6>Invoices</h6></header>
+                        <div class="h3">@Model.Report.TotalInvoices</div>
+                    </div>
+                    @foreach (var total in Model.Report.TotalsByStoreCurrency)
+                    {
+                        <div class="store-number">
+                            <header><h6>Sales (@total.Key)</h6></header>
+                            <div class="h3">@total.Value.ToString("N2") <span class="text-secondary fw-semibold" style="font-size: .65em">@total.Key</span></div>
+                        </div>
+                    }
+                    @if (Model.Report.MerchantReports.Count > 0)
+                    {
+                        @foreach (var group in Model.Report.MerchantReports
+                            .Where(r => r.PaymentBreakdown.Count > 0)
+                            .SelectMany(r => r.PaymentBreakdown.Values)
+                            .GroupBy(p => p.Currency)
+                            .Select(g => new { Currency = g.Key, Total = g.Sum(p => p.TotalAmount) }))
+                        {
+                            <div class="store-number">
+                                <header><h6>Received (@group.Currency)</h6></header>
+                                <div class="h3">@group.Total.ToString("N8") <span class="text-secondary fw-semibold" style="font-size: .65em">@group.Currency</span></div>
+                            </div>
+                        }
+                    }
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Email</th>
+                                <th>Store Name</th>
+                                <th class="text-end">Invoices</th>
+                                <th class="text-end">Sales</th>
+                                <th class="text-end">Payments</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var merchant in Model.Merchants.Where(m => m.IsProvisioned))
+                            {
+                                <tr>
+                                    <td>@merchant.Email</td>
+                                    <td>
+                                        @if (!string.IsNullOrEmpty(merchant.StoreId))
+                                        {
+                                            <a asp-controller="UIStores" asp-action="Dashboard" asp-route-storeId="@merchant.StoreId">@merchant.StoreName</a>
+                                        }
+                                        else
+                                        {
+                                            @merchant.StoreName
+                                        }
+                                    </td>
+                                    <td class="text-end">@(merchant.MerchantReport?.InvoiceCount ?? 0)</td>
+                                    <td class="text-end">
+                                        @if (merchant.MerchantReport != null && merchant.MerchantReport.TotalStoreCurrency > 0)
+                                        {
+                                            @merchant.MerchantReport.TotalStoreCurrency.ToString("N2")
+                                            <span class="text-secondary">@merchant.MerchantReport.StoreCurrency</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted">-</span>
+                                        }
+                                    </td>
+                                    <td class="text-end">
+                                        @if (merchant.MerchantReport?.PaymentBreakdown?.Count > 0)
+                                        {
+                                            @foreach (var payment in merchant.MerchantReport.PaymentBreakdown.Values)
+                                            {
+                                                <span class="d-block">@payment.TotalAmount.ToString("N8") <span class="text-secondary">@payment.Currency</span></span>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted">-</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                        <tfoot>
+                            <tr class="fw-bold">
+                                <td colspan="2">Total</td>
+                                <td class="text-end">@Model.Report.TotalInvoices</td>
+                                <td class="text-end">
+                                    @foreach (var total in Model.Report.TotalsByStoreCurrency)
+                                    {
+                                        <span class="d-block">@total.Value.ToString("N2") <span class="text-secondary">@total.Key</span></span>
+                                    }
+                                </td>
+                                <td class="text-end">
+                                    @foreach (var group in Model.Report.MerchantReports
+                                        .Where(r => r.PaymentBreakdown.Count > 0)
+                                        .SelectMany(r => r.PaymentBreakdown.Values)
+                                        .GroupBy(p => p.Currency)
+                                        .Select(g => new { Currency = g.Key, Total = g.Sum(p => p.TotalAmount) }))
+                                    {
+                                        <span class="d-block">@group.Total.ToString("N8") <span class="text-secondary">@group.Currency</span></span>
+                                    }
+                                </td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+<!-- Shared Login Code Modal (populated via AJAX) -->
+<div class="modal fade" id="loginCodeModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="loginCodeModalTitle">Login</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center" id="loginCodeModalBody">
+                <div class="spinner-border" role="status"></div>
+            </div>
+            <div class="modal-footer justify-content-center">
+                <button type="button" class="btn btn-outline-primary btn-sm" id="loginCodeRefresh">
+                    Refresh Code
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -366,43 +455,77 @@
 
 <script>
 (function () {
-    const container = document.getElementById('merchantRows');
-    const addBtn = document.getElementById('addMerchantRow');
-    const firstRow = container.querySelector('.merchant-row');
+    var container = document.getElementById('merchantRows');
+    var addRowBtn = document.getElementById('addMerchantRow');
+    var submitBtn = document.getElementById('addMerchantSubmit');
+    if (!container || !addRowBtn) return;
 
-    function updateRemoveButtons() {
-        const rows = container.querySelectorAll('.merchant-row');
-        rows.forEach((row, i) => {
-            const btn = row.querySelector('.remove-row');
-            btn.style.visibility = rows.length > 1 ? 'visible' : 'hidden';
+    function createRow() {
+        var tr = document.createElement('tr');
+        tr.className = 'merchant-row';
+        tr.innerHTML =
+            '<td><input type="email" name="emails" class="form-control form-control-sm" placeholder="Email" required /></td>' +
+            '<td><input type="text" name="storeNames" class="form-control form-control-sm" placeholder="Store Name" required /></td>' +
+            '<td><input type="text" name="currencies" class="form-control form-control-sm" placeholder="Default" /></td>' +
+            '<td><input type="number" name="spreads" class="form-control form-control-sm" step="0.01" min="0" max="100" placeholder="%" /></td>' +
+            '<td colspan="3"><input type="text" name="passwords" class="form-control form-control-sm" placeholder="Password (auto)" /></td>' +
+            '<td class="text-end"><a href="#" class="text-danger remove-row">Remove</a></td>';
+        tr.querySelector('.remove-row').addEventListener('click', function (e) {
+            e.preventDefault();
+            tr.remove();
+            updateState();
         });
-        // Only the first row keeps labels
-        rows.forEach((row, i) => {
-            row.querySelectorAll('label').forEach(l => l.style.display = i === 0 ? '' : 'none');
-        });
+        return tr;
     }
 
-    addBtn.addEventListener('click', function () {
-        const clone = firstRow.cloneNode(true);
-        clone.querySelectorAll('input').forEach(input => { input.value = ''; });
-        clone.querySelectorAll('label').forEach(l => l.style.display = 'none');
-        clone.classList.remove('mb-2');
-        clone.classList.add('mb-2');
-        container.appendChild(clone);
-        clone.querySelector('.remove-row').addEventListener('click', function () {
-            clone.remove();
-            updateRemoveButtons();
-        });
-        updateRemoveButtons();
-        clone.querySelector('input[name="emails"]').focus();
+    function updateState() {
+        var rows = container.querySelectorAll('.merchant-row');
+        if (rows.length === 0) {
+            submitBtn.classList.add('d-none');
+        } else {
+            submitBtn.classList.remove('d-none');
+        }
+    }
+
+    addRowBtn.addEventListener('click', function () {
+        var row = createRow();
+        container.appendChild(row);
+        updateState();
+        row.querySelector('input[name="emails"]').focus();
     });
 
-    // Bind remove on existing rows
-    container.querySelectorAll('.remove-row').forEach(btn => {
-        btn.addEventListener('click', function () {
-            btn.closest('.merchant-row').remove();
-            updateRemoveButtons();
-        });
+    var loginModal = document.getElementById('loginCodeModal');
+    if (!loginModal) return;
+
+    var modalTitle = document.getElementById('loginCodeModalTitle');
+    var modalBody = document.getElementById('loginCodeModalBody');
+    var refreshBtn = document.getElementById('loginCodeRefresh');
+    var loginCodeUrl = '@Url.Action("GenerateLoginCode", "Conference", new { appId = Model.AppId })';
+    var currentEmail = '';
+    var currentStoreName = '';
+
+    function fetchLoginCode() {
+        modalBody.innerHTML = '<div class="spinner-border" role="status"></div>';
+        var form = new FormData();
+        form.append('email', currentEmail);
+        fetch(loginCodeUrl, { method: 'POST', body: form, headers: { 'RequestVerificationToken': (document.querySelector('input[name="__RequestVerificationToken"]') || {}).value || '' } })
+            .then(function (r) {
+                if (!r.ok) throw new Error(r.statusText);
+                return r.text();
+            })
+            .then(function (html) { modalBody.innerHTML = html; })
+            .catch(function () { modalBody.innerHTML = '<div class="alert alert-danger mb-0">Failed to generate login code</div>'; });
+    }
+
+    loginModal.addEventListener('show.bs.modal', function (e) {
+        var btn = e.relatedTarget;
+        if (!btn) return;
+        currentEmail = btn.dataset.email;
+        currentStoreName = btn.dataset.storeName;
+        modalTitle.textContent = currentStoreName + ' — Login';
+        fetchLoginCode();
     });
+
+    refreshBtn.addEventListener('click', fetchLoginCode);
 })();
 </script>

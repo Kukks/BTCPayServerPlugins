@@ -59,6 +59,7 @@ public class ElectrumClient : IAsyncDisposable
     private bool _headersSubscribed;
 
     public bool IsConnected { get; private set; }
+    public string ConnectedServer { get; private set; }
 
     public event Action<ElectrumHeaderNotification> OnNewBlock;
     public event Action<string, string> OnScripthashNotification;
@@ -123,6 +124,7 @@ public class ElectrumClient : IAsyncDisposable
 
         _cts = new CancellationTokenSource();
         IsConnected = true;
+        ConnectedServer = $"{host}:{port}";
         _readLoop = Task.Run(() => ReadLoopAsync(_cts.Token));
 
         _logger.LogInformation("Connected to Electrum server {Host}:{Port}", host, port);
@@ -131,6 +133,7 @@ public class ElectrumClient : IAsyncDisposable
     public async Task DisconnectAsync()
     {
         IsConnected = false;
+        ConnectedServer = null;
         _cts?.Cancel();
 
         foreach (var kvp in _pending)
