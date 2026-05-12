@@ -8,7 +8,7 @@ using BTCPayServer.Client;
 using BTCPayServer.Configuration;
 using BTCPayServer.Controllers;
 using BTCPayServer.Data;
-using BTCPayServer.Fido2;
+using BTCPayServer.Plugins.Impersonation;
 using BTCPayServer.Plugins.Conference.ViewModels;
 using BTCPayServer.Plugins.PointOfSale;
 using BTCPayServer.Services.Apps;
@@ -436,12 +436,11 @@ public class ConferenceController : Controller
     {
         using var scope = _serviceProvider.CreateScope();
         var loginCodeService = scope.ServiceProvider.GetRequiredService<UserLoginCodeService>();
-        var loginCode = loginCodeService.GetOrGenerate(userId);
+        var loginCode = loginCodeService.Generate(userId);
 
-        var request = HttpContext.Request;
         return _linkGenerator.LoginCodeLink(
             loginCode, redirectUrl,
-            request.Scheme, request.Host, request.PathBase);
+            HttpContext.Request.GetRequestBaseUrl());
     }
 
     private async Task<ConferenceSettingsViewModel> BuildSettingsViewModel(
