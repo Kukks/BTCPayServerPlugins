@@ -56,6 +56,20 @@
         {
             <div class="alert alert-info mt-3">@ViewBag.StatusMessage</div>
         }
+
+        <div class="mt-5 pt-3 border-top">
+            <h5 class="text-danger">Disable Electrum</h5>
+            <p class="text-muted">
+                Disabling the Electrum plugin will re-enable NBXplorer on the next server restart.
+                Your wallet data and settings will be preserved.
+            </p>
+            <form asp-action="Disable" method="post"
+                  onsubmit="return confirm('Disable Electrum and revert to NBXplorer on next restart?');">
+                <button type="submit" class="btn btn-outline-danger">
+                    Disable Electrum on Next Restart
+                </button>
+            </form>
+        </div>
     </div>
 </div>
 

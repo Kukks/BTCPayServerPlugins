@@ -90,7 +90,12 @@ public class ElectrumStatusMonitor : IHostedService
     {
         var oldState = State;
         var settings = await _settingsRepository.GetSettingAsync<ElectrumSettings>();
-        ConfiguredServer = settings?.Server;
+        if (settings == null)
+        {
+            settings = new ElectrumSettings();
+            await _settingsRepository.UpdateSetting(settings);
+        }
+        ConfiguredServer = settings.Server;
 
         if (!_client.IsConnected)
         {

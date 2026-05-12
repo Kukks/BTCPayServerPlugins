@@ -3,10 +3,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Client;
+using BTCPayServer.Configuration;
 using BTCPayServer.Controllers;
+using BTCPayServer.Plugins;
 using BTCPayServer.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace BTCPayServer.Plugins.Electrum.Controllers;
 
@@ -15,13 +18,16 @@ public class UIElectrumController : Controller
 {
     private readonly SettingsRepository _settingsRepository;
     private readonly ElectrumClient _electrumClient;
+    private readonly IOptions<DataDirectories> _dataDirectories;
 
     public UIElectrumController(
         SettingsRepository settingsRepository,
-        ElectrumClient electrumClient)
+        ElectrumClient electrumClient,
+        IOptions<DataDirectories> dataDirectories)
     {
         _settingsRepository = settingsRepository;
         _electrumClient = electrumClient;
+        _dataDirectories = dataDirectories;
     }
 
     [HttpGet("~/server/electrum")]
@@ -56,6 +62,16 @@ public class UIElectrumController : Controller
 
         await _settingsRepository.UpdateSetting(settings);
         TempData[WellKnownTempData.SuccessMessage] = "Electrum settings updated.";
+        return RedirectToAction(nameof(Settings));
+    }
+
+    [HttpPost("~/server/electrum/disable")]
+    public IActionResult Disable()
+    {
+        PluginManager.QueueCommands(_dataDirectories.Value.PluginDir,
+            ("disable", "BTCPayServer.Plugins.Electrum"));
+        TempData[WellKnownTempData.SuccessMessage] =
+            "Electrum plugin will be disabled on next restart. NBXplorer will be re-enabled.";
         return RedirectToAction(nameof(Settings));
     }
 
