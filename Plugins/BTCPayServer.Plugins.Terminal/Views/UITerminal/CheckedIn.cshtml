@@ -1,0 +1,35 @@
+@model BTCPayServer.Plugins.Terminal.CheckedInViewModel
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@Model.TerminalName — Checked In</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex; align-items: center; justify-content: center;
+            min-height: 100vh; background: #1a1a2e; color: #e0e0e0;
+        }
+        .container { text-align: center; padding: 2rem; }
+        .check { color: #51b13e; font-size: 4rem; margin-bottom: 1rem; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; color: #fff; }
+        p { font-size: 1rem; color: #aaa; margin-bottom: 0.5rem; }
+        .terminal-name { color: #51b13e; font-weight: 600; }
+        .hint { font-size: 0.85rem; color: #666; margin-top: 1.5rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="check">&#10003;</div>
+        <h1>Terminal: <span class="terminal-name">@Model.TerminalName</span></h1>
+        <p>This device is now checked in.</p>
+        <p>All invoices created from this browser will be mapped to this terminal.</p>
+        <p class="hint">You can close this page and start taking payments.</p>
+    </div>
+</body>
+</html>

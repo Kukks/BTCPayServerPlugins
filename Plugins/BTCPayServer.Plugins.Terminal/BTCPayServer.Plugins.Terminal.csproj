@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <LangVersion>12</LangVersion>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <Product>Terminal</Product>
+        <Description>Named checkout terminals with NFC/QR static URLs that redirect to the current active invoice.</Description>
+        <Version>1.0.0</Version>
+        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+        <PreserveCompilationContext>false</PreserveCompilationContext>
+        <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    </PropertyGroup>
+
+    <ItemDefinitionGroup>
+        <ProjectReference>
+            <Properties>StaticWebAssetsEnabled=false</Properties>
+            <Private>false</Private>
+            <ExcludeAssets>runtime;native;build;buildTransitive;contentFiles</ExcludeAssets>
+        </ProjectReference>
+    </ItemDefinitionGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
+    </ItemGroup>
+</Project>

@@ -1,0 +1,39 @@
+@model BTCPayServer.Plugins.Terminal.WaitingViewModel
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content="5" />
+    <title>@Model.TerminalName — Waiting</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex; align-items: center; justify-content: center;
+            min-height: 100vh; background: #1a1a2e; color: #e0e0e0;
+        }
+        .container { text-align: center; padding: 2rem; }
+        h1 { font-size: 1.5rem; margin-bottom: 1rem; color: #fff; }
+        p { font-size: 1.1rem; color: #aaa; margin-bottom: 0.5rem; }
+        .spinner {
+            width: 48px; height: 48px; border: 4px solid #333;
+            border-top-color: #51b13e; border-radius: 50%;
+            animation: spin 1s linear infinite; margin: 2rem auto;
+        }
+        @@keyframes spin { to { transform: rotate(360deg); } }
+        .terminal-name { color: #51b13e; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="spinner"></div>
+        <h1>Terminal: <span class="terminal-name">@Model.TerminalName</span></h1>
+        <p>Waiting for a payment&hellip;</p>
+        <p style="font-size:0.85rem">This page refreshes automatically.</p>
+    </div>
+</body>
+</html>
