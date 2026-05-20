@@ -15,6 +15,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NBitcoin;
 using NBXplorer.DerivationStrategy;
+using NBXplorer.Models;
 
 namespace BTCPayServer.Plugins.Electrum.Services;
 
@@ -236,6 +237,47 @@ public class ElectrumListener : IHostedService
                 });
             }
         }
+
+        // Republish the NBXplorer-shaped NewOnChainTransactionEvent so any
+        // plugin that subscribes to it (boarding-address watchers, custom
+        // payout monitors, OnChainRateTrackerHostedService, etc.) keeps
+        // working when Electrum is the explorer backend. Without this, the
+        // NBXplorerListener removal in ElectrumPlugin.Execute leaves those
+        // subscribers silent — addresses receive tx's that the plugin never
+        // sees. Mirrors what NBXplorerListener publishes on every wallet-
+        // touching wire event.
+        if (txInfo.Transaction is null)
+            return;
+
+        var nbxEvent = new NewTransactionEvent
+        {
+            CryptoCode = network.CryptoCode,
+            DerivationStrategy = txInfo.DerivationStrategy,
+            TrackedSource = new DerivationSchemeTrackedSource(txInfo.DerivationStrategy),
+            TransactionData = new TransactionResult
+            {
+                Transaction = txInfo.Transaction,
+                TransactionHash = txInfo.Transaction.GetHash(),
+                Confirmations = txInfo.Confirmations,
+                Timestamp = txInfo.SeenAt,
+            },
+            // BlockId left null: Electrum's per-tx notification stream
+            // doesn't include the containing block hash. Consumers that
+            // care about "confirmed yet" should check Confirmations > 0.
+            Outputs = txInfo.Outputs.Select(o => new MatchedOutput
+            {
+                Index = o.Index,
+                Value = o.Value,
+                KeyPath = string.IsNullOrEmpty(o.KeyPath) ? null : new KeyPath(o.KeyPath),
+                KeyIndex = o.KeyIndex,
+                ScriptPubKey = txInfo.Transaction.Outputs[o.Index].ScriptPubKey,
+            }).ToList(),
+        };
+        _eventAggregator.Publish(new NewOnChainTransactionEvent
+        {
+            PaymentMethodId = pmi,
+            NewTransactionEvent = nbxEvent,
+        });
     }
 
     private async Task FindPaymentsViaPolling(CancellationToken ct)

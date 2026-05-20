@@ -1125,6 +1125,14 @@ public class ElectrumWalletTracker
         public int Confirmations { get; set; }
         public bool IsRbf { get; set; }
         public DateTimeOffset SeenAt { get; set; }
+        /// <summary>
+        /// The raw transaction. Carried through so the listener can republish
+        /// it on the BTCPay <c>NewOnChainTransactionEvent</c> bus — third-party
+        /// plugins that subscribe to that event (e.g. boarding-address /
+        /// payout-monitoring flows) need access to the inputs and outputs,
+        /// not just the txid.
+        /// </summary>
+        public Transaction Transaction { get; set; }
         public List<OutputInfo> Outputs { get; set; } = new();
     }
 
@@ -1148,7 +1156,8 @@ public class ElectrumWalletTracker
             Confirmations = historyItem.Height > 0 && _tipHeight > 0
                 ? _tipHeight - historyItem.Height + 1 : 0,
             IsRbf = tx.RBF,
-            SeenAt = DateTimeOffset.UtcNow
+            SeenAt = DateTimeOffset.UtcNow,
+            Transaction = tx
         };
 
         // Find outputs that match our tracked addresses
