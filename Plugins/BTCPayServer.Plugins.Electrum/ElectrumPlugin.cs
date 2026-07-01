@@ -2,13 +2,18 @@ using System;
 using System.Linq;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
+using BTCPayServer.Configuration;
 using BTCPayServer.HostedServices;
+using BTCPayServer.Logging;
 using BTCPayServer.Payments.Bitcoin;
 using BTCPayServer.Plugins.Electrum.Data;
 using BTCPayServer.Plugins.Electrum.Services;
 using BTCPayServer.Services;
 using BTCPayServer.Services.Fees;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using NBitcoin;
 
 namespace BTCPayServer.Plugins.Electrum;
 
@@ -21,6 +26,21 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
 
     public override void Execute(IServiceCollection services)
     {
+        // ──────────────────────────────────────────────
+        // 0. Only activate on mainnet
+        // ──────────────────────────────────────────────
+        // Electrum's TrustedServers are all public mainnet servers, so the plugin
+        // can only reach a usable backend on mainnet. On regtest/testnet/signet,
+        // leave BTCPay on its default NBXplorer backend and register nothing.
+        var bootstrap = ((PluginServiceCollection)services).BootstrapServices;
+        var networkType = DefaultConfiguration.GetNetworkType(bootstrap.GetRequiredService<IConfiguration>());
+        if (networkType != ChainName.Mainnet)
+        {
+            bootstrap.GetRequiredService<Logs>().Configuration.LogInformation(
+                $"Electrum plugin only supports mainnet; skipping activation on {networkType}. BTCPay will keep using NBXplorer.");
+            return;
+        }
+
         // ──────────────────────────────────────────────
         // 1. Remove NBXplorer services
         // ──────────────────────────────────────────────

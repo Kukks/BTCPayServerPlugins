@@ -9,7 +9,9 @@ using BTCPayServer.Plugins;
 using BTCPayServer.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.Options;
+using NBitcoin;
 
 namespace BTCPayServer.Plugins.Electrum.Controllers;
 
@@ -17,17 +19,33 @@ namespace BTCPayServer.Plugins.Electrum.Controllers;
 public class UIElectrumController : Controller
 {
     private readonly SettingsRepository _settingsRepository;
-    private readonly ElectrumClient _electrumClient;
+    private readonly BTCPayNetworkProvider _networkProvider;
     private readonly IOptions<DataDirectories> _dataDirectories;
 
     public UIElectrumController(
         SettingsRepository settingsRepository,
-        ElectrumClient electrumClient,
+        BTCPayNetworkProvider networkProvider,
         IOptions<DataDirectories> dataDirectories)
     {
         _settingsRepository = settingsRepository;
-        _electrumClient = electrumClient;
+        _networkProvider = networkProvider;
         _dataDirectories = dataDirectories;
+    }
+
+    // These controller routes are registered as MVC application parts independently
+    // of ElectrumPlugin.Execute, so they still resolve when Electrum is inactive
+    // (non-mainnet, where Execute returns early and registers no Electrum services).
+    // Short-circuit here so an admin hitting the URL sees a clear "inactive" response
+    // instead of a 500 from unresolved services.
+    public override void OnActionExecuting(ActionExecutingContext context)
+    {
+        if (_networkProvider.NetworkType != ChainName.Mainnet)
+        {
+            context.Result = NotFound(
+                $"Electrum is only active on Bitcoin mainnet; it is inactive on {_networkProvider.NetworkType}.");
+            return;
+        }
+        base.OnActionExecuting(context);
     }
 
     [HttpGet("~/server/electrum")]

@@ -42,6 +42,30 @@ public class UITerminalController : Controller
         _btcPayOptions = btcPayOptions;
     }
 
+    // A store has a single Terminal app. "Create" opens the existing one, or provisions
+    // it on first use, so the generic app-creation form never appears for Terminal. This
+    // route shadows the core UIApps create route for the Terminal type specifically
+    // (a literal segment outranks the core "{appType?}" parameter route).
+    [HttpGet("~/stores/{storeId}/apps/create/Terminal")]
+    public async Task<IActionResult> CreateOrOpen(string storeId)
+    {
+        var existing = (await _appService.GetApps(TerminalApp.AppType))
+            .FirstOrDefault(a => a.StoreDataId == storeId);
+        if (existing != null)
+            return RedirectToAction(nameof(UpdateSettings), new { appId = existing.Id });
+
+        var appData = new Data.AppData
+        {
+            StoreDataId = storeId,
+            Name = "Terminal",
+            AppType = TerminalApp.AppType
+        };
+        await _appService.SetDefaultSettings(appData, string.Empty);
+        await _appService.UpdateOrCreateApp(appData);
+
+        return RedirectToAction(nameof(UpdateSettings), new { appId = appData.Id });
+    }
+
     [HttpGet("~/plugins/Terminal/{appId}")]
     public async Task<IActionResult> UpdateSettings(string appId)
     {
@@ -50,7 +74,7 @@ public class UITerminalController : Controller
 
         var settings = app.GetSettings<TerminalSettings>();
         var states = _terminalService.GetTerminalsForApp(appId).ToList();
-        var activeTerminalId = HttpContext.Request.Cookies["btcpay-terminal"];
+        var activeTerminalId = HttpContext.Request.Cookies[TerminalService.CheckInCookieName(app.StoreDataId)];
 
         var vm = new TerminalSettingsViewModel
         {
@@ -120,8 +144,9 @@ public class UITerminalController : Controller
         _terminalService.RegisterTerminals(appId, app.StoreDataId, settings.Terminals);
 
         // Clear cookie if this was the active terminal
-        if (HttpContext.Request.Cookies["btcpay-terminal"] == terminalId)
-            HttpContext.Response.Cookies.Delete("btcpay-terminal");
+        var cookieName = TerminalService.CheckInCookieName(app.StoreDataId);
+        if (HttpContext.Request.Cookies[cookieName] == terminalId)
+            HttpContext.Response.Cookies.Delete(cookieName);
 
         TempData[WellKnownTempData.SuccessMessage] = $"Terminal \"{terminal.Name}\" removed";
         return RedirectToAction(nameof(UpdateSettings), new { appId });
@@ -141,7 +166,7 @@ public class UITerminalController : Controller
             return RedirectToAction(nameof(UpdateSettings), new { appId });
         }
 
-        HttpContext.Response.Cookies.Append("btcpay-terminal", terminalId, new CookieOptions
+        HttpContext.Response.Cookies.Append(TerminalService.CheckInCookieName(app.StoreDataId), terminalId, new CookieOptions
         {
             HttpOnly = true,
             Secure = true,
@@ -159,7 +184,7 @@ public class UITerminalController : Controller
         var app = await GetTerminalApp(appId);
         if (app == null) return NotFound();
 
-        HttpContext.Response.Cookies.Delete("btcpay-terminal");
+        HttpContext.Response.Cookies.Delete(TerminalService.CheckInCookieName(app.StoreDataId));
 
         TempData[WellKnownTempData.SuccessMessage] = "Terminal deactivated on this browser";
         return RedirectToAction(nameof(UpdateSettings), new { appId });
@@ -198,7 +223,7 @@ public class UITerminalController : Controller
         if (terminal == null)
             return NotFound("Terminal not found");
 
-        HttpContext.Response.Cookies.Append("btcpay-terminal", terminalId, new CookieOptions
+        HttpContext.Response.Cookies.Append(TerminalService.CheckInCookieName(terminal.StoreId), terminalId, new CookieOptions
         {
             HttpOnly = true,
             Secure = true,

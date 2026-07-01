@@ -8,6 +8,10 @@ public class TerminalService
 {
     private readonly ConcurrentDictionary<string, TerminalState> _terminals = new();
 
+    // Check-in is scoped per store so a single browser can act as a terminal in each
+    // store independently, without one store's check-in overwriting another's.
+    public static string CheckInCookieName(string storeId) => $"btcpay-terminal-{storeId}";
+
     public void RegisterTerminals(string appId, string storeId, IEnumerable<TerminalData> terminals)
     {
         var currentKeys = _terminals.Where(kv => kv.Value.AppId == appId).Select(kv => kv.Key).ToList();

@@ -12,18 +12,24 @@
 @if (store != null)
 {
     var appType = AppService.GetAppType(TerminalApp.AppType)!;
+    // One Terminal per store: if one already exists, the nav opens it directly;
+    // otherwise it offers the one-time create. This is what keeps a store from
+    // accumulating multiple Terminal apps.
+    var terminalApp = Model.Apps.FirstOrDefault(app => app.AppType == appType.Type);
     <li class="nav-item" permission="@Policies.CanModifyStoreSettings">
-        <a layout-menu-item="CreateApp-@appType.Type" asp-area="" asp-controller="UIApps" asp-action="CreateApp" asp-route-storeId="@store.Id" asp-route-appType="@appType.Type" id="@($"StoreNav-Create{appType.Type}")">
-            <vc:icon symbol="pos-cart" />
-            <span>@appType.Description</span>
-        </a>
-    </li>
-    @foreach (var app in Model.Apps.Where(app => app.AppType == appType.Type))
-    {
-        <li class="nav-item nav-item-sub" permission="@Policies.CanModifyStoreSettings">
-            <a layout-menu-item="@nameof(TerminalPlugin)-@app.Id" asp-area="" asp-controller="UITerminal" asp-action="UpdateSettings" asp-route-appId="@app.Id" id="@($"StoreNav-App-{app.Id}")">
-                <span>@app.AppName</span>
+        @if (terminalApp != null)
+        {
+            <a layout-menu-item="@nameof(TerminalPlugin)-@terminalApp.Id" asp-area="" asp-controller="UITerminal" asp-action="UpdateSettings" asp-route-appId="@terminalApp.Id" id="StoreNav-Terminal">
+                <vc:icon symbol="pos-cart" />
+                <span>@appType.Description</span>
             </a>
-        </li>
-    }
+        }
+        else
+        {
+            <a layout-menu-item="CreateApp-@appType.Type" asp-area="" asp-controller="UITerminal" asp-action="CreateOrOpen" asp-route-storeId="@store.Id" id="@($"StoreNav-Create{appType.Type}")">
+                <vc:icon symbol="pos-cart" />
+                <span>@appType.Description</span>
+            </a>
+        }
+    </li>
 }

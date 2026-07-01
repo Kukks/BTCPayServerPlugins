@@ -6,152 +6,161 @@
 @model TerminalSettingsViewModel
 @{
     var appId = Model.AppId;
-    ViewData.SetLayoutModel(new LayoutModel($"{nameof(TerminalPlugin)}-{appId}", "Terminal: " + Model.AppName));
+    ViewData.SetLayoutModel(new LayoutModel($"{nameof(TerminalPlugin)}-{appId}", "Terminal"));
     var activeTerminal = Model.Terminals.FirstOrDefault(t => t.IsActive);
 }
+
+<style>
+    /* Deliberate role colors, independent of the theme's green so the two tags read
+       as distinct roles instead of competing with green links and buttons. */
+    .badge-checkin { background-color: #e0a100; color: #1a1a1a; }
+    .badge-customer { background-color: #2f74e0; color: #ffffff; }
+    .tag-accent { padding-left: .75rem; border-left: 3px solid var(--bs-border-color); }
+    .tag-accent-checkin { border-left-color: #e0a100; }
+    .tag-accent-customer { border-left-color: #2f74e0; }
+    #qrModalContainer img, #qrModalContainer canvas { display: block; }
+</style>
 
 <div class="sticky-header-setup"></div>
 <div class="sticky-header d-sm-flex align-items-center justify-content-between">
     <h2 class="mb-0">@ViewData["Title"]</h2>
 </div>
 
-<partial name="_StatusMessage" />
-
-@if (activeTerminal != null)
-{
-    <div class="alert alert-info mb-4">
-        This browser is acting as terminal <strong>@activeTerminal.Name</strong> &mdash;
-        all invoices created will be mapped to it.
-    </div>
-}
-
 <div class="row">
-    <div class="col-xl-8 col-xxl-7">
-        <div class="d-flex align-items-center justify-content-between mb-3">
-            <h4 class="mb-0">Terminals</h4>
-        </div>
+    <div class="col-xxl-9">
+        <partial name="_StatusMessage" />
 
-        @if (Model.Terminals.Count == 0)
+        @if (activeTerminal != null)
         {
-            <p class="text-secondary">No terminals configured yet. Add one below to get started.</p>
-        }
-        else
-        {
-            <div class="table-responsive">
-                <table class="table table-hover">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Current Invoice</th>
-                            <th>URLs</th>
-                            <th class="text-end">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var terminal in Model.Terminals)
-                        {
-                            <tr>
-                                <td>
-                                    @terminal.Name
-                                    @if (terminal.IsActive)
-                                    {
-                                        <span class="badge bg-info ms-1">This browser</span>
-                                    }
-                                </td>
-                                <td>
-                                    @if (!string.IsNullOrEmpty(terminal.CurrentInvoiceId))
-                                    {
-                                        <a asp-controller="UIInvoice" asp-action="Invoice" asp-route-invoiceId="@terminal.CurrentInvoiceId" asp-area="">@terminal.CurrentInvoiceId[..8]&hellip;</a>
-                                    }
-                                    else
-                                    {
-                                        <span class="text-secondary">None</span>
-                                    }
-                                </td>
-                                <td>
-                                    <div class="d-flex flex-column gap-1" style="font-size:0.85em">
-                                        <div class="d-flex align-items-center gap-2">
-                                            <span class="badge bg-primary" style="min-width:60px">Customer</span>
-                                            <a href="@terminal.PublicUrl" target="_blank" class="text-break">@terminal.PublicUrl</a>
-                                            <button type="button" class="btn btn-link p-0" onclick="navigator.clipboard.writeText('@terminal.PublicUrl')" title="Copy customer URL">
-                                                <vc:icon symbol="copy" />
-                                            </button>
-                                            <button type="button" class="btn btn-link p-0 btn-write-nfc d-none"
-                                                    data-url="@terminal.PublicUrl"
-                                                    data-name="@terminal.Name — Customer"
-                                                    data-bs-toggle="modal"
-                                                    data-bs-target="#nfcWriteModal"
-                                                    title="Write customer URL to NFC">
-                                                <vc:icon symbol="scan-qr" />
-                                            </button>
-                                        </div>
-                                        <div class="d-flex align-items-center gap-2">
-                                            <span class="badge bg-warning text-dark" style="min-width:60px">Check-in</span>
-                                            <a href="@terminal.CheckInUrl" target="_blank" class="text-break">@terminal.CheckInUrl</a>
-                                            <button type="button" class="btn btn-link p-0" onclick="navigator.clipboard.writeText('@terminal.CheckInUrl')" title="Copy check-in URL">
-                                                <vc:icon symbol="copy" />
-                                            </button>
-                                            <button type="button" class="btn btn-link p-0 btn-write-nfc d-none"
-                                                    data-url="@terminal.CheckInUrl"
-                                                    data-name="@terminal.Name — Check-in"
-                                                    data-bs-toggle="modal"
-                                                    data-bs-target="#nfcWriteModal"
-                                                    title="Write check-in URL to NFC">
-                                                <vc:icon symbol="scan-qr" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td class="text-end">
-                                    <div class="d-inline-flex gap-2">
-                                        @if (terminal.IsActive)
-                                        {
-                                            <form asp-action="DeactivateTerminal" asp-route-appId="@appId" method="post" class="d-inline">
-                                                <button type="submit" class="btn btn-sm btn-outline-warning">Deactivate</button>
-                                            </form>
-                                        }
-                                        else
-                                        {
-                                            <form asp-action="ActivateTerminal" asp-route-appId="@appId" method="post" class="d-inline">
-                                                <input type="hidden" name="terminalId" value="@terminal.Id" />
-                                                <button type="submit" class="btn btn-sm btn-outline-primary">Activate</button>
-                                            </form>
-                                        }
-                                        <form asp-action="RemoveTerminal" asp-route-appId="@appId" method="post" class="d-inline">
-                                            <input type="hidden" name="terminalId" value="@terminal.Id" />
-                                            <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
-                                        </form>
-                                    </div>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
+            <div class="alert alert-info mb-4">
+                This browser is checked in as <strong>@activeTerminal.Name</strong> — every invoice you create here routes to it.
             </div>
         }
 
-        <form asp-action="AddTerminal" asp-route-appId="@appId" method="post" class="mt-3">
+        <div class="bg-tile rounded p-3 mb-4">
+            <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                <p class="text-secondary mb-0 me-3" style="max-width:60ch">
+                    Each terminal is one till, with two links you put on NFC tags or QR codes:
+                    <span class="badge badge-checkin">Check-in</span> the cashier taps once to bind their device, and
+                    <span class="badge badge-customer">Customer</span> the shopper taps to open and pay the current invoice.
+                </p>
+                <button type="button" class="btn btn-sm btn-outline-secondary qr-page text-nowrap" data-bs-toggle="modal" data-bs-target="#qrModal" title="Web NFC needs Chrome on Android — scan to continue there">
+                    <vc:icon symbol="scan-qr" /> Open on phone
+                </button>
+            </div>
+        </div>
+
+        <form asp-action="AddTerminal" asp-route-appId="@appId" method="post" class="mb-4">
             <div class="d-flex gap-2 align-items-end">
-                <div class="form-group mb-0 flex-grow-1">
-                    <label for="name" class="form-label">New Terminal Name</label>
+                <div class="form-group flex-grow-1 mb-0">
+                    <label for="name" class="form-label">Add a terminal</label>
                     <input type="text" id="name" name="name" class="form-control" placeholder="e.g. Counter 1, Register A" required />
                 </div>
-                <button type="submit" class="btn btn-primary">Add Terminal</button>
+                <button type="submit" class="btn btn-primary">Add</button>
             </div>
         </form>
 
-        <div class="mt-4 p-3 bg-tile rounded">
-            <h5>How it works</h5>
-            <ol class="mb-0">
-                <li>Add terminals and give each a name (e.g. "Counter 1")</li>
-                <li>Each terminal has two URLs you can write to NFC tags or print as QR codes:</li>
-                <ul class="mb-1">
-                    <li><span class="badge bg-warning text-dark">Check-in</span> — Cashier taps this to bind their device to the terminal (no login needed)</li>
-                    <li><span class="badge bg-primary">Customer</span> — Customer taps this to open the current invoice's checkout page</li>
-                </ul>
-                <li>Any invoice created from a checked-in browser will automatically map to its terminal</li>
-                <li>Hot-swap terminals by having the cashier tap a different check-in tag</li>
-            </ol>
+        @if (Model.Terminals.Count == 0)
+        {
+            <div class="bg-tile rounded text-center p-5">
+                <div class="mb-2"><vc:icon symbol="pos-cart" /></div>
+                <h5 class="mb-1">No terminals yet</h5>
+                <p class="text-secondary mb-0">Add your first terminal above to start taking tap-to-pay payments.</p>
+            </div>
+        }
+        else
+        {
+            @foreach (var terminal in Model.Terminals)
+            {
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
+                            <div>
+                                <h5 class="mb-1 d-flex align-items-center gap-2">
+                                    @terminal.Name
+                                    @if (terminal.IsActive)
+                                    {
+                                        <span class="badge text-bg-info">Checked in here</span>
+                                    }
+                                </h5>
+                                @if (!string.IsNullOrEmpty(terminal.CurrentInvoiceId))
+                                {
+                                    <span class="small text-secondary">Serving invoice
+                                        <a asp-controller="UIInvoice" asp-action="Invoice" asp-route-invoiceId="@terminal.CurrentInvoiceId" asp-area="">@terminal.CurrentInvoiceId[..8]&hellip;</a>
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="small text-secondary">Idle — no active invoice</span>
+                                }
+                            </div>
+                            <div class="d-inline-flex gap-2">
+                                @if (terminal.IsActive)
+                                {
+                                    <form asp-action="DeactivateTerminal" asp-route-appId="@appId" method="post" class="d-inline">
+                                        <button type="submit" class="btn btn-sm btn-outline-warning">Deactivate</button>
+                                    </form>
+                                }
+                                else
+                                {
+                                    <form asp-action="ActivateTerminal" asp-route-appId="@appId" method="post" class="d-inline">
+                                        <input type="hidden" name="terminalId" value="@terminal.Id" />
+                                        <button type="submit" class="btn btn-sm btn-outline-primary" title="Check this browser in as this terminal">Check in here</button>
+                                    </form>
+                                }
+                                <form asp-action="RemoveTerminal" asp-route-appId="@appId" method="post" class="d-inline">
+                                    <input type="hidden" name="terminalId" value="@terminal.Id" />
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <div class="tag-accent tag-accent-checkin">
+                                    <div class="mb-2"><span class="badge badge-checkin">Check-in</span> <span class="small text-secondary">cashier binds their device</span></div>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary btn-copy-url" data-url="@terminal.CheckInUrl"><vc:icon symbol="actions-copy" /> Copy</button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#qrModal" data-url="@terminal.CheckInUrl" data-name="@terminal.Name — Check-in"><vc:icon symbol="scan-qr" /> QR</button>
+                                        <button type="button" class="btn btn-sm btn-outline-primary btn-write-nfc d-none" data-url="@terminal.CheckInUrl" data-name="@terminal.Name — Check-in" data-bs-toggle="modal" data-bs-target="#nfcWriteModal">Write NFC</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="tag-accent tag-accent-customer">
+                                    <div class="mb-2"><span class="badge badge-customer">Customer</span> <span class="small text-secondary">shopper taps to pay</span></div>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary btn-copy-url" data-url="@terminal.PublicUrl"><vc:icon symbol="actions-copy" /> Copy</button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#qrModal" data-url="@terminal.PublicUrl" data-name="@terminal.Name — Customer"><vc:icon symbol="scan-qr" /> QR</button>
+                                        <button type="button" class="btn btn-sm btn-outline-primary btn-write-nfc d-none" data-url="@terminal.PublicUrl" data-name="@terminal.Name — Customer" data-bs-toggle="modal" data-bs-target="#nfcWriteModal">Write NFC</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+<div class="modal fade" id="qrModal" tabindex="-1" aria-labelledby="qrModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="qrModalTitle">Scan or print</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">
+                    <vc:icon symbol="close" />
+                </button>
+            </div>
+            <div class="modal-body text-center">
+                <div id="qrModalContainer" class="d-inline-block bg-white p-3 rounded"></div>
+                <p class="small text-break text-secondary mt-3 mb-0" id="qrModalUrl"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" id="qrModalPrint">Print</button>
+            </div>
         </div>
     </div>
 </div>
@@ -196,16 +205,71 @@
     </div>
 </div>
 
+<script src="~/js/qrcode.js" asp-append-version="true"></script>
 <script>
 (function () {
-    const supported = 'NDEFReader' in window;
+    const nfcSupported = 'NDEFReader' in window;
 
-    if (supported) {
-        document.querySelectorAll('.btn-write-nfc').forEach(function (btn) {
-            btn.classList.remove('d-none');
+    // On an NFC-capable browser (Chrome/Android) the Write buttons appear and the
+    // "Open on phone" bridge is unnecessary; on desktop it's the other way round.
+    if (nfcSupported) {
+        document.querySelectorAll('.btn-write-nfc').forEach(b => b.classList.remove('d-none'));
+        document.querySelectorAll('.qr-page').forEach(b => b.classList.add('d-none'));
+    }
+
+    // Copy buttons with inline feedback
+    document.querySelectorAll('.btn-copy-url').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const url = btn.getAttribute('data-url');
+            navigator.clipboard.writeText(url).then(function () {
+                const orig = btn.innerHTML;
+                btn.innerHTML = 'Copied';
+                setTimeout(function () { btn.innerHTML = orig; }, 1200);
+            });
+        });
+    });
+
+    // QR modal — renders for a link, or for this page (to continue on a phone)
+    const qrModal = document.getElementById('qrModal');
+    let currentQrUrl = '';
+    let currentQrName = '';
+    const esc = s => (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    if (qrModal) {
+        const container = document.getElementById('qrModalContainer');
+        const urlText = document.getElementById('qrModalUrl');
+        const title = document.getElementById('qrModalTitle');
+
+        qrModal.addEventListener('show.bs.modal', function (e) {
+            const trigger = e.relatedTarget;
+            const isPage = trigger && trigger.classList.contains('qr-page');
+            currentQrUrl = isPage ? window.location.href : (trigger ? trigger.getAttribute('data-url') : '');
+            currentQrName = (trigger && trigger.getAttribute('data-name')) || '';
+            title.textContent = isPage ? 'Open on your phone' : (currentQrName || 'Scan or print');
+            urlText.textContent = isPage
+                ? 'Scan with an Android phone, sign in, then use Write NFC to program tags.'
+                : currentQrUrl;
+            container.innerHTML = '';
+            new QRCode(container, { text: currentQrUrl, width: 220, height: 220, colorDark: '#000000', colorLight: '#ffffff' });
+        });
+
+        document.getElementById('qrModalPrint').addEventListener('click', function () {
+            const node = container.querySelector('canvas, img');
+            if (!node) return;
+            const src = node.tagName === 'CANVAS' ? node.toDataURL() : node.src;
+            const w = window.open('', '_blank');
+            if (!w) return;
+            w.document.write('<html><head><title>' + esc(currentQrName || 'QR') + '</title></head><body style="margin:0;text-align:center;font-family:sans-serif;padding:24px">');
+            if (currentQrName) w.document.write('<h2 style="font-size:18px;margin:0 0 12px">' + esc(currentQrName) + '</h2>');
+            w.document.write('<img src="' + src + '" style="width:260px;height:260px" />');
+            w.document.write('<p style="word-break:break-all;font-size:12px">' + esc(currentQrUrl) + '</p>');
+            w.document.write('</body></html>');
+            w.document.close();
+            w.focus();
+            setTimeout(function () { w.print(); }, 300);
         });
     }
 
+    // NFC write modal
     const modal = document.getElementById('nfcWriteModal');
     if (!modal) return;
 
@@ -247,7 +311,7 @@
     });
 
     btnWrite.addEventListener('click', async function () {
-        if (!supported) {
+        if (!nfcSupported) {
             showState('error');
             elErrorMsg.textContent = 'Web NFC is not supported in this browser. Use Chrome on Android.';
             return;

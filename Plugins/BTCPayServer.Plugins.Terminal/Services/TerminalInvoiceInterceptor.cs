@@ -61,7 +61,7 @@ public class TerminalInvoiceInterceptor : IHostedService
         if (httpContext == null)
             return;
 
-        if (!httpContext.Request.Cookies.TryGetValue("btcpay-terminal", out var terminalId) ||
+        if (!httpContext.Request.Cookies.TryGetValue(TerminalService.CheckInCookieName(evt.Invoice.StoreId), out var terminalId) ||
             string.IsNullOrEmpty(terminalId))
             return;
 

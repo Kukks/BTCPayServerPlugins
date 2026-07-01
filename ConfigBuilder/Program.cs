@@ -13,12 +13,12 @@ foreach (var plugin in plugins)
         var binPath = Path.Combine(plugin, "bin");
         if (!Directory.Exists(binPath)) continue;
 
-        var f = $"{Path.GetFullPath(plugin)}/bin/{buildConfigurationName}/net10.0/{Path.GetFileName(plugin)}.dll";
+        var f = $"{Path.GetFullPath(plugin).Replace("\\", "/")}/bin/{buildConfigurationName}/net10.0/{Path.GetFileName(plugin)}.dll";
         if (File.Exists(f))
             p += $"{f};";
         else
         {
-            f = $"{Path.GetFullPath(plugin)}/bin/Debug/net10.0/{Path.GetFileName(plugin)}.dll";
+            f = $"{Path.GetFullPath(plugin).Replace("\\", "/")}/bin/Debug/net10.0/{Path.GetFileName(plugin)}.dll";
             if (File.Exists(f))
                 p += $"{f};";
         }
