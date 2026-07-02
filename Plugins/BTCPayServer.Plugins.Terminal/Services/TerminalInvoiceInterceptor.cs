@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using BTCPayServer.Client.Models;
 using BTCPayServer.Events;
 using BTCPayServer.Services.Apps;
 using Microsoft.AspNetCore.Http;
@@ -38,19 +39,24 @@ public class TerminalInvoiceInterceptor : IHostedService
 
         _subscription = _eventAggregator.Subscribe<InvoiceEvent>((sub, evt) =>
         {
-            switch (evt.Name)
+            if (evt.Name == InvoiceEvent.Created)
             {
-                case InvoiceEvent.Created:
-                    HandleCreated(evt);
-                    break;
-                case InvoiceEvent.Completed:
-                case InvoiceEvent.Expired:
-                case InvoiceEvent.MarkedInvalid:
-                case InvoiceEvent.FailedToConfirm:
-                case InvoiceEvent.ExpiredPaidPartial:
-                    if (_terminalService.ClearInvoice(evt.Invoice.Id))
-                        _logger.LogInformation("Cleared terminal mapping for finalized invoice {InvoiceId}", evt.Invoice.Id);
-                    break;
+                HandleCreated(evt);
+                return;
+            }
+
+            // Keep serving the invoice while it is awaiting payment (New) or a payment is
+            // confirming (Processing) — a 0-conf payment is not treated as done. Once it
+            // reaches a final state (settled, expired or invalid) it is finished, so stop
+            // serving it and the customer screen returns to "waiting" for the next sale.
+            // Keying off the live status (rather than specific event names) covers every
+            // settlement path, including manual completion (MarkedCompleted -> Settled).
+            var status = evt.Invoice.Status;
+            if ((status == InvoiceStatus.Settled || status == InvoiceStatus.Expired || status == InvoiceStatus.Invalid) &&
+                _terminalService.ClearInvoice(evt.Invoice.Id))
+            {
+                _logger.LogInformation("Terminal stopped serving finished invoice {InvoiceId} ({Status})",
+                    evt.Invoice.Id, status);
             }
         });
     }

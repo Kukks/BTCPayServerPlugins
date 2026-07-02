@@ -89,8 +89,8 @@ public class UITerminalController : Controller
                     Name = t.Name,
                     CurrentInvoiceId = state?.CurrentInvoiceId,
                     IsActive = t.Id == activeTerminalId,
-                    PublicUrl = GetAbsoluteUrl(nameof(RedirectToInvoice), t.Id),
-                    CheckInUrl = GetAbsoluteUrl(nameof(CheckIn), t.Id)
+                    PublicUrl = GetAbsoluteUrl(nameof(RedirectToInvoice), new { hash = TerminalService.CustomerHash(t.Id) }),
+                    CheckInUrl = GetAbsoluteUrl(nameof(CheckIn), new { id = t.Id })
                 };
             }).ToList()
         };
@@ -190,12 +190,14 @@ public class UITerminalController : Controller
         return RedirectToAction(nameof(UpdateSettings), new { appId });
     }
 
-    // Public endpoint — no auth required. NFC/QR tags point here.
+    // Customer-facing endpoint — no auth. Customer NFC/QR tags point here. The route uses a
+    // one-way hash of the terminal id, so seeing this (widely-distributed) URL can't reveal
+    // the cashier check-in URL, which uses the raw id.
     [AllowAnonymous]
-    [HttpGet("~/t/{terminalId}")]
-    public IActionResult RedirectToInvoice(string terminalId)
+    [HttpGet("~/plugins/Terminal/pay/{hash}")]
+    public IActionResult RedirectToInvoice(string hash)
     {
-        var terminal = _terminalService.GetTerminal(terminalId);
+        var terminal = _terminalService.GetTerminalByCustomerHash(hash);
         if (terminal == null)
             return NotFound("Terminal not found");
 
@@ -214,16 +216,18 @@ public class UITerminalController : Controller
         return Redirect(checkoutUrl!);
     }
 
-    // Cashier check-in — no auth required. Tap NFC card to bind this browser to a terminal.
+    // Cashier check-in — no auth. Tapping the check-in tag binds this browser to the terminal
+    // and shows the cashier console (current invoice, clear, check out). Uses the raw id,
+    // which is the cashier-only secret.
     [AllowAnonymous]
-    [HttpGet("~/t/{terminalId}/checkin")]
-    public IActionResult CheckIn(string terminalId)
+    [HttpGet("~/plugins/Terminal/checkin/{id}")]
+    public IActionResult CheckIn(string id)
     {
-        var terminal = _terminalService.GetTerminal(terminalId);
+        var terminal = _terminalService.GetTerminal(id);
         if (terminal == null)
             return NotFound("Terminal not found");
 
-        HttpContext.Response.Cookies.Append(TerminalService.CheckInCookieName(terminal.StoreId), terminalId, new CookieOptions
+        HttpContext.Response.Cookies.Append(TerminalService.CheckInCookieName(terminal.StoreId), id, new CookieOptions
         {
             HttpOnly = true,
             Secure = true,
@@ -234,7 +238,39 @@ public class UITerminalController : Controller
         return View("CheckedIn", new CheckedInViewModel
         {
             TerminalName = terminal.Name,
-            TerminalId = terminal.TerminalId
+            TerminalId = terminal.TerminalId,
+            CurrentInvoiceId = terminal.CurrentInvoiceId
+        });
+    }
+
+    // Clear the invoice the terminal is currently serving (cashier console).
+    [AllowAnonymous]
+    [HttpPost("~/plugins/Terminal/checkin/{id}/clear")]
+    public IActionResult ClearServing(string id)
+    {
+        if (_terminalService.GetTerminal(id) == null)
+            return NotFound("Terminal not found");
+
+        _terminalService.ClearTerminal(id);
+        return RedirectToAction(nameof(CheckIn), new { id });
+    }
+
+    // Check out — deregister this browser from the terminal (cashier console).
+    [AllowAnonymous]
+    [HttpPost("~/plugins/Terminal/checkin/{id}/checkout")]
+    public IActionResult CheckOut(string id)
+    {
+        var terminal = _terminalService.GetTerminal(id);
+        if (terminal == null)
+            return NotFound("Terminal not found");
+
+        HttpContext.Response.Cookies.Delete(TerminalService.CheckInCookieName(terminal.StoreId));
+
+        return View("CheckedIn", new CheckedInViewModel
+        {
+            TerminalName = terminal.Name,
+            TerminalId = terminal.TerminalId,
+            Deregistered = true
         });
     }
 
@@ -245,12 +281,12 @@ public class UITerminalController : Controller
 
     private string GetUserId() => User.GetId();
 
-    private string GetAbsoluteUrl(string action, string terminalId)
+    private string GetAbsoluteUrl(string action, object values)
     {
         var request = HttpContext.Request;
         var path = _linkGenerator.GetPathByAction(
             action, "UITerminal",
-            new { terminalId },
+            values,
             _btcPayOptions.Value.RootPath);
         return $"{request.Scheme}://{request.Host}{path}";
     }
@@ -283,4 +319,6 @@ public class CheckedInViewModel
 {
     public string TerminalName { get; set; }
     public string TerminalId { get; set; }
+    public string CurrentInvoiceId { get; set; }
+    public bool Deregistered { get; set; }
 }

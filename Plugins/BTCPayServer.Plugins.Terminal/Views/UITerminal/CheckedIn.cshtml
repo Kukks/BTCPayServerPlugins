@@ -7,7 +7,11 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>@Model.TerminalName — Checked In</title>
+    @if (!Model.Deregistered)
+    {
+        <meta http-equiv="refresh" content="8" />
+    }
+    <title>@Model.TerminalName — Terminal</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -15,21 +19,54 @@
             display: flex; align-items: center; justify-content: center;
             min-height: 100vh; background: #1a1a2e; color: #e0e0e0;
         }
-        .container { text-align: center; padding: 2rem; }
-        .check { color: #51b13e; font-size: 4rem; margin-bottom: 1rem; }
-        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; color: #fff; }
-        p { font-size: 1rem; color: #aaa; margin-bottom: 0.5rem; }
+        .container { text-align: center; padding: 2rem; width: 100%; max-width: 420px; }
+        .check { color: #51b13e; font-size: 3rem; margin-bottom: .5rem; }
+        h1 { font-size: 1.35rem; margin-bottom: 1rem; color: #fff; }
         .terminal-name { color: #51b13e; font-weight: 600; }
-        .hint { font-size: 0.85rem; color: #666; margin-top: 1.5rem; }
+        .card { background: #23233a; border-radius: 12px; padding: 1.25rem; margin: 1rem 0; }
+        .muted { color: #8a8aa0; font-size: .95rem; }
+        .label { color: #8a8aa0; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+        .inv { font-family: ui-monospace, Menlo, Consolas, monospace; color: #fff; word-break: break-all; margin-top: .25rem; }
+        .btn { display: block; width: 100%; padding: .8rem 1rem; border: 0; border-radius: 10px;
+               font-size: 1rem; font-weight: 600; cursor: pointer; text-decoration: none; }
+        .btn-clear { background: #e0a100; color: #1a1a1a; margin-top: .9rem; }
+        .btn-out { background: transparent; color: #e78a8a; border: 1px solid #5a2b2b; margin-top: .5rem; }
+        .btn-in { background: #51b13e; color: #fff; margin-top: 1rem; }
+        form { margin: 0; }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="check">&#10003;</div>
-        <h1>Terminal: <span class="terminal-name">@Model.TerminalName</span></h1>
-        <p>This device is now checked in.</p>
-        <p>All invoices created from this browser will be mapped to this terminal.</p>
-        <p class="hint">You can close this page and start taking payments.</p>
+        @if (Model.Deregistered)
+        {
+            <h1>Checked out</h1>
+            <p class="muted">This device is no longer bound to <span class="terminal-name">@Model.TerminalName</span>. Invoices you create here will not route to it anymore.</p>
+            <a class="btn btn-in" asp-controller="UITerminal" asp-action="CheckIn" asp-route-id="@Model.TerminalId">Check in again</a>
+        }
+        else
+        {
+            <div class="check">&#10003;</div>
+            <h1>Checked in — <span class="terminal-name">@Model.TerminalName</span></h1>
+
+            <div class="card">
+                @if (!string.IsNullOrEmpty(Model.CurrentInvoiceId))
+                {
+                    <div class="label">Serving invoice</div>
+                    <div class="inv">@Model.CurrentInvoiceId</div>
+                    <form asp-controller="UITerminal" asp-action="ClearServing" asp-route-id="@Model.TerminalId" method="post">
+                        <button type="submit" class="btn btn-clear">Clear invoice</button>
+                    </form>
+                }
+                else
+                {
+                    <div class="muted">No active invoice — waiting for the next sale.</div>
+                }
+            </div>
+
+            <form asp-controller="UITerminal" asp-action="CheckOut" asp-route-id="@Model.TerminalId" method="post">
+                <button type="submit" class="btn btn-out">Check out this device</button>
+            </form>
+        }
     </div>
 </body>
 </html>

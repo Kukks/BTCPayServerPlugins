@@ -1,40 +1,58 @@
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace BTCPayServer.Plugins.Terminal.Services;
 
 public class TerminalService
 {
     private readonly ConcurrentDictionary<string, TerminalState> _terminals = new();
+    private readonly ConcurrentDictionary<string, TerminalState> _byCustomerHash = new();
 
     // Check-in is scoped per store so a single browser can act as a terminal in each
     // store independently, without one store's check-in overwriting another's.
     public static string CheckInCookieName(string storeId) => $"btcpay-terminal-{storeId}";
 
+    // The customer-facing URL uses a one-way hash of the terminal id, so that seeing it
+    // (it is the widely-distributed tag) never reveals the raw id used by the cashier
+    // check-in URL.
+    public static string CustomerHash(string terminalId)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(terminalId));
+        return Convert.ToHexString(bytes)[..16].ToLowerInvariant();
+    }
+
     public void RegisterTerminals(string appId, string storeId, IEnumerable<TerminalData> terminals)
     {
-        var currentKeys = _terminals.Where(kv => kv.Value.AppId == appId).Select(kv => kv.Key).ToList();
-        foreach (var key in currentKeys)
-            _terminals.TryRemove(key, out _);
-
+        RemoveApp(appId);
         foreach (var t in terminals)
         {
-            _terminals[t.Id] = new TerminalState
+            var state = new TerminalState
             {
                 TerminalId = t.Id,
                 Name = t.Name,
                 AppId = appId,
-                StoreId = storeId
+                StoreId = storeId,
+                CustomerHash = CustomerHash(t.Id)
             };
+            _terminals[t.Id] = state;
+            _byCustomerHash[state.CustomerHash] = state;
         }
     }
 
-    public void UnregisterApp(string appId)
+    public void UnregisterApp(string appId) => RemoveApp(appId);
+
+    private void RemoveApp(string appId)
     {
-        var keys = _terminals.Where(kv => kv.Value.AppId == appId).Select(kv => kv.Key).ToList();
-        foreach (var key in keys)
-            _terminals.TryRemove(key, out _);
+        foreach (var kv in _terminals.Where(kv => kv.Value.AppId == appId).ToList())
+        {
+            _terminals.TryRemove(kv.Key, out _);
+            if (kv.Value.CustomerHash != null)
+                _byCustomerHash.TryRemove(kv.Value.CustomerHash, out _);
+        }
     }
 
     public void SetCurrentInvoice(string terminalId, string invoiceId)
@@ -56,9 +74,27 @@ public class TerminalService
         return false;
     }
 
+    // Clears whatever invoice a terminal is currently serving (the cashier's "Clear"
+    // button), regardless of which invoice id it is.
+    public bool ClearTerminal(string terminalId)
+    {
+        if (_terminals.TryGetValue(terminalId, out var state) && state.CurrentInvoiceId != null)
+        {
+            state.CurrentInvoiceId = null;
+            return true;
+        }
+        return false;
+    }
+
     public TerminalState GetTerminal(string terminalId)
     {
         _terminals.TryGetValue(terminalId, out var state);
+        return state;
+    }
+
+    public TerminalState GetTerminalByCustomerHash(string hash)
+    {
+        _byCustomerHash.TryGetValue(hash, out var state);
         return state;
     }
 
@@ -75,4 +111,5 @@ public class TerminalState
     public string AppId { get; set; }
     public string StoreId { get; set; }
     public string CurrentInvoiceId { get; set; }
+    public string CustomerHash { get; set; }
 }
