@@ -103,6 +103,12 @@ public class ConferenceReportService
             }
 
             report.TotalInvoices += mr.InvoiceCount;
+
+            foreach (var payment in mr.PaymentBreakdown.Values)
+            {
+                report.TotalsReceivedByCurrency.TryGetValue(payment.Currency, out var existingReceived);
+                report.TotalsReceivedByCurrency[payment.Currency] = existingReceived + payment.TotalAmount;
+            }
         }
 
         return report;
@@ -137,6 +143,7 @@ public class ConferenceReport
     public DateTimeOffset EndDate { get; set; }
     public List<MerchantReport> MerchantReports { get; set; } = new();
     public Dictionary<string, decimal> TotalsByStoreCurrency { get; set; } = new();
+    public Dictionary<string, decimal> TotalsReceivedByCurrency { get; set; } = new();
     public int TotalInvoices { get; set; }
 }
 

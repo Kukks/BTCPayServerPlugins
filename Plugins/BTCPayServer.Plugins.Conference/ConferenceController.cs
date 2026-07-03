@@ -464,9 +464,11 @@ public class ConferenceController : Controller
                 settings.Merchants, timeRange, HttpContext.RequestAborted);
         }
 
+        var healthByEmail = await _provisioningService.CheckMerchantHealthBatch(settings.Merchants);
+
         foreach (var merchant in settings.Merchants)
         {
-            var health = await _provisioningService.CheckMerchantHealth(merchant);
+            var health = healthByEmail[merchant.Email];
             var mvm = new MerchantViewModel
             {
                 Email = merchant.Email,
