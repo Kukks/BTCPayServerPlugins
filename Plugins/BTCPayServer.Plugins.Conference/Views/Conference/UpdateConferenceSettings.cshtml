@@ -20,12 +20,27 @@
 
 <partial name="_StatusMessage" />
 
+<p class="text-secondary mb-4" style="max-width: 60rem;">
+    Give each merchant in your conference their own store, Point of Sale and login. Add merchants
+    (individually or via CSV), then <strong>Provision</strong> to create their user, store and POS in one
+    step, and hand out a login code or POS QR. Track everyone's combined sales under <strong>Reports</strong>.
+</p>
+
+@{
+    // The Reports tab/pane only exist when a merchant is provisioned, so gate reportsActive
+    // on that and let Settings be the catch-all — otherwise ?tab=reports with no provisioned
+    // merchant activates a pane that was never rendered, leaving a blank page.
+    var hasReports = Model.Merchants.Any(m => m.IsProvisioned);
+    var merchantsActive = activeTab == "merchants";
+    var reportsActive = activeTab == "reports" && hasReports;
+    var settingsActive = !merchantsActive && !reportsActive;
+}
 <ul class="nav nav-tabs mb-4" role="tablist">
     <li class="nav-item" role="presentation">
-        <button class="nav-link @(activeTab is not ("merchants" or "reports") ? "active" : "")" data-bs-toggle="tab" data-bs-target="#settings-tab" type="button" role="tab">Settings</button>
+        <button id="settings-tabBtn" class="nav-link @(settingsActive ? "active" : "")" data-bs-toggle="tab" data-bs-target="#settings-tab" type="button" role="tab" aria-controls="settings-tab" aria-selected="@(settingsActive ? "true" : "false")">Settings</button>
     </li>
     <li class="nav-item" role="presentation">
-        <button class="nav-link @(activeTab == "merchants" ? "active" : "")" data-bs-toggle="tab" data-bs-target="#merchants-tab" type="button" role="tab">
+        <button id="merchants-tabBtn" class="nav-link @(merchantsActive ? "active" : "")" data-bs-toggle="tab" data-bs-target="#merchants-tab" type="button" role="tab" aria-controls="merchants-tab" aria-selected="@(merchantsActive ? "true" : "false")">
             Merchants
             @if (Model.Merchants.Count > 0)
             {
@@ -33,17 +48,17 @@
             }
         </button>
     </li>
-    @if (Model.Merchants.Any(m => m.IsProvisioned))
+    @if (hasReports)
     {
         <li class="nav-item" role="presentation">
-            <button class="nav-link @(activeTab == "reports" ? "active" : "")" data-bs-toggle="tab" data-bs-target="#reports-tab" type="button" role="tab">Reports</button>
+            <button id="reports-tabBtn" class="nav-link @(reportsActive ? "active" : "")" data-bs-toggle="tab" data-bs-target="#reports-tab" type="button" role="tab" aria-controls="reports-tab" aria-selected="@(reportsActive ? "true" : "false")">Reports</button>
         </li>
     }
 </ul>
 
 <div class="tab-content">
     <!-- Settings Tab -->
-    <div class="tab-pane fade @(activeTab is not ("merchants" or "reports") ? "show active" : "")" id="settings-tab" role="tabpanel">
+    <div class="tab-pane fade @(settingsActive ? "show active" : "")" id="settings-tab" role="tabpanel" aria-labelledby="settings-tabBtn">
         <form method="post" asp-action="UpdateSettings" asp-route-appId="@appId">
             <div class="row">
                 <div class="col-xl-8 col-xxl-constrain">
@@ -66,7 +81,7 @@
             </div>
         </form>
 
-        @if (Model.Merchants.Any(m => m.IsProvisioned))
+        @if (hasReports)
         {
             <hr class="my-4" />
             <h4>Re-apply Settings to All Stores</h4>
@@ -94,13 +109,23 @@
     </div>
 
     <!-- Merchants Tab -->
-    <div class="tab-pane fade @(activeTab == "merchants" ? "show active" : "")" id="merchants-tab" role="tabpanel">
-        @if (Model.Merchants.Any(m => !m.IsProvisioned))
+    <div class="tab-pane fade @(merchantsActive ? "show active" : "")" id="merchants-tab" role="tabpanel" aria-labelledby="merchants-tabBtn">
+        @{ var unprovisionedCount = Model.Merchants.Count(m => !m.IsProvisioned); }
+        @if (unprovisionedCount > 0)
         {
             <div class="mb-4">
-                <form method="post" asp-action="ProvisionAll" asp-route-appId="@appId" class="d-inline">
-                    <button type="submit" class="btn btn-success">Provision All</button>
+                <form method="post" asp-action="ProvisionAll" asp-route-appId="@appId" class="d-inline"
+                      onsubmit="return confirm('Provision @unprovisionedCount merchant(s)? This creates a real user, store and POS app for each.');">
+                    <button type="submit" class="btn btn-success">Provision All (@unprovisionedCount)</button>
                 </form>
+            </div>
+        }
+
+        @if (Model.Merchants.Count == 0)
+        {
+            <div class="text-center text-secondary border rounded py-5 mb-3">
+                <p class="mb-1 fw-semibold">No merchants yet</p>
+                <p class="mb-0">Add rows below, or import a CSV, then <strong>Provision</strong> to create their stores.</p>
             </div>
         }
 
@@ -122,8 +147,9 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var merchant in Model.Merchants)
+                            @for (var i = 0; i < Model.Merchants.Count; i++)
                             {
+                                var merchant = Model.Merchants[i];
                                 <tr class="@(merchant.HasError ? "table-danger" : "")">
                                     <td>@merchant.Email</td>
                                     <td>
@@ -137,7 +163,7 @@
                                         }
                                     </td>
                                     <td>@(merchant.Currency ?? "Default")</td>
-                                    <td>@(merchant.Spread?.ToString("0.##") ?? "Default")%</td>
+                                    <td>@(merchant.Spread.HasValue ? merchant.Spread.Value.ToString("0.##") + "%" : "Default")</td>
                                     <td>
                                         @if (merchant.HasError)
                                         {
@@ -188,8 +214,7 @@
                                                 <button type="submit" class="btn btn-link btn-sm p-0 text-warning">Repair</button>
                                             </form>
                                         }
-                                        @{var editBtnModalId = merchant.Email.Replace("@@", "_").Replace(".", "_").Replace("+", "_");}
-                                        <a href="#" data-bs-toggle="modal" data-bs-target="#editMerchant-@editBtnModalId">Edit</a>
+                                        <a href="#" class="btn btn-link btn-sm p-0" data-bs-toggle="modal" data-bs-target="#editMerchant-@i">Edit</a>
                                         <span class="text-muted mx-1">·</span>
                                         <form method="post" asp-action="RemoveMerchant" asp-route-appId="@appId" class="d-inline"
                                               onsubmit="return confirm('Remove this merchant? Their store will be archived.');">
@@ -223,10 +248,10 @@
         </div>
 
         <!-- Edit Modals -->
-        @foreach (var merchant in Model.Merchants)
+        @for (var i = 0; i < Model.Merchants.Count; i++)
         {
-            var editModalId = merchant.Email.Replace("@@", "_").Replace(".", "_").Replace("+", "_");
-            <div class="modal fade" id="editMerchant-@editModalId" tabindex="-1">
+            var merchant = Model.Merchants[i];
+            <div class="modal fade" id="editMerchant-@i" tabindex="-1">
                 <div class="modal-dialog">
                     <div class="modal-content">
                         <form method="post" asp-action="UpdateMerchant" asp-route-appId="@appId">
@@ -284,9 +309,9 @@
     </div>
 
     <!-- Reports Tab -->
-    @if (Model.Merchants.Any(m => m.IsProvisioned))
+    @if (hasReports)
     {
-        <div class="tab-pane fade @(activeTab == "reports" ? "show active" : "")" id="reports-tab" role="tabpanel">
+        <div class="tab-pane fade @(reportsActive ? "show active" : "")" id="reports-tab" role="tabpanel" aria-labelledby="reports-tabBtn">
             <div class="btn-group mb-4" role="group">
                 @foreach (var range in new[] { ReportTimeRange.Today, ReportTimeRange.Yesterday, ReportTimeRange.Last7Days })
                 {
@@ -318,19 +343,12 @@
                             <div class="h3">@total.Value.ToString("N2") <span class="text-secondary fw-semibold" style="font-size: .65em">@total.Key</span></div>
                         </div>
                     }
-                    @if (Model.Report.MerchantReports.Count > 0)
+                    @foreach (var received in Model.Report.TotalsReceivedByCurrency)
                     {
-                        @foreach (var group in Model.Report.MerchantReports
-                            .Where(r => r.PaymentBreakdown.Count > 0)
-                            .SelectMany(r => r.PaymentBreakdown.Values)
-                            .GroupBy(p => p.Currency)
-                            .Select(g => new { Currency = g.Key, Total = g.Sum(p => p.TotalAmount) }))
-                        {
-                            <div class="store-number">
-                                <header><h6>Received (@group.Currency)</h6></header>
-                                <div class="h3">@group.Total.ToString("N8") <span class="text-secondary fw-semibold" style="font-size: .65em">@group.Currency</span></div>
-                            </div>
-                        }
+                        <div class="store-number">
+                            <header><h6>Received (@received.Key)</h6></header>
+                            <div class="h3">@received.Value.ToString("N8") <span class="text-secondary fw-semibold" style="font-size: .65em">@received.Key</span></div>
+                        </div>
                     }
                 </div>
 
@@ -342,7 +360,7 @@
                                 <th>Store Name</th>
                                 <th class="text-end">Invoices</th>
                                 <th class="text-end">Sales</th>
-                                <th class="text-end">Payments</th>
+                                <th class="text-end">Received</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -399,13 +417,9 @@
                                     }
                                 </td>
                                 <td class="text-end">
-                                    @foreach (var group in Model.Report.MerchantReports
-                                        .Where(r => r.PaymentBreakdown.Count > 0)
-                                        .SelectMany(r => r.PaymentBreakdown.Values)
-                                        .GroupBy(p => p.Currency)
-                                        .Select(g => new { Currency = g.Key, Total = g.Sum(p => p.TotalAmount) }))
+                                    @foreach (var received in Model.Report.TotalsReceivedByCurrency)
                                     {
-                                        <span class="d-block">@group.Total.ToString("N8") <span class="text-secondary">@group.Currency</span></span>
+                                        <span class="d-block">@received.Value.ToString("N8") <span class="text-secondary">@received.Key</span></span>
                                     }
                                 </td>
                             </tr>

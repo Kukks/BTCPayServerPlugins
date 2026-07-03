@@ -10,6 +10,7 @@ using BTCPayServer.Plugins.PointOfSale;
 using BTCPayServer.Services.Apps;
 using BTCPayServer.Services.Stores;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json.Linq;
 
@@ -119,6 +120,67 @@ public class ConferenceProvisioningService
         {
             status.PosStatus = "Not provisioned";
         }
+
+        return status;
+    }
+
+    // Batched equivalent of CheckMerchantHealth for the settings page: three queries total
+    // (users, stores, POS apps) instead of three per merchant, which made the page O(N)
+    // round-trips as the roster grew. A component is "OK" when its row still exists
+    // (archived included), matching the single-merchant check.
+    public async Task<Dictionary<string, MerchantHealthStatus>> CheckMerchantHealthBatch(
+        IReadOnlyCollection<ConferenceMerchant> merchants)
+    {
+        var userIds = merchants.Where(m => !string.IsNullOrEmpty(m.UserId)).Select(m => m.UserId).Distinct().ToList();
+        var storeIds = merchants.Where(m => !string.IsNullOrEmpty(m.StoreId)).Select(m => m.StoreId).Distinct().ToArray();
+        var appIds = merchants.Where(m => !string.IsNullOrEmpty(m.PosAppId)).Select(m => m.PosAppId).Distinct().ToArray();
+
+        var existingUserIds = new HashSet<string>();
+        if (userIds.Count > 0)
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            existingUserIds = (await userManager.Users
+                .Where(u => userIds.Contains(u.Id))
+                .Select(u => u.Id)
+                .ToListAsync()).ToHashSet();
+        }
+
+        var existingStoreIds = storeIds.Length == 0
+            ? new HashSet<string>()
+            : (await _storeRepository.GetStores(storeIds)).Select(s => s.Id).ToHashSet();
+
+        var existingAppIds = appIds.Length == 0
+            ? new HashSet<string>()
+            : (await _appService.GetApps(appIds, includeArchived: true)).Select(a => a.Id).ToHashSet();
+
+        var result = new Dictionary<string, MerchantHealthStatus>();
+        foreach (var merchant in merchants)
+            result[merchant.Email] = BuildHealth(merchant, existingUserIds, existingStoreIds, existingAppIds);
+        return result;
+    }
+
+    private static MerchantHealthStatus BuildHealth(
+        ConferenceMerchant merchant,
+        HashSet<string> existingUserIds,
+        HashSet<string> existingStoreIds,
+        HashSet<string> existingAppIds)
+    {
+        var status = new MerchantHealthStatus();
+
+        if (string.IsNullOrEmpty(merchant.UserId))
+        {
+            status.UserStatus = "Not provisioned";
+            return status;
+        }
+
+        status.UserStatus = existingUserIds.Contains(merchant.UserId) ? "OK" : "User deleted";
+        status.StoreStatus = string.IsNullOrEmpty(merchant.StoreId)
+            ? "Not provisioned"
+            : existingStoreIds.Contains(merchant.StoreId) ? "OK" : "Store deleted";
+        status.PosStatus = string.IsNullOrEmpty(merchant.PosAppId)
+            ? "Not provisioned"
+            : existingAppIds.Contains(merchant.PosAppId) ? "OK" : "POS deleted";
 
         return status;
     }
