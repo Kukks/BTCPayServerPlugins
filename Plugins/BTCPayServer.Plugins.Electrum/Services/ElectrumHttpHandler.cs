@@ -93,6 +93,26 @@ public class ElectrumHttpHandler : HttpMessageHandler
                             _logger.LogError(ex, "Background tracking failed for {Strategy}", strategy);
                         }
                     });
+
+                    // Mirror the Track to real NBX (Task 6) so both backends know the wallet,
+                    // regardless of which one is currently authoritative for this store.
+                    var trackCryptoCode = ExtractCryptoCode(path) ?? "BTC";
+                    _ = Task.Run(async () =>
+                    {
+                        if (_realNbx.GetClient(trackCryptoCode) is { } nbx)
+                        {
+                            try
+                            {
+                                var trackNetwork = _networkProvider.GetNetwork<BTCPayNetwork>(trackCryptoCode);
+                                var parsedStrategy = new DerivationStrategyFactory(trackNetwork.NBitcoinNetwork).Parse(strategy);
+                                await nbx.TrackAsync(parsedStrategy, cancellation: CancellationToken.None);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Mirror Track to NBX failed for {Strategy}", strategy);
+                            }
+                        }
+                    });
                     // Return empty 200 — ExplorerClient.TrackAsync uses SendAsync<string>,
                     // which returns default(string) when ContentLength == 0.
                     // Returning JSON like {} would fail string deserialization.
