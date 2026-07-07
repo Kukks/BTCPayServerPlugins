@@ -8,6 +8,7 @@ using BTCPayServer.Plugins.Electrum.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using NBXplorer;
 using NBXplorer.DerivationStrategy;
 using NBXplorer.Models;
 
@@ -26,22 +27,28 @@ public class BackendCoordinator : IHostedService
     private readonly ElectrumDbContextFactory _dbFactory;
     private readonly RealNbxGateway _realNbx;
     private readonly BTCPayNetworkProvider _networkProvider;
+    private readonly IndexFastForwarder _fastForwarder;
+    private readonly ReservedIndexLedger _reservedLedger;
     private readonly ILogger<BackendCoordinator> _logger;
     private CancellationTokenSource _cts;
     private Task _pollTask;
 
     // Dependencies are optional so this remains constructible with `new BackendCoordinator()`
     // in unit tests that only exercise the pure Get/Set/Decide surface. When resolved via DI
-    // (ElectrumPlugin.cs), all four are registered singletons and always supplied.
+    // (ElectrumPlugin.cs), all six are registered singletons and always supplied.
     public BackendCoordinator(
         ElectrumDbContextFactory dbFactory = null,
         RealNbxGateway realNbx = null,
         BTCPayNetworkProvider networkProvider = null,
+        IndexFastForwarder fastForwarder = null,
+        ReservedIndexLedger reservedLedger = null,
         ILogger<BackendCoordinator> logger = null)
     {
         _dbFactory = dbFactory;
         _realNbx = realNbx;
         _networkProvider = networkProvider;
+        _fastForwarder = fastForwarder;
+        _reservedLedger = reservedLedger;
         _logger = logger;
     }
 
@@ -63,7 +70,7 @@ public class BackendCoordinator : IHostedService
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        if (_dbFactory == null || _realNbx == null || _networkProvider == null)
+        if (_dbFactory == null || _realNbx == null || _networkProvider == null || _fastForwarder == null || _reservedLedger == null)
             return Task.CompletedTask; // not wired for polling (e.g. constructed directly in a test)
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -89,6 +96,15 @@ public class BackendCoordinator : IHostedService
 
     private async Task PollLoopAsync(CancellationToken ct)
     {
+        try
+        {
+            await SeedReservedLedgerFromNbxAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Startup ledger seed from NBX failed");
+        }
+
         while (!ct.IsCancellationRequested)
         {
             try
@@ -160,7 +176,91 @@ public class BackendCoordinator : IHostedService
                 _logger?.LogDebug(ex, "Failed to check NBX tracking for wallet {WalletId}", walletId);
             }
 
-            SetActiveBackend(walletId, DecideBackend(nbxSynced, trackedInNbx));
+            var newBackend = DecideBackend(nbxSynced, trackedInNbx);
+            var currentBackend = GetActiveBackend(walletId);
+
+            // Only fast-forward on an actual transition — fast-forwarding every poll
+            // (even when the backend hasn't changed) would burn addresses for no reason.
+            if (newBackend != currentBackend)
+            {
+                try
+                {
+                    await _fastForwarder.FastForwardAsync(walletId, newBackend, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Fast-forward failed for wallet {WalletId} transitioning to {Backend}; skipping flip this poll", walletId, newBackend);
+                    continue; // don't flip if we couldn't clear the high-water first
+                }
+            }
+
+            SetActiveBackend(walletId, newBackend);
         }
     }
+
+    // NBXplorer exposes no "list all tracked derivation schemes" API, so a true NBX -> Electrum
+    // discovery of wallets Electrum has never seen is not possible. We can only seed the ledger
+    // for wallets already present in the Electrum DB (TrackedWallets) — this reconciles those
+    // wallets' reserved-index high-water with whatever NBX already handed out, so Electrum
+    // starts life as a no-reuse standby for them. Wallets NBX tracks but Electrum has never
+    // seen reach both backends when BTCPay re-tracks each store's derivation on startup, which
+    // flows through the handler's mirror-Track.
+    private async Task SeedReservedLedgerFromNbxAsync(CancellationToken ct)
+    {
+        List<TrackedWallet> wallets;
+        try
+        {
+            await using var ctx = _dbFactory.CreateContext();
+            wallets = await ctx.TrackedWallets.ToListAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug(ex, "Failed to load tracked wallets for startup ledger seed");
+            return;
+        }
+
+        foreach (var wallet in wallets)
+        {
+            var nbx = _realNbx.GetClient(wallet.CryptoCode);
+            if (nbx == null)
+                continue;
+
+            var network = _networkProvider.GetNetwork<BTCPayNetwork>(wallet.CryptoCode);
+            if (network == null)
+                continue;
+
+            DerivationStrategyBase strategy;
+            try
+            {
+                strategy = new DerivationStrategyFactory(network.NBitcoinNetwork).Parse(wallet.DerivationStrategy);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "Failed to parse derivation strategy for wallet {WalletId} during ledger seed", wallet.Id);
+                continue;
+            }
+
+            foreach (var isChange in new[] { false, true })
+            {
+                var feature = isChange ? DerivationFeature.Change : DerivationFeature.Deposit;
+                try
+                {
+                    var info = await nbx.GetUnusedAsync(strategy, feature, 0, false, ct);
+                    var index = info?.Index ?? GetLastKeyPathIndex(info);
+                    if (index is not { } nextIndex)
+                        continue; // NBX has no record for this wallet/feature yet
+
+                    if (nextIndex > 0)
+                        await _reservedLedger.RecordReserveAsync(wallet.Id, isChange, nextIndex - 1, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogDebug(ex, "Failed to read NBX next index for wallet {WalletId} feature {Feature} during ledger seed", wallet.Id, feature);
+                }
+            }
+        }
+    }
+
+    private static int? GetLastKeyPathIndex(KeyPathInformation info) =>
+        info?.KeyPath?.Indexes is { Length: > 0 } indexes ? (int)indexes[^1] : null;
 }
