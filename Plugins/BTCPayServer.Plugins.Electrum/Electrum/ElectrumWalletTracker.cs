@@ -19,6 +19,7 @@ public class ElectrumWalletTracker
     private readonly ElectrumClient _client;
     private readonly ElectrumDbContextFactory _dbFactory;
     private readonly BTCPayNetworkProvider _networkProvider;
+    private readonly Services.ReservedIndexLedger _reservedLedger;
     private readonly ElectrumSettings _settings;
     private readonly ILogger<ElectrumWalletTracker> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
@@ -36,11 +37,13 @@ public class ElectrumWalletTracker
         ElectrumDbContextFactory dbFactory,
         BTCPayNetworkProvider networkProvider,
         SettingsRepository settingsRepository,
+        Services.ReservedIndexLedger reservedLedger,
         ILogger<ElectrumWalletTracker> logger)
     {
         _client = client;
         _dbFactory = dbFactory;
         _networkProvider = networkProvider;
+        _reservedLedger = reservedLedger;
         _logger = logger;
         ElectrumSettings settings = null;
         try
@@ -425,6 +428,9 @@ public class ElectrumWalletTracker
         {
             addr.IsUsed = true;
             await ctx.SaveChangesAsync(ct);
+
+            if (int.TryParse(addr.KeyPath.Split('/')[1], out var reservedIndex))
+                await _reservedLedger.RecordReserveAsync(strategyStr, isChange, reservedIndex, ct);
         }
 
         var script = Script.FromBytesUnsafe(addr.ScriptPubKey);

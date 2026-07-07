@@ -30,6 +30,7 @@ public class ElectrumHttpHandler : HttpMessageHandler
     private readonly BTCPayNetworkProvider _networkProvider;
     private readonly BackendCoordinator _coordinator;
     private readonly RealNbxGateway _realNbx;
+    private readonly ReservedIndexLedger _reservedLedger;
     private readonly ILogger<ElectrumHttpHandler> _logger;
 
     public ElectrumHttpHandler(
@@ -37,12 +38,14 @@ public class ElectrumHttpHandler : HttpMessageHandler
         BTCPayNetworkProvider networkProvider,
         BackendCoordinator coordinator,
         RealNbxGateway realNbx,
+        ReservedIndexLedger reservedLedger,
         ILogger<ElectrumHttpHandler> logger)
     {
         _tracker = tracker;
         _networkProvider = networkProvider;
         _coordinator = coordinator;
         _realNbx = realNbx;
+        _reservedLedger = reservedLedger;
         _logger = logger;
     }
 
@@ -72,7 +75,19 @@ public class ElectrumHttpHandler : HttpMessageHandler
             if (useNbx && _realNbx.GetClient(routeCryptoCode) != null)
             {
                 _logger.LogDebug("Routing {Method} {Path} to real NBX ({Kind})", method, path, call.Kind);
-                return await ProxyToRealNbxAsync(request, cancellationToken);
+                var proxied = await ProxyToRealNbxAsync(request, cancellationToken);
+
+                // The "reserve new address" mutation is proxied verbatim above, but the
+                // reserved-index ledger must stay authoritative regardless of which backend
+                // actually served it — peek the response and record the reserved index.
+                if (call.Kind == NbxCallKind.WalletMutate && call.WalletId != null &&
+                    path.Contains("/addresses/unused"))
+                {
+                    proxied = await PeekAndRecordNbxReserveAsync(
+                        proxied, call.WalletId, routeCryptoCode, cancellationToken);
+                }
+
+                return proxied;
             }
 
             // POST /v1/cryptos/{code}/derivations — GenerateWallet or Track
@@ -444,6 +459,55 @@ public class ElectrumHttpHandler : HttpMessageHandler
         }
 
         return await _proxyClient.SendAsync(clone, cancellationToken);
+    }
+
+    // Peeks the buffered body of a proxied "reserve new address" response so the reserved-
+    // index ledger records the index NBX just handed out, without changing what the caller
+    // (ExplorerClient) receives. The content is always rebuilt from the buffered bytes —
+    // even if deserialization/recording fails — so a ledger error can never affect the
+    // response passed back to the caller.
+    private async Task<HttpResponseMessage> PeekAndRecordNbxReserveAsync(
+        HttpResponseMessage response, string walletId, string cryptoCode, CancellationToken ct)
+    {
+        if (!response.IsSuccessStatusCode || response.Content == null)
+            return response;
+
+        byte[] bytes;
+        try
+        {
+            bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to buffer proxied NBX reserve response for {WalletId}", walletId);
+            return response;
+        }
+
+        var oldContentHeaders = response.Content.Headers;
+        var rebuilt = new ByteArrayContent(bytes);
+        foreach (var header in oldContentHeaders)
+            rebuilt.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        response.Content = rebuilt;
+
+        try
+        {
+            var network = _networkProvider.GetNetwork<BTCPayNetwork>(cryptoCode);
+            var jsonSettings = network?.NBXplorerNetwork?.JsonSerializerSettings;
+            var json = System.Text.Encoding.UTF8.GetString(bytes);
+            var info = JsonConvert.DeserializeObject<KeyPathInformation>(json, jsonSettings);
+            if (info?.KeyPath?.Indexes is { Length: > 0 } indexes)
+            {
+                var index = (int)indexes[^1];
+                var isChange = info.Feature == DerivationFeature.Change;
+                await _reservedLedger.RecordReserveAsync(walletId, isChange, index, ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to record NBX-served reserve for {WalletId}", walletId);
+        }
+
+        return response;
     }
 
     private string ExtractStrategy(string path)
