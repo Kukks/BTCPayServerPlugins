@@ -15,6 +15,7 @@ public class ElectrumSettings
         set => _gapLimit = Math.Clamp(value, 1, MaxGapLimit);
     }
     public string CryptoCode { get; set; } = "BTC";
+    public bool AllowNonMainnet { get; set; }
 
     /// <summary>
     /// Trusted public Electrum servers sourced from Sparrow Wallet.

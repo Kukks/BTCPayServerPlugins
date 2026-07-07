@@ -24,6 +24,12 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
         new() { Identifier = nameof(BTCPayServer), Condition = ">=2.3.7" }
     };
 
+    // Escape hatch for tests: allows the mainnet-only guard below to be bypassed
+    // (e.g. on regtest) via BTCPAY_ELECTRUM_ALLOWNONMAINNET=true. Production deployments
+    // should never need this — Electrum's TrustedServers are all public mainnet servers.
+    public static bool AllowNonMainnet(IConfiguration config) =>
+        config.GetValue<bool>("ELECTRUM_ALLOWNONMAINNET", false);
+
     public override void Execute(IServiceCollection services)
     {
         // ──────────────────────────────────────────────
@@ -34,7 +40,7 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
         // leave BTCPay on its default NBXplorer backend and register nothing.
         var bootstrap = ((PluginServiceCollection)services).BootstrapServices;
         var networkType = DefaultConfiguration.GetNetworkType(bootstrap.GetRequiredService<IConfiguration>());
-        if (networkType != ChainName.Mainnet)
+        if (networkType != ChainName.Mainnet && !AllowNonMainnet(bootstrap.GetRequiredService<IConfiguration>()))
         {
             bootstrap.GetRequiredService<Logs>().Configuration.LogInformation(
                 $"Electrum plugin only supports mainnet; skipping activation on {networkType}. BTCPay will keep using NBXplorer.");

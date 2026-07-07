@@ -9,9 +9,9 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.1.0" />
-        <PackageReference Include="xunit" Version="2.4.2" />
-        <PackageReference Include="xunit.runner.visualstudio" Version="2.4.5">
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
+        <PackageReference Include="xunit.v3" Version="3.2.2" />
+        <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
           <PrivateAssets>all</PrivateAssets>
           <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
@@ -20,6 +20,8 @@
     <ItemGroup>
       <ProjectReference Include="..\Plugins\BTCPayServer.Plugins.Wabisabi\BTCPayServer.Plugins.Wabisabi.csproj" />
       <ProjectReference Include="..\submodules\walletwasabi\WalletWasabi\WalletWasabi.csproj" />
+      <ProjectReference Include="..\Plugins\BTCPayServer.Plugins.Electrum\BTCPayServer.Plugins.Electrum.csproj" />
+      <ProjectReference Include="..\submodules\btcpayserver\BTCPayServer.Tests\BTCPayServer.Tests.csproj" />
     </ItemGroup>
 
 </Project>
