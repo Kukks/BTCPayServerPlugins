@@ -121,6 +121,18 @@ public class ElectrumHttpHandler : HttpMessageHandler
                                 var trackNetwork = _networkProvider.GetNetwork<BTCPayNetwork>(trackCryptoCode);
                                 var parsedStrategy = new DerivationStrategyFactory(trackNetwork.NBitcoinNetwork).Parse(strategy);
                                 await nbx.TrackAsync(parsedStrategy, cancellation: CancellationToken.None);
+
+                                // Request a UTXO-set rescan so NBX rediscovers the wallet's
+                                // historical txs — otherwise a flip to NBX under-reports the
+                                // balance of an imported wallet with pre-existing activity.
+                                try
+                                {
+                                    await nbx.ScanUTXOSetAsync(parsedStrategy, cancellation: CancellationToken.None);
+                                }
+                                catch (Exception scanEx)
+                                {
+                                    _logger.LogError(scanEx, "Rescan after mirror Track to NBX failed for {Strategy}", strategy);
+                                }
                             }
                             catch (Exception ex)
                             {
@@ -215,6 +227,37 @@ public class ElectrumHttpHandler : HttpMessageHandler
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Background wallet tracking failed for {Strategy}", derivationSchemeStr);
+                    }
+                });
+
+                // Mirror the new wallet to real NBX (P1 review gap — this branch previously
+                // wasn't mirrored) so both backends know about it, regardless of which one is
+                // currently authoritative for this store.
+                var genCryptoCode = cryptoCode ?? "BTC";
+                _ = Task.Run(async () =>
+                {
+                    if (_realNbx.GetClient(genCryptoCode) is { } nbx)
+                    {
+                        try
+                        {
+                            await nbx.TrackAsync(derivationScheme, cancellation: CancellationToken.None);
+
+                            // Request a UTXO-set rescan so NBX rediscovers the wallet's
+                            // historical txs — otherwise a flip to NBX under-reports the
+                            // balance of an imported wallet with pre-existing activity.
+                            try
+                            {
+                                await nbx.ScanUTXOSetAsync(derivationScheme, cancellation: CancellationToken.None);
+                            }
+                            catch (Exception scanEx)
+                            {
+                                _logger.LogError(scanEx, "Rescan after mirror Track to NBX failed for {Strategy}", derivationSchemeStr);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Mirror Track to NBX failed for {Strategy}", derivationSchemeStr);
+                        }
                     }
                 });
 
