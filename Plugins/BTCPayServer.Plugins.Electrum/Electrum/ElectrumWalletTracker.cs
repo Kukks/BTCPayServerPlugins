@@ -848,6 +848,95 @@ public class ElectrumWalletTracker
         scanInfo.Progress.Found = total;
     }
 
+    /// <summary>
+    /// On a backend takeover (NBX -> Electrum), NBX may have handed out indices for
+    /// this wallet+feature that Electrum never locally derived. This ensures addresses
+    /// are derived and persisted up to (and including) <paramref name="targetIndex"/> —
+    /// closing that gap — and then marks every address at/below it as <c>IsUsed</c>, so
+    /// <see cref="GetNextUnusedAddressAsync"/> can never derive-on-demand and hand out
+    /// an index NBX already reserved. Mirrors the derive+persist+gap-bookkeeping pattern
+    /// in <see cref="RescanWalletAsync"/> and <see cref="ExtendGapIfNeeded"/>. Local/DB-only —
+    /// does not require an Electrum network connection.
+    /// </summary>
+    public async Task FastForwardToIndexAsync(string walletId, bool isChange, int targetIndex, CancellationToken ct)
+    {
+        if (targetIndex < 0)
+            return;
+
+        var strategy = ParseStrategy(walletId);
+        if (strategy == null)
+        {
+            _logger.LogWarning("Cannot fast-forward wallet {WalletId}: derivation strategy unparsable", walletId);
+            return;
+        }
+
+        await EnsureMigratedAsync(ct);
+        await _lock.WaitAsync(ct);
+        try
+        {
+            await using var ctx = _dbFactory.CreateContext();
+
+            var wallet = await ctx.TrackedWallets.FindAsync(new object[] { walletId }, ct);
+            if (wallet == null)
+            {
+                wallet = new TrackedWallet
+                {
+                    Id = walletId,
+                    CryptoCode = _settings.CryptoCode ?? "BTC",
+                    DerivationStrategy = walletId,
+                    ReceiveGapIndex = _settings.GapLimit - 1,
+                    ChangeGapIndex = _settings.GapLimit - 1
+                };
+                ctx.TrackedWallets.Add(wallet);
+            }
+
+            var currentGapIndex = isChange ? wallet.ChangeGapIndex : wallet.ReceiveGapIndex;
+
+            // Derive+persist any addresses between the current boundary and targetIndex so
+            // there are no index-less gaps for GetNextUnusedAddressAsync to derive into.
+            if (targetIndex > currentGapIndex)
+            {
+                var deriveFrom = currentGapIndex + 1;
+                var deriveCount = targetIndex - currentGapIndex;
+
+                var newAddresses = DeriveAddresses(strategy, isChange, deriveFrom, deriveCount);
+                foreach (var addr in newAddresses)
+                {
+                    addr.WalletId = walletId;
+                    addr.IsUsed = true; // every newly-derived index here is <= targetIndex by construction
+                    ctx.TrackedAddresses.Add(addr);
+                }
+
+                if (isChange)
+                    wallet.ChangeGapIndex = targetIndex;
+                else
+                    wallet.ReceiveGapIndex = targetIndex;
+            }
+
+            // Burn any pre-existing rows at/below targetIndex that weren't already used.
+            var existing = await ctx.TrackedAddresses
+                .Where(a => a.WalletId == walletId && a.IsChange == isChange && !a.IsUsed)
+                .ToListAsync(ct);
+
+            foreach (var addr in existing)
+            {
+                var parts = addr.KeyPath?.Split('/');
+                if (parts == null || parts.Length < 2 || !int.TryParse(parts[1], out var index))
+                    continue;
+
+                if (index <= targetIndex)
+                    addr.IsUsed = true;
+            }
+
+            await ctx.SaveChangesAsync(ct);
+            _trackedStrategies[walletId] = strategy;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     // ─────────────────────────────────────────────
     // Metadata storage (replaces NBXplorer metadata)
     // ─────────────────────────────────────────────

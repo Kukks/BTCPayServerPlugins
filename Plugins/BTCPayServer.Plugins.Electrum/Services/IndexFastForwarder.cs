@@ -28,6 +28,7 @@ public class IndexFastForwarder
     private readonly RealNbxGateway _realNbx;
     private readonly ElectrumDbContextFactory _dbFactory;
     private readonly BTCPayNetworkProvider _networkProvider;
+    private readonly ElectrumWalletTracker _walletTracker;
     private readonly ILogger<IndexFastForwarder> _logger;
 
     public IndexFastForwarder(
@@ -35,12 +36,14 @@ public class IndexFastForwarder
         RealNbxGateway realNbx,
         ElectrumDbContextFactory dbFactory,
         BTCPayNetworkProvider networkProvider,
+        ElectrumWalletTracker walletTracker,
         ILogger<IndexFastForwarder> logger)
     {
         _reservedLedger = reservedLedger;
         _realNbx = realNbx;
         _dbFactory = dbFactory;
         _networkProvider = networkProvider;
+        _walletTracker = walletTracker;
         _logger = logger;
     }
 
@@ -136,32 +139,15 @@ public class IndexFastForwarder
 
     private async Task FastForwardElectrumAsync(string walletId, bool isChange, int highWater, CancellationToken ct)
     {
-        await using var ctx = _dbFactory.CreateContext();
+        // Derive+persist any indices Electrum never locally derived (e.g. NBX handed
+        // them out while Electrum was inactive) up to the high-water, then burn
+        // everything at/below it. Doing the derive first closes the gap so
+        // GetNextUnusedAddressAsync can't later derive-on-demand into an index
+        // NBX already reserved.
+        await _walletTracker.FastForwardToIndexAsync(walletId, isChange, highWater, ct);
 
-        var candidates = await ctx.TrackedAddresses
-            .Where(a => a.WalletId == walletId && a.IsChange == isChange && !a.IsUsed)
-            .ToListAsync(ct);
-
-        var burned = 0;
-        foreach (var addr in candidates)
-        {
-            var parts = addr.KeyPath?.Split('/');
-            if (parts == null || parts.Length < 2 || !int.TryParse(parts[1], out var index))
-                continue;
-
-            if (index <= highWater)
-            {
-                addr.IsUsed = true;
-                burned++;
-            }
-        }
-
-        if (burned == 0)
-            return;
-
-        await ctx.SaveChangesAsync(ct);
         _logger?.LogInformation(
-            "Burned {Count} Electrum addresses for wallet {WalletId} feature {Feature} (high-water {HighWater})",
-            burned, walletId, isChange ? "Change" : "Deposit", highWater);
+            "Fast-forwarded Electrum addresses for wallet {WalletId} feature {Feature} up to high-water {HighWater}",
+            walletId, isChange ? "Change" : "Deposit", highWater);
     }
 }
