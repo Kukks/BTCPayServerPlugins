@@ -83,6 +83,7 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
 
         services.AddSingleton<ElectrumClient>();
         services.AddSingleton<ElectrumWalletTracker>();
+        services.AddSingleton<BackendCoordinator>();
 
         // DB context
         services.AddSingleton<ElectrumDbContextFactory>();
