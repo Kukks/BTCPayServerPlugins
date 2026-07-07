@@ -99,6 +99,9 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
         // Reserved index ledger
         services.AddSingleton<ReservedIndexLedger>();
 
+        // Fast-forwards a backend past the reserved high-water on takeover
+        services.AddSingleton<IndexFastForwarder>();
+
         // HTTP handler for shimming ExplorerClient calls
         services.AddSingleton<ElectrumHttpHandler>();
 
