@@ -24,17 +24,25 @@ namespace BTCPayServer.Plugins.Electrum.Services;
 /// </summary>
 public class ElectrumHttpHandler : HttpMessageHandler
 {
+    private static readonly HttpClient _proxyClient = new();
+
     private readonly ElectrumWalletTracker _tracker;
     private readonly BTCPayNetworkProvider _networkProvider;
+    private readonly BackendCoordinator _coordinator;
+    private readonly RealNbxGateway _realNbx;
     private readonly ILogger<ElectrumHttpHandler> _logger;
 
     public ElectrumHttpHandler(
         ElectrumWalletTracker tracker,
         BTCPayNetworkProvider networkProvider,
+        BackendCoordinator coordinator,
+        RealNbxGateway realNbx,
         ILogger<ElectrumHttpHandler> logger)
     {
         _tracker = tracker;
         _networkProvider = networkProvider;
+        _coordinator = coordinator;
+        _realNbx = realNbx;
         _logger = logger;
     }
 
@@ -48,6 +56,25 @@ public class ElectrumHttpHandler : HttpMessageHandler
 
         try
         {
+            // Classify the call and route wallet/global reads (and broadcasts, when NBX
+            // is available) straight to real NBX instead of serving from the Electrum
+            // tracker. Everything else falls through to the existing Electrum switch below,
+            // unchanged.
+            var call = NbxRequestClassifier.Classify(method, path, request.RequestUri?.Query ?? "");
+            var routeCryptoCode = ExtractCryptoCode(path) ?? "BTC";
+            var useNbx = call.Kind switch
+            {
+                NbxCallKind.WalletRead or NbxCallKind.WalletMutate => call.WalletId != null
+                    && _coordinator.GetActiveBackend(call.WalletId) == WalletBackend.Nbx,
+                NbxCallKind.GlobalRead or NbxCallKind.Broadcast => _realNbx.GetClient(routeCryptoCode) != null, // refined in P3
+                _ => false
+            };
+            if (useNbx && _realNbx.GetClient(routeCryptoCode) != null)
+            {
+                _logger.LogDebug("Routing {Method} {Path} to real NBX ({Kind})", method, path, call.Kind);
+                return await ProxyToRealNbxAsync(request, cancellationToken);
+            }
+
             // POST /v1/cryptos/{code}/derivations — GenerateWallet or Track
             if (method == HttpMethod.Post && Regex.IsMatch(path, @"/v1/cryptos/\w+/derivations(/[^/]+)?$"))
             {
@@ -374,6 +401,29 @@ public class ElectrumHttpHandler : HttpMessageHandler
                 Content = new StringContent(ex.Message)
             };
         }
+    }
+
+    // Clones the intercepted request onto real NBX and sends it verbatim with a plain
+    // HttpClient (not routed through this handler). The request's URI already targets
+    // real NBX and carries cookie auth — both set up by ElectrumExplorerClientProvider
+    // (Task 4) — so no further rewriting is needed here. Mutation mirroring back to the
+    // Electrum tracker is handled in Task 6.
+    private async Task<HttpResponseMessage> ProxyToRealNbxAsync(
+        HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var clone = new HttpRequestMessage(request.Method, request.RequestUri);
+        foreach (var header in request.Headers)
+            clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+
+        if (request.Content != null)
+        {
+            var bytes = await request.Content.ReadAsByteArrayAsync(cancellationToken);
+            clone.Content = new ByteArrayContent(bytes);
+            foreach (var header in request.Content.Headers)
+                clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        return await _proxyClient.SendAsync(clone, cancellationToken);
     }
 
     private string ExtractStrategy(string path)
