@@ -96,6 +96,9 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
         // HTTP handler for shimming ExplorerClient calls
         services.AddSingleton<ElectrumHttpHandler>();
 
+        // Direct real-NBX gateway (used by coordinator and routing handler proxy)
+        services.AddSingleton<RealNbxGateway>();
+
         // ──────────────────────────────────────────────
         // 4. Register shadow services
         // ──────────────────────────────────────────────
