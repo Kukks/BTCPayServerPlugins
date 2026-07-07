@@ -96,6 +96,9 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
             factory.ConfigureBuilder(o);
         });
 
+        // Reserved index ledger
+        services.AddSingleton<ReservedIndexLedger>();
+
         // HTTP handler for shimming ExplorerClient calls
         services.AddSingleton<ElectrumHttpHandler>();
 
