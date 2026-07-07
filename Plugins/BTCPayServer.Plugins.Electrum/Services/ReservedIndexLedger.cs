@@ -15,12 +15,25 @@ public class ReservedIndexLedger
 
     public async Task RecordReserveAsync(string walletId, bool isChange, int index, CancellationToken ct)
     {
+        // A single atomic UPDATE ... CASE WHEN, so two concurrent writers can't race a
+        // Find -> in-memory-max -> SaveChanges round trip and regress the high-water.
         await using var ctx = _dbFactory.CreateContext();
-        var w = await ctx.TrackedWallets.FindAsync(new object[] { walletId }, ct);
-        if (w == null) return;
-        if (isChange) w.ReservedChangeIndex = Merge(w.ReservedChangeIndex, index);
-        else w.ReservedReceiveIndex = Merge(w.ReservedReceiveIndex, index);
-        await ctx.SaveChangesAsync(ct);
+        if (isChange)
+        {
+            await ctx.TrackedWallets
+                .Where(w => w.Id == walletId)
+                .ExecuteUpdateAsync(s => s.SetProperty(
+                    w => w.ReservedChangeIndex,
+                    w => w.ReservedChangeIndex < index ? index : w.ReservedChangeIndex), ct);
+        }
+        else
+        {
+            await ctx.TrackedWallets
+                .Where(w => w.Id == walletId)
+                .ExecuteUpdateAsync(s => s.SetProperty(
+                    w => w.ReservedReceiveIndex,
+                    w => w.ReservedReceiveIndex < index ? index : w.ReservedReceiveIndex), ct);
+        }
     }
 
     public async Task<int> GetReservedAsync(string walletId, bool isChange, CancellationToken ct)

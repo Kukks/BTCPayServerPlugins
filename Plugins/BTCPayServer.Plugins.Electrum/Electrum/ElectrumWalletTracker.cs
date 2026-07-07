@@ -406,20 +406,23 @@ public class ElectrumWalletTracker
         await EnsureMigratedAsync(ct);
         await using var ctx = _dbFactory.CreateContext();
 
-        var addr = await ctx.TrackedAddresses
+        // The unused set is gap-limited (tens of rows), so materialize it and order
+        // numerically by key index — KeyPath is a string, and ordering by it directly
+        // would sort "0/10" before "0/6".
+        var candidates = await ctx.TrackedAddresses
             .Where(a => a.WalletId == strategyStr && a.IsChange == isChange && !a.IsUsed)
-            .OrderBy(a => a.KeyPath)
-            .FirstOrDefaultAsync(ct);
+            .ToListAsync(ct);
+        var addr = candidates.OrderBy(GetKeyPathIndex).FirstOrDefault();
 
         if (addr == null)
         {
             // Derive addresses locally (fast, no Electrum calls).
             // Background TrackWalletAsync will subscribe them later.
             await EnsureAddressesDerivedAsync(strategyStr, ct);
-            addr = await ctx.TrackedAddresses
+            candidates = await ctx.TrackedAddresses
                 .Where(a => a.WalletId == strategyStr && a.IsChange == isChange && !a.IsUsed)
-                .OrderBy(a => a.KeyPath)
-                .FirstOrDefaultAsync(ct);
+                .ToListAsync(ct);
+            addr = candidates.OrderBy(GetKeyPathIndex).FirstOrDefault();
         }
 
         if (addr == null) return null;
@@ -871,6 +874,7 @@ public class ElectrumWalletTracker
         }
 
         await EnsureMigratedAsync(ct);
+        List<TrackedAddress> headroomAddresses;
         await _lock.WaitAsync(ct);
         try
         {
@@ -890,7 +894,15 @@ public class ElectrumWalletTracker
                 ctx.TrackedWallets.Add(wallet);
             }
 
+            var gapLimit = _settings.GapLimit;
             var currentGapIndex = isChange ? wallet.ChangeGapIndex : wallet.ReceiveGapIndex;
+
+            // Guard against a stale gap boundary causing a duplicate-PK insert for an
+            // index that was already derived (mirrors RescanWalletAsync's existingHashes filter).
+            var existingHashes = await ctx.TrackedAddresses
+                .Where(a => a.WalletId == walletId && a.IsChange == isChange)
+                .Select(a => a.Scripthash)
+                .ToHashSetAsync(ct);
 
             // Derive+persist any addresses between the current boundary and targetIndex so
             // there are no index-less gaps for GetNextUnusedAddressAsync to derive into.
@@ -902,16 +914,41 @@ public class ElectrumWalletTracker
                 var newAddresses = DeriveAddresses(strategy, isChange, deriveFrom, deriveCount);
                 foreach (var addr in newAddresses)
                 {
+                    if (!existingHashes.Add(addr.Scripthash))
+                        continue;
                     addr.WalletId = walletId;
                     addr.IsUsed = true; // every newly-derived index here is <= targetIndex by construction
                     ctx.TrackedAddresses.Add(addr);
                 }
 
-                if (isChange)
-                    wallet.ChangeGapIndex = targetIndex;
-                else
-                    wallet.ReceiveGapIndex = targetIndex;
+                currentGapIndex = targetIndex;
             }
+
+            // Leave a full gap of unused headroom beyond targetIndex — without this, a
+            // reserved high-water at/above the gap boundary leaves no unused address for
+            // GetNextUnusedAddressAsync to hand out (mirrors ExtendGapIfNeeded's headroom).
+            var newGapIndex = Math.Max(currentGapIndex, targetIndex + gapLimit);
+            headroomAddresses = new List<TrackedAddress>();
+            if (newGapIndex > currentGapIndex)
+            {
+                var deriveFrom = currentGapIndex + 1;
+                var deriveCount = newGapIndex - currentGapIndex;
+
+                var newAddresses = DeriveAddresses(strategy, isChange, deriveFrom, deriveCount);
+                foreach (var addr in newAddresses)
+                {
+                    if (!existingHashes.Add(addr.Scripthash))
+                        continue;
+                    addr.WalletId = walletId; // IsUsed stays false — this is the unused headroom
+                    ctx.TrackedAddresses.Add(addr);
+                    headroomAddresses.Add(addr);
+                }
+            }
+
+            if (isChange)
+                wallet.ChangeGapIndex = newGapIndex;
+            else
+                wallet.ReceiveGapIndex = newGapIndex;
 
             // Burn any pre-existing rows at/below targetIndex that weren't already used.
             var existing = await ctx.TrackedAddresses
@@ -934,6 +971,23 @@ public class ElectrumWalletTracker
         finally
         {
             _lock.Release();
+        }
+
+        // Subscribe the new unused headroom on Electrum outside the lock (slow network calls),
+        // best-effort — mirrors RescanWalletAsync's post-derive subscribe loop.
+        if (_client.IsConnected)
+        {
+            foreach (var addr in headroomAddresses)
+            {
+                try
+                {
+                    await _client.ScripthashSubscribeAsync(addr.Scripthash, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to subscribe {Scripthash} during fast-forward", addr.Scripthash);
+                }
+            }
         }
     }
 
@@ -976,6 +1030,18 @@ public class ElectrumWalletTracker
     // ─────────────────────────────────────────────
     // Private helpers
     // ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Parses the numeric index out of a "chain/index" KeyPath string (e.g. "0/6" -> 6).
+    /// Unparsable paths sort last so a malformed row never wins over a valid one.
+    /// </summary>
+    private static int GetKeyPathIndex(TrackedAddress a)
+    {
+        var parts = a.KeyPath?.Split('/');
+        return parts != null && parts.Length >= 2 && int.TryParse(parts[1], out var idx)
+            ? idx
+            : int.MaxValue;
+    }
 
     private DerivationStrategyBase ParseStrategy(string strategyStr)
     {
