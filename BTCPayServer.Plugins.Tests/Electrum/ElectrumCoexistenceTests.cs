@@ -9,6 +9,7 @@ using NBXplorer.DerivationStrategy;
 using BTCPayServer.Plugins.Electrum.Controllers;
 using BTCPayServer.Plugins.Electrum.Services;
 using BTCPayServer.Events;
+using BTCPayServer.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -420,5 +421,105 @@ public class ElectrumCoexistenceTests : ElectrumCoexistenceTestsBase
         // Once NBX recovers, subsequent evaluations agree Nbx again; it never left Nbx.
         await ElectrumTestInfra.ForceBackendAsync(coordinator, walletId, WalletBackend.Nbx, ct);
         Assert.Equal(WalletBackend.Nbx, coordinator.GetActiveBackend(walletId));
+    }
+
+    [Fact(Timeout = 180_000)]
+    [Trait("Integration", "Integration")]
+    public async Task NbxDown_GlobalReadFallsBackToElectrum_AndHealthFlips()
+    {
+        using var tester = CreateElectrumServerTester();
+        await tester.StartAsync();
+        var ct = TestContext.Current.CancellationToken;
+
+        await ElectrumTestInfra.PointElectrumAtFulcrumAsync(tester, ct);
+
+        // The store-facing ExplorerClient shim: its REST transport is ElectrumHttpHandler, so
+        // these calls exercise the real routing (proxy-to-NBX vs serve-from-Electrum).
+        var network = tester.PayTester.GetService<BTCPayNetworkProvider>().GetNetwork<BTCPayNetwork>("BTC");
+        var shim = tester.PayTester.GetService<ExplorerClientProvider>().GetExplorerClient(network);
+        var health = tester.PayTester.GetService<NbxHealth>();
+
+        // Sanity: with NBX up, a Global read resolves.
+        Assert.NotNull(await shim.GetStatusAsync(ct));
+
+        try
+        {
+            ElectrumTestInfra.StopNbx();
+
+            // A GlobalRead (status) through the shim must NOT throw with NBX down: the router tries
+            // NBX, catches the transport failure, marks NBX unreachable, and serves from the
+            // Electrum engine. Broadcast takes the identical routing path, so this also covers the
+            // send-during-outage fallback.
+            await TestUtils.EventuallyAsync(async () =>
+            {
+                var status = await shim.GetStatusAsync(ct);
+                Assert.NotNull(status);
+                Assert.False(health.Reachable);
+            }, delay: 30_000);
+        }
+        finally
+        {
+            ElectrumTestInfra.StartNbx();
+        }
+    }
+
+    [Fact(Timeout = 240_000)]
+    [Trait("Integration", "Integration")]
+    public async Task NbxRecovery_FiresRescan_AndNbxRediscoversOutageActivity()
+    {
+        using var tester = CreateElectrumServerTester();
+        await tester.StartAsync();
+        var ct = TestContext.Current.CancellationToken;
+
+        await ElectrumTestInfra.PointElectrumAtFulcrumAsync(tester, ct);
+
+        var user = tester.NewAccount();
+        user.GrantAccess();
+        user.RegisterDerivationScheme("BTC");
+        var walletId = user.DerivationScheme.ToString();
+
+        var health = tester.PayTester.GetService<NbxHealth>();
+        var recovered = false;
+        health.OnRecovered += () => recovered = true;
+
+        var coordinator = tester.PayTester.GetService<BackendCoordinator>();
+        var realNbx = tester.PayTester.GetService<RealNbxGateway>();
+        var network = tester.PayTester.GetService<BTCPayNetworkProvider>().GetNetwork<BTCPayNetwork>("BTC");
+        var strategy = new DerivationStrategyFactory(network.NBitcoinNetwork).Parse(walletId);
+        var depositAddress = user.DerivationScheme
+            .GetLineFor(DerivationFeature.Deposit).Derive(2)
+            .ScriptPubKey.GetDestinationAddress(network.NBitcoinNetwork);
+
+        try
+        {
+            // NBX goes down; one evaluation flips the shared health flag to unreachable.
+            ElectrumTestInfra.StopNbx();
+            await coordinator.EvaluateWalletAsync(walletId, ct);
+            Assert.False(health.Reachable);
+
+            // Funds arrive while NBX is down (only the Electrum engine could see them live).
+            await tester.ExplorerNode.SendToAddressAsync(depositAddress, Money.Coins(0.4m));
+            tester.ExplorerNode.Generate(1);
+
+            // NBX comes back (StartNbx blocks until it reports synced); one evaluation records it
+            // reachable again, which fires OnRecovered -> the coordinator rescans tracked wallets.
+            ElectrumTestInfra.StartNbx();
+            await coordinator.EvaluateWalletAsync(walletId, ct);
+            Assert.True(recovered, "NBX recovery did not fire the rescan trigger");
+
+            // Recovery data-sync: after NBX's own chain re-index + the triggered rescan, NBX must
+            // rediscover the payment that arrived during the outage.
+            var nbx = realNbx.GetClient("BTC");
+            await TestUtils.EventuallyAsync(async () =>
+            {
+                var utxos = await nbx.GetUTXOsAsync(strategy, ct);
+                Assert.Contains(utxos.Confirmed.UTXOs, u => u.Value is Money m && m == Money.Coins(0.4m));
+            }, delay: 150_000);
+        }
+        finally
+        {
+            if (!health.Reachable)
+                ElectrumTestInfra.StartNbx();
+        }
     }
 }

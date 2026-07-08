@@ -31,6 +31,7 @@ public class ElectrumHttpHandler : HttpMessageHandler
     private readonly BackendCoordinator _coordinator;
     private readonly RealNbxGateway _realNbx;
     private readonly ReservedIndexLedger _reservedLedger;
+    private readonly NbxHealth _nbxHealth;
     private readonly ILogger<ElectrumHttpHandler> _logger;
 
     public ElectrumHttpHandler(
@@ -39,6 +40,7 @@ public class ElectrumHttpHandler : HttpMessageHandler
         BackendCoordinator coordinator,
         RealNbxGateway realNbx,
         ReservedIndexLedger reservedLedger,
+        NbxHealth nbxHealth,
         ILogger<ElectrumHttpHandler> logger)
     {
         _tracker = tracker;
@@ -46,6 +48,7 @@ public class ElectrumHttpHandler : HttpMessageHandler
         _coordinator = coordinator;
         _realNbx = realNbx;
         _reservedLedger = reservedLedger;
+        _nbxHealth = nbxHealth;
         _logger = logger;
     }
 
@@ -65,29 +68,48 @@ public class ElectrumHttpHandler : HttpMessageHandler
             // unchanged.
             var call = NbxRequestClassifier.Classify(method, path, request.RequestUri?.Query ?? "");
             var routeCryptoCode = ExtractCryptoCode(path) ?? "BTC";
+            // NBX is only usable if a client exists AND it is currently reachable. Without the
+            // reachability gate, Global reads (/status, /fees) and broadcasts route to a dead NBX
+            // and fail; with it they fall through to the Electrum engine. It also covers the ~poll
+            // window where a wallet is still pinned to Nbx but NBX just went down (fast failback).
+            var nbxUsable = _realNbx.GetClient(routeCryptoCode) != null && _nbxHealth.Reachable;
             var useNbx = call.Kind switch
             {
                 NbxCallKind.WalletRead or NbxCallKind.WalletMutate => call.WalletId != null
-                    && _coordinator.GetActiveBackend(call.WalletId) == WalletBackend.Nbx,
-                NbxCallKind.GlobalRead or NbxCallKind.Broadcast => _realNbx.GetClient(routeCryptoCode) != null, // refined in P3
+                    && _coordinator.GetActiveBackend(call.WalletId) == WalletBackend.Nbx && nbxUsable,
+                NbxCallKind.GlobalRead or NbxCallKind.Broadcast => nbxUsable,
                 _ => false
             };
-            if (useNbx && _realNbx.GetClient(routeCryptoCode) != null)
+            if (useNbx)
             {
-                _logger.LogDebug("Routing {Method} {Path} to real NBX ({Kind})", method, path, call.Kind);
-                var proxied = await ProxyToRealNbxAsync(request, cancellationToken);
-
-                // The "reserve new address" mutation is proxied verbatim above, but the
-                // reserved-index ledger must stay authoritative regardless of which backend
-                // actually served it — peek the response and record the reserved index.
-                if (call.Kind == NbxCallKind.WalletMutate && call.WalletId != null &&
-                    path.Contains("/addresses/unused"))
+                try
                 {
-                    proxied = await PeekAndRecordNbxReserveAsync(
-                        proxied, call.WalletId, routeCryptoCode, cancellationToken);
-                }
+                    _logger.LogDebug("Routing {Method} {Path} to real NBX ({Kind})", method, path, call.Kind);
+                    var proxied = await ProxyToRealNbxAsync(request, cancellationToken);
 
-                return proxied;
+                    // The "reserve new address" mutation is proxied verbatim above, but the
+                    // reserved-index ledger must stay authoritative regardless of which backend
+                    // actually served it — peek the response and record the reserved index.
+                    if (call.Kind == NbxCallKind.WalletMutate && call.WalletId != null &&
+                        path.Contains("/addresses/unused"))
+                    {
+                        proxied = await PeekAndRecordNbxReserveAsync(
+                            proxied, call.WalletId, routeCryptoCode, cancellationToken);
+                    }
+
+                    return proxied;
+                }
+                catch (Exception ex) when (
+                    ex is HttpRequestException or System.IO.IOException ||
+                    (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
+                {
+                    // NBX became unreachable between the reachability check and the call (a timeout
+                    // or connection failure not caused by the caller cancelling). Mark it down so
+                    // subsequent calls skip it immediately, and fall through to serve this one from
+                    // the Electrum engine below instead of failing the request.
+                    _nbxHealth.Record(false);
+                    _logger.LogWarning(ex, "NBX proxy failed for {Method} {Path}; falling back to Electrum", method, path);
+                }
             }
 
             // POST /v1/cryptos/{code}/derivations — GenerateWallet or Track

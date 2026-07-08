@@ -110,6 +110,10 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
         // Direct real-NBX gateway (used by coordinator and routing handler proxy)
         services.AddSingleton<RealNbxGateway>();
 
+        // Shared NBX reachability signal: lets the routing handler fall back to Electrum when
+        // NBX is actually down (not just absent) and triggers a rescan when NBX recovers.
+        services.AddSingleton<NbxHealth>();
+
         // ──────────────────────────────────────────────
         // 4. Register shadow services
         // ──────────────────────────────────────────────
