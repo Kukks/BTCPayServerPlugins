@@ -432,7 +432,11 @@ public class ElectrumWalletTracker
             addr.IsUsed = true;
             await ctx.SaveChangesAsync(ct);
 
-            if (int.TryParse(addr.KeyPath.Split('/')[1], out var reservedIndex))
+            // Parse the index defensively (matches GetKeyPathIndex / ExtendGapIfNeeded): a null
+            // or slash-less KeyPath must not crash address issuance, and an unparsable index must
+            // not poison the reserved high-water.
+            var parts = addr.KeyPath?.Split('/');
+            if (parts is { Length: >= 2 } && int.TryParse(parts[1], out var reservedIndex))
                 await _reservedLedger.RecordReserveAsync(strategyStr, isChange, reservedIndex, ct);
         }
 

@@ -43,7 +43,7 @@ public class ElectrumCoexistenceTests : ElectrumCoexistenceTestsBase
     {
     }
 
-    [Fact]
+    [Fact(Timeout = 120_000)]
     [Trait("Integration", "Integration")]
     public async Task Boot_WithCoexistenceWiring_HostStartsAndComposesDi()
     {
@@ -114,7 +114,7 @@ public class ElectrumCoexistenceTests : ElectrumCoexistenceTestsBase
         Assert.Equal(Money.Coins(0.5m), coin.Amount);
     }
 
-    [Fact]
+    [Fact(Timeout = 120_000)]
     [Trait("Integration", "Integration")]
     public async Task CoexistencePanel_HonorsAllowNonMainnetEscapeHatch_AndRendersOk()
     {

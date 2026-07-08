@@ -84,6 +84,10 @@ internal static class ElectrumTestInfra
             }
             await Task.Delay(2000);
         }
+        // Fail loudly rather than let StartNbx report success — a following test would otherwise
+        // hit a confusing missed-notification failure instead of a clear "NBX didn't sync".
+        throw new InvalidOperationException(
+            $"NBX ({NbxContainer}) did not report fully synced within ~2 minutes after StartNbx");
     }
 
     private static void RunDocker(string args)
