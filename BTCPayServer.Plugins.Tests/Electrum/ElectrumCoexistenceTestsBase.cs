@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Runtime.CompilerServices;
 using BTCPayServer.Plugins.Electrum;
 using Xunit;
@@ -49,7 +50,18 @@ public abstract class ElectrumCoexistenceTestsBase : UnitTestBase
     {
         var pluginDll = typeof(ElectrumPlugin).Assembly.Location;
         Environment.SetEnvironmentVariable("BTCPAY_ELECTRUM_ALLOWNONMAINNET", "true");
-        Environment.SetEnvironmentVariable("BTCPAY_DEBUG_PLUGINS", $"{ElectrumPluginIdentifier}::{pluginDll}");
+
+        // BTCPayServerTester builds config as: env vars, THEN appsettings.dev.json from
+        // TestUtils.TestDirectory (SetBasePath + AddJsonFile), THEN in-memory TEST_RUNNER_ENABLED.
+        // So that appsettings.dev.json's DEBUG_PLUGINS — the whole repo's plugin set, written into the
+        // test output by the ConfigBuilder project — overrides BTCPAY_DEBUG_PLUGINS. Several of those
+        // plugins (Blink, MCP, NIP05, Stripe) can't resolve their dependency assemblies in this test's
+        // default load context and crash host startup (ConfigException), failing every Electrum test
+        // before it runs. Overwrite that exact file so ONLY the Electrum plugin loads.
+        var devSettings = Path.Combine(TestUtils.TestDirectory, "appsettings.dev.json");
+        File.WriteAllText(devSettings,
+            $"{{\"DEBUG_PLUGINS\":\"{ElectrumPluginIdentifier}::{pluginDll.Replace("\\", "/")}\"}}");
+
         return CreateServerTester(scope);
     }
 }
