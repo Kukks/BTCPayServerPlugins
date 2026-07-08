@@ -103,10 +103,35 @@ public class IndexFastForwarder
         {
             ct.ThrowIfCancellationRequested();
 
-            KeyPathInformation? info;
+            // Peek the next unused index WITHOUT reserving, so we don't burn the first index
+            // above the high-water just to discover it didn't need burning — GetUnusedAsync with
+            // reserve:true claims the address it returns, which would skip one extra index per
+            // takeover.
+            KeyPathInformation? peek;
             try
             {
-                info = await nbx.GetUnusedAsync(strategy, feature, 0, true, ct);
+                peek = await nbx.GetUnusedAsync(strategy, feature, 0, false, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to read next unused NBX address for wallet {WalletId} feature {Feature}", walletId, feature);
+                return;
+            }
+
+            var index = peek?.Index ?? GetLastKeyPathIndex(peek);
+            if (index == null)
+            {
+                _logger?.LogWarning("NBX returned no index while burning wallet {WalletId} feature {Feature}; stopping", walletId, feature);
+                return;
+            }
+
+            if (!NeedsBurn(index.Value, highWater))
+                return; // already past the high-water — nothing more to burn, and don't reserve it
+
+            // Still at/below the high-water: reserve (burn) this index so NBX advances past it.
+            try
+            {
+                await nbx.GetUnusedAsync(strategy, feature, 0, true, ct);
             }
             catch (Exception ex)
             {
@@ -114,19 +139,9 @@ public class IndexFastForwarder
                 return;
             }
 
-            var index = info?.Index ?? GetLastKeyPathIndex(info);
-            if (index == null)
-            {
-                _logger?.LogWarning("NBX returned no index while burning wallet {WalletId} feature {Feature}; stopping", walletId, feature);
-                return;
-            }
-
             _logger?.LogInformation(
                 "Burned NBX address at index {Index} for wallet {WalletId} feature {Feature} (high-water {HighWater})",
                 index, walletId, feature, highWater);
-
-            if (!NeedsBurn(index.Value, highWater))
-                return; // now past the high-water, NBX is safe to take over
         }
 
         _logger?.LogWarning(
