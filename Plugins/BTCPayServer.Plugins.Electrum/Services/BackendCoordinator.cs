@@ -24,6 +24,7 @@ public class BackendCoordinator : IHostedService
     private const string CryptoCode = "BTC";
 
     private readonly ConcurrentDictionary<string, WalletBackend> _active = new();
+    private readonly ConcurrentDictionary<string, HysteresisState> _hysteresis = new();
     private readonly ElectrumDbContextFactory _dbFactory;
     private readonly RealNbxGateway _realNbx;
     private readonly BTCPayNetworkProvider _networkProvider;
@@ -50,6 +51,16 @@ public class BackendCoordinator : IHostedService
         _fastForwarder = fastForwarder;
         _reservedLedger = reservedLedger;
         _logger = logger;
+    }
+
+    // Per-wallet anti-flap bookkeeping consumed by HysteresisGate: how many consecutive
+    // evaluations have agreed on the desired backend, and how many polls have elapsed
+    // since the last actual flip (for the cooldown).
+    private sealed class HysteresisState
+    {
+        public WalletBackend Desired;
+        public int ConsecutiveAgree;
+        public int PollsSinceFlip;
     }
 
     public WalletBackend GetActiveBackend(string walletId) =>
@@ -201,25 +212,39 @@ public class BackendCoordinator : IHostedService
             _logger?.LogDebug(ex, "Failed to check NBX tracking for wallet {WalletId}", walletId);
         }
 
-        var newBackend = DecideBackend(nbxSynced, trackedInNbx);
+        var desired = DecideBackend(nbxSynced, trackedInNbx);
         var currentBackend = GetActiveBackend(walletId);
+
+        var state = _hysteresis.GetOrAdd(walletId, _ => new HysteresisState());
+        if (desired == state.Desired)
+        {
+            state.ConsecutiveAgree++;
+        }
+        else
+        {
+            state.Desired = desired;
+            state.ConsecutiveAgree = 1;
+        }
+        state.PollsSinceFlip++;
+
+        var cooldownElapsed = state.PollsSinceFlip >= HysteresisGate.CooldownPolls;
+        if (!HysteresisGate.ShouldFlip(currentBackend, desired, state.ConsecutiveAgree, HysteresisGate.RequiredFor(desired), cooldownElapsed))
+            return; // not stable/cooled-down enough yet — leave the active backend as-is, retry next poll
 
         // Only fast-forward on an actual transition — fast-forwarding every poll
         // (even when the backend hasn't changed) would burn addresses for no reason.
-        if (newBackend != currentBackend)
+        try
         {
-            try
-            {
-                await _fastForwarder.FastForwardAsync(walletId, newBackend, ct);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Fast-forward failed for wallet {WalletId} transitioning to {Backend}; skipping flip this poll", walletId, newBackend);
-                return; // don't flip if we couldn't clear the high-water first
-            }
+            await _fastForwarder.FastForwardAsync(walletId, desired, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Fast-forward failed for wallet {WalletId} transitioning to {Backend}; skipping flip this poll", walletId, desired);
+            return; // don't flip if we couldn't clear the high-water first
         }
 
-        SetActiveBackend(walletId, newBackend);
+        SetActiveBackend(walletId, desired);
+        state.PollsSinceFlip = 0;
     }
 
     // NBXplorer exposes no "list all tracked derivation schemes" API, so a true NBX -> Electrum
