@@ -4,7 +4,9 @@ using BTCPayServer.Plugins.Electrum;
 using BTCPayServer.Plugins.Electrum.Controllers;
 using BTCPayServer.Plugins.Electrum.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.AspNetCore.Routing;
 using NBitcoin;
 using Npgsql;
 using Xunit;
@@ -127,6 +129,14 @@ public class ElectrumCoexistenceTests : ElectrumCoexistenceTestsBase
         // short-circuit to NotFound even though NetworkType is Regtest, because
         // ElectrumPlugin.Execute did activate (BackendCoordinator etc. are registered) and the
         // action can serve a real 200.
+        // TestAccount.GetController<T>() (BTCPayServerTester.GetController) builds
+        // ControllerContext with only HttpContext set — RouteData and ActionDescriptor are
+        // left null. ActionExecutingContext's underlying ActionContext constructor requires
+        // both to be non-null, so without this they throw ArgumentNullException(routeData)
+        // before OnActionExecuting ever runs.
+        controller.ControllerContext.RouteData = new RouteData();
+        controller.ControllerContext.ActionDescriptor = new ControllerActionDescriptor();
+
         var executingContext = new ActionExecutingContext(
             controller.ControllerContext,
             new List<IFilterMetadata>(),
