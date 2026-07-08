@@ -137,17 +137,6 @@ public class BackendCoordinator : IHostedService
         if (network == null)
             return;
 
-        var nbxSynced = false;
-        try
-        {
-            var status = await nbx.GetStatusAsync(ct);
-            nbxSynced = status?.IsFullySynched ?? false;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogDebug(ex, "Failed to read NBX status; treating as not synced");
-        }
-
         List<string> walletIds;
         try
         {
@@ -160,42 +149,77 @@ public class BackendCoordinator : IHostedService
             return;
         }
 
-        var derivationFactory = new DerivationStrategyFactory(network.NBitcoinNetwork);
-
         foreach (var walletId in walletIds)
         {
-            var trackedInNbx = false;
+            await EvaluateWalletAsync(walletId, ct);
+        }
+    }
+
+    /// <summary>
+    /// Evaluates and (if needed) flips the active backend for a single wallet. This holds the
+    /// same per-wallet decision PollOnceAsync runs for every tracked wallet every 30s, extracted
+    /// so callers that just tracked a wallet (ElectrumHttpHandler's Track/GenerateWallet mirrors)
+    /// can trigger it immediately instead of waiting for the next poll. That shrinks — but does
+    /// not fully eliminate — the race window where a newly tracked wallet sits on the stale
+    /// default backend while both ElectrumListener and the ungated NBXplorerListener are able to
+    /// publish for it; a notification that lands within this evaluation's own latency can still
+    /// race. Full elimination is P4 reconciliation.
+    /// </summary>
+    public async Task EvaluateWalletAsync(string walletId, CancellationToken ct)
+    {
+        if (_realNbx == null || _networkProvider == null || _fastForwarder == null)
+            return; // not wired (e.g. constructed directly in a test)
+
+        var nbx = _realNbx.GetClient(CryptoCode);
+        if (nbx == null)
+            return; // no NBX configured for this crypto code — stay on Electrum
+
+        var network = _networkProvider.GetNetwork<BTCPayNetwork>(CryptoCode);
+        if (network == null)
+            return;
+
+        var nbxSynced = false;
+        try
+        {
+            var status = await nbx.GetStatusAsync(ct);
+            nbxSynced = status?.IsFullySynched ?? false;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug(ex, "Failed to read NBX status; treating as not synced");
+        }
+
+        var trackedInNbx = false;
+        try
+        {
+            var strategy = new DerivationStrategyFactory(network.NBitcoinNetwork).Parse(walletId);
+            var trackedSource = TrackedSource.Create(strategy);
+            trackedInNbx = await nbx.IsTrackedAsync(trackedSource, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug(ex, "Failed to check NBX tracking for wallet {WalletId}", walletId);
+        }
+
+        var newBackend = DecideBackend(nbxSynced, trackedInNbx);
+        var currentBackend = GetActiveBackend(walletId);
+
+        // Only fast-forward on an actual transition — fast-forwarding every poll
+        // (even when the backend hasn't changed) would burn addresses for no reason.
+        if (newBackend != currentBackend)
+        {
             try
             {
-                var strategy = derivationFactory.Parse(walletId);
-                var trackedSource = TrackedSource.Create(strategy);
-                trackedInNbx = await nbx.IsTrackedAsync(trackedSource, ct);
+                await _fastForwarder.FastForwardAsync(walletId, newBackend, ct);
             }
             catch (Exception ex)
             {
-                _logger?.LogDebug(ex, "Failed to check NBX tracking for wallet {WalletId}", walletId);
+                _logger?.LogWarning(ex, "Fast-forward failed for wallet {WalletId} transitioning to {Backend}; skipping flip this poll", walletId, newBackend);
+                return; // don't flip if we couldn't clear the high-water first
             }
-
-            var newBackend = DecideBackend(nbxSynced, trackedInNbx);
-            var currentBackend = GetActiveBackend(walletId);
-
-            // Only fast-forward on an actual transition — fast-forwarding every poll
-            // (even when the backend hasn't changed) would burn addresses for no reason.
-            if (newBackend != currentBackend)
-            {
-                try
-                {
-                    await _fastForwarder.FastForwardAsync(walletId, newBackend, ct);
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogWarning(ex, "Fast-forward failed for wallet {WalletId} transitioning to {Backend}; skipping flip this poll", walletId, newBackend);
-                    continue; // don't flip if we couldn't clear the high-water first
-                }
-            }
-
-            SetActiveBackend(walletId, newBackend);
         }
+
+        SetActiveBackend(walletId, newBackend);
     }
 
     // NBXplorer exposes no "list all tracked derivation schemes" API, so a true NBX -> Electrum

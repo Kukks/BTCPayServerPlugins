@@ -122,12 +122,14 @@ public class ElectrumStatusMonitor : IHostedService
             }
         }
 
+        var electrumHealthy = false;
         if (_client.IsConnected)
         {
             try
             {
                 await _client.PingAsync(ct);
                 await _client.ServerFeaturesAsync(ct);
+                electrumHealthy = true;
             }
             catch (Exception ex)
             {
@@ -137,9 +139,11 @@ public class ElectrumStatusMonitor : IHostedService
 
         // Effective readiness: BTC is available if either backend can serve it,
         // so we don't report "not synced" while NBX is catching up but Electrum
-        // is already connected (and vice versa).
+        // is already connected (and vice versa). Use the actual health-check result,
+        // not the raw IsConnected flag — on a half-open connection IsConnected can stay
+        // stale-true after a failed ping/ServerFeatures call.
         var nbxSynced = await QueryNbxSyncedAsync(ct);
-        State = EffectiveSynced(nbxSynced, _client.IsConnected) ? NBXplorerState.Ready : NBXplorerState.NotConnected;
+        State = EffectiveSynced(nbxSynced, electrumHealthy) ? NBXplorerState.Ready : NBXplorerState.NotConnected;
 
         var status = BuildStatusResult();
         PublishDashboard(status, oldState);

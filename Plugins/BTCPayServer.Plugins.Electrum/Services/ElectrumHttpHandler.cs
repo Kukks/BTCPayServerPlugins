@@ -133,6 +133,21 @@ public class ElectrumHttpHandler : HttpMessageHandler
                                 {
                                     _logger.LogError(scanEx, "Rescan after mirror Track to NBX failed for {Strategy}", strategy);
                                 }
+
+                                // Evaluate the backend for this wallet right away instead of
+                                // waiting for the next 30s coordinator poll — this shrinks (but
+                                // does not fully eliminate) the window where a newly tracked
+                                // wallet is left on the stale default backend and both
+                                // ElectrumListener and the ungated NBXplorerListener could
+                                // publish the same event.
+                                try
+                                {
+                                    await _coordinator.EvaluateWalletAsync(strategy, CancellationToken.None);
+                                }
+                                catch (Exception evalEx)
+                                {
+                                    _logger.LogError(evalEx, "Backend evaluation after mirror Track failed for {Strategy}", strategy);
+                                }
                             }
                             catch (Exception ex)
                             {
@@ -252,6 +267,21 @@ public class ElectrumHttpHandler : HttpMessageHandler
                             catch (Exception scanEx)
                             {
                                 _logger.LogError(scanEx, "Rescan after mirror Track to NBX failed for {Strategy}", derivationSchemeStr);
+                            }
+
+                            // Evaluate the backend for this wallet right away instead of
+                            // waiting for the next 30s coordinator poll — this shrinks (but
+                            // does not fully eliminate) the window where a newly tracked
+                            // wallet is left on the stale default backend and both
+                            // ElectrumListener and the ungated NBXplorerListener could
+                            // publish the same event.
+                            try
+                            {
+                                await _coordinator.EvaluateWalletAsync(derivationSchemeStr, CancellationToken.None);
+                            }
+                            catch (Exception evalEx)
+                            {
+                                _logger.LogError(evalEx, "Backend evaluation after mirror Track failed for {Strategy}", derivationSchemeStr);
                             }
                         }
                         catch (Exception ex)
