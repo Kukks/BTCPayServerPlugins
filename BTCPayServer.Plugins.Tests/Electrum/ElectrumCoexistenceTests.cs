@@ -8,8 +8,7 @@ using BTCPayServer.Plugins.Electrum;
 using NBXplorer.DerivationStrategy;
 using BTCPayServer.Plugins.Electrum.Controllers;
 using BTCPayServer.Plugins.Electrum.Services;
-using BTCPayServer.Services.Invoices;
-using NBitpayClient;
+using BTCPayServer.Events;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -310,32 +309,47 @@ public class ElectrumCoexistenceTests : ElectrumCoexistenceTestsBase
         await ElectrumTestInfra.ForceBackendAsync(coordinator, walletId, WalletBackend.Nbx, ct);
 
         // Both backends track this wallet (NBX active + Electrum mirror on Fulcrum), so both
-        // listeners observe the tx. For an NBX-active wallet the EventGate must silence the
-        // Electrum listener, so the invoice ends up with exactly one payment — NBX's — not a
-        // second copy recorded by Electrum under a different payment id.
-        var invoice = user.BitPay.CreateInvoice(new Invoice
+        // listeners observe the tx. Assert on the EventAggregator — which, unlike the payments
+        // table, is NOT primary-key deduplicated (both listeners would otherwise mint the same
+        // "{txid}-{vout}" payment id and a duplicate row would be silently dropped, hiding a gate
+        // leak). Electrum publishes a *confirmed* tx with a null BlockId (its per-tx stream has no
+        // block hash), whereas the core NBXplorerListener sets a real BlockId once confirmed, so a
+        // confirmed-tx event with BlockId == null could only have come from the Electrum listener
+        // — i.e. the EventGate leaked for an NBX-active wallet.
+        var eventAggregator = tester.PayTester.GetService<EventAggregator>();
+        var total = 0;
+        var electrumShaped = 0;
+        using var sub = eventAggregator.Subscribe<NewOnChainTransactionEvent>(evt =>
         {
-            Price = 0.3m,
-            Currency = "BTC",
-            FullNotifications = true
+            var nte = evt.NewTransactionEvent;
+            if (nte?.DerivationStrategy?.ToString() != walletId)
+                return;
+            Interlocked.Increment(ref total);
+            if (nte.BlockId == null && nte.TransactionData?.Confirmations > 0)
+                Interlocked.Increment(ref electrumShaped);
         });
-        var address = BitcoinAddress.Create(invoice.BitcoinAddress, tester.ExplorerNode.Network);
 
-        await tester.ExplorerNode.SendToAddressAsync(address, Money.Coins(0.3m));
+        var network = tester.PayTester.GetService<BTCPayNetworkProvider>().GetNetwork<BTCPayNetwork>("BTC");
+        var depositAddress = user.DerivationScheme
+            .GetLineFor(DerivationFeature.Deposit).Derive(1)
+            .ScriptPubKey.GetDestinationAddress(network.NBitcoinNetwork);
+
+        await tester.ExplorerNode.SendToAddressAsync(depositAddress, Money.Coins(0.3m));
         tester.ExplorerNode.Generate(1);
 
-        var invoiceRepo = tester.PayTester.GetService<InvoiceRepository>();
-        await TestUtils.EventuallyAsync(async () =>
+        // Wait until the payment is observed at all (proves the scenario actually ran — else the
+        // assertion below is vacuous), then hold long enough that a leaked Electrum publish for
+        // the confirmed tx would have landed.
+        await TestUtils.EventuallyAsync(() =>
         {
-            var entity = await invoiceRepo.GetInvoice(invoice.Id);
-            Assert.NotNull(entity);
-            Assert.NotEmpty(entity.GetPayments(false));
+            Assert.True(total >= 1, "no NewOnChainTransactionEvent observed for the wallet");
+            return Task.CompletedTask;
         }, delay: 120_000);
-
-        // Give any (erroneous) Electrum-published duplicate time to arrive before asserting one.
         await Task.Delay(15_000, ct);
-        var final = await invoiceRepo.GetInvoice(invoice.Id);
-        Assert.Single(final.GetPayments(false));
+
+        // NBX published; the gate kept Electrum silent. If the gate were removed, Electrum would
+        // publish a confirmed-tx-with-null-BlockId event here and this would be >= 1.
+        Assert.Equal(0, electrumShaped);
     }
 
     [Fact(Timeout = 180_000)]

@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Plugins.Electrum;
@@ -54,7 +55,36 @@ internal static class ElectrumTestInfra
     }
 
     public static void StopNbx() => RunDocker($"stop {NbxContainer}");
-    public static void StartNbx() => RunDocker($"start {NbxContainer}");
+
+    // Start NBX and block until it reports fully synced again. `docker start` returns before NBX
+    // has reconnected to bitcoind and caught back up, so without this a following test that needs
+    // NBX would see it unsynced — its NBXplorerListener websocket would miss the payment
+    // notification (observed as an ordering-dependent failure of the no-duplicate-event leg).
+    public static void StartNbx()
+    {
+        RunDocker($"start {NbxContainer}");
+        WaitNbxSyncedAsync().GetAwaiter().GetResult();
+    }
+
+    private static async Task WaitNbxSyncedAsync()
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        for (var i = 0; i < 60; i++) // up to ~2 minutes
+        {
+            try
+            {
+                // NBX runs with NBXPLORER_NOAUTH=1 in the tester compose, so no auth header needed.
+                var json = await http.GetStringAsync("http://127.0.0.1:32838/v1/cryptos/BTC/status");
+                if (json.Replace(" ", "").ToLowerInvariant().Contains("\"isfullysynched\":true"))
+                    return;
+            }
+            catch
+            {
+                // NBX not accepting connections yet — keep polling.
+            }
+            await Task.Delay(2000);
+        }
+    }
 
     private static void RunDocker(string args)
     {
@@ -68,7 +98,16 @@ internal static class ElectrumTestInfra
         using var p = Process.Start(psi);
         if (p == null)
             throw new InvalidOperationException("Failed to start docker process");
-        p.WaitForExit(60_000);
+        var stderr = p.StandardError.ReadToEnd();
+        if (!p.WaitForExit(60_000))
+        {
+            try { p.Kill(); } catch { /* best effort */ }
+            throw new InvalidOperationException($"'docker {args}' timed out");
+        }
+        // Fail loudly instead of a silent no-op (e.g. a wrong container name), which would make
+        // the NBX-down legs pass vacuously with NBX never actually stopped.
+        if (p.ExitCode != 0)
+            throw new InvalidOperationException($"'docker {args}' failed (exit {p.ExitCode}): {stderr.Trim()}");
     }
 
     /// <summary>
