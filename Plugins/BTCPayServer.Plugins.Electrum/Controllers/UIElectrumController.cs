@@ -17,6 +17,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NBitcoin;
@@ -29,15 +30,18 @@ public class UIElectrumController : Controller
     private readonly SettingsRepository _settingsRepository;
     private readonly BTCPayNetworkProvider _networkProvider;
     private readonly IOptions<DataDirectories> _dataDirectories;
+    private readonly IConfiguration _configuration;
 
     public UIElectrumController(
         SettingsRepository settingsRepository,
         BTCPayNetworkProvider networkProvider,
-        IOptions<DataDirectories> dataDirectories)
+        IOptions<DataDirectories> dataDirectories,
+        IConfiguration configuration)
     {
         _settingsRepository = settingsRepository;
         _networkProvider = networkProvider;
         _dataDirectories = dataDirectories;
+        _configuration = configuration;
     }
 
     // These controller routes are registered as MVC application parts independently
@@ -45,9 +49,17 @@ public class UIElectrumController : Controller
     // (non-mainnet, where Execute returns early and registers no Electrum services).
     // Short-circuit here so an admin hitting the URL sees a clear "inactive" response
     // instead of a 500 from unresolved services.
+    //
+    // Must mirror ElectrumPlugin.Execute's own mainnet gate exactly, including its
+    // AllowNonMainnet(IConfiguration) escape hatch: otherwise, with the escape hatch
+    // set (e.g. BTCPAY_ELECTRUM_ALLOWNONMAINNET=true for regtest testing),
+    // ElectrumPlugin.Execute registers BackendCoordinator/ElectrumDbContextFactory/
+    // ElectrumStatusMonitor (this controller's action can resolve and use them), yet
+    // this filter would still 404 every request because it never re-checked the
+    // escape hatch — found by the P4 Task 4 integration batch.
     public override void OnActionExecuting(ActionExecutingContext context)
     {
-        if (_networkProvider.NetworkType != ChainName.Mainnet)
+        if (_networkProvider.NetworkType != ChainName.Mainnet && !ElectrumPlugin.AllowNonMainnet(_configuration))
         {
             context.Result = NotFound(
                 $"Electrum is only active on Bitcoin mainnet; it is inactive on {_networkProvider.NetworkType}.");
