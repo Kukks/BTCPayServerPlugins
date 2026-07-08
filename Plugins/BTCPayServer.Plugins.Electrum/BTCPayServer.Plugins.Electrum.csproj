@@ -8,8 +8,8 @@
     <!-- Plugin specific properties -->
     <PropertyGroup>
         <Product>Electrum</Product>
-        <Description>Electrum server backend for BTCPay Server, replacing NBXplorer with ElectrumX/Fulcrum.</Description>
-        <Version>1.1.1</Version>
+        <Description>Runs an Electrum (ElectrumX/Fulcrum) backend alongside NBXplorer — a bootstrap while NBXplorer syncs and an always-on fallback if it goes down — with automatic per-wallet failover. Mainnet only.</Description>
+        <Version>1.1.2</Version>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->
