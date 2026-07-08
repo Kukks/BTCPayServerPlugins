@@ -23,6 +23,7 @@ public class ElectrumStatusMonitor : IHostedService
     private readonly EventAggregator _eventAggregator;
     private readonly SettingsRepository _settingsRepository;
     private readonly RealNbxGateway _realNbxGateway;
+    private readonly NbxHealth _nbxHealth;
     private readonly ILogger<ElectrumStatusMonitor> _logger;
     private CancellationTokenSource _cts;
     private Task _monitorLoop;
@@ -48,6 +49,7 @@ public class ElectrumStatusMonitor : IHostedService
         EventAggregator eventAggregator,
         SettingsRepository settingsRepository,
         RealNbxGateway realNbxGateway,
+        NbxHealth nbxHealth,
         ILogger<ElectrumStatusMonitor> logger)
     {
         _client = client;
@@ -56,6 +58,7 @@ public class ElectrumStatusMonitor : IHostedService
         _eventAggregator = eventAggregator;
         _settingsRepository = settingsRepository;
         _realNbxGateway = realNbxGateway;
+        _nbxHealth = nbxHealth;
         _logger = logger;
     }
 
@@ -158,10 +161,12 @@ public class ElectrumStatusMonitor : IHostedService
         try
         {
             var status = await client.GetStatusAsync(ct);
+            _nbxHealth.Record(true);
             return status?.IsFullySynched is true;
         }
         catch (Exception ex)
         {
+            _nbxHealth.Record(false);
             _logger.LogDebug(ex, "Failed to query real NBX status");
             return false;
         }

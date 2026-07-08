@@ -31,6 +31,7 @@ public class BackendCoordinator : IHostedService
     private readonly BTCPayNetworkProvider _networkProvider;
     private readonly IndexFastForwarder _fastForwarder;
     private readonly ReservedIndexLedger _reservedLedger;
+    private readonly NbxHealth _nbxHealth;
     private readonly ILogger<BackendCoordinator> _logger;
     private CancellationTokenSource _cts;
     private Task _pollTask;
@@ -44,6 +45,7 @@ public class BackendCoordinator : IHostedService
         BTCPayNetworkProvider networkProvider = null,
         IndexFastForwarder fastForwarder = null,
         ReservedIndexLedger reservedLedger = null,
+        NbxHealth nbxHealth = null,
         ILogger<BackendCoordinator> logger = null)
     {
         _dbFactory = dbFactory;
@@ -51,6 +53,7 @@ public class BackendCoordinator : IHostedService
         _networkProvider = networkProvider;
         _fastForwarder = fastForwarder;
         _reservedLedger = reservedLedger;
+        _nbxHealth = nbxHealth;
         _logger = logger;
     }
 
@@ -105,12 +108,16 @@ public class BackendCoordinator : IHostedService
             return Task.CompletedTask; // not wired for polling (e.g. constructed directly in a test)
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (_nbxHealth != null)
+            _nbxHealth.OnRecovered += OnNbxRecovered;
         _pollTask = Task.Run(() => PollLoopAsync(_cts.Token), CancellationToken.None);
         return Task.CompletedTask;
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
+        if (_nbxHealth != null)
+            _nbxHealth.OnRecovered -= OnNbxRecovered;
         _cts?.Cancel();
         if (_pollTask != null)
         {
@@ -221,10 +228,12 @@ public class BackendCoordinator : IHostedService
             try
             {
                 var status = await nbx.GetStatusAsync(ct);
+                _nbxHealth?.Record(true);
                 nbxSynced = status?.IsFullySynched ?? false;
             }
             catch (Exception ex)
             {
+                _nbxHealth?.Record(false);
                 _logger?.LogDebug(ex, "Failed to read NBX status; treating as not synced");
             }
 
@@ -339,6 +348,66 @@ public class BackendCoordinator : IHostedService
                 {
                     _logger?.LogDebug(ex, "Failed to read NBX next index for wallet {WalletId} feature {Feature} during ledger seed", wallet.Id, feature);
                 }
+            }
+        }
+    }
+
+    // When NBX comes back after an outage, ask it to rescan each tracked wallet's UTXO set so any
+    // activity that arrived while it was down is rediscovered — belt-and-suspenders on top of NBX's
+    // own chain re-index. Fire-and-forget; a wallet won't flip back to NBX-authoritative until NBX
+    // reports fully synced anyway, so there's no rush.
+    private void OnNbxRecovered()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await RescanAllTrackedInNbxAsync(_cts?.Token ?? CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Rescan on NBX recovery failed");
+            }
+        });
+    }
+
+    private async Task RescanAllTrackedInNbxAsync(CancellationToken ct)
+    {
+        if (_realNbx == null || _networkProvider == null || _dbFactory == null)
+            return;
+
+        List<TrackedWallet> wallets;
+        try
+        {
+            await using var ctx = _dbFactory.CreateContext();
+            wallets = await ctx.TrackedWallets.ToListAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug(ex, "Failed to load tracked wallets for NBX recovery rescan");
+            return;
+        }
+
+        foreach (var wallet in wallets)
+        {
+            var nbx = _realNbx.GetClient(wallet.CryptoCode);
+            if (nbx == null)
+                continue;
+
+            var network = _networkProvider.GetNetwork<BTCPayNetwork>(wallet.CryptoCode);
+            if (network == null)
+                continue;
+
+            try
+            {
+                var strategy = new DerivationStrategyFactory(network.NBitcoinNetwork).Parse(wallet.DerivationStrategy);
+                await nbx.ScanUTXOSetAsync(strategy, cancellation: ct);
+                _logger?.LogInformation("Requested NBX UTXO rescan for wallet {WalletId} after NBX recovery", wallet.Id);
+            }
+            catch (Exception ex)
+            {
+                // Includes NBX's "scanutxoset-in-progress" when a scan is already scheduled — harmless.
+                _logger?.LogDebug(ex, "NBX recovery rescan skipped/failed for wallet {WalletId}", wallet.Id);
             }
         }
     }
