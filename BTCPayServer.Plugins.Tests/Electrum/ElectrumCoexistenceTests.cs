@@ -490,10 +490,12 @@ public class ElectrumCoexistenceTests : ElectrumCoexistenceTestsBase
             .GetLineFor(DerivationFeature.Deposit).Derive(2)
             .ScriptPubKey.GetDestinationAddress(network.NBitcoinNetwork);
 
+        var nbxStopped = false;
         try
         {
             // NBX goes down; one evaluation flips the shared health flag to unreachable.
             ElectrumTestInfra.StopNbx();
+            nbxStopped = true;
             await coordinator.EvaluateWalletAsync(walletId, ct);
             Assert.False(health.Reachable);
 
@@ -504,6 +506,7 @@ public class ElectrumCoexistenceTests : ElectrumCoexistenceTestsBase
             // NBX comes back (StartNbx blocks until it reports synced); one evaluation records it
             // reachable again, which fires OnRecovered -> the coordinator rescans tracked wallets.
             ElectrumTestInfra.StartNbx();
+            nbxStopped = false;
             await coordinator.EvaluateWalletAsync(walletId, ct);
             Assert.True(recovered, "NBX recovery did not fire the rescan trigger");
 
@@ -518,7 +521,7 @@ public class ElectrumCoexistenceTests : ElectrumCoexistenceTestsBase
         }
         finally
         {
-            if (!health.Reachable)
+            if (nbxStopped)
                 ElectrumTestInfra.StartNbx();
         }
     }

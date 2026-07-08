@@ -26,6 +26,11 @@ public class ElectrumHttpHandler : HttpMessageHandler
 {
     private static readonly HttpClient _proxyClient = new();
 
+    // Bound each proxy attempt so a hung (not merely refused) NBX fails over to Electrum quickly,
+    // instead of blocking on HttpClient's default ~100s timeout. Only the first call per outage
+    // pays this — once it trips NbxHealth to unreachable, subsequent calls skip NBX entirely.
+    private static readonly TimeSpan ProxyTimeout = TimeSpan.FromSeconds(20);
+
     private readonly ElectrumWalletTracker _tracker;
     private readonly BTCPayNetworkProvider _networkProvider;
     private readonly BackendCoordinator _coordinator;
@@ -561,7 +566,9 @@ public class ElectrumHttpHandler : HttpMessageHandler
                 clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
         }
 
-        return await _proxyClient.SendAsync(clone, cancellationToken);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(ProxyTimeout);
+        return await _proxyClient.SendAsync(clone, timeoutCts.Token);
     }
 
     // Peeks the buffered body of a proxied "reserve new address" response so the reserved-
