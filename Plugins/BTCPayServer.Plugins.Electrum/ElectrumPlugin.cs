@@ -59,13 +59,15 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
         RemoveByImplementation<NBXplorerConnectionFactory>(services);
         RemoveHostedService<NBXplorerConnectionFactory>(services);
 
-        // NBXplorerListener and NBXplorerWaiters stay registered: the shim
-        // ExplorerClientProvider now points its clients' URI + cookie auth at real
-        // NBX, and NBXplorerListener's websocket session connects using that URI
-        // directly (bypassing ElectrumHttpHandler), so real NBX keeps flowing
-        // payment notifications. NBXplorerWaiters is kept alongside
-        // ElectrumStatusMonitor for now; which one drives effective sync status is
-        // decided in P3.
+        // NBXplorerListener stays registered: the shim ExplorerClientProvider now
+        // points its clients' URI + cookie auth at real NBX, and
+        // NBXplorerListener's websocket session connects using that URI directly
+        // (bypassing ElectrumHttpHandler), so real NBX keeps flowing payment
+        // notifications. NBXplorerWaiters is removed: ElectrumStatusMonitor is now
+        // the single status publisher (it reconciles real NBX + Electrum
+        // readiness), so the core waiter would otherwise fight it over dashboard
+        // state.
+        RemoveHostedService<NBXplorerWaiters>(services);
 
         // NBXplorerDashboard
         RemoveByImplementation<NBXplorerDashboard>(services);
