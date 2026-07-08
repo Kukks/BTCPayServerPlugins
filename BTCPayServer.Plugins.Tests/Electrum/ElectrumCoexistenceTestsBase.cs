@@ -58,9 +58,15 @@ public abstract class ElectrumCoexistenceTestsBase : UnitTestBase
         // plugins (Blink, MCP, NIP05, Stripe) can't resolve their dependency assemblies in this test's
         // default load context and crash host startup (ConfigException), failing every Electrum test
         // before it runs. Overwrite that exact file so ONLY the Electrum plugin loads.
+        //
+        // Use the plain "<PathToDll>" DEBUG_PLUGINS form, NOT "<identifier>::<path>": BTCPay's
+        // PluginManager "::" parser is off-by-one (plugin[(idx+1)..] keeps a leading ':'), so
+        // "id::C:/x.dll" becomes ":C:/x.dll", which Path.Combine(contentRoot, ...) treats as
+        // relative -> a malformed "<contentRoot>:C:/x.dll" and a dependency-resolution failure.
+        // The plain-path branch derives the identifier from the filename and resolves correctly.
         var devSettings = Path.Combine(TestUtils.TestDirectory, "appsettings.dev.json");
         File.WriteAllText(devSettings,
-            $"{{\"DEBUG_PLUGINS\":\"{ElectrumPluginIdentifier}::{pluginDll.Replace("\\", "/")}\"}}");
+            $"{{\"DEBUG_PLUGINS\":\"{pluginDll.Replace("\\", "/")}\"}}");
 
         return CreateServerTester(scope);
     }
