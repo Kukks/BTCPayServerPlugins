@@ -1,8 +1,15 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
+using BTCPayServer.HostedServices;
 using BTCPayServer.Plugins.Electrum;
+using NBXplorer.DerivationStrategy;
 using BTCPayServer.Plugins.Electrum.Controllers;
 using BTCPayServer.Plugins.Electrum.Services;
+using BTCPayServer.Services.Invoices;
+using NBitpayClient;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -158,21 +165,246 @@ public class ElectrumCoexistenceTests : ElectrumCoexistenceTestsBase
     // assertion into meaninglessness (e.g. "no duplicate event" is trivially true if Electrum
     // never publishes anything at all).
 
-    [Fact(Skip = "needs regtest Electrum server (Fulcrum) — follow-up")]
-    public Task ElectrumServing_WalletBalanceAndPayment_WorksEndToEnd() => Task.CompletedTask;
+    [Fact(Timeout = 180_000)]
+    [Trait("Integration", "Integration")]
+    public async Task ElectrumServing_WalletBalanceAndPayment_WorksEndToEnd()
+    {
+        using var tester = CreateElectrumServerTester();
+        await tester.StartAsync();
+        var ct = TestContext.Current.CancellationToken;
 
-    [Fact(Skip = "needs regtest Electrum server (Fulcrum) — follow-up")]
-    public Task ReserveFlipNoReuse_AcrossBackendSwitch_ExercisesFastForwardToIndexAsync() => Task.CompletedTask;
+        // Point the singleton Electrum client at the local regtest Fulcrum and confirm a real
+        // Electrum handshake — server.version must come back as Fulcrum, proving we reached the
+        // regtest Electrum server (not a stale mainnet TrustedServer and not just an open socket).
+        await ElectrumTestInfra.PointElectrumAtFulcrumAsync(tester, ct);
+        var client = tester.PayTester.GetService<ElectrumClient>();
+        var (software, _) = await client.ServerVersionAsync("BTCPayServer-Electrum-Test", "1.4", ct);
+        Assert.Contains("Fulcrum", software, StringComparison.OrdinalIgnoreCase);
 
-    [Fact(Skip = "needs regtest Electrum server (Fulcrum) — follow-up")]
-    public Task NbxDown_FailsBackToElectrum() => Task.CompletedTask;
+        var user = tester.NewAccount();
+        user.GrantAccess();
+        user.RegisterDerivationScheme("BTC");
+        var walletId = user.DerivationScheme.ToString();
 
-    [Fact(Skip = "needs regtest Electrum server (Fulcrum) — follow-up")]
-    public Task NoDuplicateNewOnChainTransactionEvent_ForNbxActiveWallet() => Task.CompletedTask;
+        // Registering the scheme fires the handler's background TrackWalletAsync: it derives the
+        // gap-limit addresses, subscribes their scripthashes on Fulcrum, and syncs current state.
+        // Derive the deposit-index-0 address directly from the scheme (not via the tracker) so we
+        // never win the derive race that would make TrackWalletAsync skip its subscribe step.
+        var network = tester.PayTester.GetService<BTCPayNetworkProvider>().GetNetwork<BTCPayNetwork>("BTC");
+        var depositAddress = user.DerivationScheme
+            .GetLineFor(DerivationFeature.Deposit).Derive(0)
+            .ScriptPubKey.GetDestinationAddress(network.NBitcoinNetwork);
 
-    [Fact(Skip = "needs regtest Electrum server (Fulcrum) — follow-up")]
-    public Task Dashboard_AvailableWhenElectrumUpAndNbxUnsynced() => Task.CompletedTask;
+        // Pay + confirm on the regtest bitcoind Fulcrum indexes.
+        await tester.ExplorerNode.SendToAddressAsync(depositAddress, Money.Coins(0.5m));
+        tester.ExplorerNode.Generate(1);
 
-    [Fact(Skip = "needs regtest Electrum server (Fulcrum) — follow-up")]
-    public Task Hysteresis_OnePollNbxBlip_DoesNotFlipWallet() => Task.CompletedTask;
+        // The Electrum engine — reading only its own DB, populated by Fulcrum scripthash
+        // notifications / initial sync — must report the confirmed balance and the UTXO. This is
+        // the first proof the Electrum-serving half works end-to-end against a real regtest server.
+        var tracker = tester.PayTester.GetService<ElectrumWalletTracker>();
+        await TestUtils.EventuallyAsync(async () =>
+        {
+            var balance = await tracker.GetBalanceAsync(walletId, ct);
+            Assert.Equal(Money.Coins(0.5m), balance.Total);
+        }, delay: 120_000);
+
+        var utxos = await tracker.GetUTXOChangesAsync(walletId, ct);
+        Assert.Contains(utxos.Confirmed.UTXOs, u => u.Value is Money m && m == Money.Coins(0.5m));
+    }
+
+    [Fact(Timeout = 240_000)]
+    [Trait("Integration", "Integration")]
+    public async Task ReserveFlipNoReuse_AcrossBackendSwitch_ExercisesFastForwardToIndexAsync()
+    {
+        using var tester = CreateElectrumServerTester();
+        await tester.StartAsync();
+        var ct = TestContext.Current.CancellationToken;
+
+        await ElectrumTestInfra.PointElectrumAtFulcrumAsync(tester, ct);
+
+        var user = tester.NewAccount();
+        user.GrantAccess();
+        user.RegisterDerivationScheme("BTC");
+        var walletId = user.DerivationScheme.ToString();
+
+        var coordinator = tester.PayTester.GetService<BackendCoordinator>();
+        var tracker = tester.PayTester.GetService<ElectrumWalletTracker>();
+        var realNbx = tester.PayTester.GetService<RealNbxGateway>();
+        var network = tester.PayTester.GetService<BTCPayNetworkProvider>().GetNetwork<BTCPayNetwork>("BTC");
+        var strategy = new DerivationStrategyFactory(network.NBitcoinNetwork).Parse(walletId);
+
+        // Reserve several deposit addresses via Electrum to advance its reserved high-water
+        // (recorded in the shared ReservedIndexLedger).
+        var electrumHigh = -1;
+        for (var i = 0; i < 5; i++)
+        {
+            var info = await tracker.GetNextUnusedAddressAsync(walletId, false, true, ct);
+            electrumHigh = (int)info.KeyPath.Indexes[^1];
+        }
+
+        // Flip to NBX. On the transition the IndexFastForwarder burns NBX's deposit addresses up
+        // to the reserved high-water, so NBX cannot re-hand-out an index Electrum already reserved.
+        await ElectrumTestInfra.ForceBackendAsync(coordinator, walletId, WalletBackend.Nbx, ct);
+
+        // The next address NBX reserves must be strictly beyond Electrum's high-water — no reuse.
+        var nbx = realNbx.GetClient("BTC");
+        var nbxUnused = await nbx.GetUnusedAsync(strategy, DerivationFeature.Deposit, 0, true, ct);
+        var nbxIndex = (int)nbxUnused.KeyPath.Indexes[^1];
+        Assert.True(nbxIndex > electrumHigh,
+            $"NBX reused index {nbxIndex}, expected strictly greater than Electrum high-water {electrumHigh}");
+    }
+
+    [Fact(Timeout = 240_000)]
+    [Trait("Integration", "Integration")]
+    public async Task NbxDown_FailsBackToElectrum()
+    {
+        using var tester = CreateElectrumServerTester();
+        await tester.StartAsync();
+        var ct = TestContext.Current.CancellationToken;
+
+        await ElectrumTestInfra.PointElectrumAtFulcrumAsync(tester, ct);
+
+        var user = tester.NewAccount();
+        user.GrantAccess();
+        user.RegisterDerivationScheme("BTC");
+        var walletId = user.DerivationScheme.ToString();
+
+        var coordinator = tester.PayTester.GetService<BackendCoordinator>();
+
+        // First become NBX-authoritative: NBX is synced and, once the mirror-Track lands,
+        // tracking the wallet, so the hysteresis gate promotes it to Nbx.
+        await ElectrumTestInfra.ForceBackendAsync(coordinator, walletId, WalletBackend.Nbx, ct);
+
+        try
+        {
+            // Take NBX down. Its status/tracking calls now fail (connection refused), so each
+            // evaluation decides Electrum; after RequiredToElectrum consecutive votes + cooldown
+            // the wallet fails back to the still-connected Electrum backend.
+            ElectrumTestInfra.StopNbx();
+            await ElectrumTestInfra.ForceBackendAsync(coordinator, walletId, WalletBackend.Electrum, ct);
+            Assert.Equal(WalletBackend.Electrum, coordinator.GetActiveBackend(walletId));
+        }
+        finally
+        {
+            ElectrumTestInfra.StartNbx();
+        }
+    }
+
+    [Fact(Timeout = 240_000)]
+    [Trait("Integration", "Integration")]
+    public async Task NoDuplicateNewOnChainTransactionEvent_ForNbxActiveWallet()
+    {
+        using var tester = CreateElectrumServerTester();
+        await tester.StartAsync();
+        var ct = TestContext.Current.CancellationToken;
+
+        await ElectrumTestInfra.PointElectrumAtFulcrumAsync(tester, ct);
+
+        var user = tester.NewAccount();
+        user.GrantAccess();
+        user.RegisterDerivationScheme("BTC");
+        var walletId = user.DerivationScheme.ToString();
+
+        var coordinator = tester.PayTester.GetService<BackendCoordinator>();
+        await ElectrumTestInfra.ForceBackendAsync(coordinator, walletId, WalletBackend.Nbx, ct);
+
+        // Both backends track this wallet (NBX active + Electrum mirror on Fulcrum), so both
+        // listeners observe the tx. For an NBX-active wallet the EventGate must silence the
+        // Electrum listener, so the invoice ends up with exactly one payment — NBX's — not a
+        // second copy recorded by Electrum under a different payment id.
+        var invoice = user.BitPay.CreateInvoice(new Invoice
+        {
+            Price = 0.3m,
+            Currency = "BTC",
+            FullNotifications = true
+        });
+        var address = BitcoinAddress.Create(invoice.BitcoinAddress, tester.ExplorerNode.Network);
+
+        await tester.ExplorerNode.SendToAddressAsync(address, Money.Coins(0.3m));
+        tester.ExplorerNode.Generate(1);
+
+        var invoiceRepo = tester.PayTester.GetService<InvoiceRepository>();
+        await TestUtils.EventuallyAsync(async () =>
+        {
+            var entity = await invoiceRepo.GetInvoice(invoice.Id);
+            Assert.NotNull(entity);
+            Assert.NotEmpty(entity.GetPayments(false));
+        }, delay: 120_000);
+
+        // Give any (erroneous) Electrum-published duplicate time to arrive before asserting one.
+        await Task.Delay(15_000, ct);
+        var final = await invoiceRepo.GetInvoice(invoice.Id);
+        Assert.Single(final.GetPayments(false));
+    }
+
+    [Fact(Timeout = 180_000)]
+    [Trait("Integration", "Integration")]
+    public async Task Dashboard_AvailableWhenElectrumUpAndNbxUnsynced()
+    {
+        using var tester = CreateElectrumServerTester();
+        await tester.StartAsync();
+        var ct = TestContext.Current.CancellationToken;
+
+        await ElectrumTestInfra.PointElectrumAtFulcrumAsync(tester, ct);
+
+        // Reconciliation rule (pure): either backend alone keeps BTC available.
+        Assert.True(ElectrumStatusMonitor.EffectiveSynced(nbxSynced: false, electrumConnected: true));
+        Assert.False(ElectrumStatusMonitor.EffectiveSynced(nbxSynced: false, electrumConnected: false));
+
+        var monitor = tester.PayTester.GetService<ElectrumStatusMonitor>();
+        var dashboard = tester.PayTester.GetService<NBXplorerDashboard>();
+        try
+        {
+            // NBX unreachable, Electrum (Fulcrum) up: the monitor must keep BTC reported Ready so
+            // the store dashboard stays usable, instead of dropping to NotConnected when NBX dies.
+            ElectrumTestInfra.StopNbx();
+            await TestUtils.EventuallyAsync(() =>
+            {
+                Assert.Equal(NBXplorerState.Ready, monitor.State);
+                Assert.True(dashboard.IsFullySynched());
+                return Task.CompletedTask;
+            }, delay: 90_000);
+        }
+        finally
+        {
+            ElectrumTestInfra.StartNbx();
+        }
+    }
+
+    [Fact(Timeout = 240_000)]
+    [Trait("Integration", "Integration")]
+    public async Task Hysteresis_OnePollNbxBlip_DoesNotFlipWallet()
+    {
+        using var tester = CreateElectrumServerTester();
+        await tester.StartAsync();
+        var ct = TestContext.Current.CancellationToken;
+
+        await ElectrumTestInfra.PointElectrumAtFulcrumAsync(tester, ct);
+
+        var user = tester.NewAccount();
+        user.GrantAccess();
+        user.RegisterDerivationScheme("BTC");
+        var walletId = user.DerivationScheme.ToString();
+
+        var coordinator = tester.PayTester.GetService<BackendCoordinator>();
+        await ElectrumTestInfra.ForceBackendAsync(coordinator, walletId, WalletBackend.Nbx, ct);
+
+        // A single-poll NBX blip: exactly one evaluation sees NBX unreachable. RequiredToElectrum
+        // is 3, so one Electrum vote is far short of a flip — the wallet must stay on Nbx.
+        try
+        {
+            ElectrumTestInfra.StopNbx();
+            await coordinator.EvaluateWalletAsync(walletId, ct); // the blip
+        }
+        finally
+        {
+            ElectrumTestInfra.StartNbx();
+        }
+        Assert.Equal(WalletBackend.Nbx, coordinator.GetActiveBackend(walletId));
+
+        // Once NBX recovers, subsequent evaluations agree Nbx again; it never left Nbx.
+        await ElectrumTestInfra.ForceBackendAsync(coordinator, walletId, WalletBackend.Nbx, ct);
+        Assert.Equal(WalletBackend.Nbx, coordinator.GetActiveBackend(walletId));
+    }
 }

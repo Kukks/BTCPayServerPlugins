@@ -84,8 +84,13 @@ public class ElectrumClient : IAsyncDisposable
     {
         if (IsConnected) return;
 
-        // Load settings from DB if not provided via constructor
-        _settings ??= await _settingsRepository.GetSettingAsync<ElectrumSettings>();
+        // Reload settings from the repository on every (re)connect for DI-constructed
+        // clients, so a server/TLS change made in Server Settings > Electrum takes effect
+        // on the next reconnect instead of requiring a full process restart. Clients built
+        // with the explicit-settings constructor (no repository — e.g. the UI "test
+        // connection" probe) keep whatever settings they were handed.
+        if (_settingsRepository != null)
+            _settings = await _settingsRepository.GetSettingAsync<ElectrumSettings>() ?? _settings;
 
         if (string.IsNullOrEmpty(_settings?.Server))
             throw new InvalidOperationException("Electrum server not configured. Go to Server Settings > Electrum.");

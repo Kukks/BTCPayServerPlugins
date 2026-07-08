@@ -1,0 +1,64 @@
+# Supplement compose for the Electrum <-> NBX coexistence integration tests.
+#
+# Merge it with the submodule's BTCPayServer.Tests compose via two -f flags, e.g.:
+#   docker compose \
+#     -f submodules/btcpayserver/BTCPayServer.Tests/docker-compose.yml \
+#     -f BTCPayServer.Plugins.Tests/docker-compose.electrum.yml \
+#     -p btcpayservertests up -d postgres bitcoind nbxplorer fulcrum
+#
+# What it adds:
+#  1. txindex=1 on the tester's bitcoind (Fulcrum requires it). NOTE: env-var merge REPLACES
+#     BITCOIN_EXTRA_ARGS, so the whole arg block is duplicated here + txindex appended. Keep in
+#     sync with the base compose's bitcoind if those args ever change.
+#  2. A regtest Fulcrum (Electrum protocol server) wired to that bitcoind, listening on :50001.
+#     This lets the Electrum plugin actually connect on regtest (its built-in TrustedServers are
+#     all mainnet), so the Electrum-serving integration legs can run instead of being skipped.
+#     Point the plugin at it via ElectrumSettings.Server = "127.0.0.1:50001" (UseTls=false).
+services:
+  bitcoind:
+    environment:
+      BITCOIN_EXTRA_ARGS: |-
+        rpcuser=ceiwHEbqWI83
+        rpcpassword=DwubwWsoo3
+        rpcport=43782
+        rpcbind=0.0.0.0:43782
+        rpcallowip=0.0.0.0/0
+        port=39388
+        whitelist=0.0.0.0/0
+        zmqpubrawblock=tcp://0.0.0.0:28332
+        zmqpubrawtx=tcp://0.0.0.0:28333
+        deprecatedrpc=signrawtransaction
+        fallbackfee=0.0002
+        minrelaytxfee=0.00001000
+        unsafesqlitesync=1
+        txindex=1
+
+  fulcrum:
+    image: cculianu/fulcrum:latest
+    restart: unless-stopped
+    depends_on:
+      - bitcoind
+    ports:
+      - "50001:50001"
+    expose:
+      - "50001"
+    volumes:
+      - "fulcrum_datadir:/data"
+    entrypoint: ["Fulcrum"]
+    command:
+      - "--datadir"
+      - "/data"
+      - "--bitcoind"
+      - "bitcoind:43782"
+      - "--rpcuser"
+      - "ceiwHEbqWI83"
+      - "--rpcpassword"
+      - "DwubwWsoo3"
+      - "--tcp"
+      - "0.0.0.0:50001"
+      # regtest is tiny; give the DB a little memory instead of the removed --fast-sync
+      - "--db_mem"
+      - "1024.0"
+
+volumes:
+  fulcrum_datadir:
