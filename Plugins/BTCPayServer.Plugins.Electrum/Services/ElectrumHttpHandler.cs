@@ -129,6 +129,10 @@ public class ElectrumHttpHandler : HttpMessageHandler
                                 {
                                     await nbx.ScanUTXOSetAsync(parsedStrategy, cancellation: CancellationToken.None);
                                 }
+                                catch (Exception scanEx) when (IsScanAlreadyInProgress(scanEx))
+                                {
+                                    _logger.LogDebug(scanEx, "Rescan already in progress/scheduled for {Strategy}, ignoring", strategy);
+                                }
                                 catch (Exception scanEx)
                                 {
                                     _logger.LogError(scanEx, "Rescan after mirror Track to NBX failed for {Strategy}", strategy);
@@ -263,6 +267,10 @@ public class ElectrumHttpHandler : HttpMessageHandler
                             try
                             {
                                 await nbx.ScanUTXOSetAsync(derivationScheme, cancellation: CancellationToken.None);
+                            }
+                            catch (Exception scanEx) when (IsScanAlreadyInProgress(scanEx))
+                            {
+                                _logger.LogDebug(scanEx, "Rescan already in progress/scheduled for {Strategy}, ignoring", derivationSchemeStr);
                             }
                             catch (Exception scanEx)
                             {
@@ -581,6 +589,20 @@ public class ElectrumHttpHandler : HttpMessageHandler
         }
 
         return response;
+    }
+
+    // NBX throws NBXplorerException("scanutxoset-in-progress", "ScanUTXOSet has already been
+    // called for this derivationScheme") — HTTP 409 — when a scan is already scheduled/running
+    // for a scheme (NBXplorer/Controllers/DerivationSchemesController.cs). Mirror-Track can fire
+    // more than once for the same scheme (GenerateWallet then Track, repeated tracking,
+    // re-registration on restart), so this is an expected, idempotent condition, not a real
+    // failure — swallow it here rather than logging it as an error.
+    private static bool IsScanAlreadyInProgress(Exception ex)
+    {
+        return ex is NBXplorerException nbxEx &&
+               (string.Equals(nbxEx.Error?.Code, "scanutxoset-in-progress", StringComparison.OrdinalIgnoreCase) ||
+                (nbxEx.Error?.Message?.Contains("already been called", StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (nbxEx.Error?.Message?.Contains("already been scheduled", StringComparison.OrdinalIgnoreCase) ?? false));
     }
 
     private string ExtractStrategy(string path)
