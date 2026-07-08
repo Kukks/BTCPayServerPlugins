@@ -63,6 +63,9 @@ public class BackendCoordinator : IHostedService
         public int PollsSinceFlip;
     }
 
+    // Read-only per-wallet snapshot returned by SnapshotStates() for the admin status panel.
+    public sealed record WalletBackendState(string WalletId, WalletBackend Active, int ConsecutiveAgree);
+
     public WalletBackend GetActiveBackend(string walletId) =>
         _active.TryGetValue(walletId, out var b) ? b : WalletBackend.Electrum;
 
@@ -71,6 +74,22 @@ public class BackendCoordinator : IHostedService
 
     public IReadOnlyDictionary<string, WalletBackend> Snapshot() =>
         new Dictionary<string, WalletBackend>(_active);
+
+    // Read-only copy of both bookkeeping dictionaries for the admin status panel (P4 Task 3).
+    // Union of both key sets: a wallet can have an active backend without hysteresis history
+    // yet (never evaluated), or vice versa is not expected but handled defensively anyway.
+    public IReadOnlyList<WalletBackendState> SnapshotStates()
+    {
+        var walletIds = new HashSet<string>(_active.Keys);
+        walletIds.UnionWith(_hysteresis.Keys);
+
+        return walletIds
+            .Select(id => new WalletBackendState(
+                id,
+                _active.TryGetValue(id, out var backend) ? backend : WalletBackend.Electrum,
+                _hysteresis.TryGetValue(id, out var state) ? state.ConsecutiveAgree : 0))
+            .ToList();
+    }
 
     /// <summary>
     /// Pure readiness gate: NBX becomes authoritative for a wallet only when NBX's global
