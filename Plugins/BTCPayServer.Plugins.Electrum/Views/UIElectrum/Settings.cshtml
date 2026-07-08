@@ -2,6 +2,8 @@
 @using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Abstractions.Models
 @using BTCPayServer.Plugins.Electrum
+@using BTCPayServer.Plugins.Electrum.Models
+@using BTCPayServer.Plugins.Electrum.Services
 @{
     ViewData.SetLayoutModel(new LayoutModel("electrum-settings", "Electrum Settings")
         .SetCategory(WellKnownCategories.Server));
@@ -9,6 +11,7 @@
     var currentServer = Model.Server ?? "";
     var isRandom = currentServer.Equals(ElectrumSettings.RandomServer, StringComparison.OrdinalIgnoreCase);
     var isTrusted = isRandom || ElectrumSettings.TrustedServers.Any(s => $"{s.Host}:{s.Port}" == currentServer);
+    var coexistence = ViewBag.Coexistence as CoexistenceStatusViewModel;
 }
 
 <div class="row">
@@ -72,6 +75,62 @@
         </div>
     </div>
 </div>
+
+@if (coexistence != null)
+{
+    <div class="row">
+        <div class="col-xxl-constrain col-xl-8">
+            <div class="mt-5 pt-3 border-top">
+                <h5>Coexistence Status</h5>
+                <p class="text-muted mb-2">
+                    Effective status:
+                    <span class="badge @(coexistence.EffectiveReady ? "text-bg-success" : "text-bg-warning")">@(coexistence.EffectiveReady ? "Ready" : "Not Connected")</span>
+                    &middot; Electrum server: @(string.IsNullOrEmpty(coexistence.ElectrumConnectedServer) ? coexistence.ElectrumConfiguredServer : coexistence.ElectrumConnectedServer)
+                    @if (!string.IsNullOrEmpty(coexistence.ElectrumServerVersion))
+                    {
+                        <text> (@coexistence.ElectrumServerVersion)</text>
+                    }
+                    &middot; Tip height: @coexistence.ElectrumTipHeight
+                </p>
+
+                @if (coexistence.Wallets.Count == 0)
+                {
+                    <p class="text-muted">No tracked wallets yet.</p>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Wallet</th>
+                                    <th>Active Backend</th>
+                                    <th>Consecutive Agree</th>
+                                    <th>Reserved Receive Index</th>
+                                    <th>Reserved Change Index</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var wallet in coexistence.Wallets)
+                                {
+                                    <tr>
+                                        <td><vc:truncate-center text="@wallet.WalletId" classes="truncate-center-id"/></td>
+                                        <td>
+                                            <span class="badge @(wallet.Active == WalletBackend.Nbx ? "text-bg-success" : "text-bg-info")">@wallet.Active</span>
+                                        </td>
+                                        <td>@wallet.ConsecutiveAgree</td>
+                                        <td>@wallet.ReservedReceiveIndex</td>
+                                        <td>@wallet.ReservedChangeIndex</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
 
 <script>
     document.getElementById('trustedServer').addEventListener('change', function () {

@@ -24,17 +24,28 @@ namespace BTCPayServer.Plugins.Electrum.Services;
 /// </summary>
 public class ElectrumHttpHandler : HttpMessageHandler
 {
+    private static readonly HttpClient _proxyClient = new();
+
     private readonly ElectrumWalletTracker _tracker;
     private readonly BTCPayNetworkProvider _networkProvider;
+    private readonly BackendCoordinator _coordinator;
+    private readonly RealNbxGateway _realNbx;
+    private readonly ReservedIndexLedger _reservedLedger;
     private readonly ILogger<ElectrumHttpHandler> _logger;
 
     public ElectrumHttpHandler(
         ElectrumWalletTracker tracker,
         BTCPayNetworkProvider networkProvider,
+        BackendCoordinator coordinator,
+        RealNbxGateway realNbx,
+        ReservedIndexLedger reservedLedger,
         ILogger<ElectrumHttpHandler> logger)
     {
         _tracker = tracker;
         _networkProvider = networkProvider;
+        _coordinator = coordinator;
+        _realNbx = realNbx;
+        _reservedLedger = reservedLedger;
         _logger = logger;
     }
 
@@ -48,6 +59,37 @@ public class ElectrumHttpHandler : HttpMessageHandler
 
         try
         {
+            // Classify the call and route wallet/global reads (and broadcasts, when NBX
+            // is available) straight to real NBX instead of serving from the Electrum
+            // tracker. Everything else falls through to the existing Electrum switch below,
+            // unchanged.
+            var call = NbxRequestClassifier.Classify(method, path, request.RequestUri?.Query ?? "");
+            var routeCryptoCode = ExtractCryptoCode(path) ?? "BTC";
+            var useNbx = call.Kind switch
+            {
+                NbxCallKind.WalletRead or NbxCallKind.WalletMutate => call.WalletId != null
+                    && _coordinator.GetActiveBackend(call.WalletId) == WalletBackend.Nbx,
+                NbxCallKind.GlobalRead or NbxCallKind.Broadcast => _realNbx.GetClient(routeCryptoCode) != null, // refined in P3
+                _ => false
+            };
+            if (useNbx && _realNbx.GetClient(routeCryptoCode) != null)
+            {
+                _logger.LogDebug("Routing {Method} {Path} to real NBX ({Kind})", method, path, call.Kind);
+                var proxied = await ProxyToRealNbxAsync(request, cancellationToken);
+
+                // The "reserve new address" mutation is proxied verbatim above, but the
+                // reserved-index ledger must stay authoritative regardless of which backend
+                // actually served it — peek the response and record the reserved index.
+                if (call.Kind == NbxCallKind.WalletMutate && call.WalletId != null &&
+                    path.Contains("/addresses/unused"))
+                {
+                    proxied = await PeekAndRecordNbxReserveAsync(
+                        proxied, call.WalletId, routeCryptoCode, cancellationToken);
+                }
+
+                return proxied;
+            }
+
             // POST /v1/cryptos/{code}/derivations — GenerateWallet or Track
             if (method == HttpMethod.Post && Regex.IsMatch(path, @"/v1/cryptos/\w+/derivations(/[^/]+)?$"))
             {
@@ -64,6 +106,57 @@ public class ElectrumHttpHandler : HttpMessageHandler
                         catch (Exception ex)
                         {
                             _logger.LogError(ex, "Background tracking failed for {Strategy}", strategy);
+                        }
+                    });
+
+                    // Mirror the Track to real NBX (Task 6) so both backends know the wallet,
+                    // regardless of which one is currently authoritative for this store.
+                    var trackCryptoCode = ExtractCryptoCode(path) ?? "BTC";
+                    _ = Task.Run(async () =>
+                    {
+                        if (_realNbx.GetClient(trackCryptoCode) is { } nbx)
+                        {
+                            try
+                            {
+                                var trackNetwork = _networkProvider.GetNetwork<BTCPayNetwork>(trackCryptoCode);
+                                var parsedStrategy = new DerivationStrategyFactory(trackNetwork.NBitcoinNetwork).Parse(strategy);
+                                await nbx.TrackAsync(parsedStrategy, cancellation: CancellationToken.None);
+
+                                // Request a UTXO-set rescan so NBX rediscovers the wallet's
+                                // historical txs — otherwise a flip to NBX under-reports the
+                                // balance of an imported wallet with pre-existing activity.
+                                try
+                                {
+                                    await nbx.ScanUTXOSetAsync(parsedStrategy, cancellation: CancellationToken.None);
+                                }
+                                catch (Exception scanEx) when (IsScanAlreadyInProgress(scanEx))
+                                {
+                                    _logger.LogDebug(scanEx, "Rescan already in progress/scheduled for {Strategy}, ignoring", strategy);
+                                }
+                                catch (Exception scanEx)
+                                {
+                                    _logger.LogError(scanEx, "Rescan after mirror Track to NBX failed for {Strategy}", strategy);
+                                }
+
+                                // Evaluate the backend for this wallet right away instead of
+                                // waiting for the next 30s coordinator poll — this shrinks (but
+                                // does not fully eliminate) the window where a newly tracked
+                                // wallet is left on the stale default backend and both
+                                // ElectrumListener and the ungated NBXplorerListener could
+                                // publish the same event.
+                                try
+                                {
+                                    await _coordinator.EvaluateWalletAsync(strategy, CancellationToken.None);
+                                }
+                                catch (Exception evalEx)
+                                {
+                                    _logger.LogError(evalEx, "Backend evaluation after mirror Track failed for {Strategy}", strategy);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Mirror Track to NBX failed for {Strategy}", strategy);
+                            }
                         }
                     });
                     // Return empty 200 — ExplorerClient.TrackAsync uses SendAsync<string>,
@@ -153,6 +246,56 @@ public class ElectrumHttpHandler : HttpMessageHandler
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Background wallet tracking failed for {Strategy}", derivationSchemeStr);
+                    }
+                });
+
+                // Mirror the new wallet to real NBX (P1 review gap — this branch previously
+                // wasn't mirrored) so both backends know about it, regardless of which one is
+                // currently authoritative for this store.
+                var genCryptoCode = cryptoCode ?? "BTC";
+                _ = Task.Run(async () =>
+                {
+                    if (_realNbx.GetClient(genCryptoCode) is { } nbx)
+                    {
+                        try
+                        {
+                            await nbx.TrackAsync(derivationScheme, cancellation: CancellationToken.None);
+
+                            // Request a UTXO-set rescan so NBX rediscovers the wallet's
+                            // historical txs — otherwise a flip to NBX under-reports the
+                            // balance of an imported wallet with pre-existing activity.
+                            try
+                            {
+                                await nbx.ScanUTXOSetAsync(derivationScheme, cancellation: CancellationToken.None);
+                            }
+                            catch (Exception scanEx) when (IsScanAlreadyInProgress(scanEx))
+                            {
+                                _logger.LogDebug(scanEx, "Rescan already in progress/scheduled for {Strategy}, ignoring", derivationSchemeStr);
+                            }
+                            catch (Exception scanEx)
+                            {
+                                _logger.LogError(scanEx, "Rescan after mirror Track to NBX failed for {Strategy}", derivationSchemeStr);
+                            }
+
+                            // Evaluate the backend for this wallet right away instead of
+                            // waiting for the next 30s coordinator poll — this shrinks (but
+                            // does not fully eliminate) the window where a newly tracked
+                            // wallet is left on the stale default backend and both
+                            // ElectrumListener and the ungated NBXplorerListener could
+                            // publish the same event.
+                            try
+                            {
+                                await _coordinator.EvaluateWalletAsync(derivationSchemeStr, CancellationToken.None);
+                            }
+                            catch (Exception evalEx)
+                            {
+                                _logger.LogError(evalEx, "Backend evaluation after mirror Track failed for {Strategy}", derivationSchemeStr);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Mirror Track to NBX failed for {Strategy}", derivationSchemeStr);
+                        }
                     }
                 });
 
@@ -374,6 +517,92 @@ public class ElectrumHttpHandler : HttpMessageHandler
                 Content = new StringContent(ex.Message)
             };
         }
+    }
+
+    // Clones the intercepted request onto real NBX and sends it verbatim with a plain
+    // HttpClient (not routed through this handler). The request's URI already targets
+    // real NBX and carries cookie auth — both set up by ElectrumExplorerClientProvider
+    // (Task 4) — so no further rewriting is needed here. Mutation mirroring back to the
+    // Electrum tracker is handled in Task 6.
+    private async Task<HttpResponseMessage> ProxyToRealNbxAsync(
+        HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var clone = new HttpRequestMessage(request.Method, request.RequestUri);
+        foreach (var header in request.Headers)
+            clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+
+        if (request.Content != null)
+        {
+            var bytes = await request.Content.ReadAsByteArrayAsync(cancellationToken);
+            clone.Content = new ByteArrayContent(bytes);
+            foreach (var header in request.Content.Headers)
+                clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        return await _proxyClient.SendAsync(clone, cancellationToken);
+    }
+
+    // Peeks the buffered body of a proxied "reserve new address" response so the reserved-
+    // index ledger records the index NBX just handed out, without changing what the caller
+    // (ExplorerClient) receives. The content is always rebuilt from the buffered bytes —
+    // even if deserialization/recording fails — so a ledger error can never affect the
+    // response passed back to the caller.
+    private async Task<HttpResponseMessage> PeekAndRecordNbxReserveAsync(
+        HttpResponseMessage response, string walletId, string cryptoCode, CancellationToken ct)
+    {
+        if (!response.IsSuccessStatusCode || response.Content == null)
+            return response;
+
+        byte[] bytes;
+        try
+        {
+            bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to buffer proxied NBX reserve response for {WalletId}", walletId);
+            return response;
+        }
+
+        var oldContentHeaders = response.Content.Headers;
+        var rebuilt = new ByteArrayContent(bytes);
+        foreach (var header in oldContentHeaders)
+            rebuilt.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        response.Content = rebuilt;
+
+        try
+        {
+            var network = _networkProvider.GetNetwork<BTCPayNetwork>(cryptoCode);
+            var jsonSettings = network?.NBXplorerNetwork?.JsonSerializerSettings;
+            var json = System.Text.Encoding.UTF8.GetString(bytes);
+            var info = JsonConvert.DeserializeObject<KeyPathInformation>(json, jsonSettings);
+            if (info?.KeyPath?.Indexes is { Length: > 0 } indexes)
+            {
+                var index = (int)indexes[^1];
+                var isChange = info.Feature == DerivationFeature.Change;
+                await _reservedLedger.RecordReserveAsync(walletId, isChange, index, ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to record NBX-served reserve for {WalletId}", walletId);
+        }
+
+        return response;
+    }
+
+    // NBX throws NBXplorerException("scanutxoset-in-progress", "ScanUTXOSet has already been
+    // called for this derivationScheme") — HTTP 409 — when a scan is already scheduled/running
+    // for a scheme (NBXplorer/Controllers/DerivationSchemesController.cs). Mirror-Track can fire
+    // more than once for the same scheme (GenerateWallet then Track, repeated tracking,
+    // re-registration on restart), so this is an expected, idempotent condition, not a real
+    // failure — swallow it here rather than logging it as an error.
+    private static bool IsScanAlreadyInProgress(Exception ex)
+    {
+        return ex is NBXplorerException nbxEx &&
+               (string.Equals(nbxEx.Error?.Code, "scanutxoset-in-progress", StringComparison.OrdinalIgnoreCase) ||
+                (nbxEx.Error?.Message?.Contains("already been called", StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (nbxEx.Error?.Message?.Contains("already been scheduled", StringComparison.OrdinalIgnoreCase) ?? false));
     }
 
     private string ExtractStrategy(string path)

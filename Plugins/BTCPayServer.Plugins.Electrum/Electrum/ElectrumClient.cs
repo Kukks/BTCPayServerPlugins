@@ -54,6 +54,8 @@ public class ElectrumClient : IAsyncDisposable
     private Task _readLoop;
     private CancellationTokenSource _cts;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
+    private readonly SemaphoreSlim _connectLock = new(1, 1);
+    private volatile bool _intentionalDisconnect;
     private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement>> _pending = new();
     private readonly ConcurrentDictionary<string, string> _subscribedScripthashes = new();
     private bool _headersSubscribed;
@@ -84,54 +86,89 @@ public class ElectrumClient : IAsyncDisposable
     {
         if (IsConnected) return;
 
-        // Load settings from DB if not provided via constructor
-        _settings ??= await _settingsRepository.GetSettingAsync<ElectrumSettings>();
-
-        if (string.IsNullOrEmpty(_settings?.Server))
-            throw new InvalidOperationException("Electrum server not configured. Go to Server Settings > Electrum.");
-
-        string host;
-        int port;
-        if (_settings.Server.Equals(ElectrumSettings.RandomServer, StringComparison.OrdinalIgnoreCase))
+        // Serialize connect attempts. The status monitor, the background reconnect loop, and (in
+        // tests) a manual reconnect can all call this concurrently; without serialization two
+        // callers each build a fresh socket + read loop, and the orphaned read loop's teardown
+        // later disposes the live stream/writer the tracker is using ("closed TextWriter" /
+        // "stream not writable"). The lock + re-check ensures at most one connection is built.
+        await _connectLock.WaitAsync(ct);
+        try
         {
-            var servers = ElectrumSettings.TrustedServers;
-            var pick = servers[Random.Shared.Next(servers.Length)];
-            host = pick.Host;
-            port = pick.Port;
+            if (IsConnected) return; // another caller connected while we waited for the lock
+            _intentionalDisconnect = false; // a future unexpected drop should auto-reconnect
+
+            // Reload settings from the repository on every (re)connect for DI-constructed
+            // clients, so a server/TLS change made in Server Settings > Electrum takes effect
+            // on the next reconnect instead of requiring a full process restart. Clients built
+            // with the explicit-settings constructor (no repository — e.g. the UI "test
+            // connection" probe) keep whatever settings they were handed.
+            if (_settingsRepository != null)
+            {
+                try
+                {
+                    _settings = await _settingsRepository.GetSettingAsync<ElectrumSettings>() ?? _settings;
+                }
+                catch (Exception ex)
+                {
+                    // A transient settings-store blip must not stall reconnection when the Electrum
+                    // server itself is reachable — fall back to the last-known settings.
+                    _logger?.LogDebug(ex, "Failed to reload Electrum settings on reconnect; using cached settings");
+                }
+            }
+
+            if (string.IsNullOrEmpty(_settings?.Server))
+                throw new InvalidOperationException("Electrum server not configured. Go to Server Settings > Electrum.");
+
+            string host;
+            int port;
+            if (_settings.Server.Equals(ElectrumSettings.RandomServer, StringComparison.OrdinalIgnoreCase))
+            {
+                var servers = ElectrumSettings.TrustedServers;
+                var pick = servers[Random.Shared.Next(servers.Length)];
+                host = pick.Host;
+                port = pick.Port;
+            }
+            else
+            {
+                var parts = _settings.Server.Split(':');
+                if (parts.Length != 2 || !int.TryParse(parts[1], out port))
+                    throw new InvalidOperationException($"Invalid server format: {_settings.Server}. Expected host:port");
+                host = parts[0];
+            }
+
+            _tcpClient = new TcpClient();
+            await _tcpClient.ConnectAsync(host, port, ct);
+
+            Stream stream = _tcpClient.GetStream();
+            if (_settings.UseTls)
+            {
+                var sslStream = new SslStream(stream, false, (_, _, _, _) => true);
+                await sslStream.AuthenticateAsClientAsync(host);
+                stream = sslStream;
+            }
+
+            _stream = stream;
+            _reader = new StreamReader(stream);
+            _writer = new StreamWriter(stream) { AutoFlush = true, NewLine = "\n" };
+
+            _cts = new CancellationTokenSource();
+            IsConnected = true;
+            ConnectedServer = $"{host}:{port}";
+            _readLoop = Task.Run(() => ReadLoopAsync(_cts.Token));
+
+            _logger.LogInformation("Connected to Electrum server {Host}:{Port}", host, port);
         }
-        else
+        finally
         {
-            var parts = _settings.Server.Split(':');
-            if (parts.Length != 2 || !int.TryParse(parts[1], out port))
-                throw new InvalidOperationException($"Invalid server format: {_settings.Server}. Expected host:port");
-            host = parts[0];
+            _connectLock.Release();
         }
-
-        _tcpClient = new TcpClient();
-        await _tcpClient.ConnectAsync(host, port, ct);
-
-        Stream stream = _tcpClient.GetStream();
-        if (_settings.UseTls)
-        {
-            var sslStream = new SslStream(stream, false, (_, _, _, _) => true);
-            await sslStream.AuthenticateAsClientAsync(host);
-            stream = sslStream;
-        }
-
-        _stream = stream;
-        _reader = new StreamReader(stream);
-        _writer = new StreamWriter(stream) { AutoFlush = true, NewLine = "\n" };
-
-        _cts = new CancellationTokenSource();
-        IsConnected = true;
-        ConnectedServer = $"{host}:{port}";
-        _readLoop = Task.Run(() => ReadLoopAsync(_cts.Token));
-
-        _logger.LogInformation("Connected to Electrum server {Host}:{Port}", host, port);
     }
 
     public async Task DisconnectAsync()
     {
+        // Mark this as an intentional teardown so the read loop's finally does NOT auto-spawn a
+        // reconnect loop that would race a concurrent (re)connect and stomp the fresh stream.
+        _intentionalDisconnect = true;
         IsConnected = false;
         ConnectedServer = null;
         _cts?.Cancel();
@@ -345,7 +382,11 @@ public class ElectrumClient : IAsyncDisposable
         finally
         {
             IsConnected = false;
-            _ = Task.Run(() => ReconnectLoopAsync());
+            // Only auto-reconnect on an unexpected connection drop, not an intentional
+            // DisconnectAsync (shutdown, or a deliberate server switch) — otherwise the spawned
+            // reconnect loop races whoever is intentionally reconnecting.
+            if (!_intentionalDisconnect)
+                _ = Task.Run(() => ReconnectLoopAsync());
         }
     }
 

@@ -35,6 +35,7 @@ public class ElectrumListener : IHostedService
     private readonly PaymentService _paymentService;
     private readonly PaymentMethodHandlerDictionary _handlers;
     private readonly BTCPayNetworkProvider _networkProvider;
+    private readonly BackendCoordinator _coordinator;
     private readonly ILogger<ElectrumListener> _logger;
     private CancellationTokenSource _cts;
     private Task _listenTask;
@@ -49,6 +50,7 @@ public class ElectrumListener : IHostedService
         PaymentService paymentService,
         PaymentMethodHandlerDictionary handlers,
         BTCPayNetworkProvider networkProvider,
+        BackendCoordinator coordinator,
         ILogger<ElectrumListener> logger)
     {
         _electrumClient = electrumClient;
@@ -60,6 +62,7 @@ public class ElectrumListener : IHostedService
         _paymentService = paymentService;
         _handlers = handlers;
         _networkProvider = networkProvider;
+        _coordinator = coordinator;
         _logger = logger;
     }
 
@@ -196,6 +199,10 @@ public class ElectrumListener : IHostedService
         ElectrumWalletTracker.NewTransactionInfo txInfo,
         BTCPayNetwork network, BTCPayWallet wallet, PaymentMethodId pmi)
     {
+        var walletId = txInfo.DerivationStrategy.ToString();
+        if (!EventGate.ShouldElectrumPublish(_coordinator.GetActiveBackend(walletId)))
+            return; // NBX-active: NBXplorerListener owns this wallet's events
+
         foreach (var output in txInfo.Outputs)
         {
             var invoice = await _invoiceRepository.GetInvoiceFromAddress(pmi, output.Address);
@@ -304,6 +311,10 @@ public class ElectrumListener : IHostedService
 
                 var promptDetails = handler.ParsePaymentPromptDetails(prompt.Details);
                 if (promptDetails?.AccountDerivation == null) continue;
+
+                var walletId = promptDetails.AccountDerivation.ToString();
+                if (!EventGate.ShouldElectrumPublish(_coordinator.GetActiveBackend(walletId)))
+                    continue; // NBX-active: NBXplorerListener owns this wallet's events
 
                 var strategy = promptDetails.AccountDerivation;
                 var coins = await wallet.GetUnspentCoins(strategy, cancellation: ct);

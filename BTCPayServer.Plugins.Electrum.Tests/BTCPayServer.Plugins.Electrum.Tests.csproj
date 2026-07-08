@@ -1,10 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+    <!-- Lightweight unit-test project for the Electrum plugin's pure logic
+         (coordinator, request classifier, decision/index math, config guard).
+         References ONLY the Electrum plugin + BTCPayServer runtime — NOT
+         BTCPayServer.Tests / ServerTester — so it builds and runs in seconds.
+         Heavy regtest integration tests live in BTCPayServer.Plugins.Tests. -->
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-
         <IsPackable>false</IsPackable>
     </PropertyGroup>
 
@@ -18,10 +22,8 @@
     </ItemGroup>
 
     <ItemGroup>
-      <!-- Electrum integration tests (ServerTester-based) live here; pure-logic unit
-           tests live in the lightweight BTCPayServer.Plugins.Electrum.Tests project. -->
-      <ProjectReference Include="..\Plugins\BTCPayServer.Plugins.Electrum\BTCPayServer.Plugins.Electrum.csproj" />
-      <ProjectReference Include="..\submodules\btcpayserver\BTCPayServer.Tests\BTCPayServer.Tests.csproj" />
+        <ProjectReference Include="..\Plugins\BTCPayServer.Plugins.Electrum\BTCPayServer.Plugins.Electrum.csproj" />
+        <ProjectReference Include="..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
     </ItemGroup>
 
 </Project>

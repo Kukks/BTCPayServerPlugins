@@ -9,6 +9,10 @@ public class TrackedWallet
     public string DerivationStrategy { get; set; }
     public int ReceiveGapIndex { get; set; }
     public int ChangeGapIndex { get; set; }
+    // Highest key index handed out via reserve for each feature, across BOTH backends.
+    // -1 means nothing reserved yet. The authoritative anti-reuse high-water.
+    public int ReservedReceiveIndex { get; set; } = -1;
+    public int ReservedChangeIndex { get; set; } = -1;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 

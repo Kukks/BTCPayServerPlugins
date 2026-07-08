@@ -22,6 +22,7 @@ public class ElectrumStatusMonitor : IHostedService
     private readonly BTCPayNetworkProvider _networkProvider;
     private readonly EventAggregator _eventAggregator;
     private readonly SettingsRepository _settingsRepository;
+    private readonly RealNbxGateway _realNbxGateway;
     private readonly ILogger<ElectrumStatusMonitor> _logger;
     private CancellationTokenSource _cts;
     private Task _monitorLoop;
@@ -32,12 +33,21 @@ public class ElectrumStatusMonitor : IHostedService
     public string ConnectedServer => _client.ConnectedServer;
     public string ConfiguredServer { get; private set; }
 
+    /// <summary>
+    /// BTC is effectively available if either backend can serve it: real NBX is
+    /// fully synced, or the Electrum connection is up. This closes the window
+    /// where NBX is still syncing but Electrum is already ready to serve.
+    /// </summary>
+    public static bool EffectiveSynced(bool nbxSynced, bool electrumConnected) =>
+        nbxSynced || electrumConnected;
+
     public ElectrumStatusMonitor(
         ElectrumClient client,
         NBXplorerDashboard dashboard,
         BTCPayNetworkProvider networkProvider,
         EventAggregator eventAggregator,
         SettingsRepository settingsRepository,
+        RealNbxGateway realNbxGateway,
         ILogger<ElectrumStatusMonitor> logger)
     {
         _client = client;
@@ -45,6 +55,7 @@ public class ElectrumStatusMonitor : IHostedService
         _networkProvider = networkProvider;
         _eventAggregator = eventAggregator;
         _settingsRepository = settingsRepository;
+        _realNbxGateway = realNbxGateway;
         _logger = logger;
     }
 
@@ -108,28 +119,51 @@ public class ElectrumStatusMonitor : IHostedService
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Cannot connect to Electrum server");
-                SetState(NBXplorerState.NotConnected, oldState, null, null);
-                return;
             }
         }
 
+        var electrumHealthy = false;
+        if (_client.IsConnected)
+        {
+            try
+            {
+                await _client.PingAsync(ct);
+                await _client.ServerFeaturesAsync(ct);
+                electrumHealthy = true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Electrum server health check failed");
+            }
+        }
+
+        // Effective readiness: BTC is available if either backend can serve it,
+        // so we don't report "not synced" while NBX is catching up but Electrum
+        // is already connected (and vice versa). Use the actual health-check result,
+        // not the raw IsConnected flag — on a half-open connection IsConnected can stay
+        // stale-true after a failed ping/ServerFeatures call.
+        var nbxSynced = await QueryNbxSyncedAsync(ct);
+        State = EffectiveSynced(nbxSynced, electrumHealthy) ? NBXplorerState.Ready : NBXplorerState.NotConnected;
+
+        var status = BuildStatusResult();
+        PublishDashboard(status, oldState);
+    }
+
+    private async Task<bool> QueryNbxSyncedAsync(CancellationToken ct)
+    {
+        var client = _realNbxGateway.GetClient("BTC");
+        if (client == null)
+            return false;
+
         try
         {
-            await _client.PingAsync(ct);
-
-            var features = await _client.ServerFeaturesAsync(ct);
-
-            // We consider ourselves synced if connected and responding
-            State = NBXplorerState.Ready;
-
-            var status = BuildStatusResult();
-            PublishDashboard(status, oldState);
+            var status = await client.GetStatusAsync(ct);
+            return status?.IsFullySynched is true;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Electrum server health check failed");
-            State = NBXplorerState.NotConnected;
-            SetState(NBXplorerState.NotConnected, oldState, null, null);
+            _logger.LogDebug(ex, "Failed to query real NBX status");
+            return false;
         }
     }
 
@@ -163,12 +197,6 @@ public class ElectrumStatusMonitor : IHostedService
     {
         var network = _networkProvider.GetNetwork<BTCPayNetwork>("BTC");
         return network?.NBitcoinNetwork?.ChainName ?? NBitcoin.ChainName.Mainnet;
-    }
-
-    private void SetState(NBXplorerState newState, NBXplorerState oldState, StatusResult status, GetMempoolInfoResponse mempoolInfo)
-    {
-        State = newState;
-        PublishDashboard(status, oldState);
     }
 
     private void PublishDashboard(StatusResult status, NBXplorerState oldState)

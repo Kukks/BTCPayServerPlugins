@@ -3,6 +3,7 @@ using System;
 using BTCPayServer.Plugins.Electrum.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace BTCPayServer.Plugins.Electrum.Migrations
 {
     [DbContext(typeof(ElectrumDbContext))]
-    partial class ElectrumDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260707000000_ReservedIndex")]
+    partial class ReservedIndex
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

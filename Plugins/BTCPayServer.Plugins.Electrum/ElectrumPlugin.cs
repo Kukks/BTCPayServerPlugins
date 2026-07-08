@@ -24,6 +24,12 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
         new() { Identifier = nameof(BTCPayServer), Condition = ">=2.3.7" }
     };
 
+    // Escape hatch for tests: allows the mainnet-only guard below to be bypassed
+    // (e.g. on regtest) via BTCPAY_ELECTRUM_ALLOWNONMAINNET=true. Production deployments
+    // should never need this — Electrum's TrustedServers are all public mainnet servers.
+    public static bool AllowNonMainnet(IConfiguration config) =>
+        config.GetValue<bool>("ELECTRUM_ALLOWNONMAINNET", false);
+
     public override void Execute(IServiceCollection services)
     {
         // ──────────────────────────────────────────────
@@ -34,7 +40,7 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
         // leave BTCPay on its default NBXplorer backend and register nothing.
         var bootstrap = ((PluginServiceCollection)services).BootstrapServices;
         var networkType = DefaultConfiguration.GetNetworkType(bootstrap.GetRequiredService<IConfiguration>());
-        if (networkType != ChainName.Mainnet)
+        if (networkType != ChainName.Mainnet && !AllowNonMainnet(bootstrap.GetRequiredService<IConfiguration>()))
         {
             bootstrap.GetRequiredService<Logs>().Configuration.LogInformation(
                 $"Electrum plugin only supports mainnet; skipping activation on {networkType}. BTCPay will keep using NBXplorer.");
@@ -53,10 +59,14 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
         RemoveByImplementation<NBXplorerConnectionFactory>(services);
         RemoveHostedService<NBXplorerConnectionFactory>(services);
 
-        // NBXplorerListener (hosted service)
-        RemoveHostedService<NBXplorerListener>(services);
-
-        // NBXplorerWaiters (hosted service)
+        // NBXplorerListener stays registered: the shim ExplorerClientProvider now
+        // points its clients' URI + cookie auth at real NBX, and
+        // NBXplorerListener's websocket session connects using that URI directly
+        // (bypassing ElectrumHttpHandler), so real NBX keeps flowing payment
+        // notifications. NBXplorerWaiters is removed: ElectrumStatusMonitor is now
+        // the single status publisher (it reconciles real NBX + Electrum
+        // readiness), so the core waiter would otherwise fight it over dashboard
+        // state.
         RemoveHostedService<NBXplorerWaiters>(services);
 
         // NBXplorerDashboard
@@ -77,6 +87,8 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
 
         services.AddSingleton<ElectrumClient>();
         services.AddSingleton<ElectrumWalletTracker>();
+        services.AddSingleton<BackendCoordinator>();
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService>(sp => sp.GetRequiredService<BackendCoordinator>());
 
         // DB context
         services.AddSingleton<ElectrumDbContextFactory>();
@@ -86,8 +98,17 @@ public class ElectrumPlugin : BaseBTCPayServerPlugin
             factory.ConfigureBuilder(o);
         });
 
+        // Reserved index ledger
+        services.AddSingleton<ReservedIndexLedger>();
+
+        // Fast-forwards a backend past the reserved high-water on takeover
+        services.AddSingleton<IndexFastForwarder>();
+
         // HTTP handler for shimming ExplorerClient calls
         services.AddSingleton<ElectrumHttpHandler>();
+
+        // Direct real-NBX gateway (used by coordinator and routing handler proxy)
+        services.AddSingleton<RealNbxGateway>();
 
         // ──────────────────────────────────────────────
         // 4. Register shadow services
