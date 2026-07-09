@@ -137,6 +137,12 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
         if (string.IsNullOrEmpty(callback))
             throw new Exception("LNURL-pay response is missing a callback URL.");
 
+        // BTCPay allows a null amount for top-up/amountless invoices, but LNURL-pay is inherently
+        // amount-driven, so we require a concrete amount and fail with a clear message otherwise.
+        if (createInvoiceRequest.Amount is null)
+            throw new NotSupportedException(
+                "Blink non-custodial (Spark) accounts require an invoice amount; amountless/top-up invoices are not supported.");
+
         var amountMsat = createInvoiceRequest.Amount.MilliSatoshi;
         var min = metadata["minSendable"]?.Value<long>() ?? 1;
         var max = metadata["maxSendable"]?.Value<long>() ?? long.MaxValue;
@@ -163,6 +169,10 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
 
         using var resp = await _httpClient.GetAsync(callbackUri.Uri, cancellation);
         var body = await resp.Content.ReadAsStringAsync(cancellation);
+        // Guard the HTTP status before parsing: a non-2xx response may carry a non-JSON body
+        // (e.g. an HTML 500 from the LNURL server), which would otherwise throw an opaque parse error.
+        if (!resp.IsSuccessStatusCode)
+            throw new Exception($"Blink LNURL callback failed (HTTP {(int)resp.StatusCode}).");
         var json = JObject.Parse(body);
         if (json["status"]?.Value<string>()?.Equals("ERROR", StringComparison.OrdinalIgnoreCase) == true)
             throw new Exception(json["reason"]?.Value<string>() ?? "Blink LNURL callback returned an error.");
