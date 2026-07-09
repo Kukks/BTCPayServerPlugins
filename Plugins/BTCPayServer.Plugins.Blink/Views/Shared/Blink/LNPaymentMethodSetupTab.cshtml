@@ -27,12 +27,20 @@
         </h2>
         <div id="CustomBlinkContent" class="accordion-collapse collapse" aria-labelledby="CustomBlinkHeader" data-bs-parent="#CustomNodeSupport">
             <div class="accordion-body">
+                <p class="my-2"><strong>Custodial account</strong> (API key):</p>
                 <ul class="pb-2">
                     <li>
                         <code><b>type=</b>blink;<b>server=</b>https://api.blink.sv/graphql;<b>api-key</b>=blink_...;<b>wallet-id=</b>xyz;<b>currency=</b>BTC;</code>
                     </li>
                 </ul>
                 <p class="my-2">Head over to the <a href="https://dashboard.blink.sv" target="_blank" rel="noreferrer noopener" >Blink dashboard</a> and create an api key. The server is optional and will use the default Blink instance.The wallet-id is optional and will use the default wallet otherwise.</p>
+                <p class="my-2"><strong>Non-custodial (Spark) account</strong> — receive only, no API key:</p>
+                <ul class="pb-2">
+                    <li>
+                        <code><b>type=</b>blink;<b>ln-address=</b>yourname@blink.sv;</code>
+                    </li>
+                </ul>
+                <p class="my-2">Use this for the new non-custodial Blink accounts. It receives payments via your Blink lightning address and detects settlement automatically. Sending, balance and channel operations are not available for non-custodial accounts (they require the wallet seed). Add <code>currency=USD</code> to target the Dollar (USDB) balance once Blink enables non-custodial USD receiving.</p>
             </div>
         </div>
     </div>

@@ -30,6 +30,15 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
             return null;
         }
 
+        // Non-custodial (Spark) accounts: identified by an "ln-address" (or bare "username") key
+        // and the absence of an "api-key". These have no GraphQL wallet-id and can only receive,
+        // via LNURL-pay + LUD-21 verify brokered by blink-lnurl-server.
+        if (!kv.ContainsKey("api-key") &&
+            (kv.TryGetValue("ln-address", out var lnAddress) || kv.TryGetValue("username", out lnAddress)))
+        {
+            return CreateLnAddressClient(lnAddress, kv, network, out error);
+        }
+
         if (!kv.TryGetValue("server", out var server))
         {
             server = network.Name switch
@@ -98,5 +107,47 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
             }
         }
         return new BlinkLightningClient(apiKey, uri, walletId, currency, network, client, _loggerFactory.CreateLogger(nameof(BlinkLightningClient)));
+    }
+
+    private ILightningClient? CreateLnAddressClient(string? lnAddress,
+        System.Collections.Generic.Dictionary<string, string> kv, Network network, out string? error)
+    {
+        if (string.IsNullOrWhiteSpace(lnAddress))
+        {
+            error = "The key 'ln-address' must be a Blink lightning address (e.g. user@blink.sv)";
+            return null;
+        }
+
+        // Allow a bare username; default the domain to blink.sv.
+        if (!lnAddress.Contains('@'))
+            lnAddress = $"{lnAddress}@blink.sv";
+
+        var atParts = lnAddress.Split('@');
+        if (atParts.Length != 2 || string.IsNullOrWhiteSpace(atParts[0]) || string.IsNullOrWhiteSpace(atParts[1]))
+        {
+            error = $"The key 'ln-address' is not a valid lightning address ('{lnAddress}')";
+            return null;
+        }
+
+        // USDB (non-custodial Dollar balance) is requested via currency=USD. Not yet live server-side;
+        // passed through so it works automatically once Blink ships Spark USD receive support.
+        bool usd = false;
+        if (kv.TryGetValue("currency", out var currencyStr))
+        {
+            try
+            {
+                usd = BlinkLightningClient.ParseBlinkCurrency(currencyStr) == BlinkCurrency.USD;
+            }
+            catch (FormatException e)
+            {
+                error = e.Message;
+                return null;
+            }
+        }
+
+        error = null;
+        var client = _httpClientFactory.CreateClient();
+        return new BlinkLnAddressLightningClient(lnAddress, usd, network, client,
+            _loggerFactory.CreateLogger(nameof(BlinkLnAddressLightningClient)));
     }
 }
