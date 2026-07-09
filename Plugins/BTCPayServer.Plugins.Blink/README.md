@@ -34,6 +34,7 @@ type=blink;ln-address=yourname@blink.sv;
 ```
 
 - A bare username is accepted and defaults to the `blink.sv` domain (`ln-address=yourname`).
+- `username=` is accepted as an alias for `ln-address=` (e.g. `type=blink;username=yourname@blink.sv;`).
 - Only **receiving** is supported. Sending, balance and channel operations are not available because
   they require the wallet seed, which BTCPay never holds.
 - Only **mainnet** (`blink.sv`) is supported for non-custodial accounts.

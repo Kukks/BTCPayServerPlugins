@@ -147,6 +147,9 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
 
         error = null;
         var client = _httpClientFactory.CreateClient();
+        // Bound each LNURL/verify request rather than inheriting the default 100s HttpClient timeout,
+        // so a degraded blink-lnurl-server cannot tie up a connection per poll for that long.
+        client.Timeout = TimeSpan.FromSeconds(30);
         return new BlinkLnAddressLightningClient(lnAddress, usd, network, client,
             _loggerFactory.CreateLogger(nameof(BlinkLnAddressLightningClient)));
     }

@@ -54,6 +54,26 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
     private ConcurrentDictionary<string, TrackedInvoice> _tracked =>
         _sharedTracked.GetOrAdd(_lightningAddress, _ => new ConcurrentDictionary<string, TrackedInvoice>());
 
+    /// <summary>
+    /// Removes a tracked invoice and prunes the outer address entry once it is empty, so the static
+    /// registry stays bounded by the number of currently-open invoices rather than growing for every
+    /// lightning address ever configured.
+    /// </summary>
+    private void RemoveTrackedInvoice(string paymentHash)
+    {
+        if (!_sharedTracked.TryGetValue(_lightningAddress, out var inner))
+            return;
+        inner.TryRemove(paymentHash, out _);
+        if (inner.IsEmpty)
+        {
+            // Only remove the outer key if it is still the (now-empty) instance we just pruned, to
+            // avoid dropping a dictionary that another thread has concurrently repopulated.
+            _sharedTracked.TryRemove(
+                new System.Collections.Generic.KeyValuePair<string, ConcurrentDictionary<string, TrackedInvoice>>(
+                    _lightningAddress, inner));
+        }
+    }
+
     // The origin (scheme://host[:port]) of the LNURL-pay callback, which is also the host that
     // serves the LUD-21 verify endpoint (e.g. https://lnurl.blink.sv). It is NOT the lightning
     // address domain (blink.sv). Cached so a stateless GetInvoice can rebuild the verify URL.
@@ -187,9 +207,11 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
         if (bolt11.MinimumAmount != LightMoney.MilliSatoshis(amountMsat))
             throw new Exception(
                 $"Blink returned an invoice for {bolt11.MinimumAmount.MilliSatoshi} msat but {amountMsat} msat was requested.");
-        if (createInvoiceRequest.DescriptionHash is { } dh && bolt11.DescriptionHash is { } bh &&
-            dh != bh)
-            throw new Exception("Blink returned an invoice with a mismatched description hash.");
+        // Strict check: if a description hash was requested, the returned invoice must carry the
+        // exact same hash. A missing/stripped `h` tag (bolt11.DescriptionHash == null) is also a
+        // mismatch, so a compromised LNURL server cannot bypass the check by dropping the tag.
+        if (createInvoiceRequest.DescriptionHash is { } dh && dh != bolt11.DescriptionHash)
+            throw new Exception("Blink returned an invoice with a mismatched or missing description hash.");
 
         var paymentHash = bolt11.PaymentHash?.ToString() ?? throw new Exception("Invoice has no payment hash.");
         var verifyUrl = json["verify"]?.Value<string>();
@@ -365,7 +387,12 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
 
     public Task<LightningInvoice[]> ListInvoices(ListInvoicesParams request, CancellationToken cancellation = new())
     {
-        // No server-side invoice list is available for non-custodial accounts; only in-memory tracked invoices.
+        // No server-side invoice list is available for non-custodial accounts; only in-memory tracked
+        // invoices. We report these as Unpaid (settled=false) without issuing a verify call per invoice:
+        // settlement is authoritatively driven through GetInvoice / WaitInvoice, not ListInvoices, and
+        // settled invoices are pruned from the registry by the poll loop, so the only misreport window
+        // is the brief interval between a verify returning Paid and the poll loop's TryRemove. That
+        // window is harmless for BTCPay's payment detection, so we keep this cheap and avoid N HTTP calls.
         var invoices = _tracked
             .Select(kv => BuildInvoice(kv.Key, kv.Value, false, null))
             .Where(i => request.PendingOnly is not true || i.Status == LightningInvoiceStatus.Unpaid)
@@ -386,11 +413,16 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
     public class BlinkLnAddressListener : ILightningInvoiceListener
     {
         private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(3);
+        private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(30);
         private readonly BlinkLnAddressLightningClient _client;
         private readonly ILogger _logger;
         private readonly Channel<LightningInvoice> _channel = Channel.CreateUnbounded<LightningInvoice>();
         private readonly CancellationTokenSource _cts = new();
         private readonly Task _pollTask;
+
+        // Per-invoice error back-off: number of consecutive failures and the earliest next attempt.
+        private readonly System.Collections.Generic.Dictionary<string, (int Errors, DateTimeOffset NextAttempt)>
+            _backoff = new();
 
         public BlinkLnAddressListener(BlinkLnAddressLightningClient client, ILogger logger)
         {
@@ -405,23 +437,30 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
             {
                 while (!cancellation.IsCancellationRequested)
                 {
+                    var now = DateTimeOffset.UtcNow;
                     foreach (var kv in _client._tracked.ToArray())
                     {
                         cancellation.ThrowIfCancellationRequested();
                         var (paymentHash, tracked) = (kv.Key, kv.Value);
+
+                        // Skip this invoice while it is backing off after repeated failures.
+                        if (_backoff.TryGetValue(paymentHash, out var b) && now < b.NextAttempt)
+                            continue;
+
                         try
                         {
                             var invoice = await _client.GetInvoice(paymentHash, cancellation);
+                            _backoff.Remove(paymentHash); // success resets back-off
                             if (invoice is null) continue;
                             if (invoice.Status == LightningInvoiceStatus.Paid)
                             {
-                                _client._tracked.TryRemove(paymentHash, out _);
+                                RemoveTracked(paymentHash);
                                 await _channel.Writer.WriteAsync(invoice, cancellation);
                             }
                             else if (invoice.Status == LightningInvoiceStatus.Expired ||
                                      tracked.ExpiresAt < DateTimeOffset.UtcNow)
                             {
-                                _client._tracked.TryRemove(paymentHash, out _);
+                                RemoveTracked(paymentHash);
                             }
                         }
                         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -430,7 +469,14 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
                         }
                         catch (Exception e)
                         {
-                            _logger.LogDebug(e, "Error polling Blink invoice {PaymentHash}", paymentHash);
+                            // Capped exponential back-off so a degraded blink-lnurl-server is not
+                            // hammered every 3s per invoice.
+                            var errors = (_backoff.TryGetValue(paymentHash, out var prev) ? prev.Errors : 0) + 1;
+                            var delayMs = Math.Min(PollInterval.TotalMilliseconds * Math.Pow(2, errors),
+                                MaxBackoff.TotalMilliseconds);
+                            _backoff[paymentHash] = (errors, DateTimeOffset.UtcNow.AddMilliseconds(delayMs));
+                            _logger.LogDebug(e, "Error polling Blink invoice {PaymentHash} (attempt {Errors}); backing off {DelayMs}ms",
+                                paymentHash, errors, delayMs);
                         }
                     }
 
@@ -446,6 +492,12 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
             }
         }
 
+        private void RemoveTracked(string paymentHash)
+        {
+            _client.RemoveTrackedInvoice(paymentHash);
+            _backoff.Remove(paymentHash);
+        }
+
         public async Task<LightningInvoice> WaitInvoice(CancellationToken cancellation)
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, _cts.Token);
@@ -455,6 +507,10 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
         public void Dispose()
         {
             _cts.Cancel();
+            // Wait (bounded) for the poll loop to observe cancellation before completing the channel,
+            // so an in-flight WriteAsync cannot race TryComplete and surface a ChannelClosedException.
+            try { _pollTask.Wait(TimeSpan.FromSeconds(5)); }
+            catch { /* AggregateException from cancellation or timeout: ignore on dispose */ }
             _channel.Writer.TryComplete();
             _cts.Dispose();
         }
@@ -511,7 +567,7 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
 
     public Task CancelInvoice(string invoiceId, CancellationToken cancellation = new())
     {
-        _tracked.TryRemove(invoiceId, out _);
+        RemoveTrackedInvoice(invoiceId);
         return Task.CompletedTask;
     }
 
