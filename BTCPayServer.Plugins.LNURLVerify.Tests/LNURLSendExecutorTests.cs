@@ -10,6 +10,18 @@ namespace BTCPayServer.Plugins.LNURLVerify.Tests;
 
 public class LNURLSendExecutorTests
 {
+    // A canonical BOLT#11 spec example (mainnet, 2500 micro-BTC = 250,000,000 msat). Parses offline;
+    // used only to drive the Pay chain in unit tests — it need not be payable.
+    const string SpecBolt11 =
+        "lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5xysxxatsyp3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w3ls4evs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp";
+
+    [Fact]
+    public void SpecBolt11_parses_offline_with_expected_amount()
+    {
+        var b = BOLT11PaymentRequest.Parse(SpecBolt11, NBitcoin.Network.Main);
+        Assert.Equal(LightMoney.MilliSatoshis(250_000_000), b.MinimumAmount);
+    }
+
     static LNURL.LNURLWithdrawRequest Withdraw(long minMsat, long maxMsat) => new()
     {
         Callback = new Uri("https://h.example/w"),
@@ -76,5 +88,40 @@ public class LNURLSendExecutorTests
         var fresh = await exec.RefreshWithdraw(CancellationToken.None);
 
         Assert.Equal("fresh2", fresh.K1);
+    }
+
+    [Fact]
+    public async Task Pay_refreshes_k1_then_submits_with_fresh_k1_and_returns_ok()
+    {
+        var w = Withdraw(1000, 300_000_000); // covers the 250,000,000 msat bolt11
+        w.K1 = "stale";
+        w.BalanceCheck = new Uri("https://h.example/bc");
+        var http = new FakeHttp()
+            .Map("https://h.example/bc",
+                "{\"tag\":\"withdrawRequest\",\"callback\":\"https://h.example/w\",\"k1\":\"fresh\",\"minWithdrawable\":1000,\"maxWithdrawable\":300000000}")
+            .Map($"https://h.example/w?k1=fresh&pr={SpecBolt11}", "{\"status\":\"OK\"}");
+        var exec = new LNURLSendExecutor(Resolved(w), http.Client(), NullLogger.Instance);
+
+        var resp = await exec.Pay(SpecBolt11, null, CancellationToken.None);
+
+        Assert.Equal(PayResult.Ok, resp.Result);
+        // Submitted with the FRESH k1 (from balanceCheck), never the stale resolve-time one.
+        Assert.Contains(http.Requests, r => r.Contains("k1=fresh") && r.Contains("pr="));
+        Assert.DoesNotContain(http.Requests, r => r.Contains("k1=stale"));
+    }
+
+    [Fact]
+    public async Task Pay_rejects_amount_over_refreshed_max()
+    {
+        var w = Withdraw(1000, 300_000_000);
+        w.BalanceCheck = new Uri("https://h.example/bc");
+        // The refreshed withdraw tightens max BELOW the bolt11 amount -> gate on the refreshed bounds.
+        var http = new FakeHttp().Map("https://h.example/bc",
+            "{\"tag\":\"withdrawRequest\",\"callback\":\"https://h.example/w\",\"k1\":\"fresh\",\"minWithdrawable\":1000,\"maxWithdrawable\":1000}");
+        var exec = new LNURLSendExecutor(Resolved(w), http.Client(), NullLogger.Instance);
+
+        var resp = await exec.Pay(SpecBolt11, null, CancellationToken.None);
+
+        Assert.Equal(PayResult.Error, resp.Result);
     }
 }

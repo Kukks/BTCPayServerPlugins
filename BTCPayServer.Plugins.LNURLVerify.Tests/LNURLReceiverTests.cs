@@ -63,6 +63,10 @@ public class LNURLReceiverTests
     const string PayMeta =
         "{\"tag\":\"payRequest\",\"callback\":\"{CB}\",\"minSendable\":1000,\"maxSendable\":100000000,\"metadata\":\"[[\\\"text/plain\\\",\\\"x\\\"]]\"}";
 
+    // Canonical BOLT#11 spec example (mainnet, 250,000,000 msat) — parses offline.
+    const string SpecBolt11 =
+        "lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5xysxxatsyp3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w3ls4evs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp";
+
     [Fact]
     public async Task CheckVerifySupport_flags_missing_verify()
     {
@@ -111,5 +115,21 @@ public class LNURLReceiverTests
 
         Assert.NotNull(inv);
         Assert.Equal(LightningInvoiceStatus.Paid, inv!.Status);
+    }
+
+    [Fact]
+    public async Task CreateInvoice_rejects_amount_mismatch()
+    {
+        var host = "mm.example";
+        var http = new FakeHttp()
+            .Map($"https://{host}/pay", PayMeta.Replace("{CB}", $"https://{host}/cb"))
+            // Request 100,000 msat but the callback returns the 250,000,000 msat spec bolt11 -> guard trips.
+            .Map($"https://{host}/cb?amount=100000", $"{{\"pr\":\"{SpecBolt11}\",\"verify\":\"https://{host}/verify/x\"}}");
+        var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, null, host);
+        var rx = new LNURLReceiver(resolved, Network.Main, http.Client(), NullLogger.Instance);
+
+        var ex = await Assert.ThrowsAsync<Exception>(() =>
+            rx.CreateInvoice(LightMoney.MilliSatoshis(100_000), "x", null, CancellationToken.None));
+        Assert.Contains("requested", ex.Message);
     }
 }
