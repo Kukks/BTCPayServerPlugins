@@ -23,7 +23,12 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Plugins\BTCPayServer.Plugins.LNURLVerify\BTCPayServer.Plugins.LNURLVerify.csproj" />
-        <ProjectReference Include="..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
+        <!-- StaticWebAssetsEnabled=false matches the plugin's own BTCPayServer reference, so BTCPayServer
+             builds once with a single, consistent config (no staticwebassets manifest-copy MSB3030
+             flip-flop). Unit tests don't serve static assets, so this is safe. -->
+        <ProjectReference Include="..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj">
+            <Properties>StaticWebAssetsEnabled=false</Properties>
+        </ProjectReference>
     </ItemGroup>
 
 </Project>
