@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -72,6 +73,17 @@ public sealed class LNURLVerifyPollerService : IHostedService
                 var invoices = TrackedInvoiceRegistry.Hosts()
                     .SelectMany(TrackedInvoiceRegistry.SnapshotByHost)
                     .ToArray();
+
+                // Drop backoff entries for invoices no longer tracked (e.g. cancelled between polls, which
+                // the poller never observes otherwise) so _backoff can't grow over the process lifetime.
+                if (!_backoff.IsEmpty)
+                {
+                    var live = new HashSet<string>(invoices.Select(i => i.PaymentHash));
+                    foreach (var key in _backoff.Keys)
+                        if (!live.Contains(key))
+                            _backoff.TryRemove(key, out _);
+                }
+
                 if (invoices.Length > 0)
                 {
                     HttpClient? http = null;

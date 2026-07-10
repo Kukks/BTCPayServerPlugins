@@ -74,7 +74,8 @@ public class LNURLVerifyIntegrationTests : UnitTestBase
     // UNVERIFIED: the plugin-side flow below is real and compiles, but the LNbits bootstrap
     // (CreateLnbitsWithdrawWithPayLink) is a documented stub — LNbits' exact API and whether its
     // withdraw response carries a payLink (LUD-19) must be confirmed on a real run before this can pass.
-    [Fact]
+    [Fact(Skip = "Scaffolding: the LNbits withdraw-with-payLink bootstrap (CreateLnbitsWithdrawWithPayLink) " +
+                 "is not implemented — see docker-compose.lnurlverify.yml. Implement + validate on a real stack before enabling.")]
     public async Task Sends_via_lnurl_withdraw()
     {
         using var tester = CreateServerTester();
