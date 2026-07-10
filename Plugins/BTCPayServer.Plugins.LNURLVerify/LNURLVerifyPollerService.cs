@@ -65,6 +65,9 @@ public sealed class LNURLVerifyPollerService : IHostedService
             try
             {
                 TrackedInvoiceRegistry.PruneSettled(DateTimeOffset.UtcNow);
+                SentPaymentRegistry.Prune(DateTimeOffset.UtcNow.AddHours(-24)); // keep the registry bounded
+
+
 
                 // Poll every tracked invoice across every host under one global concurrency cap, so a
                 // slow host interleaves with (rather than blocks) the others.

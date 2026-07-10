@@ -143,4 +143,18 @@ public class LNURLSendExecutorTests
         Assert.Equal(LightningPaymentStatus.Complete, p.Status);
         Assert.Equal(hash, p.PaymentHash);
     }
+
+    [Fact]
+    public void SentPaymentRegistry_prune_drops_old_but_keeps_recent()
+    {
+        SentPaymentRegistry.Record(new LightningPayment
+        { Id = "prune_old", PaymentHash = "prune_old", Status = LightningPaymentStatus.Complete, CreatedAt = DateTimeOffset.UtcNow.AddDays(-2) });
+        SentPaymentRegistry.Record(new LightningPayment
+        { Id = "prune_new", PaymentHash = "prune_new", Status = LightningPaymentStatus.Complete, CreatedAt = DateTimeOffset.UtcNow });
+
+        SentPaymentRegistry.Prune(DateTimeOffset.UtcNow.AddHours(-24));
+
+        Assert.False(SentPaymentRegistry.TryGet("prune_old", out _));
+        Assert.True(SentPaymentRegistry.TryGet("prune_new", out _));
+    }
 }

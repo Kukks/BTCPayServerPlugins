@@ -1,4 +1,5 @@
 #nullable enable
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -30,4 +31,16 @@ public static class SentPaymentRegistry
         _payments.TryGetValue(paymentHash, out payment!);
 
     public static IReadOnlyCollection<LightningPayment> All() => _payments.Values.ToArray();
+
+    /// <summary>
+    /// Drop send records older than <paramref name="cutoff"/> so this static registry stays bounded
+    /// under mass payouts (BTCPay reconciles a payout shortly after the send, so a modest retention
+    /// window is enough). Called periodically by the shared poller.
+    /// </summary>
+    public static void Prune(DateTimeOffset cutoff)
+    {
+        foreach (var kv in _payments)
+            if (kv.Value.CreatedAt < cutoff)
+                _payments.TryRemove(kv.Key, out _);
+    }
 }
