@@ -50,16 +50,14 @@ public sealed class LNURLVerifyPollerService : IHostedService
         IHttpClientFactory httpClientFactory, TimeSpan interval, LNURLVerifyPersistence? persistence = null)
     { _logger = logger; _httpClientFactory = httpClientFactory; _interval = interval; _persistence = persistence; }
 
-    public async Task StartAsync(CancellationToken _)
+    public Task StartAsync(CancellationToken _)
     {
-        if (_persistence != null)
-        {
-            // Re-seed non-expired invoices so a restart doesn't lose payment detection; the loop then
-            // re-polls their verify URLs (catching anything settled while BTCPay was down).
-            try { await _persistence.LoadAsync(); _lastPersistedVersion = TrackedInvoiceRegistry.Version; }
-            catch (Exception e) { _logger.LogWarning(e, "Failed to load persisted LNURL tracked invoices"); }
-        }
+        // Persisted invoices are re-seeded by the connection handler on first Create (which BTCPay calls
+        // before any GetInvoice), guaranteeing re-arm before the core startup poll can null-evict them.
+        // The poller only handles the SAVE side.
+        _lastPersistedVersion = TrackedInvoiceRegistry.Version;
         _loop = Task.Run(() => Loop(_cts.Token));
+        return Task.CompletedTask;
     }
 
     public async Task StopAsync(CancellationToken _)
