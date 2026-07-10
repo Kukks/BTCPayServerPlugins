@@ -70,12 +70,49 @@ public class LNURLVerifyIntegrationTests : UnitTestBase
         });
     }
 
-    // TODO (send leg — not written): exercising Pay(bolt11) needs an LNURL-WITHDRAW endpoint that carries
-    // a payLink. BTCPay core does not serve LNURL-withdraw-with-payLink, so this leg needs an LNbits (or
-    // equivalent) regtest service added to the compose stack. Flow to implement:
-    //   1. Stand up LNbits on regtest wired to the tester bitcoind/LN; create a REUSABLE withdraw link
-    //      whose response includes a payLink.
-    //   2. handler.Create("type=lnurl;value=<lnurlw>") => client with Capability == SendAndReceive.
-    //   3. Create a bolt11 on the merchant node; client.Pay(bolt11) twice (verifies the k1 refresh).
-    //   4. Assert PayResult.Ok for both and that the merchant node received the payments / balance dropped.
+    // Send leg. NEEDS LNbits (see BTCPayServer.Plugins.Tests/docker-compose.lnurlverify.yml) and is
+    // UNVERIFIED: the plugin-side flow below is real and compiles, but the LNbits bootstrap
+    // (CreateLnbitsWithdrawWithPayLink) is a documented stub — LNbits' exact API and whether its
+    // withdraw response carries a payLink (LUD-19) must be confirmed on a real run before this can pass.
+    [Fact]
+    public async Task Sends_via_lnurl_withdraw()
+    {
+        using var tester = CreateServerTester();
+        await tester.StartAsync();
+        await tester.EnsureChannelsSetup();
+
+        // A reusable LNURL-withdraw (with a payLink) from the LNbits in the supplement compose.
+        var lnurlw = await CreateLnbitsWithdrawWithPayLink("http://127.0.0.1:5000");
+
+        var handler = new LNURLVerifyConnectionStringHandler(
+            tester.PayTester.GetService<IHttpClientFactory>(),
+            tester.PayTester.GetService<ILoggerFactory>());
+        var client = handler.Create($"type=lnurl;value={lnurlw}", Network.RegTest, out var error);
+        Assert.Null(error);   // resolves to a send+receive client (withdraw carries a payLink)
+        Assert.NotNull(client);
+
+        // Create an invoice on the MERCHANT node and pay it THROUGH the plugin's LNURL-withdraw.
+        var merchantInvoice = await tester.MerchantLightningD.CreateInvoice(
+            new LightMoney(1000, LightMoneyUnit.Satoshi), "lnurl-verify send", TimeSpan.FromMinutes(10));
+
+        var pay = await client!.Pay(merchantInvoice.BOLT11);
+        Assert.Equal(PayResult.Ok, pay.Result);
+
+        // The merchant node should have received it (LNbits, backed by customer_lnd, routes over the
+        // existing customer->merchant channel).
+        await TestUtils.EventuallyAsync(async () =>
+        {
+            var inv = await tester.MerchantLightningD.GetInvoice(merchantInvoice.Id);
+            Assert.NotNull(inv);
+            Assert.Equal(LightningInvoiceStatus.Paid, inv!.Status);
+        });
+    }
+
+    // UNVERIFIED STUB: best-effort LNbits bootstrap. On a real machine, implement: (1) obtain a wallet
+    // admin/invoice key, (2) enable the withdraw extension, (3) POST a reusable withdraw link to
+    // /withdraw/api/v1/links, (4) return its `lnurl`, ensuring the withdraw response includes a payLink.
+    // The exact LNbits API + payLink behaviour must be confirmed against the running LNbits version.
+    static Task<string> CreateLnbitsWithdrawWithPayLink(string lnbitsBaseUrl) =>
+        throw new NotImplementedException(
+            "LNbits withdraw-with-payLink bootstrap is not implemented — validate the LNbits API on a real run.");
 }
