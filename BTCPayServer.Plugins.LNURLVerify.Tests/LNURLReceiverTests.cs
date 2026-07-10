@@ -59,4 +59,38 @@ public class LNURLReceiverTests
         Assert.Null(inv);
         TrackedInvoiceRegistry.Remove(hash);
     }
+
+    const string PayMeta =
+        "{\"tag\":\"payRequest\",\"callback\":\"{CB}\",\"minSendable\":1000,\"maxSendable\":100000000,\"metadata\":\"[[\\\"text/plain\\\",\\\"x\\\"]]\"}";
+
+    [Fact]
+    public async Task CheckVerifySupport_flags_missing_verify()
+    {
+        var host = "nv.example";
+        var http = new FakeHttp()
+            .Map($"https://{host}/pay", PayMeta.Replace("{CB}", $"https://{host}/cb"))
+            .Map($"https://{host}/cb?amount=1000", "{\"pr\":\"lnbc1\"}"); // invoice returned, but no verify field
+        var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, null, host);
+        var rx = new LNURLReceiver(resolved, Network.RegTest, http.Client(), NullLogger.Instance);
+
+        var err = await rx.CheckVerifySupport(CancellationToken.None);
+
+        Assert.NotNull(err);
+        Assert.Contains("verify", err);
+    }
+
+    [Fact]
+    public async Task CheckVerifySupport_passes_when_verify_present()
+    {
+        var host = "yv.example";
+        var http = new FakeHttp()
+            .Map($"https://{host}/pay", PayMeta.Replace("{CB}", $"https://{host}/cb"))
+            .Map($"https://{host}/cb?amount=1000", $"{{\"pr\":\"lnbc1\",\"verify\":\"https://{host}/lnurlp/verify/abc\"}}");
+        var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, null, host);
+        var rx = new LNURLReceiver(resolved, Network.RegTest, http.Client(), NullLogger.Instance);
+
+        var err = await rx.CheckVerifySupport(CancellationToken.None);
+
+        Assert.Null(err);
+    }
 }

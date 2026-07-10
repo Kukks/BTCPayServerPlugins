@@ -21,7 +21,6 @@ namespace BTCPayServer.Plugins.LNURLVerify;
 public sealed class LNURLVerifyLightningClient : IExtendedLightningClient
 {
     private readonly ResolvedLnurl _resolved;
-    private readonly HttpClient _http;
     private readonly LNURLReceiver _receiver;
     private readonly LNURLSendExecutor? _sender;
 
@@ -31,7 +30,6 @@ public sealed class LNURLVerifyLightningClient : IExtendedLightningClient
     public LNURLVerifyLightningClient(ResolvedLnurl resolved, Network network, HttpClient http, ILoggerFactory lf)
     {
         _resolved = resolved;
-        _http = http;
         _receiver = new LNURLReceiver(resolved, network, http, lf.CreateLogger(nameof(LNURLReceiver)));
         _sender = resolved.Capability == LnurlCapability.SendAndReceive
             ? new LNURLSendExecutor(resolved, http, lf.CreateLogger(nameof(LNURLSendExecutor)))
@@ -130,9 +128,9 @@ public sealed class LNURLVerifyLightningClient : IExtendedLightningClient
     // ---- IExtendedLightningClient ----
     public async Task<ValidationResult?> Validate()
     {
-        try { await LNURLResolver.GetJson(_http, _resolved.PayEndpoint, CancellationToken.None); }
-        catch (Exception e) { return new ValidationResult(e.Message); }
-        return ValidationResult.Success;
+        // Probe for LUD-21 verify support (required to detect settlement) — reports at config time.
+        var err = await _receiver.CheckVerifySupport(CancellationToken.None);
+        return err is null ? ValidationResult.Success : new ValidationResult(err);
     }
 
     public string? DisplayName => "LNURL";

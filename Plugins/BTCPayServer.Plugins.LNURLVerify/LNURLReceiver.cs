@@ -29,6 +29,41 @@ public sealed class LNURLReceiver
     public LNURLReceiver(ResolvedLnurl resolved, Network network, HttpClient http, ILogger logger)
     { _resolved = resolved; _network = network; _http = http; _logger = logger; }
 
+    private const string VerifyUnsupportedMessage =
+        "This LNURL-pay endpoint does not support the LUD-21 'verify' extension, which is required to detect " +
+        "payment settlement. Use a verify-capable LNURL server (e.g. BTCPay Server or blink-lnurl-server).";
+
+    /// <summary>
+    /// Config-time probe: requests a minimal invoice from the pay callback and checks that the LUD-21
+    /// verify field is present. Returns null when verify is supported, or a user-facing error message.
+    /// (LUD-21 exposes verify only in the callback response, so this can't be checked from metadata alone.)
+    /// </summary>
+    public async Task<string?> CheckVerifySupport(CancellationToken ct)
+    {
+        JObject meta;
+        try { meta = await LNURLResolver.GetJson(_http, _resolved.PayEndpoint, ct); }
+        catch (Exception e) { return e.Message; }
+
+        var callback = meta["callback"]?.Value<string>();
+        if (string.IsNullOrEmpty(callback)) return "The LNURL-pay endpoint is missing a callback URL.";
+        var min = meta["minSendable"]?.Value<long>() ?? 1000;
+
+        var cb = new UriBuilder(callback);
+        var q = new StringBuilder(cb.Query.TrimStart('?'));
+        if (q.Length > 0) q.Append('&');
+        q.Append("amount=").Append(min);
+        cb.Query = q.ToString();
+
+        JObject json;
+        try { json = await LNURLResolver.GetJson(_http, cb.Uri, ct); }
+        catch (Exception e) { return $"Could not request a probe invoice: {e.Message}"; }
+
+        var verify = json["verify"]?.Value<string>();
+        if (string.IsNullOrEmpty(verify) || !Uri.TryCreate(verify, UriKind.Absolute, out _))
+            return VerifyUnsupportedMessage;
+        return null;
+    }
+
     public async Task<LightningInvoice> CreateInvoice(LightMoney? amount, string? description,
         CreateInvoiceParams? p, CancellationToken ct)
     {
@@ -69,11 +104,12 @@ public sealed class LNURLReceiver
             throw new Exception("LNURL returned an invoice with a mismatched or missing description hash.");
 
         var paymentHash = bolt11.PaymentHash?.ToString() ?? throw new Exception("Invoice has no payment hash.");
+        // LUD-21: the verify URL is returned by the callback. Without it we cannot detect settlement,
+        // so fail loudly rather than track a guessed URL that would silently never confirm payment.
         var verifyUrl = json["verify"]?.Value<string>();
-        if (string.IsNullOrEmpty(verifyUrl) || !Uri.TryCreate(verifyUrl, UriKind.Absolute, out var vu))
-            // Fall back to the conventional {payOrigin}/verify/{hash} shape when the server omits it.
-            verifyUrl = $"{_resolved.PayEndpoint.GetLeftPart(UriPartial.Authority)}/verify/{paymentHash}";
-        var verifyHost = new Uri(verifyUrl).Host;
+        if (string.IsNullOrEmpty(verifyUrl) || !Uri.TryCreate(verifyUrl, UriKind.Absolute, out var verifyUri))
+            throw new NotSupportedException(VerifyUnsupportedMessage);
+        var verifyHost = verifyUri.Host;
 
         TrackedInvoiceRegistry.Add(new TrackedInvoice(
             paymentHash, pr, verifyUrl, verifyHost, _resolved.PayEndpoint.ToString(), bolt11.ExpiryDate));
