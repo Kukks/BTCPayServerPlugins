@@ -12,7 +12,7 @@ public class LNURLVerifyClientTests
 {
     static LNURLVerifyLightningClient ReceiveOnly()
     {
-        var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri("https://h.example/pay"), null, "h.example");
+        var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri("https://h.example/pay"), null, null, "h.example");
         return new LNURLVerifyLightningClient(resolved, Network.RegTest, new FakeHttp().Client(), NullLoggerFactory.Instance);
     }
 

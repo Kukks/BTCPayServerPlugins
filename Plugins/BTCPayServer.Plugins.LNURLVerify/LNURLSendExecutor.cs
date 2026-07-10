@@ -32,8 +32,8 @@ public sealed class LNURLSendExecutor
 
     public async Task<PayResponse> Pay(string bolt11Str, LightMoney? explicitAmount, CancellationToken ct)
     {
-        var w = _resolved.Withdraw
-                ?? throw new NotSupportedException("This LNURL connection is receive-only and cannot send.");
+        if (_resolved.Withdraw is null)
+            throw new NotSupportedException("This LNURL connection is receive-only and cannot send.");
 
         BOLT11PaymentRequest bolt11;
         try { bolt11 = BOLT11PaymentRequest.Parse(bolt11Str, LNURLReceiver.InferNetwork(bolt11Str)); }
@@ -42,15 +42,20 @@ public sealed class LNURLSendExecutor
         var amount = explicitAmount ?? bolt11.MinimumAmount;
         if (amount is null || amount == LightMoney.Zero)
             return new PayResponse(PayResult.Error, "Amountless invoices cannot be sent via LNURL-withdraw.");
-        if (!WithinBounds(amount, w))
-            return new PayResponse(PayResult.Error,
-                $"Amount {amount.MilliSatoshi} msat is outside the withdraw bounds " +
-                $"[{w.MinWithdrawable.MilliSatoshi}, {w.MaxWithdrawable.MilliSatoshi}] msat.");
 
-        // Serialize per link: each withdrawal consumes k1; the next would need a balanceCheck refresh.
+        // Serialize per link: re-fetch a fresh withdraw (fresh k1 + current bounds), then submit, atomically.
         await _serialize.WaitAsync(ct);
         try
         {
+            LNURL.LNURLWithdrawRequest w;
+            try { w = await RefreshWithdraw(ct); }
+            catch (Exception e) { return new PayResponse(PayResult.Error, $"Could not refresh the LNURL-withdraw: {e.Message}"); }
+
+            if (!WithinBounds(amount, w))
+                return new PayResponse(PayResult.Error,
+                    $"Amount {amount.MilliSatoshi} msat is outside the withdraw bounds " +
+                    $"[{w.MinWithdrawable.MilliSatoshi}, {w.MaxWithdrawable.MilliSatoshi}] msat.");
+
             var cb = new UriBuilder(w.Callback);
             var q = new StringBuilder(cb.Query.TrimStart('?'));
             if (q.Length > 0) q.Append('&');
@@ -91,6 +96,21 @@ public sealed class LNURLSendExecutor
             });
         }
         finally { _serialize.Release(); }
+    }
+
+    /// <summary>
+    /// Fetches a fresh withdraw request (fresh k1 + current bounds/balance) immediately before a send.
+    /// Prefers the withdraw's balanceCheck URL (LUD-14) when present, else re-hits the original withdraw
+    /// endpoint. For a reusable link this yields a fresh k1; for a spent single-use voucher the response
+    /// will carry an error, surfaced to the caller.
+    /// </summary>
+    internal async Task<LNURL.LNURLWithdrawRequest> RefreshWithdraw(CancellationToken ct)
+    {
+        var refreshUrl = _resolved.Withdraw?.BalanceCheck ?? _resolved.WithdrawEndpoint
+            ?? throw new InvalidOperationException("No LNURL-withdraw endpoint available to refresh.");
+        var json = await LNURLResolver.GetJson(_http, refreshUrl, ct);
+        return json.ToObject<LNURL.LNURLWithdrawRequest>()
+               ?? throw new FormatException("Could not parse the refreshed LNURL-withdraw response.");
     }
 
     public Task<LightMoney?> GetBalance(CancellationToken ct) =>

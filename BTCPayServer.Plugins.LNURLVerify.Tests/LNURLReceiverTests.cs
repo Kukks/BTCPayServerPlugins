@@ -32,7 +32,7 @@ public class LNURLReceiverTests
             hash, "lnbc1", $"https://{host}/verify/{hash}", host, $"https://{host}/pay",
             DateTimeOffset.UtcNow.AddHours(1)));
         var http = new FakeHttp().Map($"https://{host}/verify/{hash}", "{}", HttpStatusCode.InternalServerError);
-        var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, host);
+        var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, null, host);
         var rx = new LNURLReceiver(resolved, Network.RegTest, http.Client(), NullLogger.Instance);
 
         var inv = await rx.GetInvoice(hash, CancellationToken.None);
@@ -51,7 +51,7 @@ public class LNURLReceiverTests
             hash, "lnbc1", $"https://{host}/verify/{hash}", host, $"https://{host}/pay",
             DateTimeOffset.UtcNow.AddHours(1)));
         var http = new FakeHttp().Map($"https://{host}/verify/{hash}", "{\"status\":\"ERROR\",\"reason\":\"nope\"}");
-        var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, host);
+        var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, null, host);
         var rx = new LNURLReceiver(resolved, Network.RegTest, http.Client(), NullLogger.Instance);
 
         var inv = await rx.GetInvoice(hash, CancellationToken.None);

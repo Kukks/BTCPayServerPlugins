@@ -14,11 +14,14 @@ public enum LnurlCapability { ReceiveOnly, SendAndReceive }
 /// The outcome of decoding a connection-string value: what capability it grants and the endpoints
 /// needed to act on it. <see cref="PayEndpoint"/> is the LNURL-pay metadata endpoint used for
 /// receiving (either the value itself, or the payLink embedded in an LNURL-withdraw).
+/// <see cref="WithdrawEndpoint"/> is the original LNURL-withdraw URL (null for receive-only); the
+/// send path re-fetches it (or the withdraw's balanceCheck) before each send to obtain a fresh k1.
 /// </summary>
 public sealed record ResolvedLnurl(
     LnurlCapability Capability,
     Uri PayEndpoint,
     LNURL.LNURLWithdrawRequest? Withdraw,
+    Uri? WithdrawEndpoint,
     string DisplayHost);
 
 public static class LNURLResolver
@@ -46,7 +49,7 @@ public static class LNURLResolver
 
         // LN addresses always resolve to a payRequest; treat an explicit payRequest tag the same.
         if (value.Contains('@') || tag == "payRequest")
-            return new ResolvedLnurl(LnurlCapability.ReceiveOnly, endpoint, null, endpoint.Host);
+            return new ResolvedLnurl(LnurlCapability.ReceiveOnly, endpoint, null, null, endpoint.Host);
 
         if (tag == "withdrawRequest")
         {
@@ -63,7 +66,7 @@ public static class LNURLResolver
             if (payJson["tag"]?.Value<string>() != "payRequest")
                 throw new FormatException("The LNURL-withdraw's payLink is not a valid LNURL-pay endpoint.");
 
-            return new ResolvedLnurl(LnurlCapability.SendAndReceive, payUri, withdraw, endpoint.Host);
+            return new ResolvedLnurl(LnurlCapability.SendAndReceive, payUri, withdraw, endpoint, endpoint.Host);
         }
 
         throw new FormatException($"Unsupported LNURL tag '{tag}'. Expected 'payRequest' or 'withdrawRequest'.");
