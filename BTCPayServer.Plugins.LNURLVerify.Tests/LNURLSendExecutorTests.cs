@@ -47,7 +47,7 @@ public class LNURLSendExecutorTests
     {
         var http = new FakeHttp();
         var exec = new LNURLSendExecutor(Resolved(Withdraw(1000, 5000)), http.Client(), NullLogger.Instance);
-        var resp = await exec.Pay("not-a-bolt11", null, CancellationToken.None);
+        var resp = await exec.Pay("not-a-bolt11", null, TestContext.Current.CancellationToken);
         Assert.Equal(PayResult.Error, resp.Result);
     }
 
@@ -57,7 +57,7 @@ public class LNURLSendExecutorTests
         var w = Withdraw(1000, 5000);
         w.CurrentBalance = LightMoney.MilliSatoshis(4200);
         var exec = new LNURLSendExecutor(Resolved(w), new FakeHttp().Client(), NullLogger.Instance);
-        var bal = await exec.GetBalance(CancellationToken.None);
+        var bal = await exec.GetBalance(TestContext.Current.CancellationToken);
         Assert.Equal(LightMoney.MilliSatoshis(4200), bal);
     }
 
@@ -71,7 +71,7 @@ public class LNURLSendExecutorTests
             "{\"tag\":\"withdrawRequest\",\"callback\":\"https://h.example/w\",\"k1\":\"fresh\",\"minWithdrawable\":1000,\"maxWithdrawable\":5000}");
         var exec = new LNURLSendExecutor(Resolved(w), http.Client(), NullLogger.Instance);
 
-        var fresh = await exec.RefreshWithdraw(CancellationToken.None);
+        var fresh = await exec.RefreshWithdraw(TestContext.Current.CancellationToken);
 
         Assert.Equal("fresh", fresh.K1);
     }
@@ -85,7 +85,7 @@ public class LNURLSendExecutorTests
             "{\"tag\":\"withdrawRequest\",\"callback\":\"https://h.example/w\",\"k1\":\"fresh2\",\"minWithdrawable\":1000,\"maxWithdrawable\":5000}");
         var exec = new LNURLSendExecutor(Resolved(w), http.Client(), NullLogger.Instance);
 
-        var fresh = await exec.RefreshWithdraw(CancellationToken.None);
+        var fresh = await exec.RefreshWithdraw(TestContext.Current.CancellationToken);
 
         Assert.Equal("fresh2", fresh.K1);
     }
@@ -102,7 +102,7 @@ public class LNURLSendExecutorTests
             .Map($"https://h.example/w?k1=fresh&pr={SpecBolt11}", "{\"status\":\"OK\"}");
         var exec = new LNURLSendExecutor(Resolved(w), http.Client(), NullLogger.Instance);
 
-        var resp = await exec.Pay(SpecBolt11, null, CancellationToken.None);
+        var resp = await exec.Pay(SpecBolt11, null, TestContext.Current.CancellationToken);
 
         Assert.Equal(PayResult.Ok, resp.Result);
         // Submitted with the FRESH k1 (from balanceCheck), never the stale resolve-time one.
@@ -120,7 +120,7 @@ public class LNURLSendExecutorTests
             "{\"tag\":\"withdrawRequest\",\"callback\":\"https://h.example/w\",\"k1\":\"fresh\",\"minWithdrawable\":1000,\"maxWithdrawable\":1000}");
         var exec = new LNURLSendExecutor(Resolved(w), http.Client(), NullLogger.Instance);
 
-        var resp = await exec.Pay(SpecBolt11, null, CancellationToken.None);
+        var resp = await exec.Pay(SpecBolt11, null, TestContext.Current.CancellationToken);
 
         Assert.Equal(PayResult.Error, resp.Result);
     }
@@ -136,7 +136,7 @@ public class LNURLSendExecutorTests
             .Map($"https://h.example/w?k1=fresh&pr={SpecBolt11}", "{\"status\":\"OK\"}");
         var exec = new LNURLSendExecutor(Resolved(w), http.Client(), NullLogger.Instance);
 
-        await exec.Pay(SpecBolt11, null, CancellationToken.None);
+        await exec.Pay(SpecBolt11, null, TestContext.Current.CancellationToken);
 
         // Scoped to the connection the executor sends on (Resolved(w).PayEndpoint).
         var conn = "https://h.example/pay";

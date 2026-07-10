@@ -19,11 +19,11 @@ public class LNURLVerifyClientTests
 
     [Fact]
     public async Task ReceiveOnly_Pay_throws_NotSupported() =>
-        await Assert.ThrowsAsync<NotSupportedException>(() => ReceiveOnly().Pay("lnbcrt1", CancellationToken.None));
+        await Assert.ThrowsAsync<NotSupportedException>(() => ReceiveOnly().Pay("lnbcrt1", TestContext.Current.CancellationToken));
 
     [Fact]
     public async Task ReceiveOnly_GetBalance_throws_NotSupported() =>
-        await Assert.ThrowsAsync<NotSupportedException>(() => ReceiveOnly().GetBalance(CancellationToken.None));
+        await Assert.ThrowsAsync<NotSupportedException>(() => ReceiveOnly().GetBalance(TestContext.Current.CancellationToken));
 
     [Fact]
     public void DisplayName_and_ServerUri_present()
@@ -35,7 +35,7 @@ public class LNURLVerifyClientTests
 
     [Fact]
     public async Task ReceiveOnly_ListPayments_is_empty() =>
-        Assert.Empty(await ReceiveOnly().ListPayments(CancellationToken.None));
+        Assert.Empty(await ReceiveOnly().ListPayments(TestContext.Current.CancellationToken));
 
     [Fact]
     public async Task GetPayment_returns_a_recorded_send_for_this_connection()
@@ -45,7 +45,7 @@ public class LNURLVerifyClientTests
         SentPaymentRegistry.Record("https://h.example/pay", new LightningPayment
         { Id = hash, PaymentHash = hash, Status = LightningPaymentStatus.Complete });
 
-        var got = await ReceiveOnly().GetPayment(hash, CancellationToken.None);
+        var got = await ReceiveOnly().GetPayment(hash, TestContext.Current.CancellationToken);
 
         Assert.NotNull(got);
         Assert.Equal(LightningPaymentStatus.Complete, got!.Status);
@@ -59,6 +59,6 @@ public class LNURLVerifyClientTests
         { Id = hash, PaymentHash = hash, Status = LightningPaymentStatus.Complete });
 
         // This client (connection https://h.example/pay) must NOT see another connection's send.
-        Assert.Null(await ReceiveOnly().GetPayment(hash, CancellationToken.None));
+        Assert.Null(await ReceiveOnly().GetPayment(hash, TestContext.Current.CancellationToken));
     }
 }

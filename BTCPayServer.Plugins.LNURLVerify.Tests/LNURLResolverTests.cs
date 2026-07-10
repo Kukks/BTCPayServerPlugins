@@ -15,7 +15,7 @@ public class LNURLResolverTests
     public async Task LnAddress_is_receive_only()
     {
         var http = new FakeHttp().Map("https://ln.example/.well-known/lnurlp/alice", Pay);
-        var r = await LNURLResolver.Resolve("alice@ln.example", Network.RegTest, http.Client(), CancellationToken.None);
+        var r = await LNURLResolver.Resolve("alice@ln.example", Network.RegTest, http.Client(), TestContext.Current.CancellationToken);
         Assert.Equal(LnurlCapability.ReceiveOnly, r.Capability);
         Assert.Null(r.Withdraw);
     }
@@ -28,7 +28,7 @@ public class LNURLResolverTests
         var http = new FakeHttp()
             .Map("https://h.example/withdraw", withdraw)
             .Map("https://h.example/pay", Pay);
-        var r = await LNURLResolver.Resolve("https://h.example/withdraw", Network.RegTest, http.Client(), CancellationToken.None);
+        var r = await LNURLResolver.Resolve("https://h.example/withdraw", Network.RegTest, http.Client(), TestContext.Current.CancellationToken);
         Assert.Equal(LnurlCapability.SendAndReceive, r.Capability);
         Assert.NotNull(r.Withdraw);
         Assert.Equal("https://h.example/pay", r.PayEndpoint.ToString());
@@ -41,6 +41,6 @@ public class LNURLResolverTests
             "{\"tag\":\"withdrawRequest\",\"callback\":\"https://h.example/w\",\"k1\":\"abc\",\"minWithdrawable\":1000,\"maxWithdrawable\":100000000}";
         var http = new FakeHttp().Map("https://h.example/withdraw", withdraw);
         await Assert.ThrowsAsync<System.FormatException>(() =>
-            LNURLResolver.Resolve("https://h.example/withdraw", Network.RegTest, http.Client(), CancellationToken.None));
+            LNURLResolver.Resolve("https://h.example/withdraw", Network.RegTest, http.Client(), TestContext.Current.CancellationToken));
     }
 }

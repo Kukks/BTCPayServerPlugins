@@ -28,20 +28,20 @@ public class LNURLVerifyPollerTests
                 : null);
 
         using var listener = new LNURLVerifyListener(ti => ti.PaymentHash == hash);
-        var waiter = listener.WaitInvoice(CancellationToken.None);
+        var waiter = listener.WaitInvoice(TestContext.Current.CancellationToken);
 
         var poller = new LNURLVerifyPollerService(
             NullLogger<LNURLVerifyPollerService>.Instance, new SimpleHttpClientFactory(), TimeSpan.FromMilliseconds(20));
-        await poller.StartAsync(default);
+        await poller.StartAsync(TestContext.Current.CancellationToken);
         try
         {
-            var seen = await waiter.WaitAsync(TimeSpan.FromSeconds(5));
+            var seen = await waiter.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
             Assert.Equal(hash, seen.PaymentHash);
             Assert.False(TrackedInvoiceRegistry.TryGet(hash, out _));
         }
         finally
         {
-            await poller.StopAsync(default);
+            await poller.StopAsync(TestContext.Current.CancellationToken);
             LNURLVerifyPollerService.PollOverride = null;
         }
     }
@@ -78,11 +78,11 @@ public class LNURLVerifyPollerTests
 
         var poller = new LNURLVerifyPollerService(
             NullLogger<LNURLVerifyPollerService>.Instance, new SimpleHttpClientFactory(), TimeSpan.FromMilliseconds(10));
-        await poller.StartAsync(default);
+        await poller.StartAsync(TestContext.Current.CancellationToken);
         try
         {
             for (int i = 0; i < 300 && Volatile.Read(ref settled) < 30; i++)
-                await Task.Delay(25);
+                await Task.Delay(25, TestContext.Current.CancellationToken);
 
             Assert.Equal(30, Volatile.Read(ref settled));                 // all 30 even invoices settled once
             foreach (var h in hashes)
@@ -91,7 +91,7 @@ public class LNURLVerifyPollerTests
         }
         finally
         {
-            await poller.StopAsync(default);
+            await poller.StopAsync(TestContext.Current.CancellationToken);
             LNURLVerifyPollerService.PollOverride = null;
             TrackedInvoiceRegistry.Settled -= Handler;
             foreach (var h in hashes) TrackedInvoiceRegistry.Remove(h);

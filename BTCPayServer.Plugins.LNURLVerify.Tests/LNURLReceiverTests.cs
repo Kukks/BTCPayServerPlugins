@@ -35,7 +35,7 @@ public class LNURLReceiverTests
         var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, null, host);
         var rx = new LNURLReceiver(resolved, Network.RegTest, http.Client(), NullLogger.Instance);
 
-        var inv = await rx.GetInvoice(hash, CancellationToken.None);
+        var inv = await rx.GetInvoice(hash, TestContext.Current.CancellationToken);
 
         Assert.NotNull(inv);
         Assert.Equal(LightningInvoiceStatus.Unpaid, inv!.Status);
@@ -54,7 +54,7 @@ public class LNURLReceiverTests
         var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, null, host);
         var rx = new LNURLReceiver(resolved, Network.RegTest, http.Client(), NullLogger.Instance);
 
-        var inv = await rx.GetInvoice(hash, CancellationToken.None);
+        var inv = await rx.GetInvoice(hash, TestContext.Current.CancellationToken);
 
         Assert.Null(inv);
         TrackedInvoiceRegistry.Remove(hash);
@@ -77,7 +77,7 @@ public class LNURLReceiverTests
         var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, null, host);
         var rx = new LNURLReceiver(resolved, Network.RegTest, http.Client(), NullLogger.Instance);
 
-        var err = await rx.CheckVerifySupport(CancellationToken.None);
+        var err = await rx.CheckVerifySupport(TestContext.Current.CancellationToken);
 
         Assert.NotNull(err);
         Assert.Contains("verify", err);
@@ -93,7 +93,7 @@ public class LNURLReceiverTests
         var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, null, host);
         var rx = new LNURLReceiver(resolved, Network.RegTest, http.Client(), NullLogger.Instance);
 
-        var err = await rx.CheckVerifySupport(CancellationToken.None);
+        var err = await rx.CheckVerifySupport(TestContext.Current.CancellationToken);
 
         Assert.Null(err);
     }
@@ -111,7 +111,7 @@ public class LNURLReceiverTests
         var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, null, host);
         var rx = new LNURLReceiver(resolved, Network.RegTest, new FakeHttp().Client(), NullLogger.Instance);
 
-        var inv = await rx.GetInvoice(hash, CancellationToken.None);
+        var inv = await rx.GetInvoice(hash, TestContext.Current.CancellationToken);
 
         Assert.NotNull(inv);
         Assert.Equal(LightningInvoiceStatus.Paid, inv!.Status);
@@ -129,7 +129,7 @@ public class LNURLReceiverTests
         var rx = new LNURLReceiver(resolved, Network.Main, http.Client(), NullLogger.Instance);
 
         var ex = await Assert.ThrowsAsync<Exception>(() =>
-            rx.CreateInvoice(LightMoney.MilliSatoshis(100_000), "x", null, CancellationToken.None));
+            rx.CreateInvoice(LightMoney.MilliSatoshis(100_000), "x", null, TestContext.Current.CancellationToken));
         Assert.Contains("requested", ex.Message);
     }
 }
