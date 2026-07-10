@@ -4,6 +4,7 @@ using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
 using BTCPayServer.Lightning;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace BTCPayServer.Plugins.LNURLVerify;
 
@@ -20,7 +21,8 @@ public class LNURLVerifyPlugin : BaseBTCPayServerPlugin
         services.AddSingleton<LNURLVerifyConnectionStringHandler>();
         services.AddSingleton<ILightningConnectionStringHandler>(sp =>
             sp.GetRequiredService<LNURLVerifyConnectionStringHandler>());
-        // The shared verify poller (IHostedService) is registered in Task 5, once it exists.
+        services.AddSingleton<LNURLVerifyPollerService>();
+        services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<LNURLVerifyPollerService>());
         base.Execute(services);
     }
 }

@@ -35,4 +35,8 @@
         <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+        <InternalsVisibleTo Include="BTCPayServer.Plugins.LNURLVerify.Tests" />
+    </ItemGroup>
+
 </Project>
