@@ -124,4 +124,23 @@ public class LNURLSendExecutorTests
 
         Assert.Equal(PayResult.Error, resp.Result);
     }
+
+    [Fact]
+    public async Task Pay_records_completed_send_for_reconciliation()
+    {
+        var w = Withdraw(1000, 300_000_000);
+        w.BalanceCheck = new Uri("https://h.example/bc");
+        var http = new FakeHttp()
+            .Map("https://h.example/bc",
+                "{\"tag\":\"withdrawRequest\",\"callback\":\"https://h.example/w\",\"k1\":\"fresh\",\"minWithdrawable\":1000,\"maxWithdrawable\":300000000}")
+            .Map($"https://h.example/w?k1=fresh&pr={SpecBolt11}", "{\"status\":\"OK\"}");
+        var exec = new LNURLSendExecutor(Resolved(w), http.Client(), NullLogger.Instance);
+
+        await exec.Pay(SpecBolt11, null, CancellationToken.None);
+
+        var hash = BOLT11PaymentRequest.Parse(SpecBolt11, NBitcoin.Network.Main).PaymentHash!.ToString();
+        Assert.True(SentPaymentRegistry.TryGet(hash, out var p));
+        Assert.Equal(LightningPaymentStatus.Complete, p.Status);
+        Assert.Equal(hash, p.PaymentHash);
+    }
 }

@@ -36,10 +36,11 @@ invoices, so it is unusable as a store's Lightning backend.
   (non-standard); it is validated (`SHA256(preimage) == payment hash`) before being reported.
 - Repeated sends against one withdraw link are **serialized** — a fresh `k1` (and current balance) is
   fetched before each send, so reusable links support repeated payouts.
-- **Uncertain sends don't auto-reconcile.** If the withdraw-callback request fails *after* submission,
-  the result is reported as unknown; this client keeps no payment history (`GetPayment` returns
-  nothing), so such a payout stays in-progress and may need manual review. (This is the safe choice —
-  retrying blindly could double-pay.)
+- **Uncertain sends can't auto-reconcile.** Sends are tracked, so `GetPayment`/`ListPayments` report
+  Complete/Failed/Pending. But if the withdraw-callback request fails *after* submission, the outcome is
+  genuinely unknowable (a bare-bolt11 send has no callback and no verify URL), so it is recorded as
+  pending and **cannot** be auto-resolved — such a payout stays in-progress in BTCPay and may need
+  manual review. (Reporting unknown rather than failed is deliberate — a blind retry could double-pay.)
 - **Validating the connection creates one throwaway probe invoice** on the receiver — this is how
   LUD-21 verify support is checked (verify is only advertised in the callback response, not metadata).
 - Amountless / top-up invoices are not supported (LNURL-pay is amount-driven).

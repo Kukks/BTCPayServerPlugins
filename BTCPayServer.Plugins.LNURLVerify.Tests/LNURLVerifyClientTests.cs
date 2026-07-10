@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using BTCPayServer.Lightning;
 using BTCPayServer.Plugins.LNURLVerify;
 using Microsoft.Extensions.Logging.Abstractions;
 using NBitcoin;
@@ -30,5 +31,22 @@ public class LNURLVerifyClientTests
         var c = ReceiveOnly();
         Assert.Equal("LNURL", c.DisplayName);
         Assert.Equal("https://h.example/", c.ServerUri!.ToString());
+    }
+
+    [Fact]
+    public async Task ReceiveOnly_ListPayments_is_empty() =>
+        Assert.Empty(await ReceiveOnly().ListPayments(CancellationToken.None));
+
+    [Fact]
+    public async Task GetPayment_returns_a_recorded_send()
+    {
+        var hash = new string('e', 64);
+        SentPaymentRegistry.Record(new LightningPayment
+        { Id = hash, PaymentHash = hash, Status = LightningPaymentStatus.Complete });
+
+        var got = await ReceiveOnly().GetPayment(hash, CancellationToken.None);
+
+        Assert.NotNull(got);
+        Assert.Equal(LightningPaymentStatus.Complete, got!.Status);
     }
 }

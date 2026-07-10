@@ -43,6 +43,20 @@ public sealed class LNURLSendExecutor
         if (amount is null || amount == LightMoney.Zero)
             return new PayResponse(PayResult.Error, "Amountless invoices cannot be sent via LNURL-withdraw.");
 
+        // Record the outbound send so BTCPay's payout reconciliation (GetPayment) can read its status.
+        void RecordSend(LightningPaymentStatus status, uint256? preimage) =>
+            SentPaymentRegistry.Record(new LightningPayment
+            {
+                Id = bolt11.PaymentHash?.ToString(),
+                PaymentHash = bolt11.PaymentHash?.ToString(),
+                BOLT11 = bolt11Str,
+                Amount = amount,
+                AmountSent = status == LightningPaymentStatus.Complete ? amount : null,
+                Status = status,
+                Preimage = preimage?.ToString(),
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+
         // Serialize per link: re-fetch a fresh withdraw (fresh k1 + current bounds), then submit, atomically.
         await _serialize.WaitAsync(ct);
         try
@@ -76,13 +90,17 @@ public sealed class LNURLSendExecutor
             }
             catch (Exception e)
             {
-                // Transport / non-JSON: we don't know the outcome. Unknown lets BTCPay reconcile later.
+                // Transport / non-JSON: we don't know the outcome. Pending/Unknown — not auto-resolvable.
+                RecordSend(LightningPaymentStatus.Pending, null);
                 return new PayResponse(PayResult.Unknown, e.Message);
             }
 
             var status = json["status"]?.Value<string>();
             if (status is null || !status.Equals("OK", StringComparison.OrdinalIgnoreCase))
+            {
+                RecordSend(LightningPaymentStatus.Failed, null);
                 return new PayResponse(PayResult.Error, json["reason"]?.Value<string>() ?? "LNURL-withdraw was rejected.");
+            }
 
             // Best-effort preimage (non-standard): only trusted if it hashes to the payment hash.
             var paymentHash = bolt11.PaymentHash;
@@ -92,6 +110,7 @@ public sealed class LNURLSendExecutor
                 LNURLReceiver.IsValidPreimage(preimageStr, paymentHash.ToString()))
                 preimage = new uint256(preimageStr);
 
+            RecordSend(LightningPaymentStatus.Complete, preimage);
             return new PayResponse(PayResult.Ok, new PayDetails
             {
                 PaymentHash = paymentHash,
