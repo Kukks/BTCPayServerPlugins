@@ -1,0 +1,46 @@
+# LNURL Verify
+
+Use any **LNURL** or **Lightning address** as a BTCPay Server Lightning backend — no node, no API key, no custody by BTCPay.
+
+## Connection strings
+
+The capability is decided by decoding the value you provide:
+
+- **Receive only** — a Lightning address or an LNURL-pay:
+  ```
+  type=lnurl;value=you@example.com
+  type=lnurl;value=LNURL1DP68...
+  ```
+- **Send & receive** — an LNURL-withdraw whose response carries a `payLink` (LUD-19):
+  ```
+  type=lnurl;value=LNURL1DP68...
+  ```
+
+An LNURL-withdraw **without** a `payLink` is rejected: it can send but cannot create checkout
+invoices, so it is unusable as a store's Lightning backend.
+
+## How it works
+
+- **Receive:** BTCPay asks the LNURL-pay callback for an invoice and detects settlement via the
+  LNURL **LUD-21 `verify`** endpoint. A single shared background poller watches every tracked invoice
+  across every connection (grouped by verify-host, bounded concurrency, capped back-off), so it scales
+  to many invoices and many addresses without a poll loop per connection.
+- **Send:** for an LNURL-withdraw, BTCPay pays an arbitrary invoice by submitting it to the withdraw
+  callback (the linked wallet pays it), bounded by the withdraw's min/max and, when exposed, its
+  balance.
+
+## Limitations
+
+- **Send has no preimage** for the payer in general — the *payee* receives the preimage, not BTCPay.
+  A preimage is surfaced only when the withdraw service returns one in its callback response
+  (non-standard); it is validated (`SHA256(preimage) == payment hash`) before being reported.
+- Repeated sends against a single withdraw link are serialized (each consumes the withdraw `k1`).
+- Amountless / top-up invoices are not supported (LNURL-pay is amount-driven).
+- Node, balance (for receive-only), channel and on-chain operations are not available — this client
+  holds no Lightning node.
+
+## Notes
+
+Every BTCPay invoice that offers LNURL already exposes a LUD-21 `verify` URL (enabled by default in
+the store's Lightning settings), so a BTCPay store on one server can receive into another via this
+plugin with cryptographic settlement proof.

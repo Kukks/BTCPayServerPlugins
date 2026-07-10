@@ -1,0 +1,45 @@
+@model BTCPayServer.Models.StoreViewModels.LightningNodeViewModel
+@{
+    if (Model.CryptoCode != "BTC")
+    {
+        return;
+    }
+}
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const customNodeAccordian = document.getElementById("CustomNodeSupport");
+        const template = document.getElementById("lnurlverify");
+        customNodeAccordian.appendChild(template.content.cloneNode(true));
+    });
+</script>
+
+<template id="lnurlverify">
+    <div class="accordion-item">
+        <h2 class="accordion-header" id="CustomLNURLVerifyHeader">
+            <button type="button" class="accordion-button collapsed" data-bs-toggle="collapse" data-bs-target="#CustomLNURLVerifyContent" aria-controls="CustomLNURLVerifyContent" aria-expanded="false">
+                <span><strong>LNURL</strong> address / withdraw</span>
+                <vc:icon symbol="caret-down"/>
+            </button>
+        </h2>
+        <div id="CustomLNURLVerifyContent" class="accordion-collapse collapse" aria-labelledby="CustomLNURLVerifyHeader" data-bs-parent="#CustomNodeSupport">
+            <div class="accordion-body">
+                <p class="my-2">Use any LNURL or Lightning address as your Lightning backend — no node, no API key. Enter a custom connection string:</p>
+                <ul class="pb-2">
+                    <li>
+                        <b>Receive only</b> (a Lightning address or LNURL-pay):<br/>
+                        <code><b>type=</b>lnurl;<b>value=</b>you@example.com</code>
+                    </li>
+                    <li class="mt-2">
+                        <b>Send &amp; receive</b> (an LNURL-withdraw whose response includes a <code>payLink</code>):<br/>
+                        <code><b>type=</b>lnurl;<b>value=</b>LNURL1...</code>
+                    </li>
+                </ul>
+                <p class="my-2 text-muted">
+                    Settlement is detected via the LNURL LUD-21 <code>verify</code> endpoint. An LNURL-withdraw
+                    without a <code>payLink</code> is rejected, because it cannot create checkout invoices.
+                </p>
+            </div>
+        </div>
+    </div>
+</template>
