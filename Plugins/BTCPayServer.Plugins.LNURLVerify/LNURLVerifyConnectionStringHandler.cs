@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Net.Http;
+using System.Threading;
 using BTCPayServer.Lightning;
 using BTCPayServer.Payments.Lightning;
 using Microsoft.Extensions.Logging;
@@ -34,8 +35,23 @@ public class LNURLVerifyConnectionStringHandler : ILightningConnectionStringHand
             return null;
         }
 
-        // Full construction (resolve + build client + register poller factory) lands in Task 8.
-        error = "not yet implemented";
-        return null;
+        error = null;
+        var http = _httpClientFactory.CreateClient(nameof(LNURLVerifyConnectionStringHandler));
+        // Bound each LNURL request rather than inheriting the default 100s HttpClient timeout.
+        http.Timeout = TimeSpan.FromSeconds(30);
+
+        ResolvedLnurl resolved;
+        try
+        {
+            // Resolve once here (at config/client-creation time) to decide capability up front.
+            resolved = LNURLResolver.Resolve(value, network, http, CancellationToken.None).GetAwaiter().GetResult();
+        }
+        catch (Exception e)
+        {
+            error = e.Message;
+            return null;
+        }
+
+        return new LNURLVerifyLightningClient(resolved, network, http, _loggerFactory);
     }
 }
