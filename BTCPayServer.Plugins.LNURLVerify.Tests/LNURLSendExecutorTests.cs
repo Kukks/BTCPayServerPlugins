@@ -164,4 +164,17 @@ public class LNURLSendExecutorTests
         Assert.True(SentPaymentRegistry.TryGet(conn, "prune_new", out _));
         Assert.True(SentPaymentRegistry.TryGet(conn, "prune_pending", out _));
     }
+
+    [Fact]
+    public void Link_locks_are_shared_per_connection_across_instances()
+    {
+        // BTCPay creates separate client instances per connection; the send lock must be shared across
+        // them (keyed by connection) or concurrent Pays would race the k1-refresh+submit.
+        var a1 = LNURLSendExecutor.GetLinkLock("https://x.example/pay");
+        var a2 = LNURLSendExecutor.GetLinkLock("https://x.example/pay");
+        var b = LNURLSendExecutor.GetLinkLock("https://y.example/pay");
+
+        Assert.Same(a1, a2);   // same connection -> same lock
+        Assert.NotSame(a1, b); // different connection -> different lock
+    }
 }

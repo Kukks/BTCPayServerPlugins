@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Concurrent;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
@@ -22,7 +23,13 @@ public sealed class LNURLSendExecutor
     private readonly ResolvedLnurl _resolved;
     private readonly HttpClient _http;
     private readonly ILogger _logger;
-    private readonly SemaphoreSlim _serialize = new(1, 1);
+
+    // Per-LINK (not per-instance) send lock: BTCPay creates separate client instances for the same
+    // connection, so serialization must be shared across them or concurrent Pays would race the
+    // k1-refresh+submit. Keyed by the connection identity, same as the send registry.
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _linkLocks = new();
+    internal static SemaphoreSlim GetLinkLock(string key) => _linkLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+    private SemaphoreSlim LinkLock => GetLinkLock(_resolved.PayEndpoint.ToString());
 
     public LNURLSendExecutor(ResolvedLnurl resolved, HttpClient http, ILogger logger)
     { _resolved = resolved; _http = http; _logger = logger; }
@@ -58,8 +65,10 @@ public sealed class LNURLSendExecutor
                 CreatedAt = DateTimeOffset.UtcNow
             });
 
-        // Serialize per link: re-fetch a fresh withdraw (fresh k1 + current bounds), then submit, atomically.
-        await _serialize.WaitAsync(ct);
+        // Serialize per link (across all client instances of this connection): re-fetch a fresh
+        // withdraw (fresh k1 + current bounds), then submit, atomically.
+        var link = LinkLock;
+        await link.WaitAsync(ct);
         try
         {
             LNURL.LNURLWithdrawRequest w;
@@ -119,7 +128,7 @@ public sealed class LNURLSendExecutor
                 Preimage = preimage
             });
         }
-        finally { _serialize.Release(); }
+        finally { link.Release(); }
     }
 
     /// <summary>
