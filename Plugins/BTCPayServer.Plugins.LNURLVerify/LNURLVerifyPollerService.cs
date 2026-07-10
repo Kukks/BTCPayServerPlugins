@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Lightning;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -25,29 +26,40 @@ public sealed class LNURLVerifyPollerService : IHostedService
     private static readonly TimeSpan DefaultInterval = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(30);
     private const int MaxConcurrencyPerCycle = 16;
+    private static readonly TimeSpan PersistThrottle = TimeSpan.FromSeconds(10);
 
     private readonly ILogger<LNURLVerifyPollerService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly TimeSpan _interval;
+    private readonly LNURLVerifyPersistence? _persistence;
     private readonly CancellationTokenSource _cts = new();
     // Concurrent: PollOne runs for many invoices at once under the cycle's concurrency gate.
     private readonly ConcurrentDictionary<string, (int Errors, DateTimeOffset Next)> _backoff = new();
     private Task? _loop;
+    private int _lastPersistedVersion;
+    private DateTimeOffset _lastPersist = DateTimeOffset.MinValue;
 
     /// <summary>Test seam: when set, used instead of a real HTTP verify poll.</summary>
     internal static Func<TrackedInvoice, CancellationToken, Task<LightningInvoice?>>? PollOverride;
 
-    public LNURLVerifyPollerService(ILogger<LNURLVerifyPollerService> logger, IHttpClientFactory httpClientFactory)
-        : this(logger, httpClientFactory, DefaultInterval) { }
+    public LNURLVerifyPollerService(ILogger<LNURLVerifyPollerService> logger, IHttpClientFactory httpClientFactory,
+        ISettingsRepository settings)
+        : this(logger, httpClientFactory, DefaultInterval, new LNURLVerifyPersistence(settings)) { }
 
     internal LNURLVerifyPollerService(ILogger<LNURLVerifyPollerService> logger,
-        IHttpClientFactory httpClientFactory, TimeSpan interval)
-    { _logger = logger; _httpClientFactory = httpClientFactory; _interval = interval; }
+        IHttpClientFactory httpClientFactory, TimeSpan interval, LNURLVerifyPersistence? persistence = null)
+    { _logger = logger; _httpClientFactory = httpClientFactory; _interval = interval; _persistence = persistence; }
 
-    public Task StartAsync(CancellationToken _)
+    public async Task StartAsync(CancellationToken _)
     {
+        if (_persistence != null)
+        {
+            // Re-seed non-expired invoices so a restart doesn't lose payment detection; the loop then
+            // re-polls their verify URLs (catching anything settled while BTCPay was down).
+            try { await _persistence.LoadAsync(); _lastPersistedVersion = TrackedInvoiceRegistry.Version; }
+            catch (Exception e) { _logger.LogWarning(e, "Failed to load persisted LNURL tracked invoices"); }
+        }
         _loop = Task.Run(() => Loop(_cts.Token));
-        return Task.CompletedTask;
     }
 
     public async Task StopAsync(CancellationToken _)
@@ -56,6 +68,11 @@ public sealed class LNURLVerifyPollerService : IHostedService
         if (_loop is not null)
         {
             try { await _loop; } catch { /* cancellation */ }
+        }
+        // Final flush on graceful shutdown so a planned restart loses nothing.
+        if (_persistence != null)
+        {
+            try { await _persistence.SaveAsync(); } catch (Exception e) { _logger.LogDebug(e, "Final LNURL persist failed"); }
         }
     }
 
@@ -102,6 +119,18 @@ public sealed class LNURLVerifyPollerService : IHostedService
                         finally { gate.Release(); }
                     });
                     await Task.WhenAll(tasks);
+                }
+
+                // Persist the tracked set (throttled, only when it changed) so it survives a restart.
+                if (_persistence != null)
+                {
+                    var version = TrackedInvoiceRegistry.Version;
+                    var now = DateTimeOffset.UtcNow;
+                    if (version != _lastPersistedVersion && now - _lastPersist > PersistThrottle)
+                    {
+                        try { await _persistence.SaveAsync(); _lastPersistedVersion = version; _lastPersist = now; }
+                        catch (Exception e) { _logger.LogDebug(e, "Failed to persist LNURL tracked invoices"); }
+                    }
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }

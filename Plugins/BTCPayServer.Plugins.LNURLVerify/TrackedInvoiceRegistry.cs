@@ -3,6 +3,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using BTCPayServer.Lightning;
 
 namespace BTCPayServer.Plugins.LNURLVerify;
@@ -36,10 +37,15 @@ public static class TrackedInvoiceRegistry
     /// <summary>Fired when the poller observes a settled invoice. Listeners filter to their connection.</summary>
     public static event Action<TrackedInvoice, LightningInvoice>? Settled;
 
+    // Bumped on every tracked add/remove so the poller knows when the persisted snapshot is stale.
+    private static int _version;
+    public static int Version => Volatile.Read(ref _version);
+
     public static void Add(TrackedInvoice t)
     {
         _byHost.GetOrAdd(t.VerifyHost, _ => new()).AddOrUpdate(t.PaymentHash, t, (_, __) => t);
         _hostOf[t.PaymentHash] = t.VerifyHost;
+        Interlocked.Increment(ref _version);
     }
 
     public static bool TryGet(string paymentHash, out TrackedInvoice t)
@@ -55,6 +61,7 @@ public static class TrackedInvoiceRegistry
         if (!_hostOf.TryRemove(paymentHash, out var host)) return;
         if (_byHost.TryGetValue(host, out var inner))
             inner.TryRemove(paymentHash, out _);
+        Interlocked.Increment(ref _version);
         // Intentionally do NOT prune the (now-possibly-empty) host bucket: the outer map is bounded by
         // the small set of distinct verify hosts, and pruning it races a concurrent Add for the same
         // host (GetOrAdd could hand back this same inner instance, which we would then delete out from

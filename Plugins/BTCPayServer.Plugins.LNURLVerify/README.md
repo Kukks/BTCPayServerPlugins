@@ -31,13 +31,12 @@ invoices, so it is unusable as a store's Lightning backend.
 
 ## Limitations
 
-- **⚠️ Payment detection does not survive a BTCPay restart.** Tracked invoices are held in memory only.
-  If BTCPay restarts (e.g. an update) while a checkout is unpaid-but-not-expired and the customer pays
-  *afterwards*, the funds arrive in the receiver's LNURL wallet but the BTCPay invoice may never be
-  marked paid — on restart BTCPay stops monitoring an invoice whose status it can no longer read. A real
-  Lightning node survives a restart here; this nodeless backend does not (persisting tracked invoices is
-  a possible future enhancement). Prefer short checkout expiries and avoid restarting during active
-  unpaid checkouts.
+- **Payment detection across a restart** — tracked invoices are persisted to BTCPay settings and
+  re-seeded on startup, so a graceful restart (e.g. an update) does not lose payment detection: the
+  poller re-polls their verify URLs and catches anything that settled while BTCPay was down. Caveats: an
+  *ungraceful* crash can lose up to ~10s of the most-recently-created invoices (the persist throttle),
+  and the state is a single settings blob — fine for typical volumes; a per-row table would scale better
+  (future work).
 - **Clearnet only (no Tor).** Requests are not routed through BTCPay's onion proxy, so a `.onion` LNURL
   or Lightning address will not connect.
 - **Send has no preimage** for the payer in general — the *payee* receives the preimage, not BTCPay.
