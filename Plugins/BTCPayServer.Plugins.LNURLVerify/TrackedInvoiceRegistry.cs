@@ -59,5 +59,9 @@ public static class TrackedInvoiceRegistry
 
     public static IReadOnlyCollection<string> Hosts() => _byHost.Keys.ToArray();
 
+    /// <summary>All tracked invoices across every host (used by a connection's ListInvoices, filtered by pay-endpoint).</summary>
+    public static IReadOnlyCollection<TrackedInvoice> All() =>
+        _byHost.Values.SelectMany(v => v.Values).ToArray();
+
     public static void PublishSettled(TrackedInvoice t, LightningInvoice inv) => Settled?.Invoke(t, inv);
 }
