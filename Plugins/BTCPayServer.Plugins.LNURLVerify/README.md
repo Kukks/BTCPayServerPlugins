@@ -34,10 +34,16 @@ invoices, so it is unusable as a store's Lightning backend.
 - **Send has no preimage** for the payer in general — the *payee* receives the preimage, not BTCPay.
   A preimage is surfaced only when the withdraw service returns one in its callback response
   (non-standard); it is validated (`SHA256(preimage) == payment hash`) before being reported.
-- Repeated sends against a single withdraw link are serialized (each consumes the withdraw `k1`).
+- Repeated sends against one withdraw link are **serialized** — a fresh `k1` (and current balance) is
+  fetched before each send, so reusable links support repeated payouts.
+- **Uncertain sends don't auto-reconcile.** If the withdraw-callback request fails *after* submission,
+  the result is reported as unknown; this client keeps no payment history (`GetPayment` returns
+  nothing), so such a payout stays in-progress and may need manual review. (This is the safe choice —
+  retrying blindly could double-pay.)
+- **Validating the connection creates one throwaway probe invoice** on the receiver — this is how
+  LUD-21 verify support is checked (verify is only advertised in the callback response, not metadata).
 - Amountless / top-up invoices are not supported (LNURL-pay is amount-driven).
-- Node, balance (for receive-only), channel and on-chain operations are not available — this client
-  holds no Lightning node.
+- Node, channel and on-chain operations are not available — this client holds no Lightning node.
 
 ## Notes
 

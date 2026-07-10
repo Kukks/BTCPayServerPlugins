@@ -93,4 +93,23 @@ public class LNURLReceiverTests
 
         Assert.Null(err);
     }
+
+    [Fact]
+    public async Task GetInvoice_returns_paid_from_settled_cache_not_null()
+    {
+        // Simulate the poller having already settled + un-tracked this invoice. GetInvoice must still
+        // report Paid (not null), or BTCPay's poll path (LightningListener.PollPayment) evicts it.
+        var host = "settledrx.example";
+        var hash = new string('d', 64);
+        var paid = new LightningInvoice { Id = hash, PaymentHash = hash, Status = LightningInvoiceStatus.Paid };
+        TrackedInvoiceRegistry.MarkSettled(hash, paid, DateTimeOffset.UtcNow.AddMinutes(5));
+
+        var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, null, host);
+        var rx = new LNURLReceiver(resolved, Network.RegTest, new FakeHttp().Client(), NullLogger.Instance);
+
+        var inv = await rx.GetInvoice(hash, CancellationToken.None);
+
+        Assert.NotNull(inv);
+        Assert.Equal(LightningInvoiceStatus.Paid, inv!.Status);
+    }
 }

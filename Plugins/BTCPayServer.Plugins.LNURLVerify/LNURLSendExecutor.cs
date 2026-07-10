@@ -55,6 +55,10 @@ public sealed class LNURLSendExecutor
                 return new PayResponse(PayResult.Error,
                     $"Amount {amount.MilliSatoshi} msat is outside the withdraw bounds " +
                     $"[{w.MinWithdrawable.MilliSatoshi}, {w.MaxWithdrawable.MilliSatoshi}] msat.");
+            if (w.CurrentBalance is not null && amount > w.CurrentBalance)
+                return new PayResponse(PayResult.Error,
+                    $"Amount {amount.MilliSatoshi} msat exceeds the withdraw's current balance " +
+                    $"({w.CurrentBalance.MilliSatoshi} msat).");
 
             var cb = new UriBuilder(w.Callback);
             var q = new StringBuilder(cb.Query.TrimStart('?'));
@@ -113,6 +117,12 @@ public sealed class LNURLSendExecutor
                ?? throw new FormatException("Could not parse the refreshed LNURL-withdraw response.");
     }
 
-    public Task<LightMoney?> GetBalance(CancellationToken ct) =>
-        Task.FromResult(_resolved.Withdraw?.CurrentBalance);
+    public async Task<LightMoney?> GetBalance(CancellationToken ct)
+    {
+        if (_resolved.Withdraw is null) return null;
+        // Re-fetch for a live balance (RefreshWithdraw prefers balanceCheck); fall back to the
+        // resolve-time snapshot on error rather than reporting a hard failure.
+        try { return (await RefreshWithdraw(ct)).CurrentBalance; }
+        catch { return _resolved.Withdraw.CurrentBalance; }
+    }
 }

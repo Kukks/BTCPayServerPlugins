@@ -28,6 +28,11 @@ public static class TrackedInvoiceRegistry
     private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, TrackedInvoice>> _byHost = new();
     private static readonly ConcurrentDictionary<string, string> _hostOf = new();
 
+    // Recently-settled invoices, kept retrievable as Paid for a grace period. BTCPay's poll path
+    // (LightningListener.PollPayment) EVICTS an invoice whose GetInvoice returns null, so a settled
+    // invoice must keep reporting Paid until BTCPay has recorded it — not vanish the instant we detect it.
+    private static readonly ConcurrentDictionary<string, (LightningInvoice Invoice, DateTimeOffset PruneAfter)> _settled = new();
+
     /// <summary>Fired when the poller observes a settled invoice. Listeners filter to their connection.</summary>
     public static event Action<TrackedInvoice, LightningInvoice>? Settled;
 
@@ -48,10 +53,39 @@ public static class TrackedInvoiceRegistry
     public static void Remove(string paymentHash)
     {
         if (!_hostOf.TryRemove(paymentHash, out var host)) return;
-        if (!_byHost.TryGetValue(host, out var inner)) return;
-        inner.TryRemove(paymentHash, out _);
-        if (inner.IsEmpty)
-            _byHost.TryRemove(new KeyValuePair<string, ConcurrentDictionary<string, TrackedInvoice>>(host, inner));
+        if (_byHost.TryGetValue(host, out var inner))
+            inner.TryRemove(paymentHash, out _);
+        // Intentionally do NOT prune the (now-possibly-empty) host bucket: the outer map is bounded by
+        // the small set of distinct verify hosts, and pruning it races a concurrent Add for the same
+        // host (GetOrAdd could hand back this same inner instance, which we would then delete out from
+        // under the just-added invoice — orphaning it).
+    }
+
+    /// <summary>
+    /// Move a settled invoice into the short-lived settled cache (so GetInvoice keeps returning it as
+    /// Paid) and stop tracking it (so the poller no longer polls it). Stores settled BEFORE removing
+    /// from tracked so there is never a window where neither map holds the hash.
+    /// </summary>
+    public static void MarkSettled(string paymentHash, LightningInvoice paid, DateTimeOffset pruneAfter)
+    {
+        _settled[paymentHash] = (paid, pruneAfter);
+        Remove(paymentHash);
+    }
+
+    public static bool TryGetSettled(string paymentHash, out LightningInvoice invoice)
+    {
+        invoice = default!;
+        if (!_settled.TryGetValue(paymentHash, out var e)) return false;
+        if (e.PruneAfter < DateTimeOffset.UtcNow) { _settled.TryRemove(paymentHash, out _); return false; }
+        invoice = e.Invoice;
+        return true;
+    }
+
+    public static void PruneSettled(DateTimeOffset now)
+    {
+        foreach (var kv in _settled)
+            if (kv.Value.PruneAfter < now)
+                _settled.TryRemove(kv.Key, out _);
     }
 
     public static IReadOnlyCollection<TrackedInvoice> SnapshotByHost(string host) =>

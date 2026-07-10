@@ -126,9 +126,14 @@ public sealed class LNURLReceiver
     }
 
     public Task<LightningInvoice?> GetInvoice(string paymentHash, CancellationToken ct)
-        => TrackedInvoiceRegistry.TryGet(paymentHash, out var t)
+    {
+        // A recently-settled invoice must keep reporting Paid (never null) or BTCPay's poll path evicts it.
+        if (TrackedInvoiceRegistry.TryGetSettled(paymentHash, out var paid))
+            return Task.FromResult<LightningInvoice?>(paid);
+        return TrackedInvoiceRegistry.TryGet(paymentHash, out var t)
             ? PollAndBuild(t, _http, ct)
             : Task.FromResult<LightningInvoice?>(null);
+    }
 
     /// <summary>
     /// Polls a tracked invoice's LUD-21 verify URL and builds its status. Connection-agnostic:
