@@ -43,9 +43,10 @@ public sealed class LNURLSendExecutor
         if (amount is null || amount == LightMoney.Zero)
             return new PayResponse(PayResult.Error, "Amountless invoices cannot be sent via LNURL-withdraw.");
 
-        // Record the outbound send so BTCPay's payout reconciliation (GetPayment) can read its status.
+        // Record the outbound send (scoped to this connection) so BTCPay's payout reconciliation
+        // (GetPayment) can read its status.
         void RecordSend(LightningPaymentStatus status, uint256? preimage) =>
-            SentPaymentRegistry.Record(new LightningPayment
+            SentPaymentRegistry.Record(_resolved.PayEndpoint.ToString(), new LightningPayment
             {
                 Id = bolt11.PaymentHash?.ToString(),
                 PaymentHash = bolt11.PaymentHash?.ToString(),

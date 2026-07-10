@@ -95,7 +95,8 @@ public class LNURLVerifyPollerTests
             LNURLVerifyPollerService.PollOverride = null;
             TrackedInvoiceRegistry.Settled -= Handler;
             foreach (var h in hashes) TrackedInvoiceRegistry.Remove(h);
-            TrackedInvoiceRegistry.PruneSettled(DateTimeOffset.UtcNow.AddDays(1));
+            // NOTE: don't PruneSettled() here — a global prune would wipe other (parallel) test classes'
+            // settled entries. This test's settled hashes are unique (conc*) and expire via their grace.
         }
     }
 }

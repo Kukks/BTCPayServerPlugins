@@ -138,23 +138,30 @@ public class LNURLSendExecutorTests
 
         await exec.Pay(SpecBolt11, null, CancellationToken.None);
 
+        // Scoped to the connection the executor sends on (Resolved(w).PayEndpoint).
+        var conn = "https://h.example/pay";
         var hash = BOLT11PaymentRequest.Parse(SpecBolt11, NBitcoin.Network.Main).PaymentHash!.ToString();
-        Assert.True(SentPaymentRegistry.TryGet(hash, out var p));
+        Assert.True(SentPaymentRegistry.TryGet(conn, hash, out var p));
         Assert.Equal(LightningPaymentStatus.Complete, p.Status);
         Assert.Equal(hash, p.PaymentHash);
     }
 
     [Fact]
-    public void SentPaymentRegistry_prune_drops_old_but_keeps_recent()
+    public void SentPaymentRegistry_prune_drops_old_terminal_but_keeps_recent_and_pending()
     {
-        SentPaymentRegistry.Record(new LightningPayment
+        const string conn = "https://prune.example/pay";
+        SentPaymentRegistry.Record(conn, new LightningPayment
         { Id = "prune_old", PaymentHash = "prune_old", Status = LightningPaymentStatus.Complete, CreatedAt = DateTimeOffset.UtcNow.AddDays(-2) });
-        SentPaymentRegistry.Record(new LightningPayment
+        SentPaymentRegistry.Record(conn, new LightningPayment
         { Id = "prune_new", PaymentHash = "prune_new", Status = LightningPaymentStatus.Complete, CreatedAt = DateTimeOffset.UtcNow });
+        // An old but Pending (uncertain) send must NOT be pruned (else BTCPay would auto-cancel + re-pay).
+        SentPaymentRegistry.Record(conn, new LightningPayment
+        { Id = "prune_pending", PaymentHash = "prune_pending", Status = LightningPaymentStatus.Pending, CreatedAt = DateTimeOffset.UtcNow.AddDays(-2) });
 
         SentPaymentRegistry.Prune(DateTimeOffset.UtcNow.AddHours(-24));
 
-        Assert.False(SentPaymentRegistry.TryGet("prune_old", out _));
-        Assert.True(SentPaymentRegistry.TryGet("prune_new", out _));
+        Assert.False(SentPaymentRegistry.TryGet(conn, "prune_old", out _));
+        Assert.True(SentPaymentRegistry.TryGet(conn, "prune_new", out _));
+        Assert.True(SentPaymentRegistry.TryGet(conn, "prune_pending", out _));
     }
 }

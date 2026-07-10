@@ -38,15 +38,27 @@ public class LNURLVerifyClientTests
         Assert.Empty(await ReceiveOnly().ListPayments(CancellationToken.None));
 
     [Fact]
-    public async Task GetPayment_returns_a_recorded_send()
+    public async Task GetPayment_returns_a_recorded_send_for_this_connection()
     {
         var hash = new string('e', 64);
-        SentPaymentRegistry.Record(new LightningPayment
+        // Record under this client's connection key (ReceiveOnly().PayEndpoint) so the scoped lookup finds it.
+        SentPaymentRegistry.Record("https://h.example/pay", new LightningPayment
         { Id = hash, PaymentHash = hash, Status = LightningPaymentStatus.Complete });
 
         var got = await ReceiveOnly().GetPayment(hash, CancellationToken.None);
 
         Assert.NotNull(got);
         Assert.Equal(LightningPaymentStatus.Complete, got!.Status);
+    }
+
+    [Fact]
+    public async Task GetPayment_does_not_leak_another_connections_send()
+    {
+        var hash = new string('f', 64);
+        SentPaymentRegistry.Record("https://other-store.example/pay", new LightningPayment
+        { Id = hash, PaymentHash = hash, Status = LightningPaymentStatus.Complete });
+
+        // This client (connection https://h.example/pay) must NOT see another connection's send.
+        Assert.Null(await ReceiveOnly().GetPayment(hash, CancellationToken.None));
     }
 }

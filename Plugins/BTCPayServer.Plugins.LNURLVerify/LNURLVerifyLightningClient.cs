@@ -101,10 +101,12 @@ public sealed class LNURLVerifyLightningClient : IExtendedLightningClient
 
     // ---- Payments (best-effort / empty) ----
     public Task<LightningPayment?> GetPayment(string paymentHash, CancellationToken cancellation = default)
-        => Task.FromResult(SentPaymentRegistry.TryGet(paymentHash, out var p) ? p : null);
+        => Task.FromResult(SentPaymentRegistry.TryGet(_resolved.PayEndpoint.ToString(), paymentHash, out var p) ? p : null);
 
     public Task<LightningPayment[]> ListPayments(CancellationToken cancellation = default)
-        => Task.FromResult(_sender is null ? Array.Empty<LightningPayment>() : SentPaymentRegistry.All().ToArray());
+        => Task.FromResult(_sender is null
+            ? Array.Empty<LightningPayment>()
+            : SentPaymentRegistry.ListByConnection(_resolved.PayEndpoint.ToString()).ToArray());
 
     public Task<LightningPayment[]> ListPayments(ListPaymentsParams request, CancellationToken cancellation = default)
         => ListPayments(cancellation);
