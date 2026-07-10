@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Concurrent;
 using System.Net.Http;
 using System.Threading;
 using BTCPayServer.Lightning;
@@ -13,6 +14,13 @@ public class LNURLVerifyConnectionStringHandler : ILightningConnectionStringHand
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILoggerFactory _loggerFactory;
+
+    // BTCPay's LightningClientFactory does NOT cache clients — it calls this handler's Create on every
+    // poll/listen/operation (e.g. LightningListener.PollPayment). Resolving over the network each time
+    // would hammer the LNURL server and block a thread per call, so cache the resolution briefly. The
+    // withdraw's mutable bits (k1/balance) are refreshed at send time regardless, so a short TTL is safe.
+    private static readonly ConcurrentDictionary<string, (ResolvedLnurl Resolved, DateTimeOffset Expiry)> _cache = new();
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(1);
 
     public LNURLVerifyConnectionStringHandler(IHttpClientFactory httpClientFactory, ILoggerFactory loggerFactory)
     {
@@ -41,15 +49,24 @@ public class LNURLVerifyConnectionStringHandler : ILightningConnectionStringHand
         http.Timeout = TimeSpan.FromSeconds(30);
 
         ResolvedLnurl resolved;
-        try
+        if (_cache.TryGetValue(value, out var cached) && cached.Expiry > DateTimeOffset.UtcNow)
         {
-            // Resolve once here (at config/client-creation time) to decide capability up front.
-            resolved = LNURLResolver.Resolve(value, network, http, CancellationToken.None).GetAwaiter().GetResult();
+            resolved = cached.Resolved;
         }
-        catch (Exception e)
+        else
         {
-            error = e.Message;
-            return null;
+            try
+            {
+                // Resolve (network) to decide capability up front; cached so the frequent per-poll
+                // Create calls don't re-fetch. Failures are not cached, so they retry next time.
+                resolved = LNURLResolver.Resolve(value, network, http, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            catch (Exception e)
+            {
+                error = e.Message;
+                return null;
+            }
+            _cache[value] = (resolved, DateTimeOffset.UtcNow.Add(CacheTtl));
         }
 
         return new LNURLVerifyLightningClient(resolved, network, http, _loggerFactory);
