@@ -246,13 +246,16 @@ query InvoiceByPaymentHash($paymentHash: PaymentHash!, $walletId: WalletId!) {
     public LightningInvoice? ToInvoice(JObject invoice)
     {
         var bolt11 = BOLT11PaymentRequest.Parse(invoice["paymentRequest"].Value<string>(), _network);
+        // Map the status once (null-safe) and reuse it for both Status and PaidAt, so a missing
+        // paymentStatus cannot abort conversion via an unsafe dereference.
+        var status = MapInvoiceStatus(invoice["paymentStatus"]?.Value<string>());
         return new LightningInvoice()
         {
             Id = invoice["paymentHash"].Value<string>(),
             Amount = invoice["satoshis"] is null? bolt11.MinimumAmount:  LightMoney.Satoshis(invoice["satoshis"].Value<long>()),
                 Preimage =  invoice["paymentSecret"].Value<string>(),
-            PaidAt = (invoice["paymentStatus"].Value<string>()) ==  "PAID"? DateTimeOffset.UtcNow : null,
-            Status =  MapInvoiceStatus(invoice["paymentStatus"]?.Value<string>()),
+            PaidAt = status == LightningInvoiceStatus.Paid ? DateTimeOffset.UtcNow : null,
+            Status =  status,
             BOLT11 =  invoice["paymentRequest"].Value<string>(),
             PaymentHash = invoice["paymentHash"].Value<string>(),
             ExpiresAt = bolt11.ExpiryDate

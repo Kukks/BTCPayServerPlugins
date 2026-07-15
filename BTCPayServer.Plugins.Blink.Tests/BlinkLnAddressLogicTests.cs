@@ -102,6 +102,16 @@ public class BlinkLnAddressLogicTests
             BlinkLnAddressLightningClient.DetermineStatus(false, now.AddMinutes(10), now));
     }
 
+    [Fact]
+    public void DetermineStatus_unpaid_when_expiry_equals_now()
+    {
+        // Expiry is strictly-less-than (expiresAt < now => Expired), so an invoice whose expiry equals
+        // 'now' is still Unpaid. Pins this intentional tie-break to avoid a 1-tick premature expiry.
+        var now = DateTimeOffset.UtcNow;
+        Assert.Equal(LightningInvoiceStatus.Unpaid,
+            BlinkLnAddressLightningClient.DetermineStatus(false, now, now));
+    }
+
     // ---- Back-off math ----
 
     [Fact]
@@ -197,6 +207,11 @@ public class BlinkLnAddressLogicTests
     [InlineData("")]
     [InlineData("not a url")]
     [InlineData("/relative/path")]
+    // Non-http(s) absolute URLs must be rejected by the scheme guard (they would otherwise pass the
+    // Uri.TryCreate gate). This locks in the http/https-only behavior of ExtractOrigin.
+    [InlineData("ftp://example.com")]
+    [InlineData("file:///etc/passwd")]
+    [InlineData("ws://lnurl.blink.sv/lnurlp/foo")]
     public void ExtractOrigin_returns_null_for_invalid(string? url)
     {
         Assert.Null(BlinkLnAddressLightningClient.ExtractOrigin(url));
@@ -211,14 +226,30 @@ public class BlinkLnAddressLogicTests
     }
 
     [Fact]
+    public void ValidateAmountBounds_passes_at_exact_min()
+    {
+        // The bound is exclusive-below (amountMsat < min throws), so amount == min is accepted.
+        BlinkLnAddressLightningClient.ValidateAmountBounds(1_000, 1_000, 1_000_000);
+    }
+
+    [Fact]
+    public void ValidateAmountBounds_passes_at_exact_max()
+    {
+        // The bound is exclusive-above (amountMsat > max throws), so amount == max is accepted.
+        BlinkLnAddressLightningClient.ValidateAmountBounds(1_000_000, 1_000, 1_000_000);
+    }
+
+    [Fact]
     public void ValidateAmountBounds_throws_below_min()
     {
-        Assert.Throws<Exception>(() => BlinkLnAddressLightningClient.ValidateAmountBounds(500, 1_000, 1_000_000));
+        var ex = Assert.Throws<Exception>(() => BlinkLnAddressLightningClient.ValidateAmountBounds(500, 1_000, 1_000_000));
+        Assert.Contains("below", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void ValidateAmountBounds_throws_above_max()
     {
-        Assert.Throws<Exception>(() => BlinkLnAddressLightningClient.ValidateAmountBounds(2_000_000, 1_000, 1_000_000));
+        var ex = Assert.Throws<Exception>(() => BlinkLnAddressLightningClient.ValidateAmountBounds(2_000_000, 1_000, 1_000_000));
+        Assert.Contains("above", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 }

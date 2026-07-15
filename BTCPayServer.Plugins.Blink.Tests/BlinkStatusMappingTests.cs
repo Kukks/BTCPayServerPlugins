@@ -56,21 +56,14 @@ public class BlinkStatusMappingTests
     }
 
     [Theory]
-    [InlineData("mainnet")]
-    [InlineData("testnet")]
-    [InlineData("signet")]
-    [InlineData("regtest")]
-    public void MapNetwork_maps_known_networks(string network)
+    [InlineData("mainnet", "Main")]
+    [InlineData("testnet", "TestNet")]
+    // signet maps to TestNet (BTCPay has no distinct signet network here).
+    [InlineData("signet", "TestNet")]
+    [InlineData("regtest", "RegTest")]
+    public void MapNetwork_maps_known_networks(string network, string expected)
     {
-        var mapped = BlinkLightningClient.MapNetwork(network);
-        Assert.NotNull(mapped);
-        // signet maps to TestNet (BTCPay has no distinct signet network here).
-        if (network is "signet" or "testnet")
-            Assert.Equal(Network.TestNet, mapped);
-        if (network == "mainnet")
-            Assert.Equal(Network.Main, mapped);
-        if (network == "regtest")
-            Assert.Equal(Network.RegTest, mapped);
+        Assert.Equal(Network.GetNetwork(expected), BlinkLightningClient.MapNetwork(network));
     }
 
     [Fact]
