@@ -83,30 +83,35 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
         HttpClient httpClient, ILogger logger)
     {
         _lightningAddress = lightningAddress;
-        var parts = lightningAddress.Split('@');
-        if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]))
-            throw new FormatException($"Invalid Blink lightning address '{lightningAddress}'");
-        _username = parts[0];
-        _domain = parts[1];
+        (_username, _domain) = ParseLightningAddress(lightningAddress);
         _usd = usd;
         _network = network;
         _httpClient = httpClient;
         _logger = logger;
     }
 
-    private Uri LnurlpMetadataUri
+    /// <summary>Splits a "user@domain" lightning address into its parts, throwing on an invalid address.</summary>
+    internal static (string Username, string Domain) ParseLightningAddress(string lightningAddress)
     {
-        get
-        {
-            // USDB uses a "+usd" wallet modifier on the local part (blink-lnurl-server identifier parsing).
-            var localPart = _usd ? $"{_username}+usd" : _username;
-            var scheme = _domain.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-                         _domain.StartsWith("localhost:", StringComparison.OrdinalIgnoreCase)
-                ? "http"
-                : "https";
-            return new Uri($"{scheme}://{_domain}/.well-known/lnurlp/{Uri.EscapeDataString(localPart)}");
-        }
+        var parts = (lightningAddress ?? "").Split('@');
+        if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]))
+            throw new FormatException($"Invalid Blink lightning address '{lightningAddress}'");
+        return (parts[0], parts[1]);
     }
+
+    /// <summary>Builds the LNURL-pay metadata URL for a Blink lightning address. USDB uses a "+usd"
+    /// wallet modifier on the local part; localhost domains use http, everything else https.</summary>
+    internal static Uri BuildLnurlpMetadataUri(string username, string domain, bool usd)
+    {
+        var localPart = usd ? $"{username}+usd" : username;
+        var scheme = domain.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                     domain.StartsWith("localhost:", StringComparison.OrdinalIgnoreCase)
+            ? "http"
+            : "https";
+        return new Uri($"{scheme}://{domain}/.well-known/lnurlp/{Uri.EscapeDataString(localPart)}");
+    }
+
+    private Uri LnurlpMetadataUri => BuildLnurlpMetadataUri(_username, _domain, _usd);
 
     private async Task<JObject> FetchLnurlMetadata(CancellationToken cancellation)
     {
@@ -123,8 +128,8 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
             throw new Exception($"'{_lightningAddress}' is not a valid LNURL-pay endpoint.");
 
         // Cache the callback origin; the LUD-21 verify endpoint lives on the same host.
-        if (json["callback"]?.Value<string>() is { } cb && Uri.TryCreate(cb, UriKind.Absolute, out var cbUri))
-            _verifyOrigin = cbUri.GetLeftPart(UriPartial.Authority);
+        if (ExtractOrigin(json["callback"]?.Value<string>()) is { } origin)
+            _verifyOrigin = origin;
 
         return json;
     }
@@ -166,12 +171,7 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
         var amountMsat = createInvoiceRequest.Amount.MilliSatoshi;
         var min = metadata["minSendable"]?.Value<long>() ?? 1;
         var max = metadata["maxSendable"]?.Value<long>() ?? long.MaxValue;
-        if (amountMsat < min)
-            throw new Exception(
-                $"Amount {amountMsat} msat is below the minimum accepted by this Blink address ({min} msat).");
-        if (amountMsat > max)
-            throw new Exception(
-                $"Amount {amountMsat} msat is above the maximum accepted by this Blink address ({max} msat).");
+        ValidateAmountBounds(amountMsat, min, max);
 
         var callbackUri = new UriBuilder(callback);
         var query = new StringBuilder(callbackUri.Query.TrimStart('?'));
@@ -215,8 +215,8 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
 
         var paymentHash = bolt11.PaymentHash?.ToString() ?? throw new Exception("Invoice has no payment hash.");
         var verifyUrl = json["verify"]?.Value<string>();
-        if (!string.IsNullOrEmpty(verifyUrl) && Uri.TryCreate(verifyUrl, UriKind.Absolute, out var vu))
-            _verifyOrigin = vu.GetLeftPart(UriPartial.Authority);
+        if (ExtractOrigin(verifyUrl) is { } vOrigin)
+            _verifyOrigin = vOrigin;
         verifyUrl ??= BuildVerifyUrl(paymentHash);
         var expiresAt = bolt11.ExpiryDate;
 
@@ -240,7 +240,71 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
     {
         if (_verifyOrigin is null)
             throw new InvalidOperationException("Verify origin not resolved yet.");
-        return $"{_verifyOrigin}/verify/{paymentHash}";
+        return BuildVerifyUrl(_verifyOrigin, paymentHash);
+    }
+
+    /// <summary>Builds the LUD-21 verify URL from the verify origin (the LNURL-pay callback host)
+    /// and the payment hash.</summary>
+    internal static string BuildVerifyUrl(string verifyOrigin, string paymentHash)
+        => $"{verifyOrigin}/verify/{paymentHash}";
+
+    /// <summary>Extracts the origin (scheme://host[:port]) from an absolute http/https URL, or null if
+    /// it is not a valid absolute http/https URL. Used to derive the verify-endpoint host from the
+    /// LNURL callback URL. Non-http(s) schemes (e.g. the file:// that some platforms infer from a bare
+    /// relative path) are rejected.</summary>
+    internal static string? ExtractOrigin(string? url)
+        => !string.IsNullOrEmpty(url)
+           && Uri.TryCreate(url, UriKind.Absolute, out var u)
+           && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps)
+            ? u.GetLeftPart(UriPartial.Authority)
+            : null;
+
+    /// <summary>Throws if the requested amount (msat) is outside the LNURL min/max sendable bounds.</summary>
+    internal static void ValidateAmountBounds(long amountMsat, long minMsat, long maxMsat)
+    {
+        if (amountMsat < minMsat)
+            throw new Exception(
+                $"Amount {amountMsat} msat is below the minimum accepted by this Blink address ({minMsat} msat).");
+        if (amountMsat > maxMsat)
+            throw new Exception(
+                $"Amount {amountMsat} msat is above the maximum accepted by this Blink address ({maxMsat} msat).");
+    }
+
+    /// <summary>Determines the invoice status from settlement and expiry, relative to <paramref name="now"/>.</summary>
+    internal static LightningInvoiceStatus DetermineStatus(bool settled, DateTimeOffset expiresAt, DateTimeOffset now)
+    {
+        if (settled) return LightningInvoiceStatus.Paid;
+        if (expiresAt < now) return LightningInvoiceStatus.Expired;
+        return LightningInvoiceStatus.Unpaid;
+    }
+
+    /// <summary>Validates a Blink LUD-21 preimage against the payment hash: it must be 64 hex chars
+    /// and SHA256(preimage) must equal the (natural-order hex) payment hash. Returns the preimage when
+    /// valid, otherwise null.</summary>
+    internal static string? ValidatePreimage(string paymentHash, string? preimage)
+    {
+        var normalizedHash = paymentHash?.Trim().ToLowerInvariant();
+        if (preimage is not { Length: 64 } || !IsHex(preimage) || normalizedHash is not { Length: 64 })
+            return null;
+        try
+        {
+            var preimageBytes = Encoders.Hex.DecodeData(preimage);
+            var computedHex = Encoders.Hex.EncodeData(Hashes.SHA256(preimageBytes));
+            return computedHex.Equals(normalizedHash, StringComparison.OrdinalIgnoreCase) ? preimage : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Computes the next per-invoice back-off after a verify failure:
+    /// delay = min(pollInterval * 2^errors, maxBackoff). Returns the incremented error count and delay.</summary>
+    internal static (int Errors, TimeSpan Delay) NextBackoff(int previousErrors, TimeSpan pollInterval, TimeSpan maxBackoff)
+    {
+        var errors = previousErrors + 1;
+        var delayMs = Math.Min(pollInterval.TotalMilliseconds * Math.Pow(2, errors), maxBackoff.TotalMilliseconds);
+        return (errors, TimeSpan.FromMilliseconds(delayMs));
     }
 
     public async Task<LightningInvoice?> GetInvoice(string invoiceId, CancellationToken cancellation = new())
@@ -309,10 +373,7 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
     private LightningInvoice BuildInvoice(string paymentHash, TrackedInvoice tracked, bool settled, string? preimage)
     {
         var bolt11 = BOLT11PaymentRequest.Parse(tracked.Bolt11, _network);
-        LightningInvoiceStatus status;
-        if (settled) status = LightningInvoiceStatus.Paid;
-        else if (tracked.ExpiresAt < DateTimeOffset.UtcNow) status = LightningInvoiceStatus.Expired;
-        else status = LightningInvoiceStatus.Unpaid;
+        var status = DetermineStatus(settled, tracked.ExpiresAt, DateTimeOffset.UtcNow);
 
         // The authoritative payment hash is the verify key (the `paymentHash` argument = BTCPay's
         // invoice Id), NOT the hash parsed from the returned `pr`. blink-lnurl-server's verify
@@ -334,23 +395,9 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
 
         // BTCPay validates the preimage: it must be 64 hex chars and SHA256(preimage)==paymentHash.
         // If invalid, drop it (the payment is still recorded, just without a preimage).
-        string? validPreimage = null;
-        if (settled && preimage is { Length: 64 } && IsHex(preimage) && normalizedPaymentHash.Length == 64)
-        {
-            try
-            {
-                var preimageBytes = Encoders.Hex.DecodeData(preimage);
-                var computedHex = Encoders.Hex.EncodeData(Hashes.SHA256(preimageBytes));
-                if (computedHex.Equals(normalizedPaymentHash, StringComparison.OrdinalIgnoreCase))
-                    validPreimage = preimage;
-                else
-                    _logger.LogWarning("Blink preimage for {PaymentHash} does not hash to the payment hash (got {Computed}); discarding.", paymentHash, computedHex);
-            }
-            catch (Exception e)
-            {
-                _logger.LogDebug(e, "Failed to validate Blink preimage for {PaymentHash}", paymentHash);
-            }
-        }
+        var validPreimage = settled ? ValidatePreimage(paymentHash, preimage) : null;
+        if (settled && preimage is not null && validPreimage is null)
+            _logger.LogWarning("Blink preimage for {PaymentHash} did not validate against the payment hash; discarding.", paymentHash);
 
         return new LightningInvoice
         {
@@ -367,7 +414,7 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
         };
     }
 
-    private static bool IsHex(string s)
+    internal static bool IsHex(string s)
     {
         foreach (var c in s)
             if (!Uri.IsHexDigit(c))
@@ -471,12 +518,11 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
                         {
                             // Capped exponential back-off so a degraded blink-lnurl-server is not
                             // hammered every 3s per invoice.
-                            var errors = (_backoff.TryGetValue(paymentHash, out var prev) ? prev.Errors : 0) + 1;
-                            var delayMs = Math.Min(PollInterval.TotalMilliseconds * Math.Pow(2, errors),
-                                MaxBackoff.TotalMilliseconds);
-                            _backoff[paymentHash] = (errors, DateTimeOffset.UtcNow.AddMilliseconds(delayMs));
+                            var prevErrors = _backoff.TryGetValue(paymentHash, out var prev) ? prev.Errors : 0;
+                            var (errors, delay) = NextBackoff(prevErrors, PollInterval, MaxBackoff);
+                            _backoff[paymentHash] = (errors, DateTimeOffset.UtcNow.Add(delay));
                             _logger.LogDebug(e, "Error polling Blink invoice {PaymentHash} (attempt {Errors}); backing off {DelayMs}ms",
-                                paymentHash, errors, delayMs);
+                                paymentHash, errors, delay.TotalMilliseconds);
                         }
                     }
 

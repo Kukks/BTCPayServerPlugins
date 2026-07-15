@@ -44,5 +44,12 @@
       <PackageReference Include="GraphQL.Client" Version="6.0.2" />
       <PackageReference Include="GraphQL.Client.Serializer.Newtonsoft" Version="6.0.2" />
     </ItemGroup>
+
+    <!-- Expose internal static helpers (status mappings, LNURL/preimage/back-off logic) to the unit-test project. -->
+    <ItemGroup>
+      <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+        <_Parameter1>BTCPayServer.Plugins.Blink.Tests</_Parameter1>
+      </AssemblyAttribute>
+    </ItemGroup>
 </Project>
 
