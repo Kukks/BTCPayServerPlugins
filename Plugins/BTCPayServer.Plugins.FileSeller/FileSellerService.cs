@@ -139,12 +139,10 @@ namespace BTCPayServer.Plugins.FileSeller
                         receiptData.Merge(existingReceiptDataObj);
                     }
 
-                    invoiceEvent.Invoice.Metadata.SetAdditionalData("receiptData", receiptData);
+                    await _invoiceRepository.UpdateInvoiceMetadata(invoiceEvent.InvoiceId, "receiptData", receiptData);
                 }
 
-                invoiceEvent.Invoice.Metadata.SetAdditionalData("fileselleractivated", "true");
-                await _invoiceRepository.UpdateInvoiceMetadata(invoiceEvent.InvoiceId, invoiceEvent.Invoice.StoreId,
-                    invoiceEvent.Invoice.Metadata.ToJObject());
+                await _invoiceRepository.UpdateInvoiceMetadata(invoiceEvent.InvoiceId, "fileselleractivated", "true");
             }
 
             await base.ProcessEvent(evt, cancellationToken);
