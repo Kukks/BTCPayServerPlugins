@@ -48,6 +48,12 @@ jobs:
             echo "::endgroup::"
           done
 
+      # StaticWebAssetsEnabled=false is passed explicitly because the test
+      # projects reference BTCPayServer.csproj plainly while also referencing
+      # their plugin, which forces that property off on its own reference.
+      # Without it MSBuild builds BTCPayServer as two separate instances with
+      # conflicting global properties, racing over one obj/ directory, and the
+      # loser fails with "MSB3030: could not copy staticwebassets.*.json".
       - name: Run unit tests
         run: |
           set -euo pipefail
@@ -61,7 +67,7 @@ jobs:
             proj="$projdir/$projdir.csproj"
             [ -f "$proj" ] || continue
             echo "::group::Test $projdir"
-            dotnet test "$proj" --verbosity normal
+            dotnet test "$proj" -m:1 -p:StaticWebAssetsEnabled=false --verbosity normal
             echo "::endgroup::"
             ran=$((ran + 1))
           done
