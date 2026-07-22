@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  test:
+    name: Build & unit test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Only btcpayserver is needed: walletwasabi is referenced solely by the
+      # deprecated Wabisabi plugin, which CI never builds.
+      - name: Init btcpayserver submodule
+        run: git submodule update --init --depth 1 submodules/btcpayserver
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # A plugin folder missing from plugin-builder.json would otherwise be
+      # silently skipped by every job below, which defeats the point of the
+      # file being the source of truth.
+      - name: Check plugin-builder.json matches the plugins on disk
+        run: |
+          set -euo pipefail
+          ls -1 Plugins | sort > /tmp/dirs.txt
+          jq -r 'keys[]' plugin-builder.json | sort > /tmp/keys.txt
+          if ! diff -u /tmp/dirs.txt /tmp/keys.txt; then
+            echo "::error::plugin-builder.json is out of sync with Plugins/ (< only on disk, > only in json)"
+            exit 1
+          fi
+          echo "plugin-builder.json matches Plugins/ ($(wc -l < /tmp/dirs.txt) plugins)"
+
+      - name: Build active plugins
+        run: |
+          set -euo pipefail
+          mapfile -t FOLDERS < <(jq -r 'to_entries[] | select(.value.deprecated == false) | .key' plugin-builder.json)
+          echo "Building ${#FOLDERS[@]} active plugins"
+          for folder in "${FOLDERS[@]}"; do
+            echo "::group::Build $folder"
+            dotnet build "Plugins/$folder/$folder.csproj" -m:1
+            echo "::endgroup::"
+          done
+
+      - name: Run unit tests
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          ran=0
+          for projdir in *.Tests; do
+            if [ "$projdir" = "BTCPayServer.Plugins.Tests" ]; then
+              echo "Skipping $projdir (Docker/regtest integration suite, not run in CI)"
+              continue
+            fi
+            proj="$projdir/$projdir.csproj"
+            [ -f "$proj" ] || continue
+            echo "::group::Test $projdir"
+            dotnet test "$proj" --verbosity normal
+            echo "::endgroup::"
+            ran=$((ran + 1))
+          done
+          echo "Ran $ran unit test project(s)"
+          if [ "$ran" -eq 0 ]; then
+            echo "::error::No unit test projects were discovered - the discovery glob is wrong"
+            exit 1
+          fi
+
+  resolve-plugins:
+    name: Resolve active plugins
+    runs-on: ubuntu-latest
+    outputs:
+      plugins: ${{ steps.resolve.outputs.plugins }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build plugin matrix from plugin-builder.json
+        id: resolve
+        run: |
+          set -euo pipefail
+          PLUGINS=$(jq -c '[to_entries[]
+            | select(.value.deprecated == false)
+            | {folderName: .key,
+               tagPrefix: (.value.tagPrefix // (.key | ltrimstr("BTCPayServer.Plugins."))),
+               slug: .value.slug}]' plugin-builder.json)
+          echo "plugins=$PLUGINS" >> "$GITHUB_OUTPUT"
+          echo "$PLUGINS" | jq .
