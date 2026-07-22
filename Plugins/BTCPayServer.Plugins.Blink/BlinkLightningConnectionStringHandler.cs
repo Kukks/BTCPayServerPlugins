@@ -20,6 +20,25 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
         _loggerFactory = loggerFactory;
     }
 
+    /// <summary>Returns the default Blink GraphQL server for the given network when none is specified.</summary>
+    internal static string DefaultServer(Network network)
+        => network.Name switch
+        {
+            nameof(Network.TestNet) => "https://api.staging.galoy.io/graphql",
+            nameof(Network.RegTest) => "http://localhost:4455/graphql",
+            _ => "https://api.blink.sv/graphql"
+        };
+
+    /// <summary>A blink connection string denotes a non-custodial (receive-only) account when it has
+    /// no <c>api-key</c> and carries an <c>ln-address</c> (or its <c>username</c> alias).</summary>
+    internal static bool IsLnAddressConnectionString(
+        System.Collections.Generic.Dictionary<string, string> kv, out string? lnAddress)
+    {
+        lnAddress = null;
+        if (kv.ContainsKey("api-key"))
+            return false;
+        return kv.TryGetValue("ln-address", out lnAddress) || kv.TryGetValue("username", out lnAddress);
+    }
 
     public ILightningClient? Create(string connectionString, Network network, out string? error)
     {
@@ -33,20 +52,14 @@ public class BlinkLightningConnectionStringHandler : ILightningConnectionStringH
         // Non-custodial (Spark) accounts: identified by an "ln-address" (or bare "username") key
         // and the absence of an "api-key". These have no GraphQL wallet-id and can only receive,
         // via LNURL-pay + LUD-21 verify brokered by blink-lnurl-server.
-        if (!kv.ContainsKey("api-key") &&
-            (kv.TryGetValue("ln-address", out var lnAddress) || kv.TryGetValue("username", out lnAddress)))
+        if (IsLnAddressConnectionString(kv, out var lnAddress))
         {
             return CreateLnAddressClient(lnAddress, kv, network, out error);
         }
 
         if (!kv.TryGetValue("server", out var server))
         {
-            server = network.Name switch
-            {
-                nameof(Network.TestNet) => "https://api.staging.galoy.io/graphql",
-                nameof(Network.RegTest) => "http://localhost:4455/graphql",
-                _ => "https://api.blink.sv/graphql"
-            };
+            server = DefaultServer(network);
             // error = $"The key 'server' is mandatory for blink connection strings";
             // return null;
         }

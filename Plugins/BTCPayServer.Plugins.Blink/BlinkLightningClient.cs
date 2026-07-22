@@ -68,6 +68,65 @@ query InvoiceByPaymentHash($walletId: WalletId!) {
             _ => throw new FormatException("Invalid Blink Wallet Currency (Only BTC and USD are supported)")
         };
 
+    /// <summary>Maps a Blink invoice <c>paymentStatus</c> to a BTCPay <see cref="LightningInvoiceStatus"/>.
+    /// Unknown or null values degrade to <see cref="LightningInvoiceStatus.Unpaid"/> so an unexpected
+    /// status from Blink cannot throw and abort payment processing.</summary>
+    internal static LightningInvoiceStatus MapInvoiceStatus(string? paymentStatus)
+        => paymentStatus switch
+        {
+            "EXPIRED" => LightningInvoiceStatus.Expired,
+            "PAID" => LightningInvoiceStatus.Paid,
+            "PENDING" => LightningInvoiceStatus.Unpaid,
+            _ => LightningInvoiceStatus.Unpaid
+        };
+
+    /// <summary>Maps a Blink transaction <c>status</c> to a BTCPay <see cref="LightningPaymentStatus"/>.</summary>
+    internal static LightningPaymentStatus MapPaymentStatus(string? status)
+        => status switch
+        {
+            "FAILURE" => LightningPaymentStatus.Failed,
+            "PENDING" => LightningPaymentStatus.Pending,
+            "SUCCESS" => LightningPaymentStatus.Complete,
+            _ => LightningPaymentStatus.Unknown
+        };
+
+    /// <summary>Maps a Blink <c>lnInvoicePaymentSend.status</c> to a BTCPay <see cref="PayResult"/>.
+    /// Unknown or null values degrade to <see cref="PayResult.Unknown"/>.</summary>
+    internal static PayResult MapPayResult(string? status)
+        => status switch
+        {
+            "ALREADY_PAID" => PayResult.Ok,
+            "SUCCESS" => PayResult.Ok,
+            "FAILURE" => PayResult.Error,
+            "PENDING" => PayResult.Unknown,
+            _ => PayResult.Unknown
+        };
+
+    /// <summary>Maps a Blink payment-send <c>status</c> to a BTCPay <see cref="LightningPaymentStatus"/>
+    /// for the <see cref="PayDetails"/>. Unknown or null values degrade to
+    /// <see cref="LightningPaymentStatus.Unknown"/>.</summary>
+    internal static LightningPaymentStatus MapPayDetailStatus(string? status)
+        => status switch
+        {
+            "ALREADY_PAID" => LightningPaymentStatus.Complete,
+            "SUCCESS" => LightningPaymentStatus.Complete,
+            "FAILURE" => LightningPaymentStatus.Failed,
+            "PENDING" => LightningPaymentStatus.Pending,
+            _ => LightningPaymentStatus.Unknown
+        };
+
+    /// <summary>Maps a Blink <c>globals.network</c> string to an <see cref="NBitcoin.Network"/>.
+    /// Blink signet maps to TestNet (BTCPay has no distinct signet network here).</summary>
+    internal static Network MapNetwork(string network)
+        => network switch
+        {
+            "mainnet" => Network.Main,
+            "testnet" => Network.TestNet,
+            "signet" => Network.TestNet,
+            "regtest" => Network.RegTest,
+            _ => throw new ArgumentOutOfRangeException(nameof(network), network, "Unknown Blink network")
+        };
+
     record WalletInfo(BlinkCurrency WalletCurrency, string WalletId);
 
     private WalletInfo? _WalletInfo;
@@ -187,18 +246,16 @@ query InvoiceByPaymentHash($paymentHash: PaymentHash!, $walletId: WalletId!) {
     public LightningInvoice? ToInvoice(JObject invoice)
     {
         var bolt11 = BOLT11PaymentRequest.Parse(invoice["paymentRequest"].Value<string>(), _network);
+        // Map the status once (null-safe) and reuse it for both Status and PaidAt, so a missing
+        // paymentStatus cannot abort conversion via an unsafe dereference.
+        var status = MapInvoiceStatus(invoice["paymentStatus"]?.Value<string>());
         return new LightningInvoice()
         {
             Id = invoice["paymentHash"].Value<string>(),
             Amount = invoice["satoshis"] is null? bolt11.MinimumAmount:  LightMoney.Satoshis(invoice["satoshis"].Value<long>()),
                 Preimage =  invoice["paymentSecret"].Value<string>(),
-            PaidAt = (invoice["paymentStatus"].Value<string>()) ==  "PAID"? DateTimeOffset.UtcNow : null,
-            Status =  (invoice["paymentStatus"].Value<string>()) switch
-            {
-                "EXPIRED" => LightningInvoiceStatus.Expired,
-                "PAID" => LightningInvoiceStatus.Paid,
-                "PENDING" => LightningInvoiceStatus.Unpaid
-            },
+            PaidAt = status == LightningInvoiceStatus.Paid ? DateTimeOffset.UtcNow : null,
+            Status =  status,
             BOLT11 =  invoice["paymentRequest"].Value<string>(),
             PaymentHash = invoice["paymentHash"].Value<string>(),
             ExpiresAt = bolt11.ExpiryDate
@@ -351,13 +408,7 @@ query TransactionsByPaymentHash($paymentHash: PaymentHash!, $walletId: WalletId!
         return new LightningPayment()
         {
             Amount = bolt11.MinimumAmount,
-            Status = transaction["status"].ToString() switch
-            {
-                "FAILURE" => LightningPaymentStatus.Failed,
-                "PENDING" => LightningPaymentStatus.Pending,
-                "SUCCESS" => LightningPaymentStatus.Complete,
-                _ => LightningPaymentStatus.Unknown
-            },
+            Status = MapPaymentStatus(transaction["status"]?.ToString()),
             BOLT11 = (string)initiationVia["paymentRequest"],
             Id = (string)initiationVia["paymentHash"],
             PaymentHash = (string)initiationVia["paymentHash"],
@@ -621,14 +672,7 @@ query GetNetworkAndDefaultWallet {
 
         var defaultWalletId = (string) response.Data.me.defaultAccount.defaultWallet.id;
         var defaultWalletCurrency = (string) response.Data.me.defaultAccount.defaultWallet.currency;
-        var network = response.Data.globals.network.ToString() switch
-        {
-            "mainnet" => Network.Main,
-            "testnet" => Network.TestNet,
-            "signet" => Network.TestNet,
-            "regtest" => Network.RegTest,
-            _ => throw new ArgumentOutOfRangeException()
-        };
+        var network = MapNetwork(response.Data.globals.network.ToString());
         return (network, defaultWalletId, ParseBlinkCurrency(defaultWalletCurrency));
     }
 
@@ -741,15 +785,7 @@ mutation LnInvoicePaymentSend($input: LnInvoicePaymentInput!) {
         var response =(JObject) (await  _client.SendQueryAsync<dynamic>(request,  cts.Token)).Data.lnInvoicePaymentSend;
         
         var result = new PayResponse();
-        result.Result = response["status"].Value<string>() switch
-        {
-            "ALREADY_PAID" => PayResult.Ok,
-            "FAILURE" => PayResult.Error,
-            "PENDING"=> PayResult.Unknown,
-            "SUCCESS" => PayResult.Ok,
-            null => PayResult.Unknown,
-            _ => throw new ArgumentOutOfRangeException()
-        };
+        result.Result = MapPayResult(response["status"]?.Value<string>());
         bool authError = false;
         response.TryGetValue("errors", out var error);
         if (result.Result == PayResult.Unknown && error is not null)
@@ -777,15 +813,7 @@ mutation LnInvoicePaymentSend($input: LnInvoicePaymentInput!) {
             result.Details = new PayDetails()
             {
                 PaymentHash = bolt11Parsed.PaymentHash ?? new uint256(response["transaction"]["initiationVia"]["paymentHash"].Value<string>()),
-                Status = response["status"].Value<string>() switch
-                {
-                    "ALREADY_PAID"  => LightningPaymentStatus.Complete,
-                    "FAILURE" => LightningPaymentStatus.Failed,
-                    "PENDING" => LightningPaymentStatus.Pending,
-                    "SUCCESS" => LightningPaymentStatus.Complete,
-                    string status => throw new ArgumentOutOfRangeException($"Unknown status received by blink ({status})"),
-                    _ => LightningPaymentStatus.Unknown,
-                },
+                Status = MapPayDetailStatus(response["status"]?.Value<string>()),
                 Preimage = response["transaction"]["settlementVia"]?["preImage"].Value<string>() is null? null: new uint256(response["transaction"]["settlementVia"]["preImage"].Value<string>()),
             };
         }
