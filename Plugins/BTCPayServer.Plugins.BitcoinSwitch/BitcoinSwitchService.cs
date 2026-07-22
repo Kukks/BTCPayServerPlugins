@@ -141,10 +141,7 @@ List<AppCartItem> cartItems = null;
                 //         });
                 // }
                 
-                invoiceEvent.Invoice.Metadata.SetAdditionalData("bitcoinswitchactivated", "true");
-                
-                await _invoiceRepository.UpdateInvoiceMetadata(invoiceEvent.InvoiceId, invoiceEvent.Invoice.StoreId,
-                    invoiceEvent.Invoice.Metadata.ToJObject());
+                await _invoiceRepository.UpdateInvoiceMetadata(invoiceEvent.InvoiceId, "bitcoinswitchactivated", "true");
                 
                 
             }

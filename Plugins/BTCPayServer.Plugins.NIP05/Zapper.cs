@@ -200,13 +200,12 @@ public class Zapper : IHostedService
 
         zapReceipt = await zapReceipt.ComputeIdAndSignAsync(key);
         relays = relays.Concat(userNostrSettings?.Relays ?? Array.Empty<string>()).Distinct().ToArray();
-        arg.Invoice.Metadata.SetAdditionalData("Nostr", new Dictionary<string,string>()
+        await _invoiceRepository.UpdateInvoiceMetadata(arg.InvoiceId, "Nostr", new Dictionary<string,string>()
         {
             {"Zap Request", zapRequestEvent.Id},
             {"Zap Receipt", zapReceipt.Id},
             {"Relays", string.Join(',', relays)}
         });
-        await _invoiceRepository.UpdateInvoiceMetadata(arg.InvoiceId, arg.Invoice.StoreId, arg.Invoice.Metadata.ToJObject());
         _pendingZapEvents.Add(new PendingZapEvent(relays, zapReceipt));
     }
 

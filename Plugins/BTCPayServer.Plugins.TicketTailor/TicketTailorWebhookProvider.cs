@@ -101,10 +101,8 @@ public class TicketTailorWebhookProvider(
                         "Deleting the hold as the invoice is invalid/expired.", invoice, invLogs, false);
                     if (await new TicketTailorClient(httpClientFactory, settings.ApiKey).DeleteHold(holdIdx))
                     {
-                        invoice.Metadata.AdditionalData.Remove("holdId");
-                        invoice.Metadata.AdditionalData.Add("holdId_deleted", holdIdx);
-                        await invoiceRepository.UpdateInvoiceMetadata(invoice.Id, invoice.StoreId,
-                            invoice.Metadata.ToJObject());
+                        await invoiceRepository.UpdateInvoiceMetadata(invoice.Id, "holdId", (object)null!);
+                        await invoiceRepository.UpdateInvoiceMetadata(invoice.Id, "holdId_deleted", holdIdx);
                     }
                 }
 
@@ -185,8 +183,7 @@ public class TicketTailorWebhookProvider(
                 }
 
 
-                invoice.Metadata.AdditionalData["ticketIds"] =
-                    new JArray(tickets.Select(issuedTicket => issuedTicket.Id));
+                var issuedTicketIds = new JArray(tickets.Select(issuedTicket => issuedTicket.Id));
                 if (tickets.Count != holdOriginalAmount)
                 {
                     await HandleIssueTicketError($"Not all the held tickets were issued because: {String.Join(",", errors)}",
@@ -195,8 +192,7 @@ public class TicketTailorWebhookProvider(
                     return null;
                 }
 
-                await invoiceRepository.UpdateInvoiceMetadata(invoice.Id, invoice.StoreId,
-                    invoice.Metadata.ToJObject());
+                await invoiceRepository.UpdateInvoiceMetadata(invoice.Id, "ticketIds", issuedTicketIds);
                 await invoiceRepository.AddInvoiceLogs(invoice.Id, invLogs);
                 
                 if (settings.SendEmail)
