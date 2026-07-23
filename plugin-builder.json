@@ -11,6 +11,7 @@
   "BTCPayServer.Plugins.Electrum": { "slug": null, "deprecated": false },
   "BTCPayServer.Plugins.FileSeller": { "slug": null, "deprecated": false },
   "BTCPayServer.Plugins.FixedFloat": { "slug": null, "deprecated": false },
+  "BTCPayServer.Plugins.LNURLVerify": { "slug": null, "deprecated": false },
   "BTCPayServer.Plugins.LiquidPlus": { "slug": null, "deprecated": true },
   "BTCPayServer.Plugins.MCP": { "slug": null, "deprecated": false },
   "BTCPayServer.Plugins.MicroNode": { "slug": null, "deprecated": false },
