@@ -21,6 +21,9 @@ namespace BTCPayServer.Plugins.Blink
             applicationBuilder.AddUIExtension("ln-payment-method-setup-tab", "Blink/LNPaymentMethodSetupTab");
             applicationBuilder.AddSingleton<ILightningConnectionStringHandler>(provider => provider.GetRequiredService<BlinkLightningConnectionStringHandler>());
             applicationBuilder.AddSingleton<BlinkLightningConnectionStringHandler>();
+            // Align served LNURL-pay metadata/bounds with Blink for non-custodial (ln-address) stores so
+            // strict wallets accept the Blink-minted invoice (LUD-06 description-hash commitment).
+            applicationBuilder.AddSingleton<Abstractions.Contracts.IPluginHookFilter, BlinkLnurlRequestFilter>();
 
             base.Execute(applicationBuilder);
         }
