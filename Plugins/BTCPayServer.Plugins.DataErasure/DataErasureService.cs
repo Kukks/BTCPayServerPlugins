@@ -94,24 +94,39 @@ namespace BTCPayServer.Plugins.DataErasure
                             foreach (var invoice in invoices)
                             {
                                 //replace all buyer info with "erased"
-                                if (!string.IsNullOrEmpty(invoice.Metadata.BuyerAddress1))
-                                    await _invoiceRepository.UpdateInvoiceMetadata(invoice.Id, "buyerAddress1", "erased");
-                                if (!string.IsNullOrEmpty(invoice.Metadata.BuyerAddress2))
-                                    await _invoiceRepository.UpdateInvoiceMetadata(invoice.Id, "buyerAddress2", "erased");
-                                if (!string.IsNullOrEmpty(invoice.Metadata.BuyerCity))
-                                    await _invoiceRepository.UpdateInvoiceMetadata(invoice.Id, "buyerCity", "erased");
-                                if (!string.IsNullOrEmpty(invoice.Metadata.BuyerCountry))
-                                    await _invoiceRepository.UpdateInvoiceMetadata(invoice.Id, "buyerCountry", "erased");
-                                if (!string.IsNullOrEmpty(invoice.Metadata.BuyerEmail))
-                                    await _invoiceRepository.UpdateInvoiceMetadata(invoice.Id, "buyerEmail", "erased");
-                                if (!string.IsNullOrEmpty(invoice.Metadata.BuyerName))
-                                    await _invoiceRepository.UpdateInvoiceMetadata(invoice.Id, "buyerName", "erased");
-                                if (!string.IsNullOrEmpty(invoice.Metadata.BuyerPhone))
-                                    await _invoiceRepository.UpdateInvoiceMetadata(invoice.Id, "buyerPhone", "erased");
-                                if (!string.IsNullOrEmpty(invoice.Metadata.BuyerState))
-                                    await _invoiceRepository.UpdateInvoiceMetadata(invoice.Id, "buyerState", "erased");
-                                if (!string.IsNullOrEmpty(invoice.Metadata.BuyerZip))
-                                    await _invoiceRepository.UpdateInvoiceMetadata(invoice.Id, "buyerZip", "erased");
+                                if (!string.IsNullOrEmpty(invoice.Metadata.BuyerAddress1) ||
+                                    !string.IsNullOrEmpty(invoice.Metadata.BuyerAddress2) ||
+                                    !string.IsNullOrEmpty(invoice.Metadata.BuyerCity) ||
+                                    !string.IsNullOrEmpty(invoice.Metadata.BuyerCountry) ||
+                                    !string.IsNullOrEmpty(invoice.Metadata.BuyerEmail) ||
+                                    !string.IsNullOrEmpty(invoice.Metadata.BuyerName) ||
+                                    !string.IsNullOrEmpty(invoice.Metadata.BuyerPhone) ||
+                                    !string.IsNullOrEmpty(invoice.Metadata.BuyerState) ||
+                                    !string.IsNullOrEmpty(invoice.Metadata.BuyerZip))
+                                {
+                                    await _invoiceRepository.UpdateInvoiceMetadata(invoice.Id, metadata =>
+                                    {
+                                        if (!string.IsNullOrEmpty(metadata.BuyerAddress1))
+                                            metadata.BuyerAddress1 = "erased";
+                                        if (!string.IsNullOrEmpty(metadata.BuyerAddress2))
+                                            metadata.BuyerAddress2 = "erased";
+                                        if (!string.IsNullOrEmpty(metadata.BuyerCity))
+                                            metadata.BuyerCity = "erased";
+                                        if (!string.IsNullOrEmpty(metadata.BuyerCountry))
+                                            metadata.BuyerCountry = "erased";
+                                        if (!string.IsNullOrEmpty(metadata.BuyerEmail))
+                                            metadata.BuyerEmail = "erased";
+                                        if (!string.IsNullOrEmpty(metadata.BuyerName))
+                                            metadata.BuyerName = "erased";
+                                        if (!string.IsNullOrEmpty(metadata.BuyerPhone))
+                                            metadata.BuyerPhone = "erased";
+                                        if (!string.IsNullOrEmpty(metadata.BuyerState))
+                                            metadata.BuyerState = "erased";
+                                        if (!string.IsNullOrEmpty(metadata.BuyerZip))
+                                            metadata.BuyerZip = "erased";
+                                        return metadata;
+                                    });
+                                }
                                 count++;
                             }
 
