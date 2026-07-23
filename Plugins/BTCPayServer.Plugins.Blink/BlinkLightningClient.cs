@@ -724,17 +724,99 @@ query GetWallet($walletId: WalletId!) {
         throw new NotSupportedException();
     }
 
-    public async Task<PayResponse> Pay(PayInvoiceParams payParams,
+    public Task<PayResponse> Pay(PayInvoiceParams payParams,
         CancellationToken cancellation = new CancellationToken())
     {
-        return await Pay(null, new PayInvoiceParams(), cancellation);
+        // This overload carries no bolt11 to pay. Blink's payment mutation requires a
+        // payment request, so there is nothing we can send here. Fail explicitly instead
+        // of forwarding a null bolt11 (which would throw an opaque NullReferenceException
+        // when parsing the invoice).
+        throw new NotSupportedException(
+            "Paying without a BOLT11 payment request is not supported by the Blink client.");
     }
 
     private static TimeSpan PayTimeout = TimeSpan.FromMinutes(1.0);
+
+    /// <summary>
+    /// Whether a fee probe should be attempted for the given invoice. Only amount-carrying
+    /// invoices can be probed here: a probe caches the route on the Blink backend so the
+    /// payment settles at the exact fee instead of Blink's max fee reserve. Zero-amount
+    /// invoices carry no amount to probe with (Pay receives no explicit amount), so they are
+    /// paid as-is.
+    /// </summary>
+    internal static bool ShouldProbeFee(BOLT11PaymentRequest bolt11)
+        => bolt11.MinimumAmount > LightMoney.Zero;
+
+    /// <summary>
+    /// Probes the route for the fee of an amount-carrying lightning invoice.
+    /// Probing caches the route on the Blink backend so the subsequent payment
+    /// settles with the exact fee instead of Blink's max fee reserve.
+    /// This is best-effort: any failure is logged and swallowed so the payment
+    /// still proceeds (Blink will then fall back to its max fee reserve).
+    /// </summary>
+    private async Task ProbeFee(string bolt11, CancellationToken cancellation)
+    {
+        var request = new GraphQLRequest
+        {
+            Query = @"
+mutation LnInvoiceFeeProbe($input: LnInvoiceFeeProbeInput!) {
+  lnInvoiceFeeProbe(input: $input) {
+    amount
+    errors {
+      message
+    }
+  }
+}",
+            OperationName = "LnInvoiceFeeProbe",
+            Variables = new
+            {
+                input = new
+                {
+                    walletId = await GetWalletId(),
+                    paymentRequest = bolt11,
+                }
+            }
+        };
+
+        try
+        {
+            var response = (JObject)(await _client.SendQueryAsync<dynamic>(request, cancellation))
+                .Data.lnInvoiceFeeProbe;
+            if (response.TryGetValue("errors", out var error)
+                && error is JArray { Count: > 0 } arr)
+            {
+                Logger?.LogWarning(
+                    "Blink fee probe failed ('{Error}'), paying without probe.",
+                    arr[0]["message"]?.Value<string>());
+            }
+            else
+            {
+                // The probe caches the route on the Blink backend so the payment
+                // settles at this exact fee instead of Blink's max fee reserve. This
+                // is the real route fee: some destinations (e.g. swap/Spark providers)
+                // legitimately cost more to reach, which is correct, not an overcharge.
+                Logger?.LogDebug(
+                    "Blink fee probe succeeded: route fee {Amount} sat.",
+                    response["amount"]?.Value<long?>());
+            }
+        }
+        catch (Exception exc)
+        {
+            Logger?.LogWarning(exc, "Blink fee probe errored, paying without probe.");
+        }
+    }
+
     public async Task<PayResponse> Pay(string bolt11, PayInvoiceParams payParams,
         CancellationToken cancellation = default)
     {
-        
+        var bolt11Parsed = BOLT11PaymentRequest.Parse(bolt11, _network);
+
+        // Probe amount invoices first so Blink caches the route and settles at the
+        // exact fee instead of its max fee reserve. Zero-amount invoices carry no
+        // amount to probe with here, so they are paid as-is (best-effort, no reject).
+        if (ShouldProbeFee(bolt11Parsed))
+            await ProbeFee(bolt11, cancellation);
+
         var request = new GraphQLRequest
         {
             Query = @"
@@ -777,7 +859,6 @@ mutation LnInvoicePaymentSend($input: LnInvoicePaymentInput!) {
                 }
             }
         };
-        var bolt11Parsed = BOLT11PaymentRequest.Parse(bolt11, _network);
 
         using var inner = new CancellationTokenSource(payParams?.SendTimeout ?? PayTimeout);
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation,inner.Token);
