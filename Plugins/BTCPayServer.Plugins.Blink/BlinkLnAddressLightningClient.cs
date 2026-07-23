@@ -42,7 +42,10 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
     private readonly HttpClient _httpClient;
     private readonly ILogger _logger;
 
-    private record TrackedInvoice(string Bolt11, string? VerifyUrl, DateTimeOffset ExpiresAt);
+    // Custodial invoices are minted via the public GraphQL API and settle through
+    // lnInvoicePaymentStatusByHash (ledger-aware); non-custodial invoices are proxied from the LNURL
+    // server and settle through the LUD-21 verify URL. VerifyUrl is null for custodial invoices.
+    private record TrackedInvoice(string Bolt11, string? VerifyUrl, DateTimeOffset ExpiresAt, bool Custodial = false);
 
     // BTCPay creates SEPARATE client instances for creating invoices and for its payment
     // listener/poller. In-memory per-instance state would therefore not be visible to the listener.
@@ -113,6 +116,30 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
 
     private Uri LnurlpMetadataUri => BuildLnurlpMetadataUri(_username, _domain, _usd);
 
+    private Uri GraphQLEndpoint => BlinkGraphQLPublicClient.GraphQLEndpointForDomain(_domain);
+
+    /// <summary>
+    /// Resolves whether this lightning address points at a custodial Galoy account (in which case we
+    /// mint invoices directly via the public GraphQL API) or a non-custodial Spark account (LNURL proxy).
+    /// The result is cached by <see cref="BlinkGraphQLPublicClient"/>. On any transport error we fall
+    /// back to non-custodial (LNURL) behaviour, which works for both account types.
+    /// </summary>
+    private async Task<BlinkGraphQLPublicClient.AccountInfo> ResolveAccount(CancellationToken cancellation)
+    {
+        try
+        {
+            return await BlinkGraphQLPublicClient.ResolveAccountAsync(
+                _httpClient, GraphQLEndpoint, _username, _usd, cancellation);
+        }
+        catch (Exception e)
+        {
+            _logger.LogDebug(e, "Could not resolve Blink account type for {Address}; assuming non-custodial (LNURL).",
+                _lightningAddress);
+            return new BlinkGraphQLPublicClient.AccountInfo(
+                BlinkGraphQLPublicClient.AccountKind.NonCustodial, null, null);
+        }
+    }
+
     private async Task<JObject> FetchLnurlMetadata(CancellationToken cancellation)
     {
         using var resp = await _httpClient.GetAsync(LnurlpMetadataUri, cancellation);
@@ -157,16 +184,39 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
     public async Task<LightningInvoice> CreateInvoice(CreateInvoiceParams createInvoiceRequest,
         CancellationToken cancellation = new())
     {
+        // BTCPay allows a null amount for top-up/amountless invoices, but LNURL-pay is inherently
+        // amount-driven, so we require a concrete amount and fail with a clear message otherwise.
+        // BTCPay sends LightMoney.Zero (not null) for InvoiceType.TopUp, so reject <= 0 too.
+        //
+        // This is expected for top-up invoices and NOT a failure: BTCPay catches this per payment
+        // method and falls back to serving the LNURL QR, where the payer's wallet supplies the amount
+        // and the callback creates the invoice for that amount. BTCPay records the fallback in the
+        // invoice event log (shown in red) - the top-up invoice can still be paid via LNURL. Note this
+        // applies to any Blink lightning-address connection, including one pointing at a custodial
+        // account, because such connections only receive via LNURL-pay and cannot mint a bolt11 here.
+        // (Checked first so the routine top-up rejection avoids an unnecessary LNURL metadata fetch.)
+        if (createInvoiceRequest.Amount is null || createInvoiceRequest.Amount.MilliSatoshi <= 0)
+            throw new NotSupportedException(
+                "Blink lightning-address connections cannot create an amountless (top-up) bolt11 invoice. " +
+                "This is expected: BTCPay falls back to the LNURL payment method for top-up invoices, " +
+                "where the payer chooses the amount in their wallet.");
+
+        // Custodial Galoy accounts: mint the invoice directly via the public GraphQL API instead of
+        // proxying the LNURL server. This commits the BOLT11 to BTCPay's own description hash (so the
+        // store description shows in the payer's wallet) and, crucially, avoids serving a
+        // "text/identifier" that would make the Blink mobile app pay intraledger and bypass BTCPay's
+        // invoice entirely. Settlement is detected via lnInvoicePaymentStatusByHash (ledger-aware).
+        var account = await ResolveAccount(cancellation);
+        if (account.Kind == BlinkGraphQLPublicClient.AccountKind.Custodial && account.WalletId is { } walletId)
+        {
+            return await CreateCustodialInvoice(createInvoiceRequest, walletId, cancellation);
+        }
+
+        // Non-custodial (Spark) path: only now do we need the LNURL-pay metadata/callback.
         var metadata = await FetchLnurlMetadata(cancellation);
         var callback = metadata["callback"]?.Value<string>();
         if (string.IsNullOrEmpty(callback))
             throw new Exception("LNURL-pay response is missing a callback URL.");
-
-        // BTCPay allows a null amount for top-up/amountless invoices, but LNURL-pay is inherently
-        // amount-driven, so we require a concrete amount and fail with a clear message otherwise.
-        if (createInvoiceRequest.Amount is null)
-            throw new NotSupportedException(
-                "Blink non-custodial (Spark) accounts require an invoice amount; amountless/top-up invoices are not supported.");
 
         var amountMsat = createInvoiceRequest.Amount.MilliSatoshi;
         var min = metadata["minSendable"]?.Value<long>() ?? 1;
@@ -177,9 +227,13 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
         var query = new StringBuilder(callbackUri.Query.TrimStart('?'));
         if (query.Length > 0) query.Append('&');
         query.Append("amount=").Append(amountMsat);
-        // Pass along a description/comment when the endpoint allows comments (LUD-12).
+        // Pass along a description/comment when the endpoint allows comments (LUD-12). But when
+        // DescriptionHashOnly is set (the LNURL-pay callback path), Description is BTCPay's serialized
+        // LNURL metadata JSON, not a human-readable comment - forwarding that blob as a LUD-12 comment
+        // is wrong (and may be rejected by the LNURL server), so skip it in that case.
         var commentAllowed = metadata["commentAllowed"]?.Value<int>() ?? 0;
-        if (commentAllowed > 0 && !string.IsNullOrEmpty(createInvoiceRequest.Description))
+        if (commentAllowed > 0 && !createInvoiceRequest.DescriptionHashOnly &&
+            !string.IsNullOrEmpty(createInvoiceRequest.Description))
         {
             var comment = createInvoiceRequest.Description!;
             if (comment.Length > commentAllowed) comment = comment.Substring(0, commentAllowed);
@@ -231,6 +285,67 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
             Status = LightningInvoiceStatus.Unpaid,
             ExpiresAt = expiresAt
         };
+    }
+
+    /// <summary>
+    /// Mints a fixed-amount invoice for a custodial Galoy account via the public GraphQL API,
+    /// committing to BTCPay's own description hash so the returned BOLT11's h-tag matches the metadata
+    /// BTCPay serves to the payer. The invoice is tracked as custodial and settles via
+    /// lnInvoicePaymentStatusByHash.
+    /// </summary>
+    private async Task<LightningInvoice> CreateCustodialInvoice(CreateInvoiceParams createInvoiceRequest,
+        string walletId, CancellationToken cancellation)
+    {
+        var amountSat = (long)createInvoiceRequest.Amount!.ToUnit(LightMoneyUnit.Satoshi);
+
+        // Determine the description hash to commit to. In the LNURL callback path BTCPay passes the
+        // serialized metadata as Description with DescriptionHashOnly=true; hash it ourselves. If an
+        // explicit DescriptionHash is provided, prefer it.
+        var descriptionHashHex = ComputeDescriptionHashHex(createInvoiceRequest);
+        var memo = descriptionHashHex is null ? createInvoiceRequest.Description : null;
+        var expiresIn = Math.Max(1, (int)createInvoiceRequest.Expiry.TotalMinutes);
+
+        var (pr, _) = await BlinkGraphQLPublicClient.CreateInvoiceOnBehalfAsync(
+            _httpClient, GraphQLEndpoint, walletId, amountSat, descriptionHashHex, memo, expiresIn, _usd,
+            cancellation);
+
+        var bolt11 = BOLT11PaymentRequest.Parse(pr, _network);
+
+        // Defensive checks mirroring the LNURL path: the minted invoice must match the requested amount
+        // and, when a description hash was requested, carry that exact hash.
+        if (bolt11.MinimumAmount != createInvoiceRequest.Amount)
+            throw new Exception(
+                $"Blink minted an invoice for {bolt11.MinimumAmount.MilliSatoshi} msat but " +
+                $"{createInvoiceRequest.Amount.MilliSatoshi} msat was requested.");
+        if (createInvoiceRequest.DescriptionHash is { } dh && dh != bolt11.DescriptionHash)
+            throw new Exception("Blink minted an invoice with a mismatched description hash.");
+
+        var paymentHash = bolt11.PaymentHash?.ToString() ?? throw new Exception("Invoice has no payment hash.");
+        var expiresAt = bolt11.ExpiryDate;
+        _tracked[paymentHash] = new TrackedInvoice(pr, VerifyUrl: null, expiresAt, Custodial: true);
+
+        return new LightningInvoice
+        {
+            Id = paymentHash,
+            PaymentHash = paymentHash,
+            BOLT11 = pr,
+            Amount = bolt11.MinimumAmount,
+            Status = LightningInvoiceStatus.Unpaid,
+            ExpiresAt = expiresAt
+        };
+    }
+
+    /// <summary>Returns the 32-byte hex description hash to commit to, or null when none applies.
+    /// Prefers an explicit <c>DescriptionHash</c>; otherwise, when <c>DescriptionHashOnly</c> is set,
+    /// hashes the (metadata) Description - matching how BTCPay's LNURL endpoint computes the hash the
+    /// payer's wallet will verify.</summary>
+    internal static string? ComputeDescriptionHashHex(CreateInvoiceParams createInvoiceRequest)
+    {
+        if (createInvoiceRequest.DescriptionHash is { } dh)
+            return dh.ToString();
+        if (createInvoiceRequest.DescriptionHashOnly && !string.IsNullOrEmpty(createInvoiceRequest.Description))
+            return Encoders.Hex.EncodeData(Hashes.SHA256(Encoding.UTF8.GetBytes(createInvoiceRequest.Description!)));
+        return null;
     }
 
     // LUD-21 verify URLs on blink-lnurl-server are {verifyOrigin}/verify/{paymentHash}, where
@@ -311,6 +426,14 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
     {
         _tracked.TryGetValue(invoiceId, out var tracked);
 
+        // Custodial invoices settle through the ledger-aware GraphQL status query, not LUD-21 verify.
+        // A tracked custodial entry is authoritative; on a fresh listener instance (no tracked entry)
+        // fall back to resolving the account type so we still pick the right settlement source.
+        var isCustodial = tracked?.Custodial ??
+            (await ResolveAccount(cancellation)).Kind == BlinkGraphQLPublicClient.AccountKind.Custodial;
+        if (isCustodial)
+            return await GetCustodialInvoice(invoiceId, tracked, cancellation);
+
         // Resolve the verify URL statelessly. On a fresh client instance (BTCPay's listener/poller)
         // there is no tracked invoice, so derive the verify origin from LNURL metadata.
         string verifyUrl;
@@ -368,6 +491,66 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
         var expiresAt = tracked?.ExpiresAt ?? BOLT11PaymentRequest.Parse(pr, _network).ExpiryDate;
         var t = new TrackedInvoice(pr, verifyUrl, expiresAt);
         return BuildInvoice(invoiceId, t, settled, preimage);
+    }
+
+    /// <summary>
+    /// Settlement for custodial invoices via the ledger-aware <c>lnInvoicePaymentStatusByHash</c> query.
+    /// This reports PAID even when Galoy smart-settles a Blink-to-Blink payment intraledger, which the
+    /// LUD-21 verify endpoint would miss. No preimage is available from this query, so payments are
+    /// recorded without one (BTCPay supports this).
+    /// </summary>
+    private async Task<LightningInvoice?> GetCustodialInvoice(string invoiceId, TrackedInvoice? tracked,
+        CancellationToken cancellation)
+    {
+        string? status;
+        try
+        {
+            status = await BlinkGraphQLPublicClient.GetPaymentStatusByHashAsync(
+                _httpClient, GraphQLEndpoint, invoiceId, cancellation);
+        }
+        catch (Exception e)
+        {
+            // Transient error: keep the invoice tracked (return Unpaid rather than null) so BTCPay's
+            // poller retries instead of dropping it. Matches the LUD-21 path's behaviour.
+            _logger.LogDebug(e, "Blink GraphQL status poll failed for {PaymentHash}", invoiceId);
+            return new LightningInvoice
+            {
+                Id = invoiceId,
+                PaymentHash = invoiceId,
+                Status = LightningInvoiceStatus.Unpaid
+            };
+        }
+
+        if (status is null)
+            return null; // unknown invoice
+
+        var mapped = BlinkLightningClient.MapInvoiceStatus(status);
+        var settled = mapped == LightningInvoiceStatus.Paid;
+
+        LightMoney? amount = null;
+        string? bolt11 = tracked?.Bolt11;
+        DateTimeOffset? expiresAt = tracked?.ExpiresAt;
+        if (bolt11 is not null)
+        {
+            var parsed = BOLT11PaymentRequest.Parse(bolt11, _network);
+            amount = parsed.MinimumAmount;
+            expiresAt ??= parsed.ExpiryDate;
+        }
+
+        // Respect expiry the same way DetermineStatus does for the LUD-21 path.
+        var finalStatus = DetermineStatus(settled, expiresAt ?? DateTimeOffset.MaxValue, DateTimeOffset.UtcNow);
+
+        return new LightningInvoice
+        {
+            Id = invoiceId,
+            PaymentHash = invoiceId,
+            BOLT11 = bolt11,
+            Amount = amount,
+            AmountReceived = settled ? amount : null,
+            Status = finalStatus,
+            PaidAt = settled ? DateTimeOffset.UtcNow : null,
+            ExpiresAt = expiresAt ?? default
+        };
     }
 
     private LightningInvoice BuildInvoice(string paymentHash, TrackedInvoice tracked, bool settled, string? preimage)
