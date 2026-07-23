@@ -1,0 +1,48 @@
+# Supplement compose for the LNURL Verify plugin's SEND integration leg.
+#
+# !!! BEST-EFFORT / UNVERIFIED !!!
+# This adds an LNbits service to the tester stack so the plugin's send path (submitting a bolt11 to an
+# LNURL-withdraw callback) can be exercised against a real withdraw-with-payLink endpoint. It has NOT
+# been run — the LND backend wiring (cert/macaroon paths + funding/channel) is the part most likely to
+# need adjustment on a real machine. Treat it as a starting point, not a working recipe.
+#
+# Merge it with the submodule's BTCPayServer.Tests compose:
+#   docker compose \
+#     -f submodules/btcpayserver/BTCPayServer.Tests/docker-compose.yml \
+#     -f BTCPayServer.Plugins.Tests/docker-compose.lnurlverify.yml \
+#     -p btcpayservertests up -d postgres bitcoind nbxplorer customer_lnd merchant_lnd lnbits
+#
+# Design choice (to avoid standing up a new funded node + channel): LNbits uses the tester's existing
+# `customer_lnd` as its funding backend, so its withdraw payments route over the customer->merchant
+# channel that ServerTester.EnsureChannelsSetup() already opens. The send test then pays a MERCHANT
+# invoice through the plugin's LNURL-withdraw and asserts the merchant received it.
+services:
+  lnbits:
+    image: lnbits/lnbits:latest
+    restart: unless-stopped
+    depends_on:
+      - customer_lnd
+    ports:
+      - "5000:5000"
+    expose:
+      - "5000"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "5000"
+      LNBITS_BACKEND_WALLET_CLASS: "LndRestWallet"
+      # customer_lnd exposes REST on :8080 (see base compose LND_REST_LISTEN_HOST).
+      LND_REST_ENDPOINT: "https://customer_lnd:8080/"
+      # TODO(validate): point these at customer_lnd's tls.cert and admin.macaroon. The exact paths
+      # depend on how the base compose mounts customer_lnd's datadir — mount that volume below and set
+      # these to the in-container paths (LNbits also accepts hex via LND_REST_MACAROON directly).
+      LND_REST_CERT: "/lnd/tls.cert"
+      LND_REST_MACAROON: "/lnd/admin.macaroon"
+      LNBITS_DATA_FOLDER: "/data"
+    volumes:
+      - "lnbits_datadir:/data"
+      # TODO(validate): mount customer_lnd's datadir (read-only) so the cert/macaroon above resolve.
+      # The base compose's customer_lnd volume name must be referenced here, e.g.:
+      #   - "customer_lnd_datadir:/lnd:ro"
+
+volumes:
+  lnbits_datadir:

@@ -21,6 +21,7 @@
       <!-- Electrum integration tests (ServerTester-based) live here; pure-logic unit
            tests live in the lightweight BTCPayServer.Plugins.Electrum.Tests project. -->
       <ProjectReference Include="..\Plugins\BTCPayServer.Plugins.Electrum\BTCPayServer.Plugins.Electrum.csproj" />
+      <ProjectReference Include="..\Plugins\BTCPayServer.Plugins.LNURLVerify\BTCPayServer.Plugins.LNURLVerify.csproj" />
       <ProjectReference Include="..\submodules\btcpayserver\BTCPayServer.Tests\BTCPayServer.Tests.csproj" />
     </ItemGroup>
 

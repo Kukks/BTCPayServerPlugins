@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- Lightweight unit-test project for the LNURL Verify plugin's pure logic
+         (resolver, registry, receiver guards, poller, send bounds, client gating).
+         References the plugin + BTCPayServer runtime (so BTCPayServer.Lightning types
+         resolve at test runtime) — NOT BTCPayServer.Tests/ServerTester — so it builds
+         and runs fast. Heavy regtest integration tests live in BTCPayServer.Plugins.Tests. -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
+        <PackageReference Include="xunit.v3" Version="3.2.2" />
+        <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+          <PrivateAssets>all</PrivateAssets>
+          <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Plugins\BTCPayServer.Plugins.LNURLVerify\BTCPayServer.Plugins.LNURLVerify.csproj" />
+        <!-- StaticWebAssetsEnabled=false matches the plugin's own BTCPayServer reference, so BTCPayServer
+             builds once with a single, consistent config (no staticwebassets manifest-copy MSB3030
+             flip-flop). Unit tests don't serve static assets, so this is safe. -->
+        <ProjectReference Include="..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj">
+            <Properties>StaticWebAssetsEnabled=false</Properties>
+        </ProjectReference>
+    </ItemGroup>
+
+</Project>
