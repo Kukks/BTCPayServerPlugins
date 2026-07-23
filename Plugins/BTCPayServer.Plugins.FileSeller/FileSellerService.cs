@@ -113,33 +113,64 @@ namespace BTCPayServer.Plugins.FileSeller
                     }
                 }
 
-                var loadedFiles = await _storedFileRepository.GetFiles(new StoredFileRepository.FilesQuery()
+                // Guard: when no cart item maps to a file-backed product, fileIds is empty.
+                // StoredFileRepository.GetFiles treats an empty Id filter as "no filter" and
+                // would return every file in the instance, which then crashes the FileName-keyed
+                // ToDictionary below whenever any two stored files share the same file name.
+                // Skip file processing entirely in that case.
+                if (fileIds.Count > 0)
                 {
-                    Id = fileIds.ToArray()
-                });
-                var productLinkTasks = loadedFiles.ToDictionary(file => file,
-                    file => _fileService.GetFileUrl(UrlToUse, file.Id));
-
-                var res = await Task.WhenAll(productLinkTasks.Values);
-
-
-                if (res.Any(s => !string.IsNullOrEmpty(s)))
-                {
-                    var productTitleToFile = productLinkTasks.Select(pair => (pair.Key.FileName, pair.Value.Result))
-                        .Where(s => s.Result is not null)
-                        .ToDictionary(tuple => tuple.FileName, tuple => tuple.Result);
-
-                    var receiptData = new JObject();
-                    receiptData.Add("Downloadable Content", JObject.FromObject(productTitleToFile));
-
-                    if (invoiceEvent.Invoice.Metadata.AdditionalData?.TryGetValue("receiptData",
-                            out var existingReceiptData) is true &&
-                        existingReceiptData is JObject existingReceiptDataObj)
+                    var loadedFiles = await _storedFileRepository.GetFiles(new StoredFileRepository.FilesQuery()
                     {
-                        receiptData.Merge(existingReceiptDataObj);
-                    }
+                        Id = fileIds.ToArray()
+                    });
+                    var productLinkTasks = loadedFiles.ToDictionary(file => file,
+                        file => _fileService.GetFileUrl(UrlToUse, file.Id));
 
-                    await _invoiceRepository.UpdateInvoiceMetadata(invoiceEvent.InvoiceId, "receiptData", receiptData);
+                    var res = await Task.WhenAll(productLinkTasks.Values);
+
+
+                    if (res.Any(s => !string.IsNullOrEmpty(s)))
+                    {
+                        // Two stored files can legitimately share the same FileName, so we cannot
+                        // key the receipt data on FileName alone. Disambiguate colliding names by
+                        // inserting a counter before the extension (e.g. "file.jpg", "file (2).jpg")
+                        // so every download link is preserved instead of throwing on a duplicate key.
+                        var productTitleToFile = new Dictionary<string, string>();
+                        foreach (var (fileName, url) in productLinkTasks
+                                     .Select(pair => (pair.Key.FileName, pair.Value.Result))
+                                     .Where(s => s.Result is not null))
+                        {
+                            var key = fileName;
+                            var suffix = 2;
+                            while (productTitleToFile.ContainsKey(key))
+                            {
+                                var nameWithoutExt = System.IO.Path.GetFileNameWithoutExtension(fileName);
+                                var ext = System.IO.Path.GetExtension(fileName);
+                                key = $"{nameWithoutExt} ({suffix}){ext}";
+                                suffix++;
+                            }
+
+                            productTitleToFile.Add(key, url);
+                        }
+
+                        var receiptData = new JObject();
+                        receiptData.Add("Downloadable Content", JObject.FromObject(productTitleToFile));
+
+                        if (invoiceEvent.Invoice.Metadata.AdditionalData?.TryGetValue("receiptData",
+                                out var existingReceiptData) is true &&
+                            existingReceiptData is JObject existingReceiptDataObj)
+                        {
+                            receiptData.Merge(existingReceiptDataObj);
+                        }
+
+                        // Cast to object so this binds to the new atomic
+                        // UpdateInvoiceMetadata(invoiceId, key, object) overload. Without the cast,
+                        // a JObject value resolves to the obsolete (invoiceId, storeId, JObject)
+                        // overload, which overwrites the whole metadata blob (the very race this
+                        // change is meant to avoid).
+                        await _invoiceRepository.UpdateInvoiceMetadata(invoiceEvent.InvoiceId, "receiptData", (object)receiptData);
+                    }
                 }
 
                 await _invoiceRepository.UpdateInvoiceMetadata(invoiceEvent.InvoiceId, "fileselleractivated", "true");
