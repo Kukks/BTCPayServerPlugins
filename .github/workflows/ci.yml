@@ -1,0 +1,248 @@
+name: CI
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  test:
+    name: Build & unit test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Only btcpayserver is needed: walletwasabi is referenced solely by the
+      # deprecated Wabisabi plugin, which CI never builds.
+      - name: Init btcpayserver submodule
+        run: git submodule update --init --depth 1 submodules/btcpayserver
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # A plugin folder missing from plugin-builder.json would otherwise be
+      # silently skipped by every job below, which defeats the point of the
+      # file being the source of truth.
+      - name: Check plugin-builder.json matches the plugins on disk
+        run: |
+          set -euo pipefail
+          ls -1 Plugins | sort > /tmp/dirs.txt
+          jq -r 'keys[]' plugin-builder.json | sort > /tmp/keys.txt
+          if ! diff -u /tmp/dirs.txt /tmp/keys.txt; then
+            echo "::error::plugin-builder.json is out of sync with Plugins/ (< only on disk, > only in json)"
+            exit 1
+          fi
+          echo "plugin-builder.json matches Plugins/ ($(wc -l < /tmp/dirs.txt) plugins)"
+
+      - name: Build active plugins
+        run: |
+          set -euo pipefail
+          mapfile -t FOLDERS < <(jq -r 'to_entries[] | select(.value.deprecated == false) | .key' plugin-builder.json)
+          echo "Building ${#FOLDERS[@]} active plugins"
+          for folder in "${FOLDERS[@]}"; do
+            echo "::group::Build $folder"
+            dotnet build "Plugins/$folder/$folder.csproj" -m:1
+            echo "::endgroup::"
+          done
+
+      # StaticWebAssetsEnabled=false is passed explicitly because the test
+      # projects reference BTCPayServer.csproj plainly while also referencing
+      # their plugin, which forces that property off on its own reference.
+      # Without it MSBuild builds BTCPayServer as two separate instances with
+      # conflicting global properties, racing over one obj/ directory, and the
+      # loser fails with "MSB3030: could not copy staticwebassets.*.json".
+      - name: Run unit tests
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          ran=0
+          for projdir in *.Tests; do
+            if [ "$projdir" = "BTCPayServer.Plugins.Tests" ]; then
+              echo "Skipping $projdir (Docker/regtest integration suite, not run in CI)"
+              continue
+            fi
+            proj="$projdir/$projdir.csproj"
+            [ -f "$proj" ] || continue
+            echo "::group::Test $projdir"
+            dotnet test "$proj" -m:1 -p:StaticWebAssetsEnabled=false --verbosity normal
+            echo "::endgroup::"
+            ran=$((ran + 1))
+          done
+          echo "Ran $ran unit test project(s)"
+          if [ "$ran" -eq 0 ]; then
+            echo "::error::No unit test projects were discovered - the discovery glob is wrong"
+            exit 1
+          fi
+
+  resolve-plugins:
+    name: Resolve active plugins
+    runs-on: ubuntu-latest
+    outputs:
+      plugins: ${{ steps.resolve.outputs.plugins }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build plugin matrix from plugin-builder.json
+        id: resolve
+        run: |
+          set -euo pipefail
+          PLUGINS=$(jq -c '[to_entries[]
+            | select(.value.deprecated == false)
+            | {folderName: .key,
+               tagPrefix: (.value.tagPrefix // (.key | ltrimstr("BTCPayServer.Plugins."))),
+               slug: .value.slug}]' plugin-builder.json)
+          echo "plugins=$PLUGINS" >> "$GITHUB_OUTPUT"
+          echo "$PLUGINS" | jq .
+
+  publish:
+    name: Publish ${{ matrix.plugin.tagPrefix }}
+    needs: [ test, resolve-plugins ]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin: ${{ fromJson(needs.resolve-plugins.outputs.plugins) }}
+    steps:
+      # fetch-depth: 0 so the tag-existence check and previous-tag lookup
+      # actually see the repository's tags.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version, tag and publish decision
+        id: decide
+        run: |
+          set -euo pipefail
+          FOLDER='${{ matrix.plugin.folderName }}'
+          PREFIX='${{ matrix.plugin.tagPrefix }}'
+          SLUG='${{ matrix.plugin.slug }}'
+          CSPROJ="Plugins/$FOLDER/$FOLDER.csproj"
+
+          VERSION=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$CSPROJ" | head -1)
+          if [ -z "$VERSION" ]; then
+            echo "::error::No <Version> element found in $CSPROJ"
+            exit 1
+          fi
+          TAG="$PREFIX/v$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists - nothing to publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "$SLUG" ] || [ "$SLUG" = "null" ]; then
+            echo "::warning::$FOLDER is at $VERSION with no tag $TAG, but has no Plugin Builder slug in plugin-builder.json - skipping publish. Fill in its slug to enable releases."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Newest existing tag for THIS plugin only, used to scope release notes.
+          # Empty on a plugin's first ever release, which is the common case here.
+          PREV_TAG=$(git tag -l "$PREFIX/v*" --sort=-v:refname | head -1 || true)
+          echo "prev_tag=$PREV_TAG" >> "$GITHUB_OUTPUT"
+
+          echo "Will publish $TAG (slug=$SLUG, previous tag='${PREV_TAG:-none}')"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger Plugin Builder build
+        id: build
+        if: steps.decide.outputs.publish == 'true'
+        env:
+          BTCPAY_EMAIL: ${{ secrets.BTCPAY_BUILDER_EMAIL }}
+          BTCPAY_PASSWORD: ${{ secrets.BTCPAY_BUILDER_PASSWORD }}
+          SLUG: ${{ matrix.plugin.slug }}
+          FOLDER: ${{ matrix.plugin.folderName }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BTCPAY_EMAIL:-}" ] || [ -z "${BTCPAY_PASSWORD:-}" ]; then
+            echo "::error::BTCPAY_BUILDER_EMAIL / BTCPAY_BUILDER_PASSWORD secrets are not set"
+            exit 1
+          fi
+
+          RESPONSE=$(curl -sS --user "$BTCPAY_EMAIL:$BTCPAY_PASSWORD" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"gitRepository\": \"https://github.com/${{ github.repository }}\", \"gitRef\": \"${{ github.ref_name }}\", \"pluginDirectory\": \"Plugins/$FOLDER\", \"buildConfig\": \"Release\"}" \
+            "https://plugin-builder.btcpayserver.org/api/v1/plugins/$SLUG/builds")
+
+          echo "Build response: $RESPONSE"
+          BUILD_ID=$(echo "$RESPONSE" | jq -r '.buildId')
+          BUILD_URL=$(echo "$RESPONSE" | jq -r '.buildUrl')
+
+          if [ "$BUILD_ID" = "null" ] || [ -z "$BUILD_ID" ]; then
+            echo "::error::Failed to create build for $SLUG"
+            exit 1
+          fi
+
+          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "build_url=$BUILD_URL" >> "$GITHUB_OUTPUT"
+          echo "Build created: $BUILD_URL"
+
+      - name: Wait for build completion
+        if: steps.decide.outputs.publish == 'true'
+        env:
+          BTCPAY_EMAIL: ${{ secrets.BTCPAY_BUILDER_EMAIL }}
+          BTCPAY_PASSWORD: ${{ secrets.BTCPAY_BUILDER_PASSWORD }}
+          SLUG: ${{ matrix.plugin.slug }}
+          BUILD_ID: ${{ steps.build.outputs.build_id }}
+        run: |
+          set -euo pipefail
+          MAX_WAIT=600
+          ELAPSED=0
+          echo "Waiting for build $BUILD_ID..."
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            STATUS=$(curl -sS --user "$BTCPAY_EMAIL:$BTCPAY_PASSWORD" \
+              "https://plugin-builder.btcpayserver.org/api/v1/plugins/$SLUG/builds/$BUILD_ID")
+            ERROR=$(echo "$STATUS" | jq -r '.buildInfo.error')
+            DOWNLOAD_LINK=$(echo "$STATUS" | jq -r '.downloadLink')
+
+            if [ "$ERROR" != "null" ] && [ -n "$ERROR" ]; then
+              echo "::error::Build failed: $ERROR"
+              exit 1
+            fi
+            if [ "$DOWNLOAD_LINK" != "null" ] && [ -n "$DOWNLOAD_LINK" ]; then
+              echo "Build completed. Download: $DOWNLOAD_LINK"
+              exit 0
+            fi
+            echo "Build still in progress... (${ELAPSED}s elapsed)"
+            sleep 10
+            ELAPSED=$((ELAPSED + 10))
+          done
+          echo "::error::Build timed out after ${MAX_WAIT}s"
+          exit 1
+
+      - name: Tag and create GitHub Release
+        if: steps.decide.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.decide.outputs.tag }}
+          VERSION: ${{ steps.decide.outputs.version }}
+          PREV_TAG: ${{ steps.decide.outputs.prev_tag }}
+          PREFIX: ${{ matrix.plugin.tagPrefix }}
+        run: |
+          set -euo pipefail
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "Pushed tag $TAG"
+
+          if [ -n "$PREV_TAG" ]; then
+            gh release create "$TAG" \
+              --title "$PREFIX v$VERSION" \
+              --generate-notes \
+              --notes-start-tag "$PREV_TAG"
+          else
+            # First release for this plugin - no previous tag to diff against.
+            gh release create "$TAG" \
+              --title "$PREFIX v$VERSION" \
+              --generate-notes
+          fi
+          echo "Created release $TAG"
