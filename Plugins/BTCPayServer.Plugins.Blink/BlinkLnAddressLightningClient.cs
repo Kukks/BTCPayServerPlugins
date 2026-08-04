@@ -179,12 +179,9 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
         query.Append("amount=").Append(amountMsat);
         // Pass along a description/comment when the endpoint allows comments (LUD-12).
         var commentAllowed = metadata["commentAllowed"]?.Value<int>() ?? 0;
-        if (commentAllowed > 0 && !string.IsNullOrEmpty(createInvoiceRequest.Description))
-        {
-            var comment = createInvoiceRequest.Description!;
-            if (comment.Length > commentAllowed) comment = comment.Substring(0, commentAllowed);
+        if (BuildLnurlComment(createInvoiceRequest.Description, createInvoiceRequest.DescriptionHashOnly,
+                commentAllowed) is { } comment)
             query.Append("&comment=").Append(Uri.EscapeDataString(comment));
-        }
         callbackUri.Query = query.ToString();
 
         using var resp = await _httpClient.GetAsync(callbackUri.Uri, cancellation);
@@ -207,11 +204,17 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
         if (bolt11.MinimumAmount != LightMoney.MilliSatoshis(amountMsat))
             throw new Exception(
                 $"Blink returned an invoice for {bolt11.MinimumAmount.MilliSatoshi} msat but {amountMsat} msat was requested.");
-        // Strict check: if a description hash was requested, the returned invoice must carry the
-        // exact same hash. A missing/stripped `h` tag (bolt11.DescriptionHash == null) is also a
-        // mismatch, so a compromised LNURL server cannot bypass the check by dropping the tag.
+        // A description-hash mismatch is expected here and must NOT be fatal: LNURL-pay has no way to
+        // request a caller-chosen `h` tag, so the invoice always carries the hash of Blink's own
+        // metadata. BTCPay's LNURL/lightning-address flow (DescriptionHashOnly) always requests the
+        // hash of BTCPay's metadata, so rejecting on mismatch would break every payment to a BTCPay
+        // lightning address backed by this client. Accept the invoice and log; settlement is still
+        // authenticated via the LUD-21 preimage check, and only wallets that strictly validate the
+        // LUD-06 `h` tag against BTCPay's metadata may refuse to pay it.
         if (createInvoiceRequest.DescriptionHash is { } dh && dh != bolt11.DescriptionHash)
-            throw new Exception("Blink returned an invoice with a mismatched or missing description hash.");
+            _logger.LogWarning(
+                "Blink LNURL invoice for {LightningAddress} carries description hash {ActualHash} instead of the requested {RequestedHash}; accepting it (LNURL-pay cannot honor a caller-supplied description hash).",
+                _lightningAddress, bolt11.DescriptionHash?.ToString() ?? "(none)", dh);
 
         var paymentHash = bolt11.PaymentHash?.ToString() ?? throw new Exception("Invoice has no payment hash.");
         var verifyUrl = json["verify"]?.Value<string>();
@@ -258,6 +261,38 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
            && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps)
             ? u.GetLeftPart(UriPartial.Authority)
             : null;
+
+    /// <summary>Builds the LUD-12 comment to attach to the LNURL callback, or null when none should be
+    /// sent. In BTCPay's LNURL/lightning-address flow (descriptionHashOnly) the description is the raw
+    /// LNURL metadata JSON, so the human-readable text/plain entry is extracted instead of forwarding
+    /// the JSON verbatim as the merchant-visible Blink memo.</summary>
+    internal static string? BuildLnurlComment(string? description, bool descriptionHashOnly, int commentAllowed)
+    {
+        if (commentAllowed <= 0 || string.IsNullOrEmpty(description))
+            return null;
+        var comment = descriptionHashOnly ? ExtractTextPlainFromLnurlMetadata(description) : description;
+        if (string.IsNullOrEmpty(comment))
+            return null;
+        return comment.Length > commentAllowed ? comment.Substring(0, commentAllowed) : comment;
+    }
+
+    /// <summary>Extracts the text/plain entry from an LNURL-pay metadata JSON string
+    /// (LUD-06: [["text/plain","…"],["text/identifier","…"],…]), or null when it cannot be parsed.</summary>
+    internal static string? ExtractTextPlainFromLnurlMetadata(string metadata)
+    {
+        try
+        {
+            foreach (var entry in JArray.Parse(metadata).OfType<JArray>())
+                if (entry.Count >= 2 && entry[0].Type == JTokenType.String &&
+                    entry[0].Value<string>() == "text/plain" && entry[1].Type == JTokenType.String)
+                    return entry[1].Value<string>();
+            return null;
+        }
+        catch (Newtonsoft.Json.JsonException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>Throws if the requested amount (msat) is outside the LNURL min/max sendable bounds.</summary>
     internal static void ValidateAmountBounds(long amountMsat, long minMsat, long maxMsat)

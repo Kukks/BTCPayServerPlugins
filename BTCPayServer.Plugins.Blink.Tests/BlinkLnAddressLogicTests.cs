@@ -217,6 +217,85 @@ public class BlinkLnAddressLogicTests
         Assert.Null(BlinkLnAddressLightningClient.ExtractOrigin(url));
     }
 
+    // ---- LUD-12 comment building ----
+
+    // BTCPay's LNURL/lightning-address flow passes the raw LNURL metadata JSON as the description.
+    private const string MetadataJson =
+        """[["text/plain","Paid to My Store"],["text/identifier","satoshi@myserver.tld"]]""";
+
+    [Fact]
+    public void BuildLnurlComment_passes_plain_description_through()
+    {
+        Assert.Equal("thanks", BlinkLnAddressLightningClient.BuildLnurlComment("thanks", false, 100));
+    }
+
+    [Fact]
+    public void BuildLnurlComment_extracts_text_plain_from_metadata_when_hash_only()
+    {
+        Assert.Equal("Paid to My Store",
+            BlinkLnAddressLightningClient.BuildLnurlComment(MetadataJson, true, 100));
+    }
+
+    [Fact]
+    public void BuildLnurlComment_does_not_parse_metadata_when_not_hash_only()
+    {
+        // Without descriptionHashOnly the description is a plain string and must be forwarded verbatim,
+        // even if it happens to look like JSON.
+        Assert.Equal(MetadataJson, BlinkLnAddressLightningClient.BuildLnurlComment(MetadataJson, false, 1000));
+    }
+
+    [Fact]
+    public void BuildLnurlComment_truncates_to_comment_allowed()
+    {
+        Assert.Equal("Paid", BlinkLnAddressLightningClient.BuildLnurlComment(MetadataJson, true, 4));
+        Assert.Equal("th", BlinkLnAddressLightningClient.BuildLnurlComment("thanks", false, 2));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void BuildLnurlComment_returns_null_when_comments_not_allowed(int commentAllowed)
+    {
+        Assert.Null(BlinkLnAddressLightningClient.BuildLnurlComment("thanks", false, commentAllowed));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void BuildLnurlComment_returns_null_for_empty_description(string? description)
+    {
+        Assert.Null(BlinkLnAddressLightningClient.BuildLnurlComment(description, true, 100));
+    }
+
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("""{"text/plain":"object not array"}""")]
+    [InlineData("""[["text/identifier","satoshi@myserver.tld"]]""")] // no text/plain entry
+    public void BuildLnurlComment_returns_null_when_hash_only_metadata_has_no_text_plain(string description)
+    {
+        Assert.Null(BlinkLnAddressLightningClient.BuildLnurlComment(description, true, 100));
+    }
+
+    // ---- LNURL metadata text/plain extraction ----
+
+    [Fact]
+    public void ExtractTextPlain_returns_first_text_plain_entry()
+    {
+        Assert.Equal("Paid to My Store",
+            BlinkLnAddressLightningClient.ExtractTextPlainFromLnurlMetadata(MetadataJson));
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("[1,2]")] // entries that are not arrays are skipped
+    [InlineData("""[["text/plain",42]]""")] // non-string value
+    [InlineData("""[["text/plain"]]""")] // missing value
+    [InlineData("garbage")]
+    public void ExtractTextPlain_returns_null_when_absent_or_unparseable(string metadata)
+    {
+        Assert.Null(BlinkLnAddressLightningClient.ExtractTextPlainFromLnurlMetadata(metadata));
+    }
+
     // ---- Amount bounds ----
 
     [Fact]

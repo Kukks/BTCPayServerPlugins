@@ -46,6 +46,13 @@ type=blink;ln-address=yourname@blink.sv;
 Note: because there is no websocket for non-custodial accounts, payment detection uses polling of the
 LUD-21 verify URL. Settlement typically appears in BTCPay within a few seconds of payment.
 
+**BTCPay lightning addresses (LNURL):** lightning addresses served by your BTCPay instance
+(`name@yourserver.tld`) work with non-custodial accounts, with one caveat: the invoice's LUD-06
+description hash is set by Blink's LNURL server (LNURL-pay cannot mint an invoice with a
+caller-chosen `h` tag), so it will not match the metadata BTCPay advertises. Most wallets do not
+check this and pay normally; a wallet that strictly validates the `h` tag may refuse the invoice.
+The store description is still forwarded to your Blink transaction memo as an LNURL comment.
+
 ## Migration: custodial → non-custodial
 
 If your Blink account is migrated from custodial to non-custodial, the existing BTCPay integration
