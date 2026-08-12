@@ -11,6 +11,7 @@ using BTCPayServer.Lightning;
 using BTCPayServer.Payments.Lightning;
 using NBitcoin;
 using NBitcoin.Secp256k1;
+using Microsoft.Extensions.Logging;
 using NNostr.Client;
 using NNostr.Client.Protocols;
 using SHA256 = System.Security.Cryptography.SHA256;
@@ -32,11 +33,15 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
     private readonly (ECXOnlyPubKey pubkey, ECPrivKey secret, Uri[] relays, string lud16) _connectParams;
 	private readonly Uri? _serverUri;
 
-	public NostrWalletConnectLightningClient(NostrClientPool nostrClientPool, Uri uri, Network network)
+	private readonly ILogger<NostrWalletConnectLightningClient>? _logger;
+
+	public NostrWalletConnectLightningClient(NostrClientPool nostrClientPool, Uri uri, Network network,
+        ILogger<NostrWalletConnectLightningClient>? logger = null)
     {
         _nostrClientPool = nostrClientPool;
         _uri = uri;
         _network = network;
+        _logger = logger;
         _connectParams = NIP47.ParseUri(uri);
         _serverUri = _connectParams.relays.FirstOrDefault();
     }
@@ -60,6 +65,8 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
             ? NIP47.EncryptionScheme.Nip44V2
             : NIP47.EncryptionScheme.Nip04;
         _encryptionScheme = scheme;
+        _logger?.LogInformation("NWC: negotiated {Scheme} encryption with wallet service on {Relay} (advertised: {Advertised})",
+            scheme, _serverUri, info?.EncryptionSchemes is { Length: > 0 } s ? string.Join(" ", s) : "(no encryption tag)");
         return scheme;
     }
 
@@ -286,6 +293,8 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
             var response = await x.Item1.SendNIP47Request<NIP47.GetInfoResponse>(_connectParams.pubkey, _connectParams.secret, new NIP47.GetInfoRequest(), cancellationToken: cancellation, encryptionScheme: scheme);
 			hasNotification = response?.Notifications?.Contains("payment_received");
 		}
+        _logger?.LogInformation("NWC: listening for paid invoices via {Listener} ({Scheme}, payment_received supported: {HasNotification})",
+            hasNotification is true ? "push notifications" : "polling", scheme, hasNotification ?? false);
         return hasNotification is true
 			? new NotificationListener(_network, x, _connectParams, scheme)
             : new PollListener(_network, x, _connectParams, scheme);
