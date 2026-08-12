@@ -46,6 +46,23 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
         return $"type=nwc;key={_uri}";
     }
 
+    private NIP47.EncryptionScheme? _encryptionScheme;
+
+    // NIP-47: the wallet service advertises supported encryption schemes via the "encryption"
+    // tag on its kind-13194 info event. Prefer nip44_v2 when available, otherwise fall back
+    // to nip04 (absence of the tag means the wallet only supports nip04).
+    private async Task<NIP47.EncryptionScheme> GetEncryptionScheme(INostrClient client, CancellationToken cancellationToken)
+    {
+        if (_encryptionScheme is { } cached)
+            return cached;
+        var info = await client.FetchNIP47InfoEvent(_connectParams.pubkey, cancellationToken);
+        var scheme = info?.EncryptionSchemes?.Contains(NIP47.EncryptionSchemeNip44V2) is true
+            ? NIP47.EncryptionScheme.Nip44V2
+            : NIP47.EncryptionScheme.Nip04;
+        _encryptionScheme = scheme;
+        return scheme;
+    }
+
 
     public async Task<LightningInvoice> GetInvoice(string invoiceId,
         CancellationToken cancellation = new())
@@ -94,12 +111,13 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
 
         using (usage)
         {
+            var scheme = await GetEncryptionScheme(nostrClient, cts.Token);
             var tx = await nostrClient.SendNIP47Request<NIP47.Nip47Transaction>(_connectParams.pubkey,
                 _connectParams.secret,
                 new NIP47.LookupInvoiceRequest()
                 {
                     PaymentHash = paymentHash.ToString()
-                }, cts.Token);
+                }, cts.Token, scheme);
             return ToLightningInvoice(tx, _network)!;
         }
     }
@@ -118,6 +136,7 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
         var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cts.Token);
         using (usage)
         {
+            var scheme = await GetEncryptionScheme(client, cts.Token);
             var response = await client.SendNIP47Request<NIP47.ListTransactionsResponse>(_connectParams.pubkey,
                 _connectParams.secret,
                 new NIP47.ListTransactionsRequest()
@@ -125,7 +144,7 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
                     Type = "incoming",
                     Offset = (int)(request.OffsetIndex ?? 0),
                     Unpaid = request.PendingOnly ?? false,
-                }, cts.Token);
+                }, cts.Token, scheme);
 
             return response.Transactions.Select(transaction => ToLightningInvoice(transaction, _network))
                 .Where(i => i is not null).ToArray()!;
@@ -177,11 +196,12 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
             NIP47.Nip47Transaction tx;
             try
             {
+                var scheme = await GetEncryptionScheme(nostrClient, cts.Token);
                 tx = await nostrClient.SendNIP47Request<NIP47.Nip47Transaction>(_connectParams.pubkey, _connectParams.secret,
                     new NIP47.LookupInvoiceRequest()
                     {
                         PaymentHash = paymentHash
-                    }, cts.Token);
+                    }, cts.Token, scheme);
             }
             // The standard says it returns NOT_FOUND error, but
             // Alby returns INTERNAL error... Probably safer to catch all
@@ -207,6 +227,7 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
 
         using (usage)
         {
+            var scheme = await GetEncryptionScheme(nostrClient, cts.Token);
             var response = await nostrClient.SendNIP47Request<NIP47.ListTransactionsResponse>(_connectParams.pubkey,
                 _connectParams.secret,
                 new NIP47.ListTransactionsRequest()
@@ -214,7 +235,7 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
                     Type = "outgoing",
                     Offset = (int)(request.OffsetIndex ?? 0),
                     Unpaid = request.IncludePending ?? false,
-                }, cts.Token);
+                }, cts.Token, scheme);
             return response.Transactions.Select(ToLightningPayment).Where(i => i is not null).ToArray()!;
         }
     }
@@ -235,6 +256,7 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
 
         using (usage)
         {
+            var scheme = await GetEncryptionScheme(nostrClient, cts.Token);
             var response = await nostrClient.SendNIP47Request<NIP47.Nip47Transaction>(_connectParams.pubkey,
                 _connectParams.secret,
                 new NIP47.MakeInvoiceRequest()
@@ -245,7 +267,7 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
                         : createInvoiceRequest.Description,
                     DescriptionHash = createInvoiceRequest.DescriptionHash?.ToString(),
                     ExpirySeconds = (int)createInvoiceRequest.Expiry.TotalSeconds,
-                }, cts.Token);
+                }, cts.Token, scheme);
             return ToLightningInvoice(response, _network)!;
         }
     }
@@ -253,16 +275,20 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
     public async Task<ILightningInvoiceListener> Listen(CancellationToken cancellation = default)
     {
         var x = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cancellation);
-		var commands = await x.Item1.FetchNIP47AvailableCommands(_connectParams.Item1, cancellationToken: cancellation);
-        bool? hasNotification = commands?.Notifications?.Contains("payment_received");
+		var info = await x.Item1.FetchNIP47InfoEvent(_connectParams.Item1, cancellationToken: cancellation);
+        var scheme = info?.EncryptionSchemes?.Contains(NIP47.EncryptionSchemeNip44V2) is true
+            ? NIP47.EncryptionScheme.Nip44V2
+            : NIP47.EncryptionScheme.Nip04;
+        _encryptionScheme = scheme;
+        bool? hasNotification = info?.Notifications?.Contains("payment_received");
         if (hasNotification is false)
         {
-            var response = await x.Item1.SendNIP47Request<NIP47.GetInfoResponse>(_connectParams.pubkey, _connectParams.secret, new NIP47.GetInfoRequest(), cancellationToken: cancellation);
+            var response = await x.Item1.SendNIP47Request<NIP47.GetInfoResponse>(_connectParams.pubkey, _connectParams.secret, new NIP47.GetInfoRequest(), cancellationToken: cancellation, encryptionScheme: scheme);
 			hasNotification = response?.Notifications?.Contains("payment_received");
 		}
         return hasNotification is true
-			? new NotificationListener(_network, x, _connectParams)
-            : new PollListener(_network, x, _connectParams);
+			? new NotificationListener(_network, x, _connectParams, scheme)
+            : new PollListener(_network, x, _connectParams, scheme);
     }
 
 
@@ -276,13 +302,14 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
         private readonly IDisposable _disposable;
 
         public NotificationListener(Network network, (INostrClient, IDisposable) client,
-            (ECXOnlyPubKey pubkey, ECPrivKey secret, Uri[] relays, string lud16) x)
+            (ECXOnlyPubKey pubkey, ECPrivKey secret, Uri[] relays, string lud16) x,
+            NIP47.EncryptionScheme encryptionScheme)
         {
             _network = network;
             _client = client.Item1;
             _disposable = client.Item2;
             _cts = new CancellationTokenSource();
-            _notifications = _client.SubscribeNip47Notifications(x.pubkey, x.secret, _cts.Token);
+            _notifications = _client.SubscribeNip47Notifications(x.pubkey, x.secret, _cts.Token, encryptionScheme);
         }
 
         public void Dispose()
@@ -319,13 +346,17 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
         private NIP47.ListTransactionsResponse? _lastPaid;
         private Channel<LightningInvoice> queue = Channel.CreateUnbounded<LightningInvoice>();
 
+        private readonly NIP47.EncryptionScheme _encryptionScheme;
+
         public PollListener(Network network, (INostrClient, IDisposable) client,
-            (ECXOnlyPubKey pubkey, ECPrivKey secret, Uri[] relays, string lud16) connectparams)
+            (ECXOnlyPubKey pubkey, ECPrivKey secret, Uri[] relays, string lud16) connectparams,
+            NIP47.EncryptionScheme encryptionScheme)
         {
             _network = network;
             _connectparams = connectparams;
             _client = client.Item1;
             _disposable = client.Item2;
+            _encryptionScheme = encryptionScheme;
             _cts = new CancellationTokenSource();
             _ = Poll();
         }
@@ -343,9 +374,9 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
                         _connectparams.secret, new NIP47.ListTransactionsRequest()
                         {
                             Type = "incoming",
-                            // Unpaid = true, //seems like this is ignored... so we only get paid ones 
+                            // Unpaid = true, //seems like this is ignored... so we only get paid ones
                             Limit = 300
-                        }, cancellationToken: cts.Token);
+                        }, cancellationToken: cts.Token, encryptionScheme: _encryptionScheme);
                     paid.Transactions = paid.Transactions.Where(i => i is { Type: "incoming", SettledAt: not null }).ToArray();
                     if (_lastPaid is not null)
                     {
@@ -402,9 +433,10 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
 
         using (usage)
         {
+            var scheme = await GetEncryptionScheme(client, cts.Token);
             var response = await client.SendNIP47Request<NIP47.GetBalanceResponse>(_connectParams.pubkey,
                 _connectParams.secret,
-                new NIP47.NIP47Request("get_balance"), cts.Token);
+                new NIP47.NIP47Request("get_balance"), cts.Token, scheme);
             return new LightningNodeBalance()
             {
                 OffchainBalance = new OffchainBalance()
@@ -456,7 +488,8 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
                 };
 
             }
-            var response = await client.SendNIP47Request<NIP47.PayInvoiceResponse>(_connectParams.pubkey, _connectParams.secret, request, cts.Token);
+            var scheme = await GetEncryptionScheme(client, cts.Token);
+            var response = await client.SendNIP47Request<NIP47.PayInvoiceResponse>(_connectParams.pubkey, _connectParams.secret, request, cts.Token, scheme);
             var payHash = ConvertHelper.ToHexString(SHA256.HashData(Convert.FromHexString(response.Preimage)));
 
             try
@@ -465,7 +498,7 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
                     new NIP47.LookupInvoiceRequest()
                     {
                         PaymentHash = payHash
-                    }, cts.Token);
+                    }, cts.Token, scheme);
                 var lp = ToLightningPayment(tx)!;
                 return new PayResponse(lp.Status == LightningPaymentStatus.Complete ? PayResult.Ok : PayResult.Error,
                     new PayDetails()
@@ -530,16 +563,21 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
 		var (client, disposable) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cts.Token).ConfigureAwait(false);
         using (disposable)
         {
-			var commands = await client.FetchNIP47AvailableCommands(_connectParams.Item1, cancellationToken: cts.Token);
+			var info = await client.FetchNIP47InfoEvent(_connectParams.Item1, cancellationToken: cts.Token);
 			var requiredCommands = new[] { "get_info", "make_invoice", "lookup_invoice", "list_transactions" };
-			if (commands?.Commands is null || requiredCommands.Any(c => !commands.Value.Commands.Contains(c)))
+			if (info?.Commands is null || requiredCommands.Any(c => !info.Value.Commands.Contains(c)))
 			{
 				return new ValidationResult("No commands available or not all required commands are available (get_info, make_invoice, lookup_invoice, list_transactions)");
 			}
 
+			var scheme = info.Value.EncryptionSchemes?.Contains(NIP47.EncryptionSchemeNip44V2) is true
+				? NIP47.EncryptionScheme.Nip44V2
+				: NIP47.EncryptionScheme.Nip04;
+			_encryptionScheme = scheme;
+
 			var response = await client
 					.SendNIP47Request<NIP47.GetInfoResponse>(_connectParams.pubkey, _connectParams.secret,
-						new NIP47.GetInfoRequest(), cancellationToken: cts.Token);
+						new NIP47.GetInfoRequest(), cancellationToken: cts.Token, encryptionScheme: scheme);
 
 			var walletNetwork = response.Network;
 			if (!_network.ChainName.ToString().Equals(walletNetwork,
