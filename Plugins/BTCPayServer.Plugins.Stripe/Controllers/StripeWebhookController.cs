@@ -88,55 +88,29 @@ public class StripeWebhookController : ControllerBase
 
         Event stripeEvent;
 
-        // Verify webhook signature if secret is configured
-        if (!string.IsNullOrEmpty(config.WebhookSecret))
+        // Require a signature we can verify against the store's secret before trusting the event.
+        if (string.IsNullOrEmpty(config.WebhookSecret))
         {
-            try
-            {
-                var signatureHeader = Request.Headers["Stripe-Signature"].FirstOrDefault();
-                if (string.IsNullOrEmpty(signatureHeader))
-                {
-                    _logger.LogWarning("Missing Stripe-Signature header for store {StoreId}", storeId);
-                    return BadRequest("Missing signature");
-                }
-
-                _logger.LogDebug(
-                    "Verifying webhook signature for store {StoreId}. Secret prefix: {SecretPrefix}, Signature header: {SignatureHeader}, Body length: {BodyLength}",
-                    storeId,
-                    config.WebhookSecret.Length > 10 ? config.WebhookSecret[..10] + "..." : "[short]",
-                    signatureHeader.Length > 50 ? signatureHeader[..50] + "..." : signatureHeader,
-                    json.Length);
-
-                // Allow API version mismatch - webhook may use older API version than Stripe.net library
-                stripeEvent = EventUtility.ConstructEvent(json, signatureHeader, config.WebhookSecret, throwOnApiVersionMismatch: false);
-            }
-            catch (StripeException ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Invalid webhook signature for store {StoreId}. Error: {Error}. Secret configured: {HasSecret} (prefix: {SecretPrefix})",
-                    storeId,
-                    ex.Message,
-                    !string.IsNullOrEmpty(config.WebhookSecret),
-                    !string.IsNullOrEmpty(config.WebhookSecret) && config.WebhookSecret.Length > 10
-                        ? config.WebhookSecret[..10] + "..."
-                        : "[short/empty]");
-                return BadRequest("Invalid signature");
-            }
+            _logger.LogWarning("Received webhook for store {StoreId} without a configured signing secret", storeId);
+            return BadRequest("Webhook signing secret not configured");
         }
-        else
+
+        var signatureHeader = Request.Headers["Stripe-Signature"].FirstOrDefault();
+        if (string.IsNullOrEmpty(signatureHeader))
         {
-            // No webhook secret configured, parse without verification
-            try
-            {
-                // Allow API version mismatch - webhook may use older API version than Stripe.net library
-                stripeEvent = EventUtility.ParseEvent(json, throwOnApiVersionMismatch: false);
-            }
-            catch (StripeException ex)
-            {
-                _logger.LogWarning(ex, "Failed to parse webhook event for store {StoreId}", storeId);
-                return BadRequest("Invalid event");
-            }
+            _logger.LogWarning("Missing Stripe-Signature header for store {StoreId}", storeId);
+            return BadRequest("Missing signature");
+        }
+
+        try
+        {
+            // Allow API version mismatch - webhook may use older API version than Stripe.net library
+            stripeEvent = EventUtility.ConstructEvent(json, signatureHeader, config.WebhookSecret, throwOnApiVersionMismatch: false);
+        }
+        catch (StripeException ex)
+        {
+            _logger.LogWarning(ex, "Invalid webhook signature for store {StoreId}", storeId);
+            return BadRequest("Invalid signature");
         }
 
         _logger.LogInformation(
@@ -192,6 +166,15 @@ public class StripeWebhookController : ControllerBase
             _logger.LogWarning(
                 "No invoice found for PaymentIntent {PaymentIntentId}",
                 paymentIntent.Id);
+            return;
+        }
+
+        // Only settle an invoice that belongs to the store named in the webhook route.
+        if (!string.Equals(invoice.StoreId, storeId, StringComparison.Ordinal))
+        {
+            _logger.LogWarning(
+                "PaymentIntent {PaymentIntentId} does not belong to store {StoreId}",
+                paymentIntent.Id, storeId);
             return;
         }
 
