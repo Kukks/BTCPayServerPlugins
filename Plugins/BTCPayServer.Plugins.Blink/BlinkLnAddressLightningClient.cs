@@ -373,7 +373,6 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
     private LightningInvoice BuildInvoice(string paymentHash, TrackedInvoice tracked, bool settled, string? preimage)
     {
         var bolt11 = BOLT11PaymentRequest.Parse(tracked.Bolt11, _network);
-        var status = DetermineStatus(settled, tracked.ExpiresAt, DateTimeOffset.UtcNow);
 
         // The authoritative payment hash is the verify key (the `paymentHash` argument = BTCPay's
         // invoice Id), NOT the hash parsed from the returned `pr`. blink-lnurl-server's verify
@@ -393,11 +392,13 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
         var reportedBolt11 = bolt11Matches ? tracked.Bolt11 : null;
         var reportedAmount = bolt11Matches ? bolt11.MinimumAmount : null;
 
-        // BTCPay validates the preimage: it must be 64 hex chars and SHA256(preimage)==paymentHash.
-        // If invalid, drop it (the payment is still recorded, just without a preimage).
+        // Require a valid preimage (64 hex chars, SHA256(preimage)==paymentHash) before reporting the
+        // invoice as paid; a settled flag without that proof is not trusted.
         var validPreimage = settled ? ValidatePreimage(paymentHash, preimage) : null;
-        if (settled && preimage is not null && validPreimage is null)
-            _logger.LogWarning("Blink preimage for {PaymentHash} did not validate against the payment hash; discarding.", paymentHash);
+        if (settled && validPreimage is null)
+            _logger.LogWarning("Blink reported {PaymentHash} settled without a valid preimage; not marking paid.", paymentHash);
+        var paid = validPreimage is not null;
+        var status = DetermineStatus(paid, tracked.ExpiresAt, DateTimeOffset.UtcNow);
 
         return new LightningInvoice
         {
@@ -406,10 +407,10 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
             BOLT11 = reportedBolt11,
             // Amount is parsed from the BOLT11; BTCPay requires a non-null amount to record payment.
             Amount = reportedAmount,
-            AmountReceived = settled ? reportedAmount : null,
+            AmountReceived = paid ? reportedAmount : null,
             Status = status,
             Preimage = validPreimage,
-            PaidAt = settled ? DateTimeOffset.UtcNow : null,
+            PaidAt = paid ? DateTimeOffset.UtcNow : null,
             ExpiresAt = tracked.ExpiresAt
         };
     }
