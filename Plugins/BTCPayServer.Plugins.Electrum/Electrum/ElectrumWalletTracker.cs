@@ -277,6 +277,11 @@ public class ElectrumWalletTracker
                 // New transaction
                 var rawHex = await _client.TransactionGetAsync(item.TxHash, ct);
                 var tx = Transaction.Parse(rawHex, _network);
+                if (!string.Equals(tx.GetHash().ToString(), item.TxHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning("Electrum returned tx bytes not matching {TxHash}; skipping", item.TxHash);
+                    continue;
+                }
                 var balanceChange = ComputeBalanceChange(ctx, tx, addr.WalletId);
 
                 var trackedTx = new TrackedTransaction
@@ -1120,6 +1125,11 @@ public class ElectrumWalletTracker
 
                     var rawHex = await _client.TransactionGetAsync(item.TxHash, ct);
                     var tx = Transaction.Parse(rawHex, _network);
+                    if (!string.Equals(tx.GetHash().ToString(), item.TxHash, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogWarning("Electrum returned tx bytes not matching {TxHash}; skipping", item.TxHash);
+                        continue;
+                    }
                     var balanceChange = ComputeBalanceChange(ctx, tx, walletId);
 
                     ctx.Transactions.Add(new TrackedTransaction
@@ -1331,9 +1341,8 @@ public class ElectrumWalletTracker
             var output = tx.Outputs[i];
             var scriptHash = ScriptHashUtility.ComputeScriptHash(output.ScriptPubKey);
 
-            // Check if this output goes to one of our addresses
-            if (scriptHash == matchedAddr.Scripthash ||
-                _subscribedScripthashes.ContainsKey(scriptHash))
+            // Check if this output goes to the notified address
+            if (scriptHash == matchedAddr.Scripthash)
             {
                 var parts = matchedAddr.KeyPath.Split('/');
                 var keyIndex = parts.Length == 2 && int.TryParse(parts[1], out var idx) ? idx : 0;
@@ -1351,10 +1360,5 @@ public class ElectrumWalletTracker
 
         return info.Outputs.Count > 0 ? info : null;
     }
-
-    private ConcurrentDictionary<string, string> _subscribedScripthashes =>
-        (ConcurrentDictionary<string, string>)typeof(ElectrumClient)
-            .GetField("_subscribedScripthashes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-            ?.GetValue(_client) ?? new ConcurrentDictionary<string, string>();
 
 }
