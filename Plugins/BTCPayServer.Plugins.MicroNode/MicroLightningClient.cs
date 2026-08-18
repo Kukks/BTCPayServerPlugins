@@ -228,7 +228,7 @@ public class MicroLightningClient:ILightningClient
                 PayResult.Error => LightningPaymentStatus.Failed,
                 _ => LightningPaymentStatus.Unknown
             },
-            AmountSent = transaction.Amount
+            AmountSent = LightMoney.MilliSatoshis(Math.Abs(transaction.Amount))
         };
     }
 

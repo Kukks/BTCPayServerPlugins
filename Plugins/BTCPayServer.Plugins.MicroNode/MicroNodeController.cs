@@ -72,9 +72,11 @@ public class MicroNodeController : Controller
         }
         var pmi = PaymentTypes.LN.GetPaymentMethodId(network.CryptoCode);
         var existing = store.GetPaymentMethodConfig<LightningPaymentMethodConfig>(pmi, _paymentMethodHandlerDictionary);
-        var isSet = settings?.Key is not null;
+        // The account key is owned server-side: reuse the store's existing key or mint a new one.
+        var storeSettings = await _microNodeService.GetStoreSettings(storeId);
         settings ??= new MicroNodeStoreSettings();
-        settings.Key ??= Guid.NewGuid().ToString();
+        settings.Key = storeSettings?.Key ?? Guid.NewGuid().ToString();
+        var isSet = storeSettings is not null;
         var mlc = new MicroLightningClient(null, _microNodeService, network.NBitcoinNetwork,settings.Key);
         var isStoreSetToThisMicro = existing?.GetExternalLightningUrl() == mlc.ToString();
 
@@ -93,7 +95,7 @@ public class MicroNodeController : Controller
                     return View(settings);
                 }
 
-                if (!isSet)
+                if (masterStoreId is not null)
                 {
                     var masterSettings = await _microNodeService.GetMasterSettings(masterStoreId);
                     if (masterSettings is null)
