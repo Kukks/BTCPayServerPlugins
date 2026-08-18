@@ -54,110 +54,131 @@ namespace BTCPayServer.Plugins.DataErasure
 
         private async Task Run()
         {
-            while (!_cts.IsCancellationRequested)
+            var cts = _cts;
+            while (!cts.IsCancellationRequested)
             {
-                await _runningLock.WaitAsync(_cts.Token);
-                IsRunning = true;
-
-
-                var settings =
-                    await _storeRepository.GetSettingsAsync<DataErasureSettings>(nameof(DataErasureSettings));
-                foreach (var setting in settings.Where(setting => setting.Value.Enabled))
+                try
                 {
-                    var count = 0;
-                    var cutoffDate = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromDays(setting.Value.DaysToKeep));
-                    if (setting.Value.EntirelyEraseInvoice)
-                    {
-                        await using var db = _dbContextFactory.CreateContext();
-                        db.Invoices.RemoveRange(db.Invoices.Where(i => i.StoreDataId == setting.Key && i.Created < cutoffDate && (setting.Value.LastRunCutoff == null || i.Created > setting.Value.LastRunCutoff)));
-                        count = await db.SaveChangesAsync(_cts.Token);
-                    }
-                    else
-                    {
-
-
-
-                        var skip = 0;
-                        while (true)
-                        {
-                            var invoices = await _invoiceRepository.GetInvoices(new InvoiceQuery()
-                            {
-                                StartDate = setting.Value.LastRunCutoff,
-                                EndDate = cutoffDate,
-                                StoreId = new[] {setting.Key},
-                                Skip = skip,
-                                Take = 100
-                            }, _cts.Token);
-
-
-
-                            foreach (var invoice in invoices)
-                            {
-                                //replace all buyer info with "erased"
-                                if (!string.IsNullOrEmpty(invoice.Metadata.BuyerAddress1) ||
-                                    !string.IsNullOrEmpty(invoice.Metadata.BuyerAddress2) ||
-                                    !string.IsNullOrEmpty(invoice.Metadata.BuyerCity) ||
-                                    !string.IsNullOrEmpty(invoice.Metadata.BuyerCountry) ||
-                                    !string.IsNullOrEmpty(invoice.Metadata.BuyerEmail) ||
-                                    !string.IsNullOrEmpty(invoice.Metadata.BuyerName) ||
-                                    !string.IsNullOrEmpty(invoice.Metadata.BuyerPhone) ||
-                                    !string.IsNullOrEmpty(invoice.Metadata.BuyerState) ||
-                                    !string.IsNullOrEmpty(invoice.Metadata.BuyerZip))
-                                {
-                                    await _invoiceRepository.UpdateInvoiceMetadata(invoice.Id, metadata =>
-                                    {
-                                        if (!string.IsNullOrEmpty(metadata.BuyerAddress1))
-                                            metadata.BuyerAddress1 = "erased";
-                                        if (!string.IsNullOrEmpty(metadata.BuyerAddress2))
-                                            metadata.BuyerAddress2 = "erased";
-                                        if (!string.IsNullOrEmpty(metadata.BuyerCity))
-                                            metadata.BuyerCity = "erased";
-                                        if (!string.IsNullOrEmpty(metadata.BuyerCountry))
-                                            metadata.BuyerCountry = "erased";
-                                        if (!string.IsNullOrEmpty(metadata.BuyerEmail))
-                                            metadata.BuyerEmail = "erased";
-                                        if (!string.IsNullOrEmpty(metadata.BuyerName))
-                                            metadata.BuyerName = "erased";
-                                        if (!string.IsNullOrEmpty(metadata.BuyerPhone))
-                                            metadata.BuyerPhone = "erased";
-                                        if (!string.IsNullOrEmpty(metadata.BuyerState))
-                                            metadata.BuyerState = "erased";
-                                        if (!string.IsNullOrEmpty(metadata.BuyerZip))
-                                            metadata.BuyerZip = "erased";
-                                        return metadata;
-                                    });
-                                }
-                                count++;
-                            }
-
-                            if (invoices.Length < 100)
-                            {
-                                break;
-                            }
-
-                            skip += 100;
-                        }
-                    }
-
-                    if (count > 0)
-                        _logger.LogInformation($"Erased {count} invoice data for store {setting.Key}");
-                    setting.Value.LastRunCutoff = cutoffDate;
-                    await SetCore(setting.Key, setting.Value);
+                    await _runningLock.WaitAsync(cts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
                 }
 
-                IsRunning = false;
+                IsRunning = true;
+                try
+                {
+                    var settings =
+                        await _storeRepository.GetSettingsAsync<DataErasureSettings>(nameof(DataErasureSettings));
+                    foreach (var setting in settings.Where(setting => setting.Value.Enabled))
+                    {
+                        try
+                        {
+                            var count = 0;
+                            var cutoffDate = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromDays(setting.Value.DaysToKeep));
+                            if (setting.Value.EntirelyEraseInvoice)
+                            {
+                                await using var db = _dbContextFactory.CreateContext();
+                                db.Invoices.RemoveRange(db.Invoices.Where(i => i.StoreDataId == setting.Key && i.Created < cutoffDate && (setting.Value.LastRunCutoff == null || i.Created > setting.Value.LastRunCutoff)));
+                                count = await db.SaveChangesAsync(cts.Token);
+                            }
+                            else
+                            {
+                                var skip = 0;
+                                while (true)
+                                {
+                                    var invoices = await _invoiceRepository.GetInvoices(new InvoiceQuery()
+                                    {
+                                        StartDate = setting.Value.LastRunCutoff,
+                                        EndDate = cutoffDate,
+                                        StoreId = new[] {setting.Key},
+                                        Skip = skip,
+                                        Take = 100
+                                    }, cts.Token);
 
+                                    foreach (var invoice in invoices)
+                                    {
+                                        //replace all buyer info with "erased"
+                                        var metadata = invoice.Metadata;
+                                        if (!string.IsNullOrEmpty(metadata.BuyerAddress1) ||
+                                            !string.IsNullOrEmpty(metadata.BuyerAddress2) ||
+                                            !string.IsNullOrEmpty(metadata.BuyerCity) ||
+                                            !string.IsNullOrEmpty(metadata.BuyerCountry) ||
+                                            !string.IsNullOrEmpty(metadata.BuyerEmail) ||
+                                            !string.IsNullOrEmpty(metadata.BuyerName) ||
+                                            !string.IsNullOrEmpty(metadata.BuyerPhone) ||
+                                            !string.IsNullOrEmpty(metadata.BuyerState) ||
+                                            !string.IsNullOrEmpty(metadata.BuyerZip))
+                                        {
+                                            if (!string.IsNullOrEmpty(metadata.BuyerAddress1))
+                                                metadata.BuyerAddress1 = "erased";
+                                            if (!string.IsNullOrEmpty(metadata.BuyerAddress2))
+                                                metadata.BuyerAddress2 = "erased";
+                                            if (!string.IsNullOrEmpty(metadata.BuyerCity))
+                                                metadata.BuyerCity = "erased";
+                                            if (!string.IsNullOrEmpty(metadata.BuyerCountry))
+                                                metadata.BuyerCountry = "erased";
+                                            if (!string.IsNullOrEmpty(metadata.BuyerEmail))
+                                                metadata.BuyerEmail = "erased";
+                                            if (!string.IsNullOrEmpty(metadata.BuyerName))
+                                                metadata.BuyerName = "erased";
+                                            if (!string.IsNullOrEmpty(metadata.BuyerPhone))
+                                                metadata.BuyerPhone = "erased";
+                                            if (!string.IsNullOrEmpty(metadata.BuyerState))
+                                                metadata.BuyerState = "erased";
+                                            if (!string.IsNullOrEmpty(metadata.BuyerZip))
+                                                metadata.BuyerZip = "erased";
+                                            await _invoiceRepository.UpdateInvoiceMetadata(invoice.Id, invoice.StoreId, metadata.ToJObject());
+                                        }
+                                        count++;
+                                    }
 
-                _runningLock.Release();
-                await Task.Delay(TimeSpan.FromHours(1), _cts.Token);
-            }
+                                    if (invoices.Length < 100)
+                                    {
+                                        break;
+                                    }
 
-            try
-            {
-                _runningLock.Release();
-            }
-            catch (Exception e)
-            {
+                                    skip += 100;
+                                }
+                            }
+
+                            if (count > 0)
+                                _logger.LogInformation($"Erased {count} invoice data for store {setting.Key}");
+                            setting.Value.LastRunCutoff = cutoffDate;
+                            await SetCore(setting.Key, setting.Value);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception e)
+                        {
+                            _logger.LogError(e, "Failed to erase data for store {StoreId}", setting.Key);
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, "Data erasure cycle failed");
+                }
+                finally
+                {
+                    IsRunning = false;
+                    _runningLock.Release();
+                }
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromHours(1), cts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
             }
         }
 
