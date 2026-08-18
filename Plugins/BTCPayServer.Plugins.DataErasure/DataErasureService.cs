@@ -40,8 +40,9 @@ namespace BTCPayServer.Plugins.DataErasure
             settings.LastRunCutoff = clearDate? null:  existing?.LastRunCutoff;
             await SetCore(storeId, settings);
             _runningLock.Release();
-            _cts = new CancellationTokenSource();
-            _ = Run();
+            var cts = new CancellationTokenSource();
+            _cts = cts;
+            _ = Run(cts);
         }
 
         private async Task SetCore(string storeId, DataErasureSettings settings)
@@ -52,9 +53,8 @@ namespace BTCPayServer.Plugins.DataErasure
         public bool IsRunning { get; private set; }
         private readonly SemaphoreSlim _runningLock = new(1, 1);
 
-        private async Task Run()
+        private async Task Run(CancellationTokenSource cts)
         {
-            var cts = _cts;
             while (!cts.IsCancellationRequested)
             {
                 try
@@ -180,14 +180,17 @@ namespace BTCPayServer.Plugins.DataErasure
                     break;
                 }
             }
+
+            cts.Dispose();
         }
 
         private CancellationTokenSource _cts;
 
         public Task StartAsync(CancellationToken cancellationToken)
         {
-            _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            _ = Run();
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _cts = cts;
+            _ = Run(cts);
             return Task.CompletedTask;
         }
 
