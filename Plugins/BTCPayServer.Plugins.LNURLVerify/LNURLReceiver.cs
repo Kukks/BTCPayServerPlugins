@@ -177,7 +177,8 @@ public sealed class LNURLReceiver
     private static LightningInvoice BuildInvoice(TrackedInvoice t, bool settled, string? preimage)
     {
         var bolt11 = BOLT11PaymentRequest.Parse(t.Bolt11, InferNetwork(t.Bolt11));
-        string? valid = settled && preimage is not null && IsValidPreimage(preimage, t.PaymentHash) ? preimage : null;
+        var normalizedPreimage = preimage?.Trim();
+        string? valid = settled && normalizedPreimage is not null && IsValidPreimage(normalizedPreimage, t.PaymentHash) ? normalizedPreimage : null;
         var paid = valid is not null;
         var status = paid ? LightningInvoiceStatus.Paid
             : t.ExpiresAt < DateTimeOffset.UtcNow ? LightningInvoiceStatus.Expired
