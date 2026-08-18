@@ -120,13 +120,15 @@ public class BlinkLnAddressLogicTests
         var poll = TimeSpan.FromSeconds(3);
         var max = TimeSpan.FromSeconds(30);
 
+        // Delays carry ±20% jitter, so assert the incremented error count exactly and the delay
+        // within the jitter band around the base (3 * 2^errors).
         var (e1, d1) = BlinkLnAddressLightningClient.NextBackoff(0, poll, max);
         Assert.Equal(1, e1);
-        Assert.Equal(TimeSpan.FromSeconds(6), d1); // 3 * 2^1
+        AssertWithinJitter(TimeSpan.FromSeconds(6), d1); // 3 * 2^1
 
         var (e2, d2) = BlinkLnAddressLightningClient.NextBackoff(1, poll, max);
         Assert.Equal(2, e2);
-        Assert.Equal(TimeSpan.FromSeconds(12), d2); // 3 * 2^2
+        AssertWithinJitter(TimeSpan.FromSeconds(12), d2); // 3 * 2^2
     }
 
     [Fact]
@@ -136,7 +138,63 @@ public class BlinkLnAddressLogicTests
         var max = TimeSpan.FromSeconds(30);
         var (errors, delay) = BlinkLnAddressLightningClient.NextBackoff(10, poll, max);
         Assert.Equal(11, errors);
-        Assert.Equal(max, delay);
+        // The base delay is capped at max BEFORE jitter, so the result is within ±20% of max.
+        AssertWithinJitter(max, delay);
+    }
+
+    // ±20% jitter band (with a tiny epsilon for floating-point rounding).
+    private static void AssertWithinJitter(TimeSpan baseline, TimeSpan actual)
+    {
+        var lo = baseline.TotalMilliseconds * 0.8 - 1;
+        var hi = baseline.TotalMilliseconds * 1.2 + 1;
+        Assert.InRange(actual.TotalMilliseconds, lo, hi);
+    }
+
+    [Fact]
+    public void ApplyJitter_stays_within_plus_minus_20_percent()
+    {
+        // Sample many draws; every result must be inside [0.8x, 1.2x] and not always identical.
+        const double baseMs = 10_000;
+        bool sawBelow = false, sawAbove = false;
+        for (var i = 0; i < 2000; i++)
+        {
+            var v = BlinkLnAddressLightningClient.ApplyJitter(baseMs);
+            Assert.InRange(v, baseMs * 0.8, baseMs * 1.2);
+            if (v < baseMs) sawBelow = true;
+            if (v > baseMs) sawAbove = true;
+        }
+        Assert.True(sawBelow && sawAbove, "jitter should vary both below and above the base delay");
+    }
+
+    [Fact]
+    public void ApplyJitter_never_below_one_ms()
+    {
+        Assert.True(BlinkLnAddressLightningClient.ApplyJitter(0) >= 1.0);
+    }
+
+    // ---- Age-stepped poll interval (F3) ----
+
+    [Theory]
+    [InlineData(0, 3)]      // fresh
+    [InlineData(60, 3)]     // < 2 min
+    [InlineData(119, 3)]    // just under 2 min
+    [InlineData(120, 10)]   // 2 min boundary -> 10s
+    [InlineData(300, 10)]   // < 10 min
+    [InlineData(599, 10)]   // just under 10 min
+    [InlineData(600, 30)]   // 10 min boundary -> 30s
+    [InlineData(3600, 30)]  // long-lived
+    public void MinIntervalForAge_steps_with_age(int ageSeconds, int expectedSeconds)
+    {
+        Assert.Equal(TimeSpan.FromSeconds(expectedSeconds),
+            BlinkLnAddressLightningClient.MinIntervalForAge(TimeSpan.FromSeconds(ageSeconds)));
+    }
+
+    // ---- User-Agent (attribution) ----
+
+    [Fact]
+    public void UserAgent_identifies_the_plugin()
+    {
+        Assert.StartsWith("BTCPayServer.Plugins.Blink/", BlinkLnAddressLightningClient.UserAgent);
     }
 
     // ---- Lightning-address parsing ----

@@ -253,7 +253,11 @@ query InvoiceByPaymentHash($paymentHash: PaymentHash!, $walletId: WalletId!) {
         {
             Id = invoice["paymentHash"].Value<string>(),
             Amount = invoice["satoshis"] is null? bolt11.MinimumAmount:  LightMoney.Satoshis(invoice["satoshis"].Value<long>()),
-                Preimage =  invoice["paymentSecret"].Value<string>(),
+            // NOTE: do NOT map `paymentSecret` to Preimage. paymentSecret is the BOLT11 payment secret
+            // (the `s` tag), not the payment preimage. BTCPay validates SHA256(preimage) == paymentHash,
+            // which a payment secret fails, producing "has a preimage but it doesn't match the payment
+            // hash" warnings on every payment. Blink does not return the preimage at creation time, so
+            // leave it null; the preimage is not required for BTCPay to record the payment.
             PaidAt = status == LightningInvoiceStatus.Paid ? DateTimeOffset.UtcNow : null,
             Status =  status,
             BOLT11 =  invoice["paymentRequest"].Value<string>(),
@@ -489,6 +493,15 @@ query Transactions($walletId: WalletId!) {
     public async Task<LightningInvoice> CreateInvoice(CreateInvoiceParams createInvoiceRequest,
         CancellationToken cancellation = new())
     {
+        // Top-up / amountless invoices: BTCPay passes a null or zero amount (see
+        // LightningLikePaymentHandler which sends LightMoney.Zero for InvoiceType.TopUp). The
+        // fixed-amount mutations below require a positive amount, so route these to Blink's
+        // dedicated no-amount mutation instead. A single mutation covers both BTC and USD wallets.
+        if (createInvoiceRequest.Amount is null || createInvoiceRequest.Amount.MilliSatoshi <= 0)
+        {
+            return await CreateNoAmountInvoice(createInvoiceRequest, cancellation);
+        }
+
         var isUSD = (await GetWalletInfo()).WalletCurrency == BlinkCurrency.USD;
         var query = isUSD ? @"
 mutation lnInvoiceCreate($input: LnUsdInvoiceBtcDenominatedCreateOnBehalfOfRecipientInput!) {
@@ -556,6 +569,62 @@ mutation lnInvoiceCreate($input: LnInvoiceCreateOnBehalfOfRecipientInput!) {
             }
         }
         return ToInvoice(inv);
+    }
+
+    /// <summary>
+    /// Creates a top-up / amountless (no-amount) invoice via Blink's
+    /// <c>lnNoAmountInvoiceCreateOnBehalfOfRecipient</c> mutation. Unlike the fixed-amount
+    /// mutations, the no-amount mutation takes no <c>amount</c> and no <c>descriptionHash</c>, and
+    /// the same mutation works for both BTC and USD recipient wallets. The returned invoice has no
+    /// <c>satoshis</c> field; <see cref="ToInvoice"/> already falls back to the BOLT11 amount
+    /// (which is 0 for an amountless invoice) in that case.
+    /// </summary>
+    private async Task<LightningInvoice> CreateNoAmountInvoice(CreateInvoiceParams createInvoiceRequest,
+        CancellationToken cancellation)
+    {
+        const string query = @"
+mutation lnNoAmountInvoiceCreate($input: LnNoAmountInvoiceCreateOnBehalfOfRecipientInput!) {
+  lnNoAmountInvoiceCreateOnBehalfOfRecipient(input: $input) {
+    invoice {
+      createdAt
+      paymentHash
+      paymentRequest
+      paymentSecret
+      paymentStatus
+    },
+    errors{
+      message
+    }
+  }
+}";
+
+        var request = new GraphQLRequest
+        {
+            Query = query,
+            OperationName = "lnNoAmountInvoiceCreate",
+            Variables = new
+            {
+                input = new
+                {
+                    recipientWalletId = await GetWalletId(),
+                    memo = createInvoiceRequest.Description,
+                    expiresIn = (int)createInvoiceRequest.Expiry.TotalMinutes
+                }
+            }
+        };
+
+        var response = await _client.SendQueryAsync<dynamic>(request, cancellation);
+        var inv = response.Data.lnNoAmountInvoiceCreateOnBehalfOfRecipient.invoice as JObject;
+        if (inv is not null)
+            return ToInvoice(inv);
+
+        var errors = response.Data.lnNoAmountInvoiceCreateOnBehalfOfRecipient.errors as JArray;
+        if (errors is not null && errors.Any())
+            throw new Exception(errors.First()["message"].ToString());
+
+        // No invoice and no error: fail explicitly rather than passing null to ToInvoice (which would
+        // throw an opaque NullReferenceException while dereferencing the invoice fields).
+        throw new Exception("Blink did not return an invoice.");
     }
 
     public async Task<ILightningInvoiceListener> Listen(CancellationToken cancellation = new CancellationToken())

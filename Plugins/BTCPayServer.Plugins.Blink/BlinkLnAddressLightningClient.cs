@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Net.Http;
@@ -42,7 +43,15 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
     private readonly HttpClient _httpClient;
     private readonly ILogger _logger;
 
-    private record TrackedInvoice(string Bolt11, string? VerifyUrl, DateTimeOffset ExpiresAt);
+    // Custodial invoices are minted via the public GraphQL API and settle through
+    // lnInvoicePaymentStatusByHash (ledger-aware); non-custodial invoices are proxied from the LNURL
+    // server and settle through the LUD-21 verify URL. VerifyUrl is null for custodial invoices.
+    private record TrackedInvoice(string Bolt11, string? VerifyUrl, DateTimeOffset ExpiresAt, bool Custodial = false)
+    {
+        // When the invoice was first tracked locally. Drives the age-stepped poll interval (F3):
+        // fresh invoices poll fast for quick settlement feedback, long-lived unpaid ones back off.
+        public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+    }
 
     // BTCPay creates SEPARATE client instances for creating invoices and for its payment
     // listener/poller. In-memory per-instance state would therefore not be visible to the listener.
@@ -88,7 +97,17 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
         _network = network;
         _httpClient = httpClient;
         _logger = logger;
+
+        // Identify plugin verify/LNURL traffic so operators can attribute it in server telemetry
+        // (and so the path-scoped rate limit can be tuned per client type). Multiple client
+        // instances may share one HttpClient, so only set the UA if not already present.
+        if (!_httpClient.DefaultRequestHeaders.UserAgent.Any())
+            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
     }
+
+    /// <summary>Product-info User-Agent header value identifying this plugin (name/version).</summary>
+    internal static string UserAgent =>
+        $"BTCPayServer.Plugins.Blink/{typeof(BlinkLnAddressLightningClient).Assembly.GetName().Version}";
 
     /// <summary>Splits a "user@domain" lightning address into its parts, throwing on an invalid address.</summary>
     internal static (string Username, string Domain) ParseLightningAddress(string lightningAddress)
@@ -112,6 +131,30 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
     }
 
     private Uri LnurlpMetadataUri => BuildLnurlpMetadataUri(_username, _domain, _usd);
+
+    private Uri GraphQLEndpoint => BlinkGraphQLPublicClient.GraphQLEndpointForDomain(_domain);
+
+    /// <summary>
+    /// Resolves whether this lightning address points at a custodial Galoy account (in which case we
+    /// mint invoices directly via the public GraphQL API) or a non-custodial Spark account (LNURL proxy).
+    /// The result is cached by <see cref="BlinkGraphQLPublicClient"/>. On any transport error we fall
+    /// back to non-custodial (LNURL) behaviour, which works for both account types.
+    /// </summary>
+    private async Task<BlinkGraphQLPublicClient.AccountInfo> ResolveAccount(CancellationToken cancellation)
+    {
+        try
+        {
+            return await BlinkGraphQLPublicClient.ResolveAccountAsync(
+                _httpClient, GraphQLEndpoint, _username, _usd, cancellation);
+        }
+        catch (Exception e)
+        {
+            _logger.LogDebug(e, "Could not resolve Blink account type for {Address}; assuming non-custodial (LNURL).",
+                _lightningAddress);
+            return new BlinkGraphQLPublicClient.AccountInfo(
+                BlinkGraphQLPublicClient.AccountKind.NonCustodial, null, null);
+        }
+    }
 
     private async Task<JObject> FetchLnurlMetadata(CancellationToken cancellation)
     {
@@ -157,16 +200,39 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
     public async Task<LightningInvoice> CreateInvoice(CreateInvoiceParams createInvoiceRequest,
         CancellationToken cancellation = new())
     {
+        // BTCPay allows a null amount for top-up/amountless invoices, but LNURL-pay is inherently
+        // amount-driven, so we require a concrete amount and fail with a clear message otherwise.
+        // BTCPay sends LightMoney.Zero (not null) for InvoiceType.TopUp, so reject <= 0 too.
+        //
+        // This is expected for top-up invoices and NOT a failure: BTCPay catches this per payment
+        // method and falls back to serving the LNURL QR, where the payer's wallet supplies the amount
+        // and the callback creates the invoice for that amount. BTCPay records the fallback in the
+        // invoice event log (shown in red) - the top-up invoice can still be paid via LNURL. Note this
+        // applies to any Blink lightning-address connection, including one pointing at a custodial
+        // account, because such connections only receive via LNURL-pay and cannot mint a bolt11 here.
+        // (Checked first so the routine top-up rejection avoids an unnecessary LNURL metadata fetch.)
+        if (createInvoiceRequest.Amount is null || createInvoiceRequest.Amount.MilliSatoshi <= 0)
+            throw new NotSupportedException(
+                "Blink lightning-address connections cannot create an amountless (top-up) bolt11 invoice. " +
+                "This is expected: BTCPay falls back to the LNURL payment method for top-up invoices, " +
+                "where the payer chooses the amount in their wallet.");
+
+        // Custodial Galoy accounts: mint the invoice directly via the public GraphQL API instead of
+        // proxying the LNURL server. This commits the BOLT11 to BTCPay's own description hash (so the
+        // store description shows in the payer's wallet) and, crucially, avoids serving a
+        // "text/identifier" that would make the Blink mobile app pay intraledger and bypass BTCPay's
+        // invoice entirely. Settlement is detected via lnInvoicePaymentStatusByHash (ledger-aware).
+        var account = await ResolveAccount(cancellation);
+        if (account.Kind == BlinkGraphQLPublicClient.AccountKind.Custodial && account.WalletId is { } walletId)
+        {
+            return await CreateCustodialInvoice(createInvoiceRequest, walletId, cancellation);
+        }
+
+        // Non-custodial (Spark) path: only now do we need the LNURL-pay metadata/callback.
         var metadata = await FetchLnurlMetadata(cancellation);
         var callback = metadata["callback"]?.Value<string>();
         if (string.IsNullOrEmpty(callback))
             throw new Exception("LNURL-pay response is missing a callback URL.");
-
-        // BTCPay allows a null amount for top-up/amountless invoices, but LNURL-pay is inherently
-        // amount-driven, so we require a concrete amount and fail with a clear message otherwise.
-        if (createInvoiceRequest.Amount is null)
-            throw new NotSupportedException(
-                "Blink non-custodial (Spark) accounts require an invoice amount; amountless/top-up invoices are not supported.");
 
         var amountMsat = createInvoiceRequest.Amount.MilliSatoshi;
         var min = metadata["minSendable"]?.Value<long>() ?? 1;
@@ -177,9 +243,13 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
         var query = new StringBuilder(callbackUri.Query.TrimStart('?'));
         if (query.Length > 0) query.Append('&');
         query.Append("amount=").Append(amountMsat);
-        // Pass along a description/comment when the endpoint allows comments (LUD-12).
+        // Pass along a description/comment when the endpoint allows comments (LUD-12). But when
+        // DescriptionHashOnly is set (the LNURL-pay callback path), Description is BTCPay's serialized
+        // LNURL metadata JSON, not a human-readable comment - forwarding that blob as a LUD-12 comment
+        // is wrong (and may be rejected by the LNURL server), so skip it in that case.
         var commentAllowed = metadata["commentAllowed"]?.Value<int>() ?? 0;
-        if (commentAllowed > 0 && !string.IsNullOrEmpty(createInvoiceRequest.Description))
+        if (commentAllowed > 0 && !createInvoiceRequest.DescriptionHashOnly &&
+            !string.IsNullOrEmpty(createInvoiceRequest.Description))
         {
             var comment = createInvoiceRequest.Description!;
             if (comment.Length > commentAllowed) comment = comment.Substring(0, commentAllowed);
@@ -231,6 +301,67 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
             Status = LightningInvoiceStatus.Unpaid,
             ExpiresAt = expiresAt
         };
+    }
+
+    /// <summary>
+    /// Mints a fixed-amount invoice for a custodial Galoy account via the public GraphQL API,
+    /// committing to BTCPay's own description hash so the returned BOLT11's h-tag matches the metadata
+    /// BTCPay serves to the payer. The invoice is tracked as custodial and settles via
+    /// lnInvoicePaymentStatusByHash.
+    /// </summary>
+    private async Task<LightningInvoice> CreateCustodialInvoice(CreateInvoiceParams createInvoiceRequest,
+        string walletId, CancellationToken cancellation)
+    {
+        var amountSat = (long)createInvoiceRequest.Amount!.ToUnit(LightMoneyUnit.Satoshi);
+
+        // Determine the description hash to commit to. In the LNURL callback path BTCPay passes the
+        // serialized metadata as Description with DescriptionHashOnly=true; hash it ourselves. If an
+        // explicit DescriptionHash is provided, prefer it.
+        var descriptionHashHex = ComputeDescriptionHashHex(createInvoiceRequest);
+        var memo = descriptionHashHex is null ? createInvoiceRequest.Description : null;
+        var expiresIn = Math.Max(1, (int)createInvoiceRequest.Expiry.TotalMinutes);
+
+        var (pr, _) = await BlinkGraphQLPublicClient.CreateInvoiceOnBehalfAsync(
+            _httpClient, GraphQLEndpoint, walletId, amountSat, descriptionHashHex, memo, expiresIn, _usd,
+            cancellation);
+
+        var bolt11 = BOLT11PaymentRequest.Parse(pr, _network);
+
+        // Defensive checks mirroring the LNURL path: the minted invoice must match the requested amount
+        // and, when a description hash was requested, carry that exact hash.
+        if (bolt11.MinimumAmount != createInvoiceRequest.Amount)
+            throw new Exception(
+                $"Blink minted an invoice for {bolt11.MinimumAmount.MilliSatoshi} msat but " +
+                $"{createInvoiceRequest.Amount.MilliSatoshi} msat was requested.");
+        if (createInvoiceRequest.DescriptionHash is { } dh && dh != bolt11.DescriptionHash)
+            throw new Exception("Blink minted an invoice with a mismatched description hash.");
+
+        var paymentHash = bolt11.PaymentHash?.ToString() ?? throw new Exception("Invoice has no payment hash.");
+        var expiresAt = bolt11.ExpiryDate;
+        _tracked[paymentHash] = new TrackedInvoice(pr, VerifyUrl: null, expiresAt, Custodial: true);
+
+        return new LightningInvoice
+        {
+            Id = paymentHash,
+            PaymentHash = paymentHash,
+            BOLT11 = pr,
+            Amount = bolt11.MinimumAmount,
+            Status = LightningInvoiceStatus.Unpaid,
+            ExpiresAt = expiresAt
+        };
+    }
+
+    /// <summary>Returns the 32-byte hex description hash to commit to, or null when none applies.
+    /// Prefers an explicit <c>DescriptionHash</c>; otherwise, when <c>DescriptionHashOnly</c> is set,
+    /// hashes the (metadata) Description - matching how BTCPay's LNURL endpoint computes the hash the
+    /// payer's wallet will verify.</summary>
+    internal static string? ComputeDescriptionHashHex(CreateInvoiceParams createInvoiceRequest)
+    {
+        if (createInvoiceRequest.DescriptionHash is { } dh)
+            return dh.ToString();
+        if (createInvoiceRequest.DescriptionHashOnly && !string.IsNullOrEmpty(createInvoiceRequest.Description))
+            return Encoders.Hex.EncodeData(Hashes.SHA256(Encoding.UTF8.GetBytes(createInvoiceRequest.Description!)));
+        return null;
     }
 
     // LUD-21 verify URLs on blink-lnurl-server are {verifyOrigin}/verify/{paymentHash}, where
@@ -299,17 +430,78 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
     }
 
     /// <summary>Computes the next per-invoice back-off after a verify failure:
-    /// delay = min(pollInterval * 2^errors, maxBackoff). Returns the incremented error count and delay.</summary>
+    /// delay = min(pollInterval * 2^errors, maxBackoff), with ±20% jitter to avoid lockstep retries
+    /// when many invoices fail against the same degraded verify endpoint at once (F5).
+    /// Returns the incremented error count and delay.</summary>
     internal static (int Errors, TimeSpan Delay) NextBackoff(int previousErrors, TimeSpan pollInterval, TimeSpan maxBackoff)
     {
         var errors = previousErrors + 1;
         var delayMs = Math.Min(pollInterval.TotalMilliseconds * Math.Pow(2, errors), maxBackoff.TotalMilliseconds);
+        delayMs = ApplyJitter(delayMs);
         return (errors, TimeSpan.FromMilliseconds(delayMs));
+    }
+
+    /// <summary>Applies ±20% random jitter to a delay (milliseconds), never below 1ms.</summary>
+    internal static double ApplyJitter(double delayMs)
+    {
+        var jitter = 1.0 + (Random.Shared.NextDouble() * 0.4 - 0.2); // [0.8, 1.2)
+        return Math.Max(1.0, delayMs * jitter);
+    }
+
+    /// <summary>Age-stepped minimum poll interval for a tracked invoice (F3): poll fresh invoices
+    /// fast for quick settlement feedback, then back off as the invoice ages so a long-lived unpaid
+    /// invoice is not hammered every few seconds for its whole expiry window.</summary>
+    internal static TimeSpan MinIntervalForAge(TimeSpan age)
+        => age < TimeSpan.FromMinutes(2) ? TimeSpan.FromSeconds(3)
+         : age < TimeSpan.FromMinutes(10) ? TimeSpan.FromSeconds(10)
+         : TimeSpan.FromSeconds(30);
+
+    /// <summary>The outcome of a single LUD-21 verify poll, so the poll loop can distinguish a real
+    /// invoice status from a transport/HTTP failure (which must trigger back-off) and from an explicit
+    /// "not found" (which, after confirmation, should evict the invoice) — without conflating them.</summary>
+    internal enum VerifyOutcome
+    {
+        /// <summary>verify returned a usable status (settled/unpaid/expired).</summary>
+        Status,
+        /// <summary>HTTP error / timeout / unparseable body. Transient — the poller should back off.</summary>
+        TransportError,
+        /// <summary>verify explicitly returned status=ERROR (the server has no such invoice).</summary>
+        NotFound,
     }
 
     public async Task<LightningInvoice?> GetInvoice(string invoiceId, CancellationToken cancellation = new())
     {
+        var (outcome, invoice) = await PollVerify(invoiceId, cancellation);
+
+        // BTCPay's poller drops an invoice from monitoring when GetInvoice returns null, and it only
+        // re-seeds monitored invoices on restart. So for a transient transport error we must NOT return
+        // null; return a minimal Unpaid so the invoice stays tracked and is retried. (BTCPay
+        // short-circuits Unpaid before reading amount/bolt11 fields, so this is safe.)
+        if (outcome == VerifyOutcome.TransportError && invoice is null)
+            return new LightningInvoice { Id = invoiceId, PaymentHash = invoiceId, Status = LightningInvoiceStatus.Unpaid };
+
+        // NotFound => return null so BTCPay stops monitoring this invoice.
+        return invoice;
+    }
+
+    /// <summary>Polls the LUD-21 verify URL for an invoice and reports the outcome. On TransportError the
+    /// returned invoice may be null (no cached bolt11) or a synthetic Unpaid; on NotFound it is null; on
+    /// Status it is the built invoice. Shared by GetInvoice and the settlement poll loop.</summary>
+    internal async Task<(VerifyOutcome Outcome, LightningInvoice? Invoice)> PollVerify(
+        string invoiceId, CancellationToken cancellation = new())
+    {
         _tracked.TryGetValue(invoiceId, out var tracked);
+
+        // Custodial invoices settle through the ledger-aware GraphQL status query, not LUD-21 verify.
+        // A tracked custodial entry is authoritative; on a fresh listener instance (no tracked entry)
+        // fall back to resolving the account type so we still pick the right settlement source.
+        var isCustodial = tracked?.Custodial ??
+            (await ResolveAccount(cancellation)).Kind == BlinkGraphQLPublicClient.AccountKind.Custodial;
+        if (isCustodial)
+        {
+            var custodial = await GetCustodialInvoice(invoiceId, tracked, cancellation);
+            return (custodial is null ? VerifyOutcome.NotFound : VerifyOutcome.Status, custodial);
+        }
 
         // Resolve the verify URL statelessly. On a fresh client instance (BTCPay's listener/poller)
         // there is no tracked invoice, so derive the verify origin from LNURL metadata.
@@ -337,37 +529,94 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
         }
 
         // Explicit "not found" from the verify endpoint => the invoice genuinely does not exist.
-        // Only in that case do we return null (BTCPay will stop tracking it).
         if (json?["status"]?.Value<string>()?.Equals("ERROR", StringComparison.OrdinalIgnoreCase) == true)
         {
             _logger.LogDebug("Blink verify returned ERROR for {PaymentHash}: {Reason}", invoiceId,
                 json["reason"]?.Value<string>());
-            return null;
+            return (VerifyOutcome.NotFound, null);
         }
 
         var pr = tracked?.Bolt11 ?? json?["pr"]?.Value<string>();
         if (pr is null)
         {
-            // Transient transport error on a fresh client (no cached bolt11). Do NOT return null:
-            // BTCPay's poller drops an invoice from monitoring when GetInvoice returns null, and it
-            // only re-seeds monitored invoices on restart. Instead return a minimal Unpaid invoice so
-            // the invoice stays tracked and is retried. (BTCPay short-circuits Unpaid before reading
-            // amount/bolt11 fields, so this is safe.)
-            if (transportError)
-                return new LightningInvoice
-                {
-                    Id = invoiceId,
-                    PaymentHash = invoiceId,
-                    Status = LightningInvoiceStatus.Unpaid
-                };
-            return null;
+            // No usable bolt11. On a transport error there is no status to report (invoice stays
+            // tracked); on a 2xx with no pr and no cached bolt11 there is nothing to build.
+            return transportError
+                ? (VerifyOutcome.TransportError, null)
+                : (VerifyOutcome.NotFound, null);
         }
+
+        if (transportError)
+            return (VerifyOutcome.TransportError, null);
 
         var settled = json?["settled"]?.Value<bool>() ?? false;
         var preimage = json?["preimage"]?.Value<string>();
         var expiresAt = tracked?.ExpiresAt ?? BOLT11PaymentRequest.Parse(pr, _network).ExpiryDate;
-        var t = new TrackedInvoice(pr, verifyUrl, expiresAt);
-        return BuildInvoice(invoiceId, t, settled, preimage);
+        var t = new TrackedInvoice(pr, verifyUrl, expiresAt)
+        {
+            CreatedAt = tracked?.CreatedAt ?? DateTimeOffset.UtcNow
+        };
+        return (VerifyOutcome.Status, BuildInvoice(invoiceId, t, settled, preimage));
+    }
+
+    /// <summary>
+    /// Settlement for custodial invoices via the ledger-aware <c>lnInvoicePaymentStatusByHash</c> query.
+    /// This reports PAID even when Galoy smart-settles a Blink-to-Blink payment intraledger, which the
+    /// LUD-21 verify endpoint would miss. No preimage is available from this query, so payments are
+    /// recorded without one (BTCPay supports this).
+    /// </summary>
+    private async Task<LightningInvoice?> GetCustodialInvoice(string invoiceId, TrackedInvoice? tracked,
+        CancellationToken cancellation)
+    {
+        string? status;
+        try
+        {
+            status = await BlinkGraphQLPublicClient.GetPaymentStatusByHashAsync(
+                _httpClient, GraphQLEndpoint, invoiceId, cancellation);
+        }
+        catch (Exception e)
+        {
+            // Transient error: keep the invoice tracked (return Unpaid rather than null) so BTCPay's
+            // poller retries instead of dropping it. Matches the LUD-21 path's behaviour.
+            _logger.LogDebug(e, "Blink GraphQL status poll failed for {PaymentHash}", invoiceId);
+            return new LightningInvoice
+            {
+                Id = invoiceId,
+                PaymentHash = invoiceId,
+                Status = LightningInvoiceStatus.Unpaid
+            };
+        }
+
+        if (status is null)
+            return null; // unknown invoice
+
+        var mapped = BlinkLightningClient.MapInvoiceStatus(status);
+        var settled = mapped == LightningInvoiceStatus.Paid;
+
+        LightMoney? amount = null;
+        string? bolt11 = tracked?.Bolt11;
+        DateTimeOffset? expiresAt = tracked?.ExpiresAt;
+        if (bolt11 is not null)
+        {
+            var parsed = BOLT11PaymentRequest.Parse(bolt11, _network);
+            amount = parsed.MinimumAmount;
+            expiresAt ??= parsed.ExpiryDate;
+        }
+
+        // Respect expiry the same way DetermineStatus does for the LUD-21 path.
+        var finalStatus = DetermineStatus(settled, expiresAt ?? DateTimeOffset.MaxValue, DateTimeOffset.UtcNow);
+
+        return new LightningInvoice
+        {
+            Id = invoiceId,
+            PaymentHash = invoiceId,
+            BOLT11 = bolt11,
+            Amount = amount,
+            AmountReceived = settled ? amount : null,
+            Status = finalStatus,
+            PaidAt = settled ? DateTimeOffset.UtcNow : null,
+            ExpiresAt = expiresAt ?? default
+        };
     }
 
     private LightningInvoice BuildInvoice(string paymentHash, TrackedInvoice tracked, bool settled, string? preimage)
@@ -450,34 +699,94 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
 
     public async Task<ILightningInvoiceListener> Listen(CancellationToken cancellation = new())
     {
-        return new BlinkLnAddressListener(this, _logger);
+        // F4: a single shared poll loop per lightning address, ref-counted across all listeners.
+        // Previously every Listen() spawned an independent PollLoop over the same shared registry,
+        // multiplying the /verify/* request rate by the number of live listeners.
+        var poller = SharedVerifyPoller.Acquire(_lightningAddress, this, _logger);
+        return new BlinkLnAddressListener(poller);
     }
 
     /// <summary>
-    /// Polls the LUD-21 verify URLs of tracked, unpaid invoices and yields them as they settle.
-    /// Spark settlement is delivered to blink-lnurl-server via an SSP webhook, so detection may lag
-    /// the actual payment by a few seconds; there is no websocket for non-custodial accounts.
+    /// One shared verify-polling loop per lightning address (static registry, ref-counted). Polls the
+    /// LUD-21 verify URLs of tracked, unpaid invoices and broadcasts settlements to all listeners.
+    ///
+    /// Fixes vs. the previous per-listener loop:
+    ///  - F1: transport/HTTP errors trigger capped exponential back-off (they are no longer swallowed
+    ///        and mistaken for success), so a degraded blink-lnurl-server is not hammered.
+    ///  - F2: invoices the server reports as not-found are evicted after a few confirmations instead of
+    ///        being polled forever.
+    ///  - F3: the per-invoice poll interval widens as the invoice ages (fresh = fast, stale = slow).
+    ///  - F4: one loop per address regardless of how many times Listen() is called.
+    ///
+    /// Spark settlement is delivered to blink-lnurl-server via an SSP webhook, so detection may lag the
+    /// actual payment by a few seconds; there is no websocket for non-custodial accounts.
     /// </summary>
-    public class BlinkLnAddressListener : ILightningInvoiceListener
+    public sealed class SharedVerifyPoller
     {
         private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(3);
         private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(30);
+
+        // Evict an invoice only after this many consecutive not-found (status=ERROR) responses, to
+        // tolerate the brief race between invoice creation and the invoice becoming visible to verify.
+        internal const int NotFoundEvictionThreshold = 3;
+
+        private static readonly ConcurrentDictionary<string, SharedVerifyPoller> _byAddress = new();
+
+        private readonly string _address;
         private readonly BlinkLnAddressLightningClient _client;
         private readonly ILogger _logger;
-        private readonly Channel<LightningInvoice> _channel = Channel.CreateUnbounded<LightningInvoice>();
         private readonly CancellationTokenSource _cts = new();
         private readonly Task _pollTask;
+        private int _refCount;
 
-        // Per-invoice error back-off: number of consecutive failures and the earliest next attempt.
-        private readonly System.Collections.Generic.Dictionary<string, (int Errors, DateTimeOffset NextAttempt)>
-            _backoff = new();
+        // Per-invoice poll scheduling: consecutive transport errors, consecutive not-founds, and the
+        // earliest next attempt (covers both error back-off and the age-stepped steady-state interval).
+        private readonly System.Collections.Generic.Dictionary<string, InvoicePollState> _state = new();
 
-        public BlinkLnAddressListener(BlinkLnAddressLightningClient client, ILogger logger)
+        private sealed class InvoicePollState
         {
+            public int Errors;
+            public int NotFounds;
+            public DateTimeOffset NextAttempt;
+        }
+
+        /// <summary>Raised when the poller observes an invoice settle. Listeners filter to their own.</summary>
+        public event Action<LightningInvoice>? Settled;
+
+        private SharedVerifyPoller(string address, BlinkLnAddressLightningClient client, ILogger logger)
+        {
+            _address = address;
             _client = client;
             _logger = logger;
             _pollTask = Task.Run(() => PollLoop(_cts.Token));
         }
+
+        /// <summary>Returns the shared poller for the address, creating and starting it on first use.</summary>
+        public static SharedVerifyPoller Acquire(string address, BlinkLnAddressLightningClient client, ILogger logger)
+        {
+            return _byAddress.AddOrUpdate(
+                address,
+                _ => { var p = new SharedVerifyPoller(address, client, logger); p._refCount = 1; return p; },
+                (_, existing) => { Interlocked.Increment(ref existing._refCount); return existing; });
+        }
+
+        /// <summary>Releases a listener's hold; stops and unregisters the loop when the last one leaves.</summary>
+        public void Release()
+        {
+            if (Interlocked.Decrement(ref _refCount) > 0)
+                return;
+            _byAddress.TryRemove(_address, out _);
+            _cts.Cancel();
+            try { _pollTask.Wait(TimeSpan.FromSeconds(5)); }
+            catch { /* cancellation / bounded wait */ }
+            _cts.Dispose();
+        }
+
+        /// <summary>Number of live listeners holding this poller (exposed for tests).</summary>
+        internal int RefCount => Volatile.Read(ref _refCount);
+
+        /// <summary>How many shared pollers currently exist across all addresses (exposed for tests).</summary>
+        internal static int ActivePollerCount => _byAddress.Count;
 
         private async Task PollLoop(CancellationToken cancellation)
         {
@@ -491,24 +800,66 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
                         cancellation.ThrowIfCancellationRequested();
                         var (paymentHash, tracked) = (kv.Key, kv.Value);
 
-                        // Skip this invoice while it is backing off after repeated failures.
-                        if (_backoff.TryGetValue(paymentHash, out var b) && now < b.NextAttempt)
+                        var st = _state.TryGetValue(paymentHash, out var s) ? s : (_state[paymentHash] = new InvoicePollState());
+
+                        // F1/F3: skip while backing off (after errors) or within this invoice's
+                        // age-stepped minimum interval.
+                        if (now < st.NextAttempt)
                             continue;
 
+                        // A settled/expired invoice observed via a prior poll is pruned below; here we
+                        // only prune on pure time-based expiry without needing a verify response.
                         try
                         {
-                            var invoice = await _client.GetInvoice(paymentHash, cancellation);
-                            _backoff.Remove(paymentHash); // success resets back-off
-                            if (invoice is null) continue;
-                            if (invoice.Status == LightningInvoiceStatus.Paid)
+                            var (outcome, invoice) = await _client.PollVerify(paymentHash, cancellation);
+                            switch (outcome)
                             {
-                                RemoveTracked(paymentHash);
-                                await _channel.Writer.WriteAsync(invoice, cancellation);
-                            }
-                            else if (invoice.Status == LightningInvoiceStatus.Expired ||
-                                     tracked.ExpiresAt < DateTimeOffset.UtcNow)
-                            {
-                                RemoveTracked(paymentHash);
+                                case VerifyOutcome.TransportError:
+                                {
+                                    // F1: a real failure => back off (was previously swallowed as success).
+                                    st.NotFounds = 0;
+                                    var (errors, delay) = NextBackoff(st.Errors, PollInterval, MaxBackoff);
+                                    st.Errors = errors;
+                                    st.NextAttempt = DateTimeOffset.UtcNow.Add(delay);
+                                    break;
+                                }
+                                case VerifyOutcome.NotFound:
+                                {
+                                    // F2: evict after consecutive not-founds instead of polling forever.
+                                    st.Errors = 0;
+                                    st.NotFounds++;
+                                    if (st.NotFounds >= NotFoundEvictionThreshold)
+                                    {
+                                        RemoveTracked(paymentHash);
+                                        break;
+                                    }
+                                    // Not a transport error, but slow down re-checks of a missing invoice.
+                                    st.NextAttempt = DateTimeOffset.UtcNow.Add(MaxBackoff);
+                                    break;
+                                }
+                                case VerifyOutcome.Status:
+                                {
+                                    // Success: clear failure state and apply the age-stepped steady-state interval (F3).
+                                    st.Errors = 0;
+                                    st.NotFounds = 0;
+                                    var age = DateTimeOffset.UtcNow - tracked.CreatedAt;
+                                    var intervalMs = ApplyJitter(MinIntervalForAge(age).TotalMilliseconds);
+                                    st.NextAttempt = DateTimeOffset.UtcNow.Add(TimeSpan.FromMilliseconds(intervalMs));
+
+                                    if (invoice is null)
+                                        break;
+                                    if (invoice.Status == LightningInvoiceStatus.Paid)
+                                    {
+                                        RemoveTracked(paymentHash);
+                                        Settled?.Invoke(invoice);
+                                    }
+                                    else if (invoice.Status == LightningInvoiceStatus.Expired ||
+                                             tracked.ExpiresAt < DateTimeOffset.UtcNow)
+                                    {
+                                        RemoveTracked(paymentHash);
+                                    }
+                                    break;
+                                }
                             }
                         }
                         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -517,14 +868,22 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
                         }
                         catch (Exception e)
                         {
-                            // Capped exponential back-off so a degraded blink-lnurl-server is not
-                            // hammered every 3s per invoice.
-                            var prevErrors = _backoff.TryGetValue(paymentHash, out var prev) ? prev.Errors : 0;
-                            var (errors, delay) = NextBackoff(prevErrors, PollInterval, MaxBackoff);
-                            _backoff[paymentHash] = (errors, DateTimeOffset.UtcNow.Add(delay));
+                            // Defensive back-off for any unexpected throw escaping PollVerify.
+                            var (errors, delay) = NextBackoff(st.Errors, PollInterval, MaxBackoff);
+                            st.Errors = errors;
+                            st.NextAttempt = DateTimeOffset.UtcNow.Add(delay);
                             _logger.LogDebug(e, "Error polling Blink invoice {PaymentHash} (attempt {Errors}); backing off {DelayMs}ms",
                                 paymentHash, errors, delay.TotalMilliseconds);
                         }
+                    }
+
+                    // Prune poll state for invoices no longer tracked so _state stays bounded.
+                    if (_state.Count > 0)
+                    {
+                        var live = new HashSet<string>(_client._tracked.Keys);
+                        foreach (var key in _state.Keys.ToArray())
+                            if (!live.Contains(key))
+                                _state.Remove(key);
                     }
 
                     await Task.Delay(PollInterval, cancellation);
@@ -535,14 +894,33 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
             }
             catch (Exception e)
             {
-                _channel.Writer.TryComplete(e);
+                _logger.LogDebug(e, "Blink shared verify poll loop for {Address} terminated unexpectedly", _address);
             }
         }
 
         private void RemoveTracked(string paymentHash)
         {
             _client.RemoveTrackedInvoice(paymentHash);
-            _backoff.Remove(paymentHash);
+            _state.Remove(paymentHash);
+        }
+    }
+
+    /// <summary>
+    /// A cheap per-Listen() subscriber over the shared poller's settlement broadcast. It holds no poll
+    /// loop of its own — the single SharedVerifyPoller per address does the polling and fans out.
+    /// </summary>
+    public sealed class BlinkLnAddressListener : ILightningInvoiceListener
+    {
+        private readonly SharedVerifyPoller _poller;
+        private readonly Channel<LightningInvoice> _channel = Channel.CreateUnbounded<LightningInvoice>();
+        private readonly CancellationTokenSource _cts = new();
+        private readonly Action<LightningInvoice> _handler;
+
+        public BlinkLnAddressListener(SharedVerifyPoller poller)
+        {
+            _poller = poller;
+            _handler = inv => _channel.Writer.TryWrite(inv);
+            _poller.Settled += _handler;
         }
 
         public async Task<LightningInvoice> WaitInvoice(CancellationToken cancellation)
@@ -553,13 +931,11 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
 
         public void Dispose()
         {
+            _poller.Settled -= _handler;
             _cts.Cancel();
-            // Wait (bounded) for the poll loop to observe cancellation before completing the channel,
-            // so an in-flight WriteAsync cannot race TryComplete and surface a ChannelClosedException.
-            try { _pollTask.Wait(TimeSpan.FromSeconds(5)); }
-            catch { /* AggregateException from cancellation or timeout: ignore on dispose */ }
             _channel.Writer.TryComplete();
             _cts.Dispose();
+            _poller.Release();
         }
     }
 
