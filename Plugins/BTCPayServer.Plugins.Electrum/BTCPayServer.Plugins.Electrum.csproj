@@ -9,7 +9,7 @@
     <PropertyGroup>
         <Product>Electrum</Product>
         <Description>Runs an Electrum (ElectrumX/Fulcrum) backend alongside NBXplorer — a bootstrap while NBXplorer syncs and an always-on fallback if it goes down — with automatic per-wallet failover. Mainnet only.</Description>
-        <Version>1.1.2</Version>
+        <Version>1.1.3</Version>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     </PropertyGroup>
     <!-- Plugin development properties -->
