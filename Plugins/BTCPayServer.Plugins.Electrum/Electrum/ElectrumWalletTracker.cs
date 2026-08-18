@@ -250,6 +250,12 @@ public class ElectrumWalletTracker
             var addr = await ctx.TrackedAddresses.FindAsync(new object[] { scripthash }, ct);
             if (addr == null) return newTxs;
 
+            // All of this wallet's tracked addresses, so a tx paying several of them is
+            // fully attributed in one pass (later notifications dedupe on txid).
+            var walletAddresses = await ctx.TrackedAddresses
+                .Where(a => a.WalletId == addr.WalletId)
+                .ToDictionaryAsync(a => a.Scripthash, ct);
+
             // Fetch current history from Electrum
             var history = await _client.ScripthashGetHistoryAsync(scripthash, ct);
             var existingTxids = await ctx.Transactions
@@ -292,7 +298,7 @@ public class ElectrumWalletTracker
 
                 ctx.Transactions.Add(trackedTx);
 
-                var txInfo = BuildNewTransactionInfo(tx, addr, strategy, item);
+                var txInfo = BuildNewTransactionInfo(tx, strategy, item, walletAddresses);
                 if (txInfo != null)
                     newTxs.Add(txInfo);
             }
@@ -1311,8 +1317,8 @@ public class ElectrumWalletTracker
     }
 
     private NewTransactionInfo BuildNewTransactionInfo(
-        Transaction tx, TrackedAddress matchedAddr,
-        DerivationStrategyBase strategy, ElectrumHistoryItem historyItem)
+        Transaction tx, DerivationStrategyBase strategy, ElectrumHistoryItem historyItem,
+        IReadOnlyDictionary<string, TrackedAddress> walletAddresses)
     {
         var info = new NewTransactionInfo
         {
@@ -1325,24 +1331,23 @@ public class ElectrumWalletTracker
             Transaction = tx
         };
 
-        // Find outputs that match our tracked addresses
+        // Attribute each output to whichever of this wallet's tracked addresses it pays.
         for (var i = 0; i < tx.Outputs.Count; i++)
         {
             var output = tx.Outputs[i];
             var scriptHash = ScriptHashUtility.ComputeScriptHash(output.ScriptPubKey);
 
-            // Check if this output goes to the notified address
-            if (scriptHash == matchedAddr.Scripthash)
+            if (walletAddresses.TryGetValue(scriptHash, out var outputAddr))
             {
-                var parts = matchedAddr.KeyPath.Split('/');
+                var parts = outputAddr.KeyPath.Split('/');
                 var keyIndex = parts.Length == 2 && int.TryParse(parts[1], out var idx) ? idx : 0;
 
                 info.Outputs.Add(new OutputInfo
                 {
-                    Address = matchedAddr.Address,
+                    Address = outputAddr.Address,
                     Index = i,
                     Value = output.Value,
-                    KeyPath = matchedAddr.KeyPath,
+                    KeyPath = outputAddr.KeyPath,
                     KeyIndex = keyIndex
                 });
             }
