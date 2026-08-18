@@ -397,7 +397,7 @@ public class BlinkLnAddressLightningClient : IExtendedLightningClient
         var validPreimage = settled ? ValidatePreimage(paymentHash, preimage) : null;
         if (settled && validPreimage is null)
             _logger.LogWarning("Blink reported {PaymentHash} settled without a valid preimage; not marking paid.", paymentHash);
-        var paid = validPreimage is not null;
+        var paid = validPreimage is not null && reportedAmount is not null;
         var status = DetermineStatus(paid, tracked.ExpiresAt, DateTimeOffset.UtcNow);
 
         return new LightningInvoice
