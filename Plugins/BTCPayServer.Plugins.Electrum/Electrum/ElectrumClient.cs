@@ -142,7 +142,7 @@ public class ElectrumClient : IAsyncDisposable
             Stream stream = _tcpClient.GetStream();
             if (_settings.UseTls)
             {
-                var sslStream = new SslStream(stream, false);
+                var sslStream = new SslStream(stream, false, (_, _, _, _) => true);
                 await sslStream.AuthenticateAsClientAsync(host);
                 stream = sslStream;
             }

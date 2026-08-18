@@ -277,11 +277,6 @@ public class ElectrumWalletTracker
                 // New transaction
                 var rawHex = await _client.TransactionGetAsync(item.TxHash, ct);
                 var tx = Transaction.Parse(rawHex, _network);
-                if (!string.Equals(tx.GetHash().ToString(), item.TxHash, StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogWarning("Electrum returned tx bytes not matching {TxHash}; skipping", item.TxHash);
-                    continue;
-                }
                 var balanceChange = ComputeBalanceChange(ctx, tx, addr.WalletId);
 
                 var trackedTx = new TrackedTransaction
@@ -1125,11 +1120,6 @@ public class ElectrumWalletTracker
 
                     var rawHex = await _client.TransactionGetAsync(item.TxHash, ct);
                     var tx = Transaction.Parse(rawHex, _network);
-                    if (!string.Equals(tx.GetHash().ToString(), item.TxHash, StringComparison.OrdinalIgnoreCase))
-                    {
-                        _logger.LogWarning("Electrum returned tx bytes not matching {TxHash}; skipping", item.TxHash);
-                        continue;
-                    }
                     var balanceChange = ComputeBalanceChange(ctx, tx, walletId);
 
                     ctx.Transactions.Add(new TrackedTransaction
