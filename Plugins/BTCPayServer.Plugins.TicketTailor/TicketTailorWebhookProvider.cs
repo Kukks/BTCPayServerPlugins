@@ -154,6 +154,7 @@ public class TicketTailorWebhookProvider(
                     InvoiceEventData.EventSeverity.Info);
                 while (hold?.TotalOnHold > 0)
                 {
+                    var remainingBefore = hold.TotalOnHold;
                     foreach (var tt in hold.Quantities.Where(quantity => quantity.Quantity > 0))
                     {
 
@@ -179,7 +180,13 @@ public class TicketTailorWebhookProvider(
                         }
 
                         hold = await client.GetHold(holdId);
+                        if (hold is null || ticketResult.error is not null)
+                            break;
                     }
+
+                    if (hold is null || errors.Count > 0 || tickets.Count >= holdOriginalAmount ||
+                        hold.TotalOnHold >= remainingBefore)
+                        break;
                 }
 
 
