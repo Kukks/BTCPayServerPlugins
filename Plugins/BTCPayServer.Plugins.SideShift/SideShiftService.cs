@@ -237,6 +237,16 @@ namespace BTCPayServer.Plugins.SideShift
                 }
                 var coins = await response.Content.ReadAsStringAsync().ContinueWith(t => JsonConvert.DeserializeObject<JObject>(t.Result));
                
+                static bool IsSafeIdentifier(string s)
+                {
+                    if (string.IsNullOrEmpty(s)) return false;
+                    foreach (var c in s)
+                    {
+                        var ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
+                        if (!ok) return false;
+                    }
+                    return true;
+                }
                 foreach (var asset in coins["depositMethods"].Children<JProperty>())
                 {
                     if (asset.Value["enabled"].Value<bool>() is not true)
@@ -248,6 +258,12 @@ namespace BTCPayServer.Plugins.SideShift
                    var coinType = asset.Value["fixedOnly"].Value<bool>() ? CoinType.FixedOnly : asset.Value["variableOnly"].Value<bool>()? CoinType.VariableOnly : CoinType.Both;
                    var network = asset.Value["network"].Value<string>();
                    var cryptoCode = asset.Value["asset"].Value<string>();
+                   // SideShift is untrusted and these ids are rendered into the checkout page's Vue
+                   // expressions; skip any that aren't plain identifier characters.
+                   if (!IsSafeIdentifier(id) || !IsSafeIdentifier(network) || !IsSafeIdentifier(cryptoCode))
+                   {
+                       continue;
+                   }
                    result.Add(new SideshiftDepositCoin()
                    {
                        Id = id,
