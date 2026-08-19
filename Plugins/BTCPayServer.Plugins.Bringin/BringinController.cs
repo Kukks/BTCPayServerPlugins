@@ -54,9 +54,13 @@ public class BringinController : Controller
     [IgnoreAntiforgeryToken]
     public async Task<IActionResult> Callback(string storeId, string code, [FromBody]BringinVerificationUpdate content)
     {
+        // Authenticate the shared code against read-only settings BEFORE any state change: Update()
+        // takes the store edit lock, so validating first stops an anonymous caller from holding it.
+        var settings = await _bringinService.Get(storeId);
+        if (settings?.Code != code) return BadRequest();
+        if (content.verificationStatus != "APPROVED") return BadRequest("Verification not approved");
+
         var vm = await _bringinService.Update(storeId);
-        if(vm.Code != code) return BadRequest();
-        if(content.verificationStatus != "APPROVED") return BadRequest("Verification not approved");
 
         if (string.IsNullOrEmpty(vm.ApiKey) && !string.IsNullOrEmpty(content.apikey))
         {
