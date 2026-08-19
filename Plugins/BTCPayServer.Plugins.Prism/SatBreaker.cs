@@ -274,6 +274,7 @@ namespace BTCPayServer.Plugins.Prism
                             continue;
                         }
 
+                        var dirty = false;
                         foreach (var payout in storePayouts)
                         {
 
@@ -347,9 +348,10 @@ namespace BTCPayServer.Plugins.Prism
                             }
 
                             prismSettings.PendingPayouts.Remove(payout.Id);
+                            dirty = true;
                         }
 
-                        if (await CreatePayouts(storePayouts.Key, prismSettings, new()))
+                        if (await CreatePayouts(storePayouts.Key, prismSettings, new()) || dirty)
                         {
                             await UpdatePrismSettingsForStore(storePayouts.Key, prismSettings, true);
                         }
