@@ -135,8 +135,14 @@ namespace BTCPayServer.Plugins.DataErasure
 
                             if (count > 0)
                                 _logger.LogInformation($"Erased {count} invoice data for store {setting.Key}");
-                            setting.Value.LastRunCutoff = cutoffDate;
-                            await SetCore(setting.Key, setting.Value);
+                            // Persist only cutoff progress against the latest settings, so a concurrent
+                            // user change (e.g. disabling erasure mid-cycle) is not clobbered.
+                            var latest = await Get(setting.Key);
+                            if (latest != null)
+                            {
+                                latest.LastRunCutoff = cutoffDate;
+                                await SetCore(setting.Key, latest);
+                            }
                         }
                         catch (OperationCanceledException)
                         {
