@@ -314,6 +314,18 @@ public class ElectrumWalletTracker
                 await ExtendGapIfNeeded(ctx, addr, ct);
             }
 
+            // A single tx can pay several of this wallet's addresses; mark every co-paid address used
+            // too, so none is left eligible for reissue by GetNextUnusedAddressAsync.
+            var addressLookup = walletAddresses.Values.ToDictionary(a => a.Address);
+            foreach (var paidAddress in newTxs.SelectMany(t => t.Outputs).Select(o => o.Address).Distinct())
+            {
+                if (addressLookup.TryGetValue(paidAddress, out var coPaid) && !coPaid.IsUsed)
+                {
+                    coPaid.IsUsed = true;
+                    await ExtendGapIfNeeded(ctx, coPaid, ct);
+                }
+            }
+
             await ctx.SaveChangesAsync(ct);
         }
         finally
