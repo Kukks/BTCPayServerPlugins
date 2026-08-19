@@ -322,7 +322,12 @@ public class ElectrumWalletTracker
                 if (addressLookup.TryGetValue(paidAddress, out var coPaid) && !coPaid.IsUsed)
                 {
                     coPaid.IsUsed = true;
-                    await ExtendGapIfNeeded(ctx, coPaid, ct);
+                    // Best-effort: a failed gap-extension subscription must not abort persisting the tx.
+                    try { await ExtendGapIfNeeded(ctx, coPaid, ct); }
+                    catch (Exception e) when (!ct.IsCancellationRequested)
+                    {
+                        _logger.LogWarning(e, "Failed to extend gap for co-paid address {Address}", coPaid.Address);
+                    }
                 }
             }
 
