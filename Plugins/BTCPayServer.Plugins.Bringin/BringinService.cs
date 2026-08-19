@@ -223,6 +223,8 @@ public class BringinService : EventHostedServiceBase
                 if (methodSetting.Value.FiatThreshold)
                 {
                     var rate = await bringinClient.GetRate();
+                    if (rate.BringinPrice <= 0)
+                        throw new Exception($"Bringin returned an invalid exchange rate ({rate.BringinPrice}).");
                     thresholdAmount = methodSetting.Value.Threshold / rate.BringinPrice;
                 }
 
@@ -279,6 +281,8 @@ public class BringinService : EventHostedServiceBase
         {
             
             var rate = await bringinClient.GetRate();
+            if (rate.BringinPrice <= 0)
+                throw new Exception($"Bringin returned an invalid exchange rate ({rate.BringinPrice}).");
             var thresholdAmount = supportedMethod.FiatMinimumAmount  / rate.BringinPrice;
             if (amountBtc.ToDecimal(MoneyUnit.BTC) <= thresholdAmount)
             {
