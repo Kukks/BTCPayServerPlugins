@@ -34,15 +34,12 @@ namespace BTCPayServer.Plugins.DataErasure
 
         public async Task Set(string storeId, DataErasureSettings settings, bool clearDate = false)
         {
-            _cts?.Cancel();
-            await _runningLock.WaitAsync();
             var existing = await Get(storeId);
-            settings.LastRunCutoff = clearDate? null:  existing?.LastRunCutoff;
+            settings.LastRunCutoff = clearDate ? null : existing?.LastRunCutoff;
             await SetCore(storeId, settings);
-            _runningLock.Release();
-            var cts = new CancellationTokenSource();
-            _cts = cts;
-            _ = Run(cts);
+            // Wake the single worker so new settings apply promptly; coalesced to one pending run.
+            try { _wake.Release(); }
+            catch (SemaphoreFullException) { }
         }
 
         private async Task SetCore(string storeId, DataErasureSettings settings)
@@ -51,21 +48,14 @@ namespace BTCPayServer.Plugins.DataErasure
         }
 
         public bool IsRunning { get; private set; }
-        private readonly SemaphoreSlim _runningLock = new(1, 1);
 
-        private async Task Run(CancellationTokenSource cts)
+        // Signals the worker to run a cycle immediately, bounded to a single pending wake.
+        private readonly SemaphoreSlim _wake = new(0, 1);
+
+        private async Task RunLoop(CancellationToken ct)
         {
-            while (!cts.IsCancellationRequested)
+            while (!ct.IsCancellationRequested)
             {
-                try
-                {
-                    await _runningLock.WaitAsync(cts.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-
                 IsRunning = true;
                 try
                 {
@@ -81,7 +71,7 @@ namespace BTCPayServer.Plugins.DataErasure
                             {
                                 await using var db = _dbContextFactory.CreateContext();
                                 db.Invoices.RemoveRange(db.Invoices.Where(i => i.StoreDataId == setting.Key && i.Created < cutoffDate && (setting.Value.LastRunCutoff == null || i.Created > setting.Value.LastRunCutoff)));
-                                count = await db.SaveChangesAsync(cts.Token);
+                                count = await db.SaveChangesAsync(ct);
                             }
                             else
                             {
@@ -95,7 +85,7 @@ namespace BTCPayServer.Plugins.DataErasure
                                         StoreId = new[] {setting.Key},
                                         Skip = skip,
                                         Take = 100
-                                    }, cts.Token);
+                                    }, ct);
 
                                     foreach (var invoice in invoices)
                                     {
@@ -168,29 +158,25 @@ namespace BTCPayServer.Plugins.DataErasure
                 finally
                 {
                     IsRunning = false;
-                    _runningLock.Release();
                 }
 
                 try
                 {
-                    await Task.Delay(TimeSpan.FromHours(1), cts.Token);
+                    await _wake.WaitAsync(TimeSpan.FromHours(1), ct);
                 }
                 catch (OperationCanceledException)
                 {
                     break;
                 }
             }
-
-            cts.Dispose();
         }
 
         private CancellationTokenSource _cts;
 
         public Task StartAsync(CancellationToken cancellationToken)
         {
-            var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            _cts = cts;
-            _ = Run(cts);
+            _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _ = RunLoop(_cts.Token);
             return Task.CompletedTask;
         }
 
