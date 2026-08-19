@@ -64,7 +64,17 @@ public class OpenSatsPrismClaimCreate : IPluginHookFilter
             var result = await httpClient.PostAsync("https://opensats.org/api/btcpay",content).ConfigureAwait(false);
 
             var rawInvoice = JObject.Parse(await result.Content.ReadAsStringAsync().ConfigureAwait(false));
-            var invoiceUrl = $"{rawInvoice.Value<string>("checkoutLink").TrimEnd('/')}/{paymentMethod}/status";
+            // checkoutLink comes from the third-party response; pin it to opensats.org over HTTPS so a
+            // hostile response can't turn this into a server-side request against an arbitrary/internal URL.
+            var checkoutLink = rawInvoice.Value<string>("checkoutLink");
+            if (!Uri.TryCreate(checkoutLink, UriKind.Absolute, out var checkoutUri) ||
+                checkoutUri.Scheme != Uri.UriSchemeHttps ||
+                !(checkoutUri.Host.Equals("opensats.org", StringComparison.OrdinalIgnoreCase) ||
+                  checkoutUri.Host.EndsWith(".opensats.org", StringComparison.OrdinalIgnoreCase)))
+            {
+                return null;
+            }
+            var invoiceUrl = $"{checkoutLink.TrimEnd('/')}/{paymentMethod}/status";
             var invoiceBtcpayModel = JObject.Parse(await httpClient.GetStringAsync(invoiceUrl).ConfigureAwait(false));
             var destination = invoiceBtcpayModel.Value<string>("btcAddress");
             var receiptLink = invoiceBtcpayModel.Value<string>("receiptLink");
