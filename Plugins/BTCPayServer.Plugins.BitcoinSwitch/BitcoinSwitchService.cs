@@ -174,11 +174,22 @@ List<AppCartItem> cartItems = null;
                             return;
                         foreach (var socket in sockets)
                         {
-                            await socket.SendAsync(
-                                new ArraySegment<byte>(buffer),
-                                WebSocketMessageType.Text,
-                                true,
-                                cancellationToken);
+                            // Isolate each socket with its own timeout so one stalled or faulted
+                            // listener can't block or abort delivery to the real device.
+                            try
+                            {
+                                using var sendCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                                sendCts.CancelAfter(TimeSpan.FromSeconds(5));
+                                await socket.SendAsync(
+                                    new ArraySegment<byte>(buffer),
+                                    WebSocketMessageType.Text,
+                                    true,
+                                    sendCts.Token);
+                            }
+                            catch (Exception ex)
+                            {
+                                Logs.PayServer.LogWarning(ex, "Failed to send BitcoinSwitch command to a socket; continuing");
+                            }
                         }
                                 
                     }
