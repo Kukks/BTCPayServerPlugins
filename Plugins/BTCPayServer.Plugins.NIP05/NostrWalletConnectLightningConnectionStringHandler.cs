@@ -12,10 +12,13 @@ namespace BTCPayServer.Plugins.NIP05;
 public class NostrWalletConnectLightningConnectionStringHandler : ILightningConnectionStringHandler
 {
     private readonly NostrClientPool _nostrClientPool;
+    private readonly Microsoft.Extensions.Logging.ILogger<NostrWalletConnectLightningClient> _logger;
 
-    public NostrWalletConnectLightningConnectionStringHandler(NostrClientPool nostrClientPool)
+    public NostrWalletConnectLightningConnectionStringHandler(NostrClientPool nostrClientPool,
+        Microsoft.Extensions.Logging.ILogger<NostrWalletConnectLightningClient> logger)
     {
         _nostrClientPool = nostrClientPool;
+        _logger = logger;
     }
     public ILightningClient? Create(string connectionString, Network network, out string? error)
     {
@@ -41,6 +44,6 @@ public class NostrWalletConnectLightningConnectionStringHandler : ILightningConn
         }
 
         error = null;
-		return new NostrWalletConnectLightningClient(_nostrClientPool, uri, network);
+		return new NostrWalletConnectLightningClient(_nostrClientPool, uri, network, _logger);
 	}
 }
