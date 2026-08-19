@@ -31,6 +31,7 @@ namespace BTCPayServer.Plugins.DynamicRateLimits
 
 
         [HttpPost("")]
+        [ValidateAntiForgeryToken]
         public async Task<IActionResult> Update(DynamicRateLimitSettings vm, string command)
         {
             switch (command)

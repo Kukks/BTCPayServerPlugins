@@ -9,7 +9,7 @@
     <PropertyGroup>
         <Product>LNURL Verify</Product>
         <Description>Use any LNURL or Lightning address as a BTCPay Lightning backend (receive via LUD-21 verify; send via LNURL-withdraw).</Description>
-        <Version>1.0.0</Version>
+        <Version>1.0.1</Version>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         <RootNamespace>BTCPayServer.Plugins.LNURLVerify</RootNamespace>
     </PropertyGroup>

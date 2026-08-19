@@ -15,7 +15,7 @@ public class McpPlugin : BaseBTCPayServerPlugin
 {
     public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
     [
-        new() { Identifier = nameof(BTCPayServer), Condition = ">=2.3.7" }
+        new() { Identifier = nameof(BTCPayServer), Condition = ">=2.4.2" }
     ];
 
     public override void Execute(IServiceCollection services)
@@ -25,11 +25,7 @@ public class McpPlugin : BaseBTCPayServerPlugin
             .WithHttpTransport(options => options.Stateless = true)
             .WithToolsFromAssembly();
         services.AddScoped<McpHttpClient>();
-        services.AddHttpClient("McpGreenfield")
-            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-            {
-                ServerCertificateCustomValidationCallback = (_, _, _, _) => true
-            });
+        services.AddHttpClient("McpGreenfield");
         // Insert token middleware before authentication in the pipeline
         services.AddTransient<IStartupFilter, McpTokenStartupFilter>();
         base.Execute(services);

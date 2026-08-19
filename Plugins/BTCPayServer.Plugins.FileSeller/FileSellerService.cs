@@ -48,8 +48,9 @@ namespace BTCPayServer.Plugins.FileSeller
         {
             if (evt is not InvoiceEvent invoiceEvent) return;
             List<AppCartItem> cartItems = null;
-            if (invoiceEvent.Name is not (InvoiceEvent.Completed or InvoiceEvent.MarkedCompleted
-                or InvoiceEvent.Confirmed))
+            // Release downloads only on settled states, never on Confirmed (which fires before
+            // settlement and is reversible for 0-conf stores).
+            if (invoiceEvent.Name is not (InvoiceEvent.Completed or InvoiceEvent.MarkedCompleted))
             {
                 return;
             }

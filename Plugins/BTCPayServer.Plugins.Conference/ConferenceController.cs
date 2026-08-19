@@ -23,6 +23,7 @@ namespace BTCPayServer.Plugins.Conference;
 
 [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie)]
 [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
+[AutoValidateAntiforgeryToken]
 public class ConferenceController : Controller
 {
     private readonly AppService _appService;

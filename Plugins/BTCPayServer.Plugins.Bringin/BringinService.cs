@@ -223,6 +223,8 @@ public class BringinService : EventHostedServiceBase
                 if (methodSetting.Value.FiatThreshold)
                 {
                     var rate = await bringinClient.GetRate();
+                    if (rate.BringinPrice <= 0)
+                        throw new Exception($"Bringin returned an invalid exchange rate ({rate.BringinPrice}).");
                     thresholdAmount = methodSetting.Value.Threshold / rate.BringinPrice;
                 }
 
@@ -279,6 +281,8 @@ public class BringinService : EventHostedServiceBase
         {
             
             var rate = await bringinClient.GetRate();
+            if (rate.BringinPrice <= 0)
+                throw new Exception($"Bringin returned an invalid exchange rate ({rate.BringinPrice}).");
             var thresholdAmount = supportedMethod.FiatMinimumAmount  / rate.BringinPrice;
             if (amountBtc.ToDecimal(MoneyUnit.BTC) <= thresholdAmount)
             {
@@ -294,6 +298,11 @@ public class BringinService : EventHostedServiceBase
             PaymentMethod = supportedMethod.bringinMethod
         };
         var order = await bringinClient.PlaceOrder(request);
+        // The Bringin response is untrusted: reject a non-positive amount or one larger than requested
+        // before it becomes a pre-approved payout, so a hostile response can't claim more than intended.
+        if (order.Amount <= 0 || order.Amount > amountBtc.Satoshi)
+            throw new Exception(
+                $"Bringin returned an invalid order amount ({order.Amount} sats) for a {amountBtc.Satoshi} sats request.");
         var orderMoney = Money.Satoshis(order.Amount);
 
         if (!payout)

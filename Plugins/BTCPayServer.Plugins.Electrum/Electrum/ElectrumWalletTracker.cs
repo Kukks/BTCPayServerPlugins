@@ -250,6 +250,12 @@ public class ElectrumWalletTracker
             var addr = await ctx.TrackedAddresses.FindAsync(new object[] { scripthash }, ct);
             if (addr == null) return newTxs;
 
+            // All of this wallet's tracked addresses, so a tx paying several of them is
+            // fully attributed in one pass (later notifications dedupe on txid).
+            var walletAddresses = await ctx.TrackedAddresses
+                .Where(a => a.WalletId == addr.WalletId)
+                .ToDictionaryAsync(a => a.Scripthash, ct);
+
             // Fetch current history from Electrum
             var history = await _client.ScripthashGetHistoryAsync(scripthash, ct);
             var existingTxids = await ctx.Transactions
@@ -292,7 +298,7 @@ public class ElectrumWalletTracker
 
                 ctx.Transactions.Add(trackedTx);
 
-                var txInfo = BuildNewTransactionInfo(tx, addr, strategy, item);
+                var txInfo = BuildNewTransactionInfo(tx, strategy, item, walletAddresses);
                 if (txInfo != null)
                     newTxs.Add(txInfo);
             }
@@ -306,6 +312,23 @@ public class ElectrumWalletTracker
             {
                 addr.IsUsed = true;
                 await ExtendGapIfNeeded(ctx, addr, ct);
+            }
+
+            // A single tx can pay several of this wallet's addresses; mark every co-paid address used
+            // too, so none is left eligible for reissue by GetNextUnusedAddressAsync.
+            var addressLookup = walletAddresses.Values.ToDictionary(a => a.Address);
+            foreach (var paidAddress in newTxs.SelectMany(t => t.Outputs).Select(o => o.Address).Distinct())
+            {
+                if (addressLookup.TryGetValue(paidAddress, out var coPaid) && !coPaid.IsUsed)
+                {
+                    coPaid.IsUsed = true;
+                    // Best-effort: a failed gap-extension subscription must not abort persisting the tx.
+                    try { await ExtendGapIfNeeded(ctx, coPaid, ct); }
+                    catch (Exception e) when (!ct.IsCancellationRequested)
+                    {
+                        _logger.LogWarning(e, "Failed to extend gap for co-paid address {Address}", coPaid.Address);
+                    }
+                }
             }
 
             await ctx.SaveChangesAsync(ct);
@@ -1311,8 +1334,8 @@ public class ElectrumWalletTracker
     }
 
     private NewTransactionInfo BuildNewTransactionInfo(
-        Transaction tx, TrackedAddress matchedAddr,
-        DerivationStrategyBase strategy, ElectrumHistoryItem historyItem)
+        Transaction tx, DerivationStrategyBase strategy, ElectrumHistoryItem historyItem,
+        IReadOnlyDictionary<string, TrackedAddress> walletAddresses)
     {
         var info = new NewTransactionInfo
         {
@@ -1325,25 +1348,23 @@ public class ElectrumWalletTracker
             Transaction = tx
         };
 
-        // Find outputs that match our tracked addresses
+        // Attribute each output to whichever of this wallet's tracked addresses it pays.
         for (var i = 0; i < tx.Outputs.Count; i++)
         {
             var output = tx.Outputs[i];
             var scriptHash = ScriptHashUtility.ComputeScriptHash(output.ScriptPubKey);
 
-            // Check if this output goes to one of our addresses
-            if (scriptHash == matchedAddr.Scripthash ||
-                _subscribedScripthashes.ContainsKey(scriptHash))
+            if (walletAddresses.TryGetValue(scriptHash, out var outputAddr))
             {
-                var parts = matchedAddr.KeyPath.Split('/');
+                var parts = outputAddr.KeyPath.Split('/');
                 var keyIndex = parts.Length == 2 && int.TryParse(parts[1], out var idx) ? idx : 0;
 
                 info.Outputs.Add(new OutputInfo
                 {
-                    Address = matchedAddr.Address,
+                    Address = outputAddr.Address,
                     Index = i,
                     Value = output.Value,
-                    KeyPath = matchedAddr.KeyPath,
+                    KeyPath = outputAddr.KeyPath,
                     KeyIndex = keyIndex
                 });
             }
@@ -1351,10 +1372,5 @@ public class ElectrumWalletTracker
 
         return info.Outputs.Count > 0 ? info : null;
     }
-
-    private ConcurrentDictionary<string, string> _subscribedScripthashes =>
-        (ConcurrentDictionary<string, string>)typeof(ElectrumClient)
-            .GetField("_subscribedScripthashes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-            ?.GetValue(_client) ?? new ConcurrentDictionary<string, string>();
 
 }

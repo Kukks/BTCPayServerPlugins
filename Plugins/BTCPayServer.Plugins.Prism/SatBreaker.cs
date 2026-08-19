@@ -274,6 +274,7 @@ namespace BTCPayServer.Plugins.Prism
                             continue;
                         }
 
+                        var dirty = false;
                         foreach (var payout in storePayouts)
                         {
 
@@ -347,9 +348,10 @@ namespace BTCPayServer.Plugins.Prism
                             }
 
                             prismSettings.PendingPayouts.Remove(payout.Id);
+                            dirty = true;
                         }
 
-                        if (await CreatePayouts(storePayouts.Key, prismSettings, new()))
+                        if (await CreatePayouts(storePayouts.Key, prismSettings, new()) || dirty)
                         {
                             await UpdatePrismSettingsForStore(storePayouts.Key, prismSettings, true);
                         }
@@ -633,8 +635,9 @@ namespace BTCPayServer.Plugins.Prism
                     var paymentGroup = payments.First();
                     if (!catchAlls.Remove(paymentGroup.Key, out catchAllSplit))
                     {
-                        //shift the paymentgroup to bottom of the list
-                        payments = payments.Where(grouping => grouping.Key != paymentGroup.Key).Append(paymentGroup).ToArray();
+                        //no catch-all matches this group and no null-key catch-all exists to drain it;
+                        //drop it so the loop makes progress instead of rotating the same group forever.
+                        payments = payments.Where(grouping => grouping.Key != paymentGroup.Key).ToArray();
                         continue;
                     }
 

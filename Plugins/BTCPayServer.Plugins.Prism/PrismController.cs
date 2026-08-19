@@ -351,6 +351,23 @@ public class PrismController : Controller
             }
         }
 
+        // A store-prism destination writes invoices into the target store on every payout, so require
+        // the caller to actually hold a role on that store (the dropdown is filtered, but the POST
+        // accepts arbitrary values).
+        if (destination.StartsWith("store-prism:", StringComparison.InvariantCultureIgnoreCase))
+        {
+            var parts = destination.Split(':', StringSplitOptions.RemoveEmptyEntries);
+            var targetStoreId = parts.Length > 1 ? parts[1] : null;
+            var currentUser = await _userManager.GetUserAsync(User);
+            var appUser = currentUser is null
+                ? null
+                : await _userManager.Users.Where(c => c.Id == currentUser.Id).Include(u => u.UserStores).SingleOrDefaultAsync();
+            if (targetStoreId is null || appUser?.UserStores.Any(us => us.StoreDataId == targetStoreId) != true)
+            {
+                ModelState.AddModelError(nameof(vm.SelectedStoreId), "You do not have access to the selected store.");
+            }
+        }
+
         var currentSettings = await _satBreaker.Get(storeId) ?? new PrismSettings();
         currentSettings.Destinations ??= new Dictionary<string, PrismDestination>();
 
