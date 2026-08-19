@@ -13,6 +13,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using NBitcoin;
+using Newtonsoft.Json.Linq;
 using NNostr.Client;
 using JsonSerializer = System.Text.Json.JsonSerializer;
 
@@ -200,12 +201,14 @@ public class Zapper : IHostedService
 
         zapReceipt = await zapReceipt.ComputeIdAndSignAsync(key);
         relays = relays.Concat(userNostrSettings?.Relays ?? Array.Empty<string>()).Distinct().ToArray();
-        await _invoiceRepository.UpdateInvoiceMetadata(arg.InvoiceId, "Nostr", new Dictionary<string,string>()
+        var metadata = arg.Invoice.Metadata.ToJObject();
+        metadata["Nostr"] = new JObject
         {
-            {"Zap Request", zapRequestEvent.Id},
-            {"Zap Receipt", zapReceipt.Id},
-            {"Relays", string.Join(',', relays)}
-        });
+            ["Zap Request"] = zapRequestEvent.Id,
+            ["Zap Receipt"] = zapReceipt.Id,
+            ["Relays"] = string.Join(',', relays)
+        };
+        await _invoiceRepository.UpdateInvoiceMetadata(arg.InvoiceId, arg.Invoice.StoreId, metadata);
         _pendingZapEvents.Add(new PendingZapEvent(relays, zapReceipt));
     }
 
