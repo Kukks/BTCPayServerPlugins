@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Plugins.SecSwitch.Models;
 
@@ -13,18 +14,52 @@ public static class AdvisoryApplicability
     {
         installedVersion = null;
 
+        // Defensive guards: a null/malformed argument must fail closed, never throw. A later
+        // task iterates advisories in a loop, and an uncaught exception there would silently
+        // abort the whole sweep - for a security kill-switch that means it quietly stops
+        // protecting rather than skipping the one bad advisory.
+        if (advisory is null)
+        {
+            reason = "Advisory is null.";
+            return false;
+        }
+
+        if (state is null)
+        {
+            reason = "Instance state is null.";
+            return false;
+        }
+
+        if (state.InstalledPlugins is null)
+        {
+            reason = "Instance state has no installed-plugins map.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(advisory.Identifier))
+        {
+            reason = "Advisory has no identifier.";
+            return false;
+        }
+
         if (string.Equals(advisory.Identifier, CoreIdentifier, StringComparison.OrdinalIgnoreCase))
         {
             installedVersion = state.CoreVersion;
         }
-        else if (state.InstalledPlugins.TryGetValue(advisory.Identifier, out var v))
-        {
-            installedVersion = v;
-        }
         else
         {
-            reason = $"{advisory.Identifier} is not installed on this instance.";
-            return false;
+            // Case-insensitive by construction, independent of whatever comparer the caller's
+            // dictionary was built with - InstalledPlugins carries no documented comparer
+            // requirement, and a case mismatch here is a false negative (a vulnerable plugin
+            // reported not-applicable), the dangerous direction for this component.
+            var match = state.InstalledPlugins.FirstOrDefault(kv =>
+                string.Equals(kv.Key, advisory.Identifier, StringComparison.OrdinalIgnoreCase));
+            if (match.Key is null)
+            {
+                reason = $"{advisory.Identifier} is not installed on this instance.";
+                return false;
+            }
+            installedVersion = match.Value;
         }
 
         // A blank condition parses to VersionCondition.Yes, which matches every version.
