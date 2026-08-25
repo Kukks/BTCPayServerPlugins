@@ -137,13 +137,27 @@ public static class PgpTestKeys
     /// the wire: one armor wrapper around several back-to-back signature packets.
     /// </summary>
     public static string CombineArmoredSignatures(params string[] armoredSignatures)
+        => CombineArmoredBlocks(armoredSignatures);
+
+    /// <summary>
+    /// Concatenates the raw (de-armored) packet bytes of each armored public key/ring and re-armors
+    /// them as a single blob - what pasting several keys into one "trusted keys" text box actually
+    /// looks like on the wire: one armor wrapper around several back-to-back key rings. Also used to
+    /// simulate an attacker stapling an entire second (rogue) ring onto a victim's blob, since a
+    /// bare "Public Key"-tagged packet always starts a new ring rather than extending the one before
+    /// it - unlike a "Public Subkey"-tagged packet (see <see cref="StapleRogueSubkey"/>).
+    /// </summary>
+    public static string CombineArmoredPublicKeys(params string[] armoredPublicKeys)
+        => CombineArmoredBlocks(armoredPublicKeys);
+
+    static string CombineArmoredBlocks(params string[] armoredBlocks)
     {
         using var output = new MemoryStream();
         using (var armored = new ArmoredOutputStream(output))
         {
-            foreach (var armoredSignature in armoredSignatures)
+            foreach (var block in armoredBlocks)
             {
-                var decoded = Dearmor(armoredSignature);
+                var decoded = Dearmor(block);
                 armored.Write(decoded, 0, decoded.Length);
             }
         }

@@ -24,6 +24,24 @@ public static class AdvisoryVerifier
     /// </summary>
     const int MaxSignaturesPerBlock = 64;
 
+    /// <summary>
+    /// A real trusted-key blob (a primary plus a handful of subkeys, armored) is a few KB at most;
+    /// this is deliberately generous headroom, bounding the cost of parsing and ring-matching a
+    /// hostile or oversized blob before any of that work is attempted.
+    /// </summary>
+    const int MaxTrustedKeyBlobLength = 256 * 1024;
+
+    /// <summary>
+    /// A real deployment has a ring's primary plus a small number of signing subkeys (one, or a
+    /// handful during rotation overlap) - not dozens. This bounds how many non-primary candidates
+    /// <see cref="BuildTrustedRing"/> will run <see cref="HasValidSubkeyBinding"/>'s RSA
+    /// verification against for a single ring, so a ring stuffed with many candidate keys cannot
+    /// force unbounded CPU on every <see cref="Verify"/> call. The round-3 ring-to-label
+    /// cross-check in <see cref="LoadTrustedKeys"/> already limits a blob to at most one admitted
+    /// ring; this caps the remaining cost within that one ring.
+    /// </summary>
+    const int MaxSubkeyCandidatesPerRing = 16;
+
     public static VerificationResult Verify(
         byte[] payload,
         IReadOnlyList<string> armoredSignatures,
@@ -86,27 +104,41 @@ public static class AdvisoryVerifier
         => Convert.ToHexString(PrimaryKeyOf(ReadPublicKeyRing(armoredPublicKey)).GetFingerprint());
 
     /// <summary>
-    /// Loads every trusted key ring - every ring in every configured blob, each validated
-    /// independently - flattened to the ring's primary (master) fingerprint plus every key in that
-    /// ring admitted by <see cref="BuildTrustedRing"/> (the primary always; a subkey only if its
-    /// binding signature actually verifies against that primary). There is deliberately no lookup
-    /// keyed by 64-bit Key ID here (see VerifyOne): that field lives in a signature's unhashed area
-    /// and is attacker-malleable, so a single dictionary slot indexed by it would let a rewritten
-    /// claim shadow the real signer, and two trusted keys that happened to share an id would have
-    /// one silently overwrite the other. A flat list makes both impossible - every candidate key is
-    /// always tried, never selected via untrusted data.
+    /// Loads every trusted entry, cross-checked against the label it was filed under: for each
+    /// dictionary entry, every ring in the blob is parsed, but only the ring whose OWN primary
+    /// fingerprint (re-derived from its key material - never trusted from the label itself) equals
+    /// the dictionary key is admitted, via <see cref="BuildTrustedRing"/> (the primary always; a
+    /// non-primary key only if its binding signature verifies against that primary). If no ring in
+    /// the blob matches the label, the whole entry contributes nothing.
+    ///
+    /// This cross-check is NOT "trusting the caller's label": the label is never used as the
+    /// reported signer identity (that is always the freshly re-derived fingerprint) and never
+    /// substitutes for the binding-signature check on non-primary keys - it only decides which of
+    /// possibly several rings in one blob is the one the admin actually vetted under this entry.
+    /// Without it, a blob was not required to contain only the ring an admin thinks they vetted:
+    /// BouncyCastle's parser has no concept of "the one true ring" for an entry, so a second ring
+    /// stapled onto the blob - including a bare, unsigned, user-id-less primary key, which needs no
+    /// binding signature at all because a ring's own primary is never gated on one - was admitted
+    /// just as fully as the genuine one, forging a quorum-counting signature reported under an
+    /// innocent signer's own real, correctly-published fingerprint.
+    ///
+    /// There is deliberately no lookup keyed by 64-bit Key ID here (see VerifyOne): that field lives
+    /// in a signature's unhashed area and is attacker-malleable, so a single dictionary slot indexed
+    /// by it would let a rewritten claim shadow the real signer, and two trusted keys that happened
+    /// to share an id would have one silently overwrite the other. A flat list of admitted rings
+    /// makes both impossible - every candidate key is always tried, never selected via untrusted
+    /// data.
     /// </summary>
     static List<TrustedRing> LoadTrustedKeys(IReadOnlyDictionary<string, string> trustedKeysByFingerprint)
     {
         var rings = new List<TrustedRing>();
 
-        // The caller-supplied dictionary key (the fingerprint label under which the admin filed
-        // this trusted key) is intentionally never read - see the discard below. Each ring's
-        // identity is instead re-derived from its own master key material via GetFingerprint().
-        // Trusting the caller's label would let a mislabelled entry silently verify under an
-        // identity it doesn't hold.
-        foreach (var (_, armored) in trustedKeysByFingerprint)
+        foreach (var (label, armored) in trustedKeysByFingerprint)
         {
+            // Bound the cost of a hostile or oversized blob before attempting to parse it at all.
+            if (armored is null || armored.Length > MaxTrustedKeyBlobLength)
+                continue;
+
             List<PgpPublicKeyRing> parsedRings;
             try
             {
@@ -118,19 +150,40 @@ public static class AdvisoryVerifier
                 continue;
             }
 
-            // Every ring in a multi-key blob is admitted, each validated independently: an admin
-            // who pastes a blob containing several keys should not have all but the first silently
-            // ignored with no error.
-            foreach (var ring in parsedRings)
+            // Find the one ring in this blob whose own derived fingerprint matches the label the
+            // admin filed it under. A blob may contain more than one ring (see
+            // ReadPublicKeyRings) - anything that does not match the label is not the ring this
+            // entry vetted, so it is never even passed to BuildTrustedRing, let alone admitted.
+            PgpPublicKeyRing? matched = null;
+            foreach (var candidateRing in parsedRings)
             {
+                string candidateFingerprint;
                 try
                 {
-                    rings.Add(BuildTrustedRing(ring));
+                    candidateFingerprint = Convert.ToHexString(PrimaryKeyOf(candidateRing).GetFingerprint());
                 }
                 catch (Exception)
                 {
-                    // This one ring within the bundle is unusable - skip only it.
+                    continue; // This ring's own primary is unreadable - it can never match a label.
                 }
+
+                if (string.Equals(candidateFingerprint, label, StringComparison.OrdinalIgnoreCase))
+                {
+                    matched = candidateRing;
+                    break;
+                }
+            }
+
+            if (matched is null)
+                continue; // No ring in this blob matches the label it was filed under.
+
+            try
+            {
+                rings.Add(BuildTrustedRing(matched));
+            }
+            catch (Exception)
+            {
+                // The matched ring itself turned out to be unusable - skip it.
             }
         }
         return rings;
@@ -156,10 +209,22 @@ public static class AdvisoryVerifier
 
         var keys = new List<PgpPublicKey> { primary };
 
+        var candidatesChecked = 0;
         foreach (PgpPublicKey candidate in ring.GetPublicKeys())
         {
             if (candidate.IsMasterKey)
-                continue; // Already admitted above, unconditionally.
+                continue; // The ring's primary was already admitted above via
+                          // PrimaryKeyOf/GetPublicKey() - this only avoids re-adding it here. (Also
+                          // true if a ring ever yielded more than one master-flagged key: any
+                          // further one is excluded too, never examined as a binding candidate -
+                          // fail-closed, not "impossible".)
+
+            if (candidatesChecked >= MaxSubkeyCandidatesPerRing)
+                break; // Cap reached - see MaxSubkeyCandidatesPerRing's doc comment. Any further
+                       // candidates in this ring's packet order, including a genuine subkey, are
+                       // never examined: fails closed (a signer's own contribution might not
+                       // count), never opens a path to admitting more than the cap.
+            candidatesChecked++;
 
             if (HasValidSubkeyBinding(primary, candidate))
                 keys.Add(candidate);
@@ -232,7 +297,7 @@ public static class AdvisoryVerifier
     {
         var signatures = new List<PgpSignature>();
 
-        if (armoredSignature.Length > MaxArmoredSignatureLength)
+        if (armoredSignature is null || armoredSignature.Length > MaxArmoredSignatureLength)
             return signatures;
 
         try
