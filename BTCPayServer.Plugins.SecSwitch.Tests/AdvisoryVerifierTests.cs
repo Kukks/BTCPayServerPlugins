@@ -56,6 +56,11 @@ public class AdvisoryVerifierTests
         // label is "found the claimed trusted key, but Verify() rejected it" - i.e. InvalidSignature
         // - not UnknownSigner. Neither status counts toward quorum either way.
         Assert.All(result.Signatures, s => Assert.Equal(SignatureStatus.InvalidSignature, s.Status));
+        // The reported fingerprint is a *claim*, not a verified fact - it must use the "claimed:"
+        // form so a future admin UI can never mistake it for the bare 40-hex ValidTrusted shape.
+        Assert.All(result.Signatures, s => Assert.StartsWith("claimed:", s.Fingerprint));
+        Assert.Contains(result.Signatures, s => s.Fingerprint == $"claimed:{a.Fingerprint}");
+        Assert.Contains(result.Signatures, s => s.Fingerprint == $"claimed:{b.Fingerprint}");
     }
 
     [Fact]
@@ -245,6 +250,103 @@ public class AdvisoryVerifierTests
         var sig = Assert.Single(result.Signatures);
         Assert.Equal(SignatureStatus.ValidTrusted, sig.Status);
         Assert.Equal(a.Fingerprint, sig.Fingerprint); // correctly attributed to the real signer
+    }
+
+    // --- Round-2 additions: LoadTrustedKeys now validates subkey-binding signatures (NEW-1), caps
+    // the cost of a single armored block (NEW-2), and reports InvalidSignature's fingerprint in the
+    // "claimed:" form (finding 3, covered above in Tampered_payload_invalidates_every_signature).
+
+    [Fact]
+    public void Stapled_rogue_subkey_with_no_binding_signature_does_not_reach_quorum()
+    {
+        // Reproduces NEW-1: BouncyCastle does not validate subkey-binding signatures while parsing a
+        // ring, so a rogue key stapled onto a victim's otherwise-genuine armored blob - with no
+        // binding signature at all - must still be rejected. The victim's own primary must keep
+        // working normally; only the stapled addition is untrusted.
+        var victim = PgpTestKeys.Generate("victim@example.com");
+        var rogue = PgpTestKeys.GenerateWithSigningSubkey("evil@example.com");
+        var poisoned = new Dictionary<string, string>
+        {
+            ["victim"] = PgpTestKeys.StapleRogueSubkey(victim, rogue, includeBindingSignature: false)
+        };
+
+        var forged = AdvisoryVerifier.Verify(Payload, [rogue.SignDetached(Payload)], poisoned, quorumThreshold: 1);
+        Assert.False(forged.QuorumMet);
+        Assert.Equal(0, forged.TrustedValidCount);
+        Assert.DoesNotContain(forged.Signatures, s => s.Status == SignatureStatus.ValidTrusted);
+
+        var genuine = AdvisoryVerifier.Verify(Payload, [victim.SignDetached(Payload)], poisoned, quorumThreshold: 1);
+        Assert.True(genuine.QuorumMet);
+        var sig = Assert.Single(genuine.Signatures);
+        Assert.Equal(SignatureStatus.ValidTrusted, sig.Status);
+        Assert.Equal(victim.Fingerprint, sig.Fingerprint);
+    }
+
+    [Fact]
+    public void Stapled_rogue_subkey_with_a_foreign_binding_signature_does_not_reach_quorum()
+    {
+        // A binding signature that is real - just produced by the attacker's own master key, not
+        // the victim's - must be rejected exactly like no binding signature at all. Structurally
+        // present is not the same as cryptographically valid against the ring it was stapled onto.
+        var victim = PgpTestKeys.Generate("victim@example.com");
+        var rogue = PgpTestKeys.GenerateWithSigningSubkey("evil@example.com");
+        var poisoned = new Dictionary<string, string>
+        {
+            ["victim"] = PgpTestKeys.StapleRogueSubkey(victim, rogue, includeBindingSignature: true)
+        };
+
+        var forged = AdvisoryVerifier.Verify(Payload, [rogue.SignDetached(Payload)], poisoned, quorumThreshold: 1);
+        Assert.False(forged.QuorumMet);
+        Assert.Equal(0, forged.TrustedValidCount);
+        Assert.DoesNotContain(forged.Signatures, s => s.Status == SignatureStatus.ValidTrusted);
+
+        var genuine = AdvisoryVerifier.Verify(Payload, [victim.SignDetached(Payload)], poisoned, quorumThreshold: 1);
+        Assert.True(genuine.QuorumMet);
+        var sig = Assert.Single(genuine.Signatures);
+        Assert.Equal(SignatureStatus.ValidTrusted, sig.Status);
+        Assert.Equal(victim.Fingerprint, sig.Fingerprint);
+    }
+
+    [Fact]
+    public void Armored_block_over_the_signature_count_cap_is_rejected_as_malformed()
+    {
+        // 65 copies of one genuine, individually-trusted signature - proves the cap fires on count
+        // alone, regardless of whether every individual signature is well-formed and trusted.
+        var a = PgpTestKeys.Generate("a@example.com");
+        var oneSig = a.SignDetached(Payload);
+        var overCap = PgpTestKeys.CombineArmoredSignatures(Enumerable.Repeat(oneSig, 65).ToArray());
+
+        var result = AdvisoryVerifier.Verify(Payload, [overCap], Trust(a), quorumThreshold: 1);
+
+        Assert.False(result.QuorumMet);
+        Assert.Equal(SignatureStatus.Malformed, Assert.Single(result.Signatures).Status);
+    }
+
+    [Fact]
+    public void Armored_block_at_exactly_the_signature_count_cap_is_still_processed()
+    {
+        // Boundary check: 64 must still be accepted - only exceeding the cap rejects the block.
+        var a = PgpTestKeys.Generate("a@example.com");
+        var oneSig = a.SignDetached(Payload);
+        var atCap = PgpTestKeys.CombineArmoredSignatures(Enumerable.Repeat(oneSig, 64).ToArray());
+
+        var result = AdvisoryVerifier.Verify(Payload, [atCap], Trust(a), quorumThreshold: 1);
+
+        Assert.True(result.QuorumMet);
+        Assert.Equal(64, result.Signatures.Count);
+        Assert.All(result.Signatures, s => Assert.Equal(SignatureStatus.ValidTrusted, s.Status));
+    }
+
+    [Fact]
+    public void Armored_block_over_the_byte_length_cap_is_rejected_as_malformed()
+    {
+        var a = PgpTestKeys.Generate("a@example.com");
+        var oversized = a.SignDetached(Payload) + new string('X', 70_000);
+
+        var result = AdvisoryVerifier.Verify(Payload, [oversized], Trust(a), quorumThreshold: 1);
+
+        Assert.False(result.QuorumMet);
+        Assert.Equal(SignatureStatus.Malformed, Assert.Single(result.Signatures).Status);
     }
 
     // Not implemented: two trusted keys sharing a 64-bit Key ID. A genuine collision requires an RSA

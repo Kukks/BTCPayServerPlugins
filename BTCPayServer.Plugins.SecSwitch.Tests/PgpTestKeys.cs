@@ -143,12 +143,78 @@ public static class PgpTestKeys
         {
             foreach (var armoredSignature in armoredSignatures)
             {
-                using var decoded = PgpUtilities.GetDecoderStream(
-                    new MemoryStream(Encoding.ASCII.GetBytes(armoredSignature)));
-                decoded.CopyTo(armored);
+                var decoded = Dearmor(armoredSignature);
+                armored.Write(decoded, 0, decoded.Length);
             }
         }
         return Encoding.ASCII.GetString(output.ToArray());
+    }
+
+    /// <summary>
+    /// Simulates an attacker stapling a rogue key onto a victim's otherwise-untouched armored
+    /// public key blob - poisoning a blob an admin might import as trusted (a compromised keyserver
+    /// mirror, a malicious "add a trusted key" PR, a MITM'd fetch). The rogue key is the real
+    /// "Public Subkey"-tagged packet extracted from <paramref name="rogueRing"/> (build with
+    /// <see cref="GenerateWithSigningSubkey"/>) - not a hand-crafted one - so it parses as part of
+    /// the victim's ring instead of starting a second one, and only the one variable under test
+    /// differs: <paramref name="includeBindingSignature"/> controls whether the rogue subkey's real
+    /// binding signature is also stapled alongside it. That signature verifies only against
+    /// <paramref name="rogueRing"/>'s OWN master key, never the victim's, so it proves
+    /// "structurally has a binding signature" is not enough - it must verify against the specific
+    /// primary it's stapled onto. <paramref name="rogueRing"/> keeps its own usable secret key for
+    /// the rogue subkey, so a test can sign with it directly and confirm the forged signature still
+    /// does not verify against the victim's (now poisoned) trusted entry.
+    /// </summary>
+    public static string StapleRogueSubkey(PgpTestKey victim, PgpTestKey rogueRing, bool includeBindingSignature)
+    {
+        using var rogueInput = PgpUtilities.GetDecoderStream(
+            new MemoryStream(Encoding.ASCII.GetBytes(rogueRing.ArmoredPublicKey)));
+        var rogueBundle = new PgpPublicKeyRingBundle(rogueInput);
+
+        PgpPublicKey? rogueSubkey = null;
+        foreach (PgpPublicKeyRing ring in rogueBundle.GetKeyRings())
+        {
+            foreach (PgpPublicKey key in ring.GetPublicKeys())
+            {
+                if (key.IsMasterKey) continue;
+                rogueSubkey = key;
+                break;
+            }
+            if (rogueSubkey is not null) break;
+        }
+        if (rogueSubkey is null)
+            throw new InvalidOperationException("rogueRing did not contain a subkey for this test helper.");
+
+        var victimBytes = Dearmor(victim.ArmoredPublicKey);
+
+        using var output = new MemoryStream();
+        using (var armored = new ArmoredOutputStream(output))
+        {
+            armored.Write(victimBytes, 0, victimBytes.Length);
+            rogueSubkey.Encode(armored);
+
+            if (includeBindingSignature)
+            {
+                PgpSignature? bindingSignature = null;
+                foreach (PgpSignature sig in rogueSubkey.GetSignaturesOfType(PgpSignature.SubkeyBinding))
+                {
+                    bindingSignature = sig;
+                    break;
+                }
+                if (bindingSignature is null)
+                    throw new InvalidOperationException("The rogue subkey did not carry a binding signature to steal.");
+                bindingSignature.Encode(armored);
+            }
+        }
+        return Encoding.ASCII.GetString(output.ToArray());
+    }
+
+    static byte[] Dearmor(string armored)
+    {
+        using var decoded = PgpUtilities.GetDecoderStream(new MemoryStream(Encoding.ASCII.GetBytes(armored)));
+        using var buffer = new MemoryStream();
+        decoded.CopyTo(buffer);
+        return buffer.ToArray();
     }
 
     /// <summary>
@@ -162,14 +228,7 @@ public static class PgpTestKeys
     /// </summary>
     public static string RewriteIssuerKeyId(string armoredSignature, long fromKeyId, long toKeyId)
     {
-        byte[] raw;
-        using (var decoded = PgpUtilities.GetDecoderStream(
-                   new MemoryStream(Encoding.ASCII.GetBytes(armoredSignature))))
-        using (var buffer = new MemoryStream())
-        {
-            decoded.CopyTo(buffer);
-            raw = buffer.ToArray();
-        }
+        var raw = Dearmor(armoredSignature);
 
         var needle = KeyIdBytes(fromKeyId);
         var replacement = KeyIdBytes(toKeyId);
