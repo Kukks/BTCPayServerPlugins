@@ -84,14 +84,35 @@ public class AdvisoryParserTests
     [InlineData("2")]
     [InlineData("7")]
     [InlineData("-1")]
+    [InlineData("+2")]
+    [InlineData(" 2")]
+    [InlineData("2 ")]
+    [InlineData(" 2 ")]
     public void Rejects_numeric_severity_strings(string raw)
     {
         // The advisory schema is string-names-only. Enum.TryParse also accepts the
-        // underlying numeric value (e.g. "2" -> High), which is undocumented surface -
-        // in-range numerics must be rejected just like out-of-range ones.
+        // underlying numeric value (e.g. "2" -> High), optionally sign-prefixed and
+        // whitespace-padded (Enum.Parse's documented acceptance rules, which TryParse
+        // shares) - all of that is undocumented surface and must be rejected, in range
+        // or out of it. The allowlist in TryParseSeverity is immune to all of these by
+        // construction, not because each case is special-cased.
         var json = Valid.Replace("\"severity\": \"high\"", $"\"severity\": \"{raw}\"");
         Assert.False(AdvisoryParser.TryParse(Encoding.UTF8.GetBytes(json), out _, out var err));
         Assert.Contains("severity", err!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Accepts_whitespace_padded_severity_name()
+    {
+        // Decision (pinned down deliberately, not incidental): TryParseSeverity trims before
+        // matching, so padding around a valid *name* is tolerated - unlike the numeric cases
+        // above, which are rejected regardless of padding. Padding around a recognised word is
+        // treated as incidental formatting noise; a numeric value is a different value class
+        // the schema never allows at all, padded or not.
+        var json = Valid.Replace("\"severity\": \"high\"", "\"severity\": \" high \"");
+        Assert.True(AdvisoryParser.TryParse(Encoding.UTF8.GetBytes(json), out var a, out var err));
+        Assert.Null(err);
+        Assert.Equal(AdvisorySeverity.High, a!.Severity);
     }
 
     [Theory]
