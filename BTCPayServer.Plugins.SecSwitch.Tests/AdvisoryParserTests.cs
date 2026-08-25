@@ -60,21 +60,61 @@ public class AdvisoryParserTests
     }
 
     [Theory]
-    [InlineData("\"id\": \"2026-08-25-electrum-xss\",", "")]
-    [InlineData("\"identifier\": \"BTCPayServer.Plugins.Electrum\",", "")]
-    [InlineData("\"affectedVersions\": \">=1.0.0 && <1.2.3\",", "")]
-    public void Rejects_missing_required_fields(string fragment, string replacement)
+    [InlineData("\"id\": \"2026-08-25-electrum-xss\",", "", "id")]
+    [InlineData("\"identifier\": \"BTCPayServer.Plugins.Electrum\",", "", "identifier")]
+    [InlineData("\"affectedVersions\": \">=1.0.0 && <1.2.3\",", "", "affectedVersions")]
+    public void Rejects_missing_required_fields(string fragment, string replacement, string expectedField)
     {
         var json = Valid.Replace(fragment, replacement);
         Assert.False(AdvisoryParser.TryParse(Encoding.UTF8.GetBytes(json), out _, out var err));
-        Assert.NotNull(err);
+        // Exact match, not Contains: "id" is a substring of "identifier", so a loose
+        // Contains("id") would still pass if a regression blamed the wrong field.
+        Assert.Equal($"Missing required field: {expectedField}", err);
     }
 
     [Fact]
-    public void Rejects_malformed_json_without_throwing()
+    public void Rejects_syntactically_invalid_json_without_throwing()
     {
         Assert.False(AdvisoryParser.TryParse(Encoding.UTF8.GetBytes("{ not json"), out _, out var err));
-        Assert.NotNull(err);
+        Assert.StartsWith("Malformed advisory JSON", err);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("2")]
+    [InlineData("7")]
+    [InlineData("-1")]
+    public void Rejects_numeric_severity_strings(string raw)
+    {
+        // The advisory schema is string-names-only. Enum.TryParse also accepts the
+        // underlying numeric value (e.g. "2" -> High), which is undocumented surface -
+        // in-range numerics must be rejected just like out-of-range ones.
+        var json = Valid.Replace("\"severity\": \"high\"", $"\"severity\": \"{raw}\"");
+        Assert.False(AdvisoryParser.TryParse(Encoding.UTF8.GetBytes(json), out _, out var err));
+        Assert.Contains("severity", err!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("[1,2,3]")]
+    [InlineData("[{\"a\":1}]")]
+    [InlineData("[true]")]
+    [InlineData("[null]")]
+    public void Non_string_reference_entries_are_dropped_without_throwing(string referencesArray)
+    {
+        // JsonElement.GetString() throws InvalidOperationException for any ValueKind other
+        // than String or Null. These arrays are structurally valid JSON, so this must not
+        // throw - it must drop the non-string entries and still return a usable advisory.
+        var json = Valid.Replace("[\"https://example.com/a\"]", referencesArray);
+        Assert.True(AdvisoryParser.TryParse(Encoding.UTF8.GetBytes(json), out var a, out var err));
+        Assert.Empty(a!.References);
+    }
+
+    [Fact]
+    public void Mixed_reference_array_keeps_only_valid_strings()
+    {
+        var json = Valid.Replace("[\"https://example.com/a\"]", "[\"https://ok\", 1, \"https://also-ok\"]");
+        Assert.True(AdvisoryParser.TryParse(Encoding.UTF8.GetBytes(json), out var a, out var err));
+        Assert.Equal(["https://ok", "https://also-ok"], a!.References);
     }
 
     [Fact]
@@ -88,5 +128,15 @@ public class AdvisoryParserTests
         Assert.Equal(2, entries.Length);
         Assert.Equal("deadbeef", entries[0].ContentHash);
         Assert.Equal("advisories/b", entries[1].Path);
+    }
+
+    [Theory]
+    [InlineData("{ not json")]
+    [InlineData("")]
+    [InlineData("{}")]
+    public void ParseIndex_returns_empty_array_on_malformed_input_rather_than_throwing(string json)
+    {
+        var entries = AdvisoryParser.ParseIndex(Encoding.UTF8.GetBytes(json));
+        Assert.Empty(entries);
     }
 }

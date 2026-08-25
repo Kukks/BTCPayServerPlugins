@@ -60,7 +60,7 @@ public static class AdvisoryParser
                 Title = GetString(root, "title") ?? "",
                 Description = GetString(root, "description") ?? "",
                 References = root.TryGetProperty("references", out var refs) && refs.ValueKind == JsonValueKind.Array
-                    ? refs.EnumerateArray().Select(e => e.GetString() ?? "").Where(s => s.Length > 0).ToArray()
+                    ? refs.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString() ?? "").Where(s => s.Length > 0).ToArray()
                     : [],
                 PublishedAt = root.TryGetProperty("publishedAt", out var pub) && pub.ValueKind == JsonValueKind.String
                               && DateTimeOffset.TryParse(pub.GetString(), out var parsed)
@@ -74,7 +74,18 @@ public static class AdvisoryParser
     }
 
     public static AdvisoryIndexEntry[] ParseIndex(byte[] json)
-        => JsonSerializer.Deserialize<AdvisoryIndexEntry[]>(json, Options) ?? [];
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<AdvisoryIndexEntry[]>(json, Options) ?? [];
+        }
+        catch (JsonException)
+        {
+            // Fail closed: malformed, empty, or wrongly-shaped input means "no advisories
+            // seen", not a thrown exception a future caller might forget to catch.
+            return [];
+        }
+    }
 
     static string? GetString(JsonElement root, string name)
         => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
@@ -82,6 +93,17 @@ public static class AdvisoryParser
     static bool TryParseSeverity(string? raw, out AdvisorySeverity severity)
     {
         severity = default;
-        return raw is not null && Enum.TryParse(raw, ignoreCase: true, out severity) && Enum.IsDefined(severity);
+        if (raw is null || IsNumeric(raw))
+            return false;
+        return Enum.TryParse(raw, ignoreCase: true, out severity) && Enum.IsDefined(severity);
+    }
+
+    // The advisory schema is string-names-only ("high", not "2"). Enum.TryParse also accepts
+    // the underlying numeric value of the enum, which would silently let e.g. "2" parse as
+    // High - undocumented, untested surface. Reject it outright rather than allow it through.
+    static bool IsNumeric(string raw)
+    {
+        var digits = raw.Length > 0 && (raw[0] == '-' || raw[0] == '+') ? raw[1..] : raw;
+        return digits.Length > 0 && digits.All(char.IsAsciiDigit);
     }
 }
