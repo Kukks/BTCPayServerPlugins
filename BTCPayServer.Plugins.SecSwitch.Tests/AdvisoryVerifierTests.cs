@@ -265,9 +265,13 @@ public class AdvisoryVerifierTests
         // working normally; only the stapled addition is untrusted.
         var victim = PgpTestKeys.Generate("victim@example.com");
         var rogue = PgpTestKeys.GenerateWithSigningSubkey("evil@example.com");
+        // Labelled by the victim's own real fingerprint (not a placeholder): the round-3
+        // ring-to-label cross-check requires this to admit the (still primary-untouched) ring at
+        // all - see Stapled_rogue_primary_ring_does_not_reach_quorum for the case where the label
+        // is deliberately wrong.
         var poisoned = new Dictionary<string, string>
         {
-            ["victim"] = PgpTestKeys.StapleRogueSubkey(victim, rogue, includeBindingSignature: false)
+            [victim.Fingerprint] = PgpTestKeys.StapleRogueSubkey(victim, rogue, includeBindingSignature: false)
         };
 
         var forged = AdvisoryVerifier.Verify(Payload, [rogue.SignDetached(Payload)], poisoned, quorumThreshold: 1);
@@ -290,9 +294,10 @@ public class AdvisoryVerifierTests
         // present is not the same as cryptographically valid against the ring it was stapled onto.
         var victim = PgpTestKeys.Generate("victim@example.com");
         var rogue = PgpTestKeys.GenerateWithSigningSubkey("evil@example.com");
+        // Labelled by the victim's own real fingerprint - see the sibling test above.
         var poisoned = new Dictionary<string, string>
         {
-            ["victim"] = PgpTestKeys.StapleRogueSubkey(victim, rogue, includeBindingSignature: true)
+            [victim.Fingerprint] = PgpTestKeys.StapleRogueSubkey(victim, rogue, includeBindingSignature: true)
         };
 
         var forged = AdvisoryVerifier.Verify(Payload, [rogue.SignDetached(Payload)], poisoned, quorumThreshold: 1);
@@ -347,6 +352,160 @@ public class AdvisoryVerifierTests
 
         Assert.False(result.QuorumMet);
         Assert.Equal(SignatureStatus.Malformed, Assert.Single(result.Signatures).Status);
+    }
+
+    [Fact]
+    public void Armored_block_at_exactly_the_byte_length_cap_is_still_processed()
+    {
+        // Boundary check pinning the exact constant, mirroring the count-cap pair above: exactly at
+        // AdvisoryVerifier.MaxArmoredSignatureLength (64 * 1024) must still be processed - padding
+        // placed after a complete, genuine armored block is inert (armor decoding stops at the
+        // "-----END PGP SIGNATURE-----" marker), matching the technique already proven by the
+        // over-cap test above.
+        const int cap = 64 * 1024;
+        var a = PgpTestKeys.Generate("a@example.com");
+        var genuine = a.SignDetached(Payload);
+        var atCap = genuine + new string('X', cap - genuine.Length);
+
+        var result = AdvisoryVerifier.Verify(Payload, [atCap], Trust(a), quorumThreshold: 1);
+
+        Assert.True(result.QuorumMet);
+        var sig = Assert.Single(result.Signatures);
+        Assert.Equal(SignatureStatus.ValidTrusted, sig.Status);
+    }
+
+    [Fact]
+    public void Armored_block_one_byte_over_the_length_cap_is_rejected_as_malformed()
+    {
+        const int cap = 64 * 1024;
+        var a = PgpTestKeys.Generate("a@example.com");
+        var genuine = a.SignDetached(Payload);
+        var overCap = genuine + new string('X', cap - genuine.Length + 1);
+
+        var result = AdvisoryVerifier.Verify(Payload, [overCap], Trust(a), quorumThreshold: 1);
+
+        Assert.False(result.QuorumMet);
+        Assert.Equal(SignatureStatus.Malformed, Assert.Single(result.Signatures).Status);
+    }
+
+    // --- Round-3 additions: NEW-A (a null element in armoredSignatures threw instead of failing
+    // closed) and NEW-B (LoadTrustedKeys admitted every ring in a blob with no cross-check against
+    // the label it was filed under, so a stapled rogue PRIMARY - which needs no binding signature at
+    // all, since a ring's own primary is never gated on one - forged a quorum-counting signature
+    // reported under an innocent signer's real fingerprint; cheaper than the round-2 subkey vector).
+
+    [Fact]
+    public void Null_element_in_signature_list_is_reported_malformed_and_does_not_throw()
+    {
+        var a = PgpTestKeys.Generate("a@example.com");
+        var result = AdvisoryVerifier.Verify(Payload, [null!], Trust(a), quorumThreshold: 1);
+
+        Assert.False(result.QuorumMet);
+        Assert.Equal(SignatureStatus.Malformed, Assert.Single(result.Signatures).Status);
+    }
+
+    [Fact]
+    public void Null_element_following_a_genuine_signature_does_not_discard_it()
+    {
+        // A null element used to throw out of Verify entirely, losing every result computed before
+        // it, not merely the null entry itself.
+        var a = PgpTestKeys.Generate("a@example.com");
+        var result = AdvisoryVerifier.Verify(
+            Payload, [a.SignDetached(Payload), null!], Trust(a), quorumThreshold: 1);
+
+        Assert.True(result.QuorumMet);
+        Assert.Equal(1, result.TrustedValidCount);
+        Assert.Equal(2, result.Signatures.Count);
+        Assert.Contains(result.Signatures, s => s.Status == SignatureStatus.ValidTrusted);
+        Assert.Contains(result.Signatures, s => s.Status == SignatureStatus.Malformed);
+    }
+
+    [Fact]
+    public void Stapled_rogue_primary_ring_does_not_reach_quorum()
+    {
+        // NEW-B: a bare, unsigned, user-id-less rogue PRIMARY ring stapled onto the victim's blob -
+        // a "Public Key"-tagged packet always starts a NEW ring rather than extending the one before
+        // it, so this needs no binding signature, no user id, and no self-signature at all: a ring's
+        // own primary is admitted by BuildTrustedRing unconditionally. Only the round-3 ring-to-label
+        // cross-check stops it: the rogue ring's own derived fingerprint never matches the label the
+        // victim's blob was filed under (the victim's real fingerprint), so it is never even passed
+        // to BuildTrustedRing. The victim's own genuine ring, first in the blob and matching the
+        // label, must keep working normally.
+        var victim = PgpTestKeys.Generate("victim@example.com");
+        var rogue = PgpTestKeys.Generate("evil@example.com");
+        var poisoned = new Dictionary<string, string>
+        {
+            [victim.Fingerprint] = PgpTestKeys.CombineArmoredPublicKeys(victim.ArmoredPublicKey, rogue.ArmoredPublicKey)
+        };
+
+        var forged = AdvisoryVerifier.Verify(Payload, [rogue.SignDetached(Payload)], poisoned, quorumThreshold: 1);
+        Assert.False(forged.QuorumMet);
+        Assert.Equal(0, forged.TrustedValidCount);
+        Assert.DoesNotContain(forged.Signatures, s => s.Status == SignatureStatus.ValidTrusted);
+
+        var genuine = AdvisoryVerifier.Verify(Payload, [victim.SignDetached(Payload)], poisoned, quorumThreshold: 1);
+        Assert.True(genuine.QuorumMet);
+        var sig = Assert.Single(genuine.Signatures);
+        Assert.Equal(SignatureStatus.ValidTrusted, sig.Status);
+        Assert.Equal(victim.Fingerprint, sig.Fingerprint);
+    }
+
+    [Fact]
+    public void Two_stapled_rogue_primaries_do_not_meet_a_quorum_of_two()
+    {
+        // Two independently-poisoned trusted entries (e.g. two different signers whose blobs each
+        // got poisoned via a different compromised mirror), each rogue key signing - proves the fix
+        // isn't merely "reduces the odds", it structurally prevents forgery regardless of how many
+        // poisoned entries or forged signers are combined, even at a threshold matching their count.
+        var victimA = PgpTestKeys.Generate("victimA@example.com");
+        var victimB = PgpTestKeys.Generate("victimB@example.com");
+        var rogueA = PgpTestKeys.Generate("evilA@example.com");
+        var rogueB = PgpTestKeys.Generate("evilB@example.com");
+        var poisoned = new Dictionary<string, string>
+        {
+            [victimA.Fingerprint] = PgpTestKeys.CombineArmoredPublicKeys(victimA.ArmoredPublicKey, rogueA.ArmoredPublicKey),
+            [victimB.Fingerprint] = PgpTestKeys.CombineArmoredPublicKeys(victimB.ArmoredPublicKey, rogueB.ArmoredPublicKey),
+        };
+
+        var result = AdvisoryVerifier.Verify(
+            Payload, [rogueA.SignDetached(Payload), rogueB.SignDetached(Payload)], poisoned, quorumThreshold: 2);
+
+        Assert.False(result.QuorumMet);
+        Assert.Equal(0, result.TrustedValidCount);
+    }
+
+    [Fact]
+    public void Entry_whose_label_does_not_match_any_ring_in_its_blob_loads_nothing()
+    {
+        // The cross-check's negative case in isolation, with no staple involved at all: an otherwise
+        // completely genuine key, filed under a label that isn't its own fingerprint, must not be
+        // trusted - not even under its own correct identity, since nothing here vetted that mapping.
+        var a = PgpTestKeys.Generate("a@example.com");
+        var mislabeled = new Dictionary<string, string> { ["not-a-real-fingerprint"] = a.ArmoredPublicKey };
+
+        var result = AdvisoryVerifier.Verify(Payload, [a.SignDetached(Payload)], mislabeled, quorumThreshold: 1);
+
+        Assert.False(result.QuorumMet);
+        Assert.Equal(0, result.TrustedValidCount);
+        Assert.DoesNotContain(result.Signatures, s => s.Status == SignatureStatus.ValidTrusted);
+    }
+
+    [Fact]
+    public void A_plain_key_entry_and_a_subkey_ring_entry_both_work_together()
+    {
+        // The cross-check must not break ordinary, non-adversarial multi-entry use: two correctly
+        // self-labelled trusted entries (via the existing Trust() helper) - one a bare key, one a
+        // real master+subkey ring - both still verify and both count toward quorum.
+        var plain = PgpTestKeys.Generate("plain@example.com");
+        var withSubkey = PgpTestKeys.GenerateWithSigningSubkey("subkey-owner@example.com");
+        var trusted = Trust(plain, withSubkey);
+
+        var result = AdvisoryVerifier.Verify(
+            Payload, [plain.SignDetached(Payload), withSubkey.SignDetached(Payload)], trusted, quorumThreshold: 2);
+
+        Assert.True(result.QuorumMet);
+        Assert.Equal(2, result.TrustedValidCount);
+        Assert.All(result.Signatures, s => Assert.Equal(SignatureStatus.ValidTrusted, s.Status));
     }
 
     // Not implemented: two trusted keys sharing a 64-bit Key ID. A genuine collision requires an RSA
