@@ -170,12 +170,23 @@ public static class PgpTestKeys
     /// mirror, a malicious "add a trusted key" PR, a MITM'd fetch). The rogue key is the real
     /// "Public Subkey"-tagged packet extracted from <paramref name="rogueRing"/> (build with
     /// <see cref="GenerateWithSigningSubkey"/>) - not a hand-crafted one - so it parses as part of
-    /// the victim's ring instead of starting a second one, and only the one variable under test
-    /// differs: <paramref name="includeBindingSignature"/> controls whether the rogue subkey's real
-    /// binding signature is also stapled alongside it. That signature verifies only against
-    /// <paramref name="rogueRing"/>'s OWN master key, never the victim's, so it proves
-    /// "structurally has a binding signature" is not enough - it must verify against the specific
-    /// primary it's stapled onto. <paramref name="rogueRing"/> keeps its own usable secret key for
+    /// the victim's ring instead of starting a second one.
+    ///
+    /// <paramref name="includeBindingSignature"/> controls exactly how many subkey-binding
+    /// signatures the re-parsed rogue subkey carries: <c>false</c> means genuinely zero,
+    /// <c>true</c> means exactly one, real, produced by <paramref name="rogueRing"/>'s OWN master
+    /// key - never the victim's. Getting <c>false</c> to mean zero takes an extra step:
+    /// <see cref="PgpPublicKey.Encode(Stream)"/> also writes out a key's own attached signatures, so
+    /// encoding the subkey as extracted (which still carries its self-produced binding signature)
+    /// would emit one regardless of this parameter. <see cref="PgpPublicKey.RemoveCertification(PgpPublicKey,PgpSignature)"/>
+    /// (BouncyCastle's own public API for this, confirmed by reflection and an end-to-end
+    /// encode/re-parse round trip) strips it first, so the <c>true</c> case then re-adds exactly one
+    /// copy explicitly rather than relying on - and duplicating - the auto-embedded one.
+    ///
+    /// Either way the signature (when present) verifies only against <paramref name="rogueRing"/>'s
+    /// own master, never the victim's, so both cases prove "a binding signature is not enough - it
+    /// must verify against the specific primary it's stapled onto" and "no binding signature at all
+    /// is rejected identically". <paramref name="rogueRing"/> keeps its own usable secret key for
     /// the rogue subkey, so a test can sign with it directly and confirm the forged signature still
     /// does not verify against the victim's (now poisoned) trusted entry.
     /// </summary>
@@ -199,26 +210,29 @@ public static class PgpTestKeys
         if (rogueSubkey is null)
             throw new InvalidOperationException("rogueRing did not contain a subkey for this test helper.");
 
+        PgpSignature? bindingSignature = null;
+        foreach (PgpSignature sig in rogueSubkey.GetSignaturesOfType(PgpSignature.SubkeyBinding))
+        {
+            bindingSignature = sig;
+            break;
+        }
+        if (bindingSignature is null)
+            throw new InvalidOperationException("The rogue subkey did not carry a binding signature to steal.");
+
+        // Strip the subkey's own embedded binding signature before encoding it, so encoding never
+        // auto-emits one regardless of includeBindingSignature - see the doc comment above.
+        var bareSubkey = PgpPublicKey.RemoveCertification(rogueSubkey, bindingSignature);
+
         var victimBytes = Dearmor(victim.ArmoredPublicKey);
 
         using var output = new MemoryStream();
         using (var armored = new ArmoredOutputStream(output))
         {
             armored.Write(victimBytes, 0, victimBytes.Length);
-            rogueSubkey.Encode(armored);
+            bareSubkey.Encode(armored);
 
             if (includeBindingSignature)
-            {
-                PgpSignature? bindingSignature = null;
-                foreach (PgpSignature sig in rogueSubkey.GetSignaturesOfType(PgpSignature.SubkeyBinding))
-                {
-                    bindingSignature = sig;
-                    break;
-                }
-                if (bindingSignature is null)
-                    throw new InvalidOperationException("The rogue subkey did not carry a binding signature to steal.");
                 bindingSignature.Encode(armored);
-            }
         }
         return Encoding.ASCII.GetString(output.ToArray());
     }
