@@ -24,7 +24,10 @@
     </ItemDefinitionGroup>
     <ItemGroup>
         <!-- Explicit, not transitive: BouncyCastle currently reaches us only via MimeKit/ExchangeSharp,
-             which is incidental. A security-critical verification path must not depend on that holding. -->
+             which is incidental. This reference pins the version we build against. It does NOT by itself
+             make the scaffold test fail if it were ever deleted - a transitive path still supplies the
+             same types at compile time - so the test instead guards against a major-version drift; see
+             Bouncycastle_assembly_major_version_is_2 in ScaffoldTests.cs. -->
         <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
         <EmbeddedResource Include="Resources\**" />
         <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
