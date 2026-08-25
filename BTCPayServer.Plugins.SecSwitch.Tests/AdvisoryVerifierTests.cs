@@ -467,11 +467,26 @@ public class AdvisoryVerifierTests
             [victimB.Fingerprint] = PgpTestKeys.CombineArmoredPublicKeys(victimB.ArmoredPublicKey, rogueB.ArmoredPublicKey),
         };
 
-        var result = AdvisoryVerifier.Verify(
+        var forged = AdvisoryVerifier.Verify(
             Payload, [rogueA.SignDetached(Payload), rogueB.SignDetached(Payload)], poisoned, quorumThreshold: 2);
 
-        Assert.False(result.QuorumMet);
-        Assert.Equal(0, result.TrustedValidCount);
+        Assert.False(forged.QuorumMet);
+        Assert.Equal(0, forged.TrustedValidCount);
+
+        // Non-vacuity: both poisoned entries actually loaded something - the victims' own genuine
+        // primaries, cross-check-matched despite the stapled rogue ring alongside each. Without
+        // this, a future regression that made both entries load nothing (e.g. a broken cross-check)
+        // would leave the assertions above green while proving nothing about rogue primaries
+        // specifically - this is exactly the failure mode the round-3 fixture relabelling caught,
+        // here pinned explicitly rather than relying on a sibling test to catch it.
+        var genuine = AdvisoryVerifier.Verify(
+            Payload, [victimA.SignDetached(Payload), victimB.SignDetached(Payload)], poisoned, quorumThreshold: 2);
+        Assert.True(genuine.QuorumMet);
+        Assert.Equal(2, genuine.TrustedValidCount);
+        Assert.Contains(genuine.Signatures,
+            s => s.Status == SignatureStatus.ValidTrusted && s.Fingerprint == victimA.Fingerprint);
+        Assert.Contains(genuine.Signatures,
+            s => s.Status == SignatureStatus.ValidTrusted && s.Fingerprint == victimB.Fingerprint);
     }
 
     [Fact]
