@@ -165,4 +165,56 @@ public class AdvisoryApplicabilityTests
         Assert.Null(installed);
         Assert.NotEmpty(reason);
     }
+
+    [Fact]
+    public void Null_core_version_with_a_would_otherwise_fail_open_operator_is_indeterminate()
+    {
+        // Without the dedicated guard, System.Version's operators treat null as "less than
+        // everything", so null >= 1.0.0 evaluates to false - reading as an ordinary, silent
+        // "not affected" outcome rather than the indeterminate state it actually is.
+        var state = new InstanceState(new Dictionary<string, Version>(), null!, CanUseSsh: false);
+        var ok = AdvisoryApplicability.IsApplicable(
+            Adv("BTCPayServer", ">=1.0.0"), state, out var installed, out var reason);
+        Assert.False(ok);
+        Assert.Null(installed);
+        Assert.Contains("could not be determined", reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Null_core_version_with_a_would_otherwise_be_a_misleading_match_is_indeterminate()
+    {
+        // Without the dedicated guard, null < 2.5.0 evaluates to true, which would make
+        // IsApplicable report ok=true while installedVersion is null - "applicable, but we
+        // don't know the version" is not a real answer.
+        var state = new InstanceState(new Dictionary<string, Version>(), null!, CanUseSsh: false);
+        var ok = AdvisoryApplicability.IsApplicable(
+            Adv("BTCPayServer", "<2.5.0"), state, out var installed, out var reason);
+        Assert.False(ok);
+        Assert.Null(installed);
+        Assert.Contains("could not be determined", reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Null_plugin_version_with_a_would_otherwise_fail_open_operator_is_indeterminate()
+    {
+        var state = new InstanceState(
+            new Dictionary<string, Version> { ["Plug"] = null! }, Version.Parse("2.4.2"), CanUseSsh: false);
+        var ok = AdvisoryApplicability.IsApplicable(
+            Adv("Plug", ">=1.0.0"), state, out var installed, out var reason);
+        Assert.False(ok);
+        Assert.Null(installed);
+        Assert.Contains("could not be determined", reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Null_plugin_version_with_a_would_otherwise_be_a_misleading_match_is_indeterminate()
+    {
+        var state = new InstanceState(
+            new Dictionary<string, Version> { ["Plug"] = null! }, Version.Parse("2.4.2"), CanUseSsh: false);
+        var ok = AdvisoryApplicability.IsApplicable(
+            Adv("Plug", "<1.2.3"), state, out var installed, out var reason);
+        Assert.False(ok);
+        Assert.Null(installed);
+        Assert.Contains("could not be determined", reason, StringComparison.OrdinalIgnoreCase);
+    }
 }

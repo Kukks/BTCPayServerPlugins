@@ -62,6 +62,19 @@ public static class AdvisoryApplicability
             installedVersion = match.Value;
         }
 
+        // System.Version's comparison operators treat a null operand as "less than everything"
+        // rather than throwing, so IsFulfilled(null) silently returns a result that depends on
+        // which operator the advisory happened to use (">=1.0.0" => false, "<2.5.0" => true) -
+        // a false negative or a nonsensical "applicable but the version is unknown" outcome,
+        // decided by accident rather than by design. Neither is acceptable for a fail-closed
+        // component, so treat "we resolved an identifier but its version is null" as its own
+        // explicit, deterministic outcome rather than letting it fall into IsFulfilled.
+        if (installedVersion is null)
+        {
+            reason = $"Installed version of {advisory.Identifier} could not be determined.";
+            return false;
+        }
+
         // A blank condition parses to VersionCondition.Yes, which matches every version.
         // Treat it as malformed rather than as a wildcard match.
         if (string.IsNullOrWhiteSpace(advisory.AffectedVersions))
