@@ -131,6 +131,81 @@ public static class PgpTestKeys
     }
 
     /// <summary>
+    /// Generates an ordinary key, then self-signs and attaches a <see cref="PgpSignature.KeyRevocation"/>
+    /// certification onto its own primary key before returning it - simulating a signer whose key
+    /// has since been revoked (e.g. after a compromise). Used to exercise TrustStore's revocation
+    /// guard at rotation-admission time. The returned key's <c>Fingerprint</c> is unchanged by the
+    /// revocation - a fingerprint is derived from the key material itself, never from signatures
+    /// attached to it.
+    /// </summary>
+    public static PgpTestKey GenerateRevoked(string identity)
+    {
+        var normal = Generate(identity);
+        var privateKey = normal.SecretKey.ExtractPrivateKey(Array.Empty<char>());
+
+        var revocationGen = new PgpSignatureGenerator(normal.SecretKey.PublicKey.Algorithm, HashAlgorithmTag.Sha256);
+        revocationGen.InitSign(PgpSignature.KeyRevocation, privateKey);
+        var revocation = revocationGen.GenerateCertification(normal.SecretKey.PublicKey);
+
+        var revokedPublicKey = PgpPublicKey.AddCertification(normal.SecretKey.PublicKey, revocation);
+
+        using var output = new MemoryStream();
+        using (var armored = new ArmoredOutputStream(output))
+        {
+            revokedPublicKey.Encode(armored);
+        }
+
+        return new PgpTestKey
+        {
+            ArmoredPublicKey = Encoding.ASCII.GetString(output.ToArray()),
+            SecretKey = normal.SecretKey,
+            Fingerprint = normal.Fingerprint
+        };
+    }
+
+    /// <summary>
+    /// Generates a key whose self-certification carries a key-expiration subpacket that has already
+    /// elapsed as of "now" - the creation time is backdated and the validity window is short enough
+    /// that it is already in the past. Used to exercise TrustStore's expiry guard at
+    /// rotation-admission time.
+    /// </summary>
+    public static PgpTestKey GenerateExpired(string identity)
+    {
+        var gen = new RsaKeyPairGenerator();
+        gen.Init(new RsaKeyGenerationParameters(
+            BigInteger.ValueOf(0x10001), new SecureRandom(), strength: 2048, certainty: 25));
+        var createdAt = DateTime.UtcNow.AddDays(-2);
+        var keyPair = new PgpKeyPair(PublicKeyAlgorithmTag.RsaGeneral, gen.GenerateKeyPair(), createdAt);
+
+        var subpackets = new PgpSignatureSubpacketGenerator();
+        subpackets.SetKeyExpirationTime(false, 60 * 60 * 24); // valid 1 day from createdAt - already elapsed
+
+        var secretKey = new PgpSecretKey(
+            PgpSignature.DefaultCertification,
+            keyPair,
+            identity,
+            SymmetricKeyAlgorithmTag.Null,
+            Array.Empty<char>(),
+            useSha1: true,
+            hashedPackets: subpackets.Generate(),
+            unhashedPackets: null,
+            rand: new SecureRandom());
+
+        using var output = new MemoryStream();
+        using (var armored = new ArmoredOutputStream(output))
+        {
+            secretKey.PublicKey.Encode(armored);
+        }
+
+        return new PgpTestKey
+        {
+            ArmoredPublicKey = Encoding.ASCII.GetString(output.ToArray()),
+            SecretKey = secretKey,
+            Fingerprint = Convert.ToHexString(secretKey.PublicKey.GetFingerprint())
+        };
+    }
+
+    /// <summary>
     /// Concatenates the raw (de-armored) packet bytes of each detached signature and re-armors
     /// them as a single block - what a multi-signature <c>.asc</c> file (e.g. from signing twice
     /// with <c>gpg --detach-sign</c>, or from prepending a second signature) actually looks like on
