@@ -37,8 +37,14 @@ public static class AdvisoryVerifier
     /// <see cref="BuildTrustedRing"/> will run <see cref="HasValidSubkeyBinding"/>'s RSA
     /// verification against for a single ring, so a ring stuffed with many candidate keys cannot
     /// force unbounded CPU on every <see cref="Verify"/> call. The round-3 ring-to-label
-    /// cross-check in <see cref="LoadTrustedKeys"/> already limits a blob to at most one admitted
-    /// ring; this caps the remaining cost within that one ring.
+    /// cross-check in <see cref="TryLoadTrustedKey"/> already limits a blob to at most one admitted
+    /// ring; this caps the remaining cost within that one ring. NOTE: this cap is invisible to
+    /// <see cref="TryLoadTrustedKey"/> itself - it only governs which of an admitted ring's
+    /// non-primary keys <see cref="BuildTrustedRing"/> goes on to examine, not whether the ring is
+    /// admitted at all - so a ring whose intended signing subkey happens to fall past candidate 16
+    /// in packet order is silently never admitted for that subkey specifically (the primary is
+    /// unaffected either way). Task 5's rotation-admission probe inherits this same blind spot; see
+    /// Services.TrustStore's report.
     /// </summary>
     const int MaxSubkeyCandidatesPerRing = 16;
 
@@ -135,47 +141,8 @@ public static class AdvisoryVerifier
 
         foreach (var (label, armored) in trustedKeysByFingerprint)
         {
-            // Bound the cost of a hostile or oversized blob before attempting to parse it at all.
-            if (armored is null || armored.Length > MaxTrustedKeyBlobLength)
-                continue;
-
-            List<PgpPublicKeyRing> parsedRings;
-            try
-            {
-                parsedRings = ReadPublicKeyRings(armored);
-            }
-            catch (Exception)
-            {
-                // The whole entry is unreadable - skip it, never treated as matching.
-                continue;
-            }
-
-            // Find the one ring in this blob whose own derived fingerprint matches the label the
-            // admin filed it under. A blob may contain more than one ring (see
-            // ReadPublicKeyRings) - anything that does not match the label is not the ring this
-            // entry vetted, so it is never even passed to BuildTrustedRing, let alone admitted.
-            PgpPublicKeyRing? matched = null;
-            foreach (var candidateRing in parsedRings)
-            {
-                string candidateFingerprint;
-                try
-                {
-                    candidateFingerprint = Convert.ToHexString(PrimaryKeyOf(candidateRing).GetFingerprint());
-                }
-                catch (Exception)
-                {
-                    continue; // This ring's own primary is unreadable - it can never match a label.
-                }
-
-                if (string.Equals(candidateFingerprint, label, StringComparison.OrdinalIgnoreCase))
-                {
-                    matched = candidateRing;
-                    break;
-                }
-            }
-
-            if (matched is null)
-                continue; // No ring in this blob matches the label it was filed under.
+            if (!TryLoadTrustedKey(label, armored, out var matched) || matched is null)
+                continue; // Not admitted under this label - see TryLoadTrustedKey.
 
             try
             {
@@ -187,6 +154,75 @@ public static class AdvisoryVerifier
             }
         }
         return rings;
+    }
+
+    /// <summary>
+    /// Admission-only probe, factored out of <see cref="LoadTrustedKeys"/> so it and
+    /// <see cref="Services.TrustStore"/> can never drift apart (Task 5 review, Finding 1): true only
+    /// if a trusted-key dictionary entry filed under <paramref name="label"/> with armored blob
+    /// <paramref name="armored"/> would actually be admitted here - the same byte-length cap, ring
+    /// parsing, and label cross-check <see cref="LoadTrustedKeys"/> itself relies on, with
+    /// <paramref name="matchedRing"/> set to the one ring in the blob whose own re-derived primary
+    /// fingerprint matched <paramref name="label"/>.
+    ///
+    /// Deliberately stops short of <see cref="BuildTrustedRing"/>'s subkey-binding validation -
+    /// that question (which of a ring's non-primary keys may also sign) has no bearing on whether
+    /// the entry is admitted at all: a ring's primary is unconditionally admitted once matched,
+    /// regardless of which (if any) of its subkeys later turn out to have valid bindings.
+    ///
+    /// internal, not public: this only needs to be visible to <see cref="Services.TrustStore"/>, in
+    /// the same assembly, and leaks a BouncyCastle type (<see cref="PgpPublicKeyRing"/>) that has no
+    /// business on this plugin's public surface. TrustStore.TryApplyRotation calls this before
+    /// admitting a key during rotation, so a blob this method would silently skip (e.g. one over
+    /// <see cref="MaxTrustedKeyBlobLength"/>) can never be stored as "trusted" while actually being
+    /// permanently unusable for a future <see cref="Verify"/> call - without a single shared
+    /// definition of "admitted", TrustStore would have to reimplement these same checks, and any
+    /// future drift between the two copies would let a rotation silently and permanently brick the
+    /// trust store (a key correctly fingerprinted and stored, but that <see cref="LoadTrustedKeys"/>
+    /// can never actually load again).
+    /// </summary>
+    internal static bool TryLoadTrustedKey(string label, string armored, out PgpPublicKeyRing? matchedRing)
+    {
+        matchedRing = null;
+
+        // Bound the cost of a hostile or oversized blob before attempting to parse it at all.
+        if (armored is null || armored.Length > MaxTrustedKeyBlobLength)
+            return false;
+
+        List<PgpPublicKeyRing> parsedRings;
+        try
+        {
+            parsedRings = ReadPublicKeyRings(armored);
+        }
+        catch (Exception)
+        {
+            return false; // The whole entry is unreadable - skip it, never treated as matching.
+        }
+
+        // Find the one ring in this blob whose own derived fingerprint matches the label the admin
+        // filed it under. A blob may contain more than one ring (see ReadPublicKeyRings) - anything
+        // that does not match the label is not the ring this entry vetted, so it is never even
+        // passed to BuildTrustedRing, let alone admitted.
+        foreach (var candidateRing in parsedRings)
+        {
+            string candidateFingerprint;
+            try
+            {
+                candidateFingerprint = Convert.ToHexString(PrimaryKeyOf(candidateRing).GetFingerprint());
+            }
+            catch (Exception)
+            {
+                continue; // This ring's own primary is unreadable - it can never match a label.
+            }
+
+            if (string.Equals(candidateFingerprint, label, StringComparison.OrdinalIgnoreCase))
+            {
+                matchedRing = candidateRing;
+                return true;
+            }
+        }
+
+        return false; // No ring in this blob matches the label it was filed under.
     }
 
     /// <summary>
