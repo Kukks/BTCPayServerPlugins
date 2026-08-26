@@ -137,6 +137,38 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
         return (await GetAsync()).Entries.ContainsKey(advisoryId);
     }
 
+    /// <summary>
+    /// True only if <paramref name="advisoryId"/> has a ledger entry recorded under a TERMINAL
+    /// status - <c>Acted</c>, <c>NeedsDecision</c>, or <c>Suppressed</c>. Deliberately narrower
+    /// than <see cref="IsHandledAsync"/>, which returns true for ANY recorded entry regardless of
+    /// status: a non-terminal entry (e.g. Rejected, Unverified, or a not-applicable/needs-attention
+    /// result) means the advisory was looked at but nothing was actually decided or done about it,
+    /// so it must remain eligible for re-evaluation on a later poll. Gating a re-action check on
+    /// <see cref="IsHandledAsync"/> instead would let a single transient failure - a hostile mirror
+    /// serving malformed bytes for one poll, or a signature fetch truncated by the fetcher's own
+    /// request budget - permanently and silently disarm SecSwitch for that advisory id: the very
+    /// re-fetch a withheld ContentHash exists to buy would arrive at a poller that now refuses to
+    /// even look at it again, because SOME entry already exists under that id.
+    ///
+    /// "Suppressed" is included in the terminal set so the admin's suppression escape hatch stays
+    /// absolute even under this narrower gate - see <see cref="SuppressAsync"/>. A caller that wants
+    /// "has ANY entry ever been recorded, no matter the status" should keep using
+    /// <see cref="IsHandledAsync"/>; the two methods answer different questions and are not
+    /// interchangeable.
+    /// </summary>
+    public async Task<bool> IsActedAsync(string advisoryId)
+    {
+        if (string.IsNullOrWhiteSpace(advisoryId))
+            return false;
+        var ledger = await GetAsync();
+        return ledger.Entries.TryGetValue(advisoryId, out var entry) && IsTerminalStatus(entry.Status);
+    }
+
+    static bool IsTerminalStatus(string? status) =>
+        string.Equals(status, "Acted", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "NeedsDecision", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "Suppressed", StringComparison.OrdinalIgnoreCase);
+
     public async Task SuppressAsync(string advisoryId)
     {
         if (string.IsNullOrWhiteSpace(advisoryId))
