@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
@@ -19,6 +20,20 @@ namespace BTCPayServer.Plugins.SecSwitch.Services;
 ///    Suppression makes <see cref="IsHandledAsync"/> return true, so a suppressed advisory is
 ///    never acted on again.
 ///
+/// Both properties depend on advisory ids being compared case-INsensitively, matching the
+/// OrdinalIgnoreCase convention already used for every other identifier in this plugin
+/// (TrustStore, PolicyResolver, AdvisoryVerifier, AdvisoryApplicability). "ADV-1" and "adv-1" must
+/// resolve to the SAME ledger entry, or a differently-cased resubmission could bypass both the
+/// action-loop guard and an admin's suppression. <see cref="GetAsync"/> re-establishes an
+/// OrdinalIgnoreCase-keyed `Entries` dictionary on every fetch rather than trusting
+/// SecSwitchLedger.Entries's own comparer, because that comparer does not reliably survive a real
+/// JSON round trip - verified empirically against the same Newtonsoft.Json serialization core's
+/// SettingsRepository actually uses (see LedgerStoreTests.Newtonsoft_round_trip_does_not_preserve_a_custom_dictionary_comparer
+/// and task-7-report.md's fix-round section): a fresh SecSwitchLedger coming back from
+/// GetSettingAsync&lt;T&gt; can arrive with a case-SENSITIVE Entries dictionary regardless of how
+/// Entries was constructed before it was persisted, so LedgerStore re-establishes
+/// case-insensitivity itself on every read instead of relying on the model.
+///
 /// Concurrency: <see cref="RecordAsync"/>, <see cref="SuppressAsync"/> and
 /// <see cref="RecordStartupAsync"/> are all read-modify-write against <see cref="ISettingsRepository"/>
 /// (fetch the whole ledger, mutate a copy, write the whole ledger back) and ISettingsRepository
@@ -34,45 +49,79 @@ namespace BTCPayServer.Plugins.SecSwitch.Services;
 /// always starts its own read-modify-write from a ledger that already includes every write that
 /// finished before it, rather than from a stale snapshot.
 ///
-/// Limits of that gate, stated explicitly: it is an in-process <see cref="SemaphoreSlim"/>, so it
-/// only serializes callers that share this one LedgerStore instance. ISettingsRepository is
-/// registered as a singleton in core, so within a single BTCPayServer process there is exactly
-/// one LedgerStore and therefore exactly one gate guarding every caller in that process - the
-/// poller and the web UI above are safe. It does NOT serialize across multiple OS processes (e.g.
-/// a hypothetical multi-instance/load-balanced deployment sharing one database): two processes
-/// each have their own independent gate and could still race each other's UpdateSetting calls.
-/// SecSwitch's threat model is a single self-hosted instance, which makes that an accepted gap
-/// rather than a defect here, but it is a real limit of this mechanism worth being explicit about
-/// rather than silently assuming the gate covers.
+/// <see cref="_gate"/> is `static`, deliberately, not an instance field: there is exactly one
+/// logical ledger (a single settings row keyed by type name) no matter how many LedgerStore
+/// OBJECTS happen to exist, so one process-wide gate is not just safe but semantically correct -
+/// and, unlike an instance field, its correctness does not depend on LedgerStore itself being
+/// registered in DI as a singleton. Nothing registers LedgerStore in DI yet. If a later task
+/// registers it as Scoped or Transient - an easy default that ASP.NET Core's DI validation does
+/// NOT flag, since injecting a singleton ISettingsRepository into a scoped/transient service is
+/// perfectly legal - an instance-field gate would silently hand every caller its own private gate
+/// and none of the protection described above would actually happen, with no compiler error and
+/// nothing in this test suite able to catch it (every test constructs LedgerStore directly rather
+/// than through DI). A static field is immune to that by construction: it is shared by every
+/// LedgerStore instance in the process regardless of how any of them were constructed.
+///
+/// Limits of that gate, stated explicitly: it is a single in-process <see cref="SemaphoreSlim"/>,
+/// so it only serializes callers within ONE BTCPayServer process. It does NOT serialize across
+/// multiple OS processes (e.g. a hypothetical multi-instance/load-balanced deployment sharing one
+/// database): two processes each have their own independent gate and could still race each
+/// other's UpdateSetting calls. SecSwitch's threat model is a single self-hosted instance, which
+/// makes that an accepted gap rather than a defect here, but it is a real limit of this mechanism
+/// worth being explicit about rather than silently assuming the gate covers.
 /// </summary>
 public sealed class LedgerStore(ISettingsRepository settingsRepository)
 {
     // Guards every read-modify-write sequence below (GetAsync -> mutate -> UpdateSetting) so that
-    // two concurrent writers cannot lose an entry - see the class doc comment for why this
-    // matters and what it does and does not protect against. A plain read (GetAsync /
-    // IsHandledAsync) deliberately does NOT take this gate: it never writes anything back, so it
-    // cannot itself cause a lost update, and ISettingsRepository.UpdateSetting's single-row write
-    // is what determines whether such a read observes the old or the new ledger - never a value
-    // torn between the two.
-    readonly SemaphoreSlim _gate = new(1, 1);
+    // two concurrent writers cannot lose an entry - see the class doc comment for why this is
+    // `static` (independent of LedgerStore's own DI lifetime) and what it does and does not
+    // protect against. A plain read (GetAsync / IsHandledAsync) deliberately does NOT take this
+    // gate: it never writes anything back, so it cannot itself cause a lost update, and
+    // ISettingsRepository.UpdateSetting's single-row write is what determines whether such a read
+    // observes the old or the new ledger - never a value torn between the two.
+    static readonly SemaphoreSlim _gate = new(1, 1);
 
     public async Task<SecSwitchLedger> GetAsync()
-        => await settingsRepository.GetSettingAsync<SecSwitchLedger>() ?? new SecSwitchLedger();
+    {
+        var ledger = await settingsRepository.GetSettingAsync<SecSwitchLedger>() ?? new SecSwitchLedger();
+
+        // Re-establish case-insensitive keys on every fetch - see the class doc comment for why
+        // this cannot be delegated to SecSwitchLedger.Entries's own comparer. Rebuilt key-by-key
+        // via indexer assignment rather than the Dictionary(IDictionary, comparer) copy-constructor
+        // overload: a ledger persisted BEFORE this fix could already contain two entries for the
+        // same advisory differing only by case (that was exactly the bug), and the copy-constructor
+        // overload throws ArgumentException the moment it meets such a colliding key. Indexer
+        // assignment instead merges them (last one wins), self-healing a pre-existing corrupt
+        // ledger on read instead of making every future GetAsync call throw.
+        if (!ReferenceEquals(ledger.Entries.Comparer, StringComparer.OrdinalIgnoreCase))
+        {
+            var normalized = new Dictionary<string, LedgerEntry>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in ledger.Entries)
+                normalized[pair.Key] = pair.Value;
+            ledger.Entries = normalized;
+        }
+
+        return ledger;
+    }
 
     public async Task RecordAsync(LedgerEntry entry)
     {
+        // Fail gracefully, not crash: a null entry or a null/blank AdvisoryId can never be looked
+        // back up by IsHandledAsync/SuppressAsync (both also reject null/blank - see below), so
+        // recording one would be a dead, unreachable ledger row at best and a NullReferenceException
+        // at worst. Treated as a no-op rather than thrown, matching the fail-closed-without-crashing
+        // posture the rest of this plugin uses (TrustStore, PolicyResolver, AdvisoryApplicability).
+        if (entry is null || string.IsNullOrWhiteSpace(entry.AdvisoryId))
+            return;
+
         await _gate.WaitAsync();
         try
         {
             var ledger = await GetAsync();
             ledger.Entries[entry.AdvisoryId] = entry;
-            // Always saved back explicitly - this must never depend on the mutation above alone
-            // being "enough". GetAsync's returned object is not guaranteed to be the same
-            // instance the repository holds internally: the real SettingsRepository deserializes
-            // a fresh object graph from JSON on every read, so mutating it does nothing to what
-            // is actually persisted until UpdateSetting is called (only a naive in-memory test
-            // fake that hands back the same reference every time could make that mistake look
-            // like it works). See LedgerStoreTests' JsonRoundTrippingSettingsRepository.
+            // Always saved back explicitly - see class doc comment: GetAsync's returned object is
+            // not guaranteed to be the same instance the repository holds internally, so mutating
+            // it does nothing to what is actually persisted until UpdateSetting is called.
             await settingsRepository.UpdateSetting(ledger);
         }
         finally
@@ -82,10 +131,17 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
     }
 
     public async Task<bool> IsHandledAsync(string advisoryId)
-        => (await GetAsync()).Entries.ContainsKey(advisoryId);
+    {
+        if (string.IsNullOrWhiteSpace(advisoryId))
+            return false;
+        return (await GetAsync()).Entries.ContainsKey(advisoryId);
+    }
 
     public async Task SuppressAsync(string advisoryId)
     {
+        if (string.IsNullOrWhiteSpace(advisoryId))
+            return;
+
         await _gate.WaitAsync();
         try
         {

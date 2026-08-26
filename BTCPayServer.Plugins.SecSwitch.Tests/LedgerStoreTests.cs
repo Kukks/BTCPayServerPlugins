@@ -3,6 +3,7 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Plugins.SecSwitch.Models;
 using BTCPayServer.Plugins.SecSwitch.Services;
 using Xunit;
+using NewtonsoftJsonConvert = Newtonsoft.Json.JsonConvert;
 
 namespace BTCPayServer.Plugins.SecSwitch.Tests;
 
@@ -198,5 +199,170 @@ public class LedgerStoreTests
         Assert.Equal(concurrency, ledger.Entries.Count);
         for (var i = 0; i < concurrency; i++)
             Assert.True(ledger.Entries.ContainsKey($"a{i}"), $"advisory a{i} missing - lost update");
+    }
+
+    // --- Fix-round additions (post-review) -------------------------------------------------
+    //
+    // Finding 1 (Important): Entries was keyed case-sensitively, so "ADV-1" and "adv-1" became
+    // TWO ledger entries - defeating both of this class's safety properties (an already-acted-on
+    // advisory reported under a different casing would look unhandled again; suppressing one
+    // casing would not suppress the other). Fixed in LedgerStore.GetAsync by re-establishing an
+    // OrdinalIgnoreCase-keyed Entries dictionary on every fetch.
+
+    [Fact]
+    public async Task Recorded_advisory_is_reported_handled_regardless_of_casing()
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        await store.RecordAsync(Entry("ADV-1"));
+        Assert.True(await store.IsHandledAsync("adv-1"));
+        Assert.True(await store.IsHandledAsync("Adv-1"));
+    }
+
+    [Fact]
+    public async Task Recording_a_different_casing_of_an_existing_advisory_does_not_duplicate()
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        await store.RecordAsync(Entry("ADV-1"));
+        await store.RecordAsync(Entry("adv-1", action: "DisablePlugin"));
+
+        var ledger = await store.GetAsync();
+        Assert.Single(ledger.Entries);
+        Assert.Equal("DisablePlugin", ledger.Entries.Values.Single().Action);
+    }
+
+    [Fact]
+    public async Task Suppressing_one_casing_suppresses_the_advisory_recorded_under_another_casing()
+    {
+        // This is the exact scenario Finding 1 called out: an admin suppressing a false positive
+        // by whatever casing they see in an alert must suppress the SAME entry the poller
+        // recorded, however it was cased.
+        var store = new LedgerStore(new FakeSettingsRepository());
+        await store.RecordAsync(Entry("ADV-1"));
+        await store.SuppressAsync("adv-1");
+
+        var ledger = await store.GetAsync();
+        Assert.Single(ledger.Entries); // merged into the SAME entry, not a second one
+        Assert.True(ledger.Entries.Values.Single().Suppressed);
+        Assert.True(await store.IsHandledAsync("ADV-1"));
+        Assert.True(await store.IsHandledAsync("adv-1"));
+    }
+
+    [Fact]
+    public async Task Case_insensitivity_survives_persistence_through_a_json_round_trip()
+    {
+        // Uses a FRESH LedgerStore instance sharing the same underlying repository, forcing a
+        // genuine JSON deserialize on read rather than any in-memory shortcut a single instance
+        // might offer - proving normalization happens on READ (inside GetAsync), which is what
+        // makes it work regardless of which process or LedgerStore instance reads the ledger back.
+        var repo = new JsonRoundTrippingSettingsRepository();
+        await new LedgerStore(repo).RecordAsync(Entry("ADV-1"));
+
+        var store = new LedgerStore(repo); // new instance, same underlying persisted JSON
+        Assert.True(await store.IsHandledAsync("adv-1"));
+    }
+
+    [Fact]
+    public async Task Pre_existing_case_variant_duplicate_entries_are_merged_not_thrown_on_read()
+    {
+        // Self-heal edge case surfaced while implementing Finding 1's fix: a ledger PERSISTED
+        // BEFORE this fix shipped could already contain two entries for the same advisory
+        // differing only by case (that was exactly the bug). GetAsync must not throw when it
+        // re-establishes case-insensitivity over such a ledger - it must merge them instead. (A
+        // naive fix using the Dictionary(IDictionary, comparer) copy-constructor would throw
+        // ArgumentException on the second colliding key here; see GetAsync's comment.)
+        var repo = new FakeSettingsRepository();
+        var preExisting = new SecSwitchLedger();
+        preExisting.Entries["ADV-1"] = Entry("ADV-1", action: "DisablePlugin");
+        preExisting.Entries["adv-1"] = Entry("adv-1", action: "UpdatePlugin");
+        await repo.UpdateSetting(preExisting);
+
+        var store = new LedgerStore(repo);
+        var ledger = await store.GetAsync(); // must not throw
+        Assert.Single(ledger.Entries);
+    }
+
+    [Fact]
+    public void Newtonsoft_round_trip_does_not_preserve_a_custom_dictionary_comparer()
+    {
+        // Empirical check requested at review, informing Finding 1's fix: does a custom
+        // StringComparer set on SecSwitchLedger.Entries survive a round trip through the SAME
+        // Newtonsoft.Json serialization core's real SettingsRepository uses (JsonConvert.
+        // SerializeObject / DeserializeObject<T> - see submodules/btcpayserver/BTCPayServer/
+        // Services/SettingsRepository.cs)? Observed: it does NOT survive. Newtonsoft has no way
+        // to represent a dictionary's comparer in JSON at all (it isn't part of the data), so
+        // DeserializeObject reconstructs a plain Dictionary<TKey,TValue> - default (case-
+        // sensitive) comparer - and populates it from the parsed pairs, discarding whatever
+        // comparer the original instance used. This is exactly why GetAsync re-normalizes Entries
+        // on every fetch instead of trusting the model to keep its OrdinalIgnoreCase comparer
+        // across a save/load cycle - see task-7-report.md's fix-round section for the command and
+        // full output that produced this observation.
+        var ledger = new SecSwitchLedger
+        {
+            Entries = new Dictionary<string, LedgerEntry>(StringComparer.OrdinalIgnoreCase)
+        };
+        ledger.Entries["ADV-1"] = Entry("ADV-1");
+
+        var json = NewtonsoftJsonConvert.SerializeObject(ledger);
+        var roundTripped = NewtonsoftJsonConvert.DeserializeObject<SecSwitchLedger>(json)!;
+
+        Assert.True(roundTripped.Entries.ContainsKey("ADV-1"));  // the exact original key survives...
+        Assert.False(roundTripped.Entries.ContainsKey("adv-1")); // ...but case-insensitive lookup does not.
+    }
+
+    // --- Minor 3: null/blank advisory ids must fail gracefully, not crash.
+
+    [Fact]
+    public async Task RecordAsync_with_null_entry_is_a_no_op()
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        await store.RecordAsync(null!); // must not throw
+        Assert.Empty((await store.GetAsync()).Entries);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task RecordAsync_with_blank_advisory_id_is_a_no_op(string? advisoryId)
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        await store.RecordAsync(Entry(advisoryId!)); // must not throw
+        Assert.Empty((await store.GetAsync()).Entries);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task SuppressAsync_with_blank_advisory_id_is_a_no_op(string? advisoryId)
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        await store.SuppressAsync(advisoryId!); // must not throw
+        Assert.Empty((await store.GetAsync()).Entries);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task IsHandledAsync_with_blank_advisory_id_returns_false(string? advisoryId)
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        Assert.False(await store.IsHandledAsync(advisoryId!)); // must not throw
+    }
+
+    // --- Minor 4: coverage gap - RecordStartupAsync must not disturb existing entries.
+
+    [Fact]
+    public async Task Startup_heartbeat_does_not_erase_existing_entries()
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        await store.RecordAsync(Entry("a1"));
+        var now = DateTimeOffset.UtcNow;
+        await store.RecordStartupAsync(now);
+
+        var ledger = await store.GetAsync();
+        Assert.Equal(now, ledger.LastStartedAt);
+        Assert.True(ledger.Entries.ContainsKey("a1"));
     }
 }
