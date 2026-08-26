@@ -116,17 +116,68 @@ public class SecSwitchMonitorTests
         // (and, per Finding R2, entry.Suppressed is ALSO checked directly - see LedgerStoreTests
         // for a test that isolates that specific path), so this must hold even under the narrowed
         // gate.
+        //
+        // Fix-round note (Task 12 review, Finding I3): SuppressAsync no longer fabricates an entry
+        // for an id it has never seen, so the advisory is recorded first, matching the new "must
+        // already exist" contract (see LedgerStoreTests.Suppressing_an_unknown_advisory_id_is_rejected).
         var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
         var payload = Payload;
         var settings = Settings(a, b);
         var (monitor, sink, ledger) = Make(settings);
-        await ledger.SuppressAsync("a1");
+        await ledger.RecordAsync(new LedgerEntry
+        { AdvisoryId = "a1", Status = LedgerStatus.Acted, RecordedAt = DateTimeOffset.UtcNow });
+        Assert.True(await ledger.SuppressAsync("a1"));
 
         await monitor.ProcessAsync(
             [Fetched("hash-a1", true, a.SignDetached(payload), b.SignDetached(payload))],
             State(), settings, CancellationToken.None);
 
         Assert.Empty(sink.Calls);
+    }
+
+    [Fact]
+    public async Task Unsuppressed_advisory_is_re_evaluated_by_a_later_sweep()
+    {
+        // Task 12 review, Finding I3, end to end: suppressing an advisory latches IsActedAsync (see
+        // Suppressed_advisory_is_not_acted_on above); un-suppressing must not just flip that latch
+        // back but make the advisory genuinely reachable again. That also requires ContentHash to
+        // have been cleared (see LedgerStore.UnsuppressAsync's own doc comment) - a real
+        // AdvisoryFetcher would otherwise keep skipping this advisory's directory by hash regardless
+        // of what the ledger's Status says. Feeds the SAME FetchedAdvisory (same ContentHash) back
+        // into ProcessAsync three times - acted, suppressed (no-op), unsuppressed (acted again) - to
+        // prove the full chain, not just the ledger-level flags in isolation.
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var payload = Payload;
+        var settings = Settings(a, b);
+        var (monitor, sink, ledger) = Make(settings);
+
+        var firstSweep = await monitor.ProcessAsync(
+            [Fetched("hash-a1", true, a.SignDetached(payload), b.SignDetached(payload))],
+            State(), settings, CancellationToken.None);
+        Assert.Equal(LedgerStatus.Acted, Assert.Single(firstSweep).Status);
+        Assert.Equal(["update:Plug:2.0.0", "stop"], sink.Calls);
+
+        Assert.True(await ledger.SuppressAsync("a1"));
+        Assert.True(await ledger.IsActedAsync("a1"));
+
+        var suppressedSweep = await monitor.ProcessAsync(
+            [Fetched("hash-a1", true, a.SignDetached(payload), b.SignDetached(payload))],
+            State(), settings, CancellationToken.None);
+        Assert.Empty(suppressedSweep); // IsActedAsync still latches - nothing (re-)recorded this sweep
+        Assert.Equal(["update:Plug:2.0.0", "stop"], sink.Calls); // no NEW calls since the first sweep
+
+        Assert.True(await ledger.UnsuppressAsync("a1"));
+        Assert.False(await ledger.IsActedAsync("a1"));
+
+        var finalSweep = await monitor.ProcessAsync(
+            [Fetched("hash-a1", true, a.SignDetached(payload), b.SignDetached(payload))],
+            State(), settings, CancellationToken.None);
+
+        var finalEntry = Assert.Single(finalSweep);
+        Assert.Equal(LedgerStatus.Acted, finalEntry.Status);
+        Assert.True(await ledger.IsActedAsync("a1"));
+        // Acted a SECOND time - proves genuine re-evaluation, not merely "still present from before".
+        Assert.Equal(2, sink.Calls.Count(c => c == "update:Plug:2.0.0"));
     }
 
     [Fact]

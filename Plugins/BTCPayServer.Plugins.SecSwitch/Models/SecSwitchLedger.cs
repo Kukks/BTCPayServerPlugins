@@ -75,6 +75,15 @@ public static class LedgerStatus
     /// <summary>An admin explicitly suppressed this advisory via LedgerStore.SuppressAsync - the
     /// escape hatch, always absolute. Safe to cache.</summary>
     public const string Suppressed = "Suppressed";
+
+    /// <summary>An admin explicitly reversed a suppression via LedgerStore.UnsuppressAsync (Task 12
+    /// review, Finding I3). A transient marker, not a terminal outcome - it exists only to be a
+    /// NON-terminal Status so Services.LedgerStore.IsTerminalStatus (and therefore IsActedAsync)
+    /// stop latching on this entry, making it eligible for a fresh SecSwitchMonitor evaluation on
+    /// the next poll. Never cached (see IsTerminalStatus) - the next RecordAsync call for this
+    /// advisory id overwrites both this Status and the ContentHash UnsuppressAsync also cleared
+    /// with whatever that fresh evaluation produces.</summary>
+    public const string Unsuppressed = "Unsuppressed";
 }
 
 public sealed class LedgerEntry

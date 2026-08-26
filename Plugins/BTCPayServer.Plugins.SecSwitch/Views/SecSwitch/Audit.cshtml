@@ -22,6 +22,8 @@
             "Quorum met; SecSwitch applied the resulting action automatically."),
         LedgerStatus.Suppressed => ("bg-dark", "Suppressed",
             "An admin suppressed this advisory on this instance; it will not be acted on again."),
+        LedgerStatus.Unsuppressed => ("bg-info text-dark", "Un-suppressed",
+            "An admin un-suppressed this advisory. Not final — it will be re-evaluated on the next poll."),
         _ => ("bg-secondary", string.IsNullOrEmpty(status) ? "(none)" : status, "")
     };
 }
@@ -57,12 +59,15 @@
             <td>
                 @if (!row.Entry.Suppressed)
                 {
-                    <form method="post" asp-action="Suppress">
-                        <input type="hidden" name="advisoryId" value="@row.AdvisoryId" />
-                        <button type="submit" class="btn btn-sm btn-outline-secondary">Suppress</button>
-                    </form>
+                    <a asp-action="SuppressConfirm" asp-route-advisoryId="@row.AdvisoryId"
+                       class="btn btn-sm btn-outline-secondary">Suppress</a>
                 }
-                else { <span class="text-muted">Suppressed</span> }
+                else
+                {
+                    <span class="text-muted d-block">Suppressed</span>
+                    <a asp-action="UnsuppressConfirm" asp-route-advisoryId="@row.AdvisoryId"
+                       class="btn btn-sm btn-outline-secondary">Un-suppress</a>
+                }
             </td>
         </tr>
     }

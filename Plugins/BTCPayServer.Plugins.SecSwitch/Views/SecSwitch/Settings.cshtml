@@ -44,31 +44,57 @@
         </label>
     </div>
 
-    <h4>Trusted signing keys</h4>
-    <p class="text-muted">
-        Read-only here. Keys are added or removed only via a quorum-signed key-rotation document
-        co-signed by the existing trusted signers, never typed directly into this page - so a
-        mistaken or malicious paste here can never disarm or hijack verification. A key's
-        fingerprint is always re-derived from its own key material, never accepted as typed text.
-    </p>
-    <span asp-validation-for="TrustedKeys" class="text-danger"></span>
-    <table class="table">
-        <thead><tr><th>Identity</th><th>Fingerprint</th></tr></thead>
-        <tbody>
-        @foreach (var key in Model.TrustedKeys)
-        {
-            <tr><td>@key.Identity</td><td><code>@key.Fingerprint</code></td></tr>
-        }
-        @if (Model.TrustedKeys.Count == 0)
-        {
-            <tr><td colspan="2" class="text-danger">
-                No trusted keys — SecSwitch cannot verify any advisory.
-            </td></tr>
-        }
-        </tbody>
-    </table>
-
     <button type="submit" class="btn btn-primary">Save</button>
     <a asp-action="Audit" class="btn btn-secondary">Audit log</a>
     <a asp-action="Verify" class="btn btn-secondary">Verify a signature</a>
+</form>
+
+<h4 class="mt-5">Trusted signing keys</h4>
+<p class="text-muted">
+    A key's fingerprint is always re-derived from its own key material below - never accepted as
+    typed text - so a mismatched or malicious fingerprint label can never be filed here. Keys are
+    also added or replaced via a quorum-signed key-rotation document co-signed by the existing
+    trusted signers.
+</p>
+@* Finding I4 (Task 12 review): this table's Remove links and the "add a key" form below are their
+   own POST endpoints (AddTrustedKey / RemoveTrustedKey) that mutate the persisted TrustedKeys
+   directly - deliberately NOT form-bound fields on the SecSwitchSettings model above. The Settings
+   POST action above restores TrustedKeys from the persisted record before saving specifically
+   because this view does not (and, by design, must not) round-trip them through that form - see its
+   own doc comment. *@
+<span asp-validation-for="TrustedKeys" class="text-danger"></span>
+<table class="table">
+    <thead><tr><th>Identity</th><th>Fingerprint</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var key in Model.TrustedKeys)
+    {
+        <tr>
+            <td>@key.Identity</td>
+            <td><code>@key.Fingerprint</code></td>
+            <td>
+                <a asp-action="RemoveTrustedKeyConfirm" asp-route-fingerprint="@key.Fingerprint"
+                   class="btn btn-sm btn-outline-danger">Remove</a>
+            </td>
+        </tr>
+    }
+    @if (Model.TrustedKeys.Count == 0)
+    {
+        <tr><td colspan="3" class="text-danger">
+            No trusted keys — SecSwitch cannot verify any advisory.
+        </td></tr>
+    }
+    </tbody>
+</table>
+
+<h5>Add a trusted key</h5>
+<p class="text-muted">
+    Paste the key's own armored public key (<code>-----BEGIN PGP PUBLIC KEY BLOCK-----</code> ...).
+    Its fingerprint will be derived from the key material itself, not from anything typed here.
+</p>
+<form method="post" asp-action="AddTrustedKey">
+    <div class="form-group mb-3">
+        <label for="armoredPublicKey" class="form-label">Armored public key</label>
+        <textarea id="armoredPublicKey" name="armoredPublicKey" class="form-control font-monospace" rows="8"></textarea>
+    </div>
+    <button type="submit" class="btn btn-secondary">Add key</button>
 </form>

@@ -119,8 +119,12 @@ public class LedgerStoreTests
     public async Task Suppressed_advisory_counts_as_handled()
     {
         // This is the safety valve: suppression must stop the advisory being acted on again.
+        // Fix-round note (Finding I3): SuppressAsync no longer fabricates an entry for an id it has
+        // never seen (see Suppressing_an_unknown_advisory_id_is_rejected below) - this test now
+        // records the advisory first, matching the new "must already exist" contract.
         var store = new LedgerStore(new FakeSettingsRepository());
-        await store.SuppressAsync("a1");
+        await store.RecordAsync(Entry("a1"));
+        Assert.True(await store.SuppressAsync("a1"));
         Assert.True(await store.IsHandledAsync("a1"));
         Assert.True((await store.GetAsync()).Entries["a1"].Suppressed);
     }
@@ -190,8 +194,11 @@ public class LedgerStoreTests
     [Fact]
     public async Task Suppressed_via_SuppressAsync_counts_as_acted_on()
     {
+        // Fix-round note (Finding I3): records the advisory first - see the note on
+        // Suppressed_advisory_counts_as_handled above.
         var store = new LedgerStore(new FakeSettingsRepository());
-        await store.SuppressAsync("a1");
+        await store.RecordAsync(Entry("a1"));
+        Assert.True(await store.SuppressAsync("a1"));
         Assert.True(await store.IsActedAsync("a1"));
     }
 
@@ -258,8 +265,11 @@ public class LedgerStoreTests
     [Fact]
     public async Task Suppressed_advisory_counts_as_handled_without_relying_on_fake_aliasing()
     {
+        // Fix-round note (Finding I3): records the advisory first - see the note on
+        // Suppressed_advisory_counts_as_handled above.
         var store = new LedgerStore(new JsonRoundTrippingSettingsRepository());
-        await store.SuppressAsync("a1");
+        await store.RecordAsync(Entry("a1"));
+        Assert.True(await store.SuppressAsync("a1"));
         Assert.True(await store.IsHandledAsync("a1"));
         Assert.True((await store.GetAsync()).Entries["a1"].Suppressed);
     }
@@ -336,7 +346,7 @@ public class LedgerStoreTests
         // recorded, however it was cased.
         var store = new LedgerStore(new FakeSettingsRepository());
         await store.RecordAsync(Entry("ADV-1"));
-        await store.SuppressAsync("adv-1");
+        Assert.True(await store.SuppressAsync("adv-1"));
 
         var ledger = await store.GetAsync();
         Assert.Single(ledger.Entries); // merged into the SAME entry, not a second one
@@ -435,7 +445,7 @@ public class LedgerStoreTests
     public async Task SuppressAsync_with_blank_advisory_id_is_a_no_op(string? advisoryId)
     {
         var store = new LedgerStore(new FakeSettingsRepository());
-        await store.SuppressAsync(advisoryId!); // must not throw
+        Assert.False(await store.SuppressAsync(advisoryId!)); // must not throw
         Assert.Empty((await store.GetAsync()).Entries);
     }
 
@@ -462,5 +472,135 @@ public class LedgerStoreTests
         var ledger = await store.GetAsync();
         Assert.Equal(now, ledger.LastStartedAt);
         Assert.True(ledger.Entries.ContainsKey("a1"));
+    }
+
+    // --- Task 12 review, Finding I3: Suppress must reject an id with no existing entry (pre-emptive
+    // disarm of a future advisory must be impossible), and un-suppress must exist and correctly
+    // reset all three fields the suppressed-terminal state touches: Suppressed, Status, ContentHash.
+
+    [Fact]
+    public async Task Suppressing_an_unknown_advisory_id_is_rejected()
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+
+        Assert.False(await store.SuppressAsync("never-seen"));
+
+        var ledger = await store.GetAsync();
+        Assert.Empty(ledger.Entries); // no entry was fabricated for the unknown id
+    }
+
+    [Fact]
+    public async Task Suppressing_an_unknown_advisory_id_does_not_disturb_other_entries()
+    {
+        // A stronger form of the rejection test: proves the reject path really changes nothing at
+        // all, not just "no new top-level entry" - an unrelated, already-recorded advisory must be
+        // completely unaffected by a rejected suppress call for a different, unknown id.
+        var store = new LedgerStore(new FakeSettingsRepository());
+        await store.RecordAsync(Entry("a1"));
+
+        Assert.False(await store.SuppressAsync("never-seen"));
+
+        var ledger = await store.GetAsync();
+        Assert.Single(ledger.Entries);
+        Assert.True(ledger.Entries.ContainsKey("a1"));
+    }
+
+    [Fact]
+    public async Task Unsuppressing_an_advisory_clears_suppressed_status_and_content_hash()
+    {
+        // The exact three-field contract UnsuppressAsync's own doc comment describes: Suppressed
+        // back to false, Status to a NON-terminal value (so IsActedAsync stops latching), and
+        // ContentHash cleared (so AdvisoryFetcher's hash-based dedup stops skipping it). Missing any
+        // one of the three would make un-suppress a silent no-op for at least one downstream reader.
+        var store = new LedgerStore(new FakeSettingsRepository());
+        var entry = Entry("a1");
+        entry.ContentHash = "hash-a1";
+        await store.RecordAsync(entry);
+        Assert.True(await store.SuppressAsync("a1"));
+        // Sanity check on the fixture itself: suppression really did cache the hash, matching
+        // SuppressAsync setting a terminal Status - otherwise this test would not be exercising the
+        // scenario UnsuppressAsync's doc comment describes.
+        Assert.Equal("hash-a1", (await store.GetAsync()).Entries["a1"].ContentHash);
+
+        Assert.True(await store.UnsuppressAsync("a1"));
+
+        var unsuppressed = (await store.GetAsync()).Entries["a1"];
+        Assert.False(unsuppressed.Suppressed);
+        Assert.Equal(LedgerStatus.Unsuppressed, unsuppressed.Status);
+        Assert.False(LedgerStore.IsTerminalStatus(unsuppressed.Status));
+        Assert.Equal("", unsuppressed.ContentHash);
+    }
+
+    [Fact]
+    public async Task Unsuppressed_advisory_is_no_longer_reported_as_acted_on()
+    {
+        // Directly exercises the consumer IsActedAsync/IsTerminalStatus exist to gate:
+        // SecSwitchMonitor's re-action check. See SecSwitchMonitorTests for the full, end-to-end
+        // suppress -> unsuppress -> re-evaluated-by-ProcessAsync scenario.
+        var store = new LedgerStore(new FakeSettingsRepository());
+        await store.RecordAsync(Entry("a1"));
+        await store.SuppressAsync("a1");
+        Assert.True(await store.IsActedAsync("a1")); // sanity: suppression really did latch
+
+        await store.UnsuppressAsync("a1");
+
+        Assert.False(await store.IsActedAsync("a1"));
+        // IsHandledAsync still sees it - an entry still exists, just no longer terminal.
+        Assert.True(await store.IsHandledAsync("a1"));
+    }
+
+    [Fact]
+    public async Task Unsuppressing_an_unknown_advisory_id_is_rejected()
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        Assert.False(await store.UnsuppressAsync("never-seen"));
+        Assert.Empty((await store.GetAsync()).Entries); // no entry fabricated
+    }
+
+    [Fact]
+    public async Task Unsuppressing_an_advisory_that_is_not_currently_suppressed_is_rejected()
+    {
+        // An entry can exist without ever having been suppressed (e.g. Acted from a normal sweep) -
+        // there is nothing to reverse, and this must not be treated as a successful no-op.
+        var store = new LedgerStore(new FakeSettingsRepository());
+        await store.RecordAsync(Entry("a1")); // Status = Acted, Suppressed = false (see Entry() helper)
+
+        Assert.False(await store.UnsuppressAsync("a1"));
+
+        var entry = (await store.GetAsync()).Entries["a1"];
+        Assert.Equal(LedgerStatus.Acted, entry.Status); // untouched
+        Assert.False(entry.Suppressed);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task UnsuppressAsync_with_blank_advisory_id_is_a_no_op(string? advisoryId)
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        Assert.False(await store.UnsuppressAsync(advisoryId!)); // must not throw
+        Assert.Empty((await store.GetAsync()).Entries);
+    }
+
+    [Fact]
+    public async Task Suppress_then_unsuppress_survives_a_json_round_trip()
+    {
+        // Uses a FRESH LedgerStore instance sharing the same underlying repository each time,
+        // forcing a genuine JSON deserialize/serialize on every call rather than any in-memory
+        // aliasing shortcut - see JsonRoundTrippingSettingsRepository's own doc comment for why this
+        // matters (the same reasoning Finding 1's case-insensitivity tests rely on).
+        var repo = new JsonRoundTrippingSettingsRepository();
+        var entry = Entry("a1");
+        entry.ContentHash = "hash-a1";
+        await new LedgerStore(repo).RecordAsync(entry);
+        Assert.True(await new LedgerStore(repo).SuppressAsync("a1"));
+
+        Assert.True(await new LedgerStore(repo).UnsuppressAsync("a1"));
+
+        var final = (await new LedgerStore(repo).GetAsync()).Entries["a1"];
+        Assert.False(final.Suppressed);
+        Assert.Equal(LedgerStatus.Unsuppressed, final.Status);
+        Assert.Equal("", final.ContentHash);
     }
 }

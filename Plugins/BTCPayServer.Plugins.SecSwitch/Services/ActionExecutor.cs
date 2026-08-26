@@ -9,6 +9,7 @@ using BTCPayServer.HostedServices;
 using BTCPayServer.Plugins;
 using BTCPayServer.Plugins.SecSwitch.Models;
 using BTCPayServer.SSH;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -182,9 +183,28 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
 /// original. Directory.EnumerateDirectories's enumeration order is not guaranteed, so picking
 /// arbitrarily between two such siblings could disable/update the wrong one while leaving the real,
 /// vulnerable plugin directory untouched.
+///
+/// <see cref="PluginService"/> is deliberately NOT a constructor-injected dependency here (Task 12
+/// review, Finding I1 - a captive dependency): core registers it transient
+/// (<c>PluginManagerPlugin.cs</c>, <c>services.AddTransient&lt;PluginService&gt;()</c>), and it
+/// itself holds a typed <see cref="System.Net.Http.HttpClient"/> (<c>PluginBuilderClient</c>) plus
+/// <c>PoliciesSettings</c> - core's own comment above that registration warns that a singleton must
+/// never capture it directly ("Singletons shouldn't reference the settings directly, but
+/// ISettingsAccessor&lt;T&gt;, since singletons won't have refreshed values of the setting"), and
+/// .NET's built-in scope validation does not catch a singleton depending on a transient. This class
+/// is registered singleton (<c>SecSwitchPlugin.cs</c>), so resolving <see cref="PluginService"/>
+/// once into a field here would freeze it, its <c>PluginBuilderClient</c>, and its
+/// <c>PoliciesSettings</c> snapshot for the life of the process: an admin changing the pre-release
+/// policy after boot would never affect <see cref="QueueUpdateAsync"/> here, and the captured
+/// HttpClient's connection pool/DNS resolution would never rotate on a long-running instance -
+/// silently degrading the one action ("update the vulnerable plugin") this kill switch exists to
+/// take reliably. <see cref="QueueUpdateAsync"/> instead takes an <see cref="IServiceScopeFactory"/>
+/// and resolves a fresh <see cref="PluginService"/>, from its own short-lived scope, on every call -
+/// <see cref="QueueDisable"/> needs no such scope, since it never touches <see cref="PluginService"/>
+/// at all (only the static <see cref="PluginManager.DisablePlugin"/>).
 /// </summary>
 public sealed class BtcPayActionSink(
-    PluginService pluginService,
+    IServiceScopeFactory scopeFactory,
     IOptions<DataDirectories> dataDirectories,
     BTCPayServerOptions serverOptions,
     CheckConfigurationHostedService sshState,
@@ -209,6 +229,14 @@ public sealed class BtcPayActionSink(
             LogUnresolved("update", identifier, ambiguous);
             return false;
         }
+
+        // Resolved fresh from its own scope, used, and disposed immediately - never captured on
+        // this (singleton) instance. See the class doc comment (Finding I1) for why: PluginService
+        // is transient and itself owns a typed HttpClient plus a settings snapshot, so holding onto
+        // one for longer than a single call would silently go stale for the life of the process.
+        using var scope = scopeFactory.CreateScope();
+        var pluginService = scope.ServiceProvider.GetRequiredService<PluginService>();
+
         // Two separate calls: downloading a plugin does not queue its install. Both use the
         // resolved on-disk casing so the files DownloadRemotePlugin writes are the same path
         // InstallPlugin's queued command later looks for - core's "install" replay builds that
