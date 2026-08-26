@@ -34,6 +34,15 @@
                     </li>
                 </ul>
                 <p class="my-2">Head over to the <a href="https://dashboard.blink.sv" target="_blank" rel="noreferrer noopener" >Blink dashboard</a> and create an api key. The server is optional and will use the default Blink instance.The wallet-id is optional and will use the default wallet otherwise.</p>
+                <div class="alert alert-warning my-2" role="alert">
+                    <strong>The API key is stored on this server.</strong> BTCPay keeps it in the store's
+                    Lightning settings, so whoever operates the server can read it and use it for whatever the
+                    key is scoped to — a <code>WRITE</code> key can spend the account's balance. Grant the key
+                    only the scopes BTCPay needs: <code>READ</code> and <code>RECEIVE</code> to receive
+                    payments, and <code>WRITE</code> only if BTCPay must also pay invoices. If you do not
+                    operate and trust this server, treat the key as exposed to its operator; a key can be
+                    revoked and replaced from the Blink dashboard at any time.
+                </div>
                 <p class="my-2"><strong>Non-custodial (Spark) account</strong> — receive only, no API key:</p>
                 <ul class="pb-2">
                     <li>
