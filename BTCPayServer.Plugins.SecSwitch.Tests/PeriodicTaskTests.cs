@@ -198,6 +198,113 @@ public class PeriodicTaskTests
         Assert.False(SecSwitchPeriodicTask.IsNotifiable(status));
     }
 
+    // ================================================================================
+    // Final whole-branch review, Finding I4 (Important): a stuck NeedsAttention advisory notified on
+    // EVERY poll, forever. It is notifiable but not terminal, so IsActedAsync never latches it and it
+    // is re-recorded hourly - and core's NotificationSender inserts a new row per admin per call with
+    // no dedupe of its own. Unbounded table growth, plus a bell an admin learns to ignore, degrading
+    // the very signal the NeedsAttention notification was added to provide. Notification is now gated
+    // on the state being NEW or CHANGED; visibility in the banner and audit log is untouched (both
+    // read the ledger directly, not this predicate).
+    // ================================================================================
+
+    static LedgerEntry Recorded(string id, string status, string reason = "r") => new()
+    { AdvisoryId = id, Status = status, Reason = reason, RecordedAt = DateTimeOffset.UtcNow };
+
+    static Dictionary<string, SecSwitchPeriodicTask.NotifiedState> Prior(
+        string id, string status, string reason = "r") =>
+        new(StringComparer.OrdinalIgnoreCase)
+        { [id] = new SecSwitchPeriodicTask.NotifiedState(status, reason) };
+
+    [Fact]
+    public void A_newly_recorded_notifiable_advisory_is_notified()
+    {
+        Assert.True(SecSwitchPeriodicTask.ShouldNotify(
+            Recorded("a1", LedgerStatus.NeedsAttention),
+            new Dictionary<string, SecSwitchPeriodicTask.NotifiedState>()));
+    }
+
+    [Fact]
+    public void An_unchanged_needs_attention_advisory_is_not_notified_again()
+    {
+        // The headline case: an SSH probe that never succeeds, an installed version that stays
+        // indeterminate, or an action that keeps failing to queue, re-recorded identically every hour.
+        Assert.False(SecSwitchPeriodicTask.ShouldNotify(
+            Recorded("a1", LedgerStatus.NeedsAttention, "SSH connectivity has not finished verifying"),
+            Prior("a1", LedgerStatus.NeedsAttention, "SSH connectivity has not finished verifying")));
+    }
+
+    [Fact]
+    public void A_needs_attention_advisory_whose_reason_changed_is_notified_again()
+    {
+        // Something about the situation genuinely moved - e.g. an indeterminate version became an SSH
+        // deferral, or a queue failure became a different failure. Worth re-announcing.
+        Assert.True(SecSwitchPeriodicTask.ShouldNotify(
+            Recorded("a1", LedgerStatus.NeedsAttention, "Failed to queue disable of Plug"),
+            Prior("a1", LedgerStatus.NeedsAttention, "SSH connectivity has not finished verifying")));
+    }
+
+    [Fact]
+    public void An_advisory_whose_status_changed_is_notified_again()
+    {
+        // NeedsAttention -> Acted is exactly the transition an admin most wants to hear about.
+        Assert.True(SecSwitchPeriodicTask.ShouldNotify(
+            Recorded("a1", LedgerStatus.Acted),
+            Prior("a1", LedgerStatus.NeedsAttention)));
+    }
+
+    [Fact]
+    public void A_non_notifiable_status_is_never_notified_however_new_it_is()
+    {
+        // The dedupe must narrow the set, never widen it: Rejected/Unverified/NotApplicable stay out
+        // regardless of whether they are new.
+        Assert.False(SecSwitchPeriodicTask.ShouldNotify(
+            Recorded("a1", LedgerStatus.Unverified),
+            new Dictionary<string, SecSwitchPeriodicTask.NotifiedState>()));
+    }
+
+    [Fact]
+    public void Prior_state_lookup_is_case_insensitive_on_the_advisory_id()
+    {
+        // LedgerStore keys entries case-insensitively (a differently-cased id resolves to the SAME
+        // row), so a case difference must not read as "never seen before" and re-notify.
+        Assert.False(SecSwitchPeriodicTask.ShouldNotify(
+            Recorded("A1", LedgerStatus.NeedsAttention),
+            Prior("a1", LedgerStatus.NeedsAttention)));
+    }
+
+    [Fact]
+    public void Should_notify_tolerates_null_inputs_without_throwing()
+    {
+        Assert.False(SecSwitchPeriodicTask.ShouldNotify(null!, new Dictionary<string, SecSwitchPeriodicTask.NotifiedState>()));
+        Assert.True(SecSwitchPeriodicTask.ShouldNotify(Recorded("a1", LedgerStatus.NeedsAttention), null!));
+    }
+
+    [Fact]
+    public void Prior_notification_states_snapshot_status_and_reason_by_value()
+    {
+        // Taken by VALUE, deliberately: the snapshot comes from the same SecSwitchLedger instance
+        // LedgerStore.RecordAsync may later mutate in place, so holding the LedgerEntry objects
+        // themselves would compare an entry against its own updated self and never report a change -
+        // silently restoring the every-poll notification this fix removes.
+        var entry = Recorded("a1", LedgerStatus.NeedsAttention, "before");
+        var ledger = new SecSwitchLedger { Entries = { ["a1"] = entry } };
+
+        var snapshot = SecSwitchPeriodicTask.BuildPriorNotificationStates(ledger);
+        entry.Status = LedgerStatus.Acted;
+        entry.Reason = "after";
+
+        Assert.Equal(LedgerStatus.NeedsAttention, snapshot["a1"].Status);
+        Assert.Equal("before", snapshot["a1"].Reason);
+        Assert.True(SecSwitchPeriodicTask.ShouldNotify(entry, snapshot)); // the change IS seen
+    }
+
+    [Fact]
+    public void Prior_notification_states_from_a_null_ledger_does_not_throw()
+    {
+        Assert.Empty(SecSwitchPeriodicTask.BuildPriorNotificationStates(null!));
+    }
+
     sealed class StubPlugin(string id, Version version) : BTCPayServer.Abstractions.Models.BaseBTCPayServerPlugin
     {
         public override string Identifier => id;

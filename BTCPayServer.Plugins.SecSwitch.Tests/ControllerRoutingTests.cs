@@ -33,20 +33,16 @@ public class ControllerRoutingTests
         Assert.Equal("~/plugins/secswitch", route!.Template);
     }
 
-    [Theory]
-    [InlineData("Settings")]
-    [InlineData("Audit")]
-    [InlineData("Verify")]
-    [InlineData("Suppress")]
-    public void Expected_actions_exist(string action)
-        => Assert.NotEmpty(typeof(SecSwitchController).GetMethods().Where(m => m.Name == action));
-
-    // Fix-round strengthening (Task 12 review, Finding M5): the theory above only pins method
-    // NAMES - it would stay green even if [HttpGet("audit")] were deleted outright (a bare, un-
-    // routed public method named "Audit" still satisfies it), and it does not exist at all for most
-    // of the actions this fix round added. This theory pins verb AND route template together for
-    // every action the controller exposes, so either one drifting - or an action losing its route
-    // attribute entirely - fails the test.
+    // Final whole-branch review, Finding M8: a name-only `Expected_actions_exist` theory used to sit
+    // here. It carried the solution's ONLY analyzer warning (xUnit2030), its own comment conceded it
+    // "would stay green even if [HttpGet(\"audit\")] were deleted", and every case it covered is a
+    // strict subset of the verb+template theory below - which pins the method name AND the verb AND
+    // the route template. Deleted rather than silenced: a weaker duplicate of a stronger test is not
+    // worth a suppression.
+    //
+    // Fix-round strengthening (Task 12 review, Finding M5): this theory pins verb AND route template
+    // together for every action the controller exposes, so either one drifting - or an action losing
+    // its route attribute entirely - fails the test.
     [Theory]
     [InlineData("Settings", "GET", "")]
     [InlineData("Settings", "POST", "")]

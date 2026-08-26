@@ -36,6 +36,17 @@ public sealed class SecSwitchLedger
     // LedgerStore's own methods ever mutate it.
     public List<string> OfferedTrustRootFingerprints { get; set; } = [];
 
+    // Final whole-branch review, Finding C3 (Critical): where the next poll should resume its scan of
+    // the feed's index.json - see AdvisoryFetchResult.NextCursor's own doc comment for the full
+    // contract. Persisted here rather than held in memory on SecSwitchPeriodicTask because the
+    // starvation it prevents is permanent, and a process restart must not reset the scan back to a
+    // stuck prefix. On the ledger rather than SecSwitchSettings for the same reason
+    // OfferedTrustRootFingerprints is (see above): the ledger is never partially overwritten by a web
+    // form, so no future settings-mutating endpoint can silently reset it by forgetting a
+    // restore-before-save. Zero (the default for an existing ledger row that predates this field) is
+    // both a valid cursor and exactly the old behaviour - always start at the top of the index.
+    public int FeedIndexCursor { get; set; }
+
     public Dictionary<string, LedgerEntry> Entries { get; set; } = [];
 }
 
@@ -86,12 +97,18 @@ public static class LedgerStatus
     /// that feed-spec invariant were ever relaxed, this identity mismatch becomes live.</summary>
     public const string NotApplicable = "NotApplicable";
 
-    /// <summary>Quorum met; PolicyResolver resolved SecSwitchAction.None (or, for a core advisory,
-    /// deferred entirely - see PolicyResolver.SshVerificationPendingPhrase) for one of several reasons
-    /// SecSwitch could not resolve on its own: the installed version could not be determined,
-    /// InstanceState itself was null, or - Task 13 review round 2, Finding R1 - a fixable core
-    /// advisory was reached while SSH is configured but CheckConfigurationHostedService has not (yet,
-    /// or ever) reported success. In every case we do not actually know whether/how to act. Final only
+    /// <summary>Quorum met, but no action was applied. Either PolicyResolver resolved
+    /// SecSwitchAction.None (or, for a core advisory, deferred entirely - see
+    /// PolicyResolver.SshVerificationPendingPhrase) for one of several reasons SecSwitch could not
+    /// resolve on its own - the installed version could not be determined, InstanceState itself was
+    /// null, or (Task 13 review round 2, Finding R1) a fixable core advisory was reached while SSH is
+    /// configured but CheckConfigurationHostedService has not (yet, or ever) reported success - or
+    /// (final whole-branch review, Finding C1) an action WAS resolved, attempted, and FAILED:
+    /// ActionExecutor reported Succeeded=false because the identifier was refused, the sink queued
+    /// nothing (e.g. a core-bundled plugin, which has no directory under PluginDir to resolve), or the
+    /// call threw. A third case (Finding C2) is an advisory whose signed id does not match the id the
+    /// unsigned feed index filed it under. In every case we do not actually know that the instance is
+    /// safe, and in the failure case we know it is not. Final only
     /// because we could not look properly - never cached; must be re-fetched. The SSH case specifically
     /// can persist INDEFINITELY (the connectivity probe retries forever but never guarantees success),
     /// which is why SecSwitchPeriodicTask.IsNotifiable now surfaces this status via the admin bell
@@ -105,8 +122,13 @@ public static class LedgerStatus
     /// through the ledger itself, not by the advisory changing - safe to cache.</summary>
     public const string NeedsDecision = "NeedsDecision";
 
-    /// <summary>Quorum met and SecSwitch applied (or attempted) the resulting action automatically.
-    /// Final "on content" - safe to cache.</summary>
+    /// <summary>Quorum met and SecSwitch applied the resulting action automatically, and that action
+    /// reported SUCCESS. Final whole-branch review, Finding C1: this used to read "applied (or
+    /// attempted)", and the code matched - every non-Notify outcome landed here regardless of whether
+    /// anything actually happened, so a failure was latched terminal, had its ContentHash cached, and
+    /// was announced to the admin as "Handled". An attempt that fails is now
+    /// <see cref="NeedsAttention"/>; only genuine success reaches this status. Final "on content" -
+    /// safe to cache.</summary>
     public const string Acted = "Acted";
 
     /// <summary>An admin explicitly suppressed this advisory via LedgerStore.SuppressAsync - the

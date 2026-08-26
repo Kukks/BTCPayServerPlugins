@@ -470,8 +470,8 @@ public class AdvisoryFetcherTests
         // see Overall_poll_deadline_bounds_total_wall_time_even_with_many_hanging_requests for the
         // other one. CancellationToken.None is deliberate here - it proves the fetcher enforces
         // its OWN bound even when the caller supplies no cooperating token at all.
-        var fetched = await fetcher.FetchAsync(
-            Feed, new HashSet<string>(), TimeSpan.FromMilliseconds(100), TimeSpan.FromSeconds(30), CancellationToken.None);
+        var fetched = (await fetcher.FetchAsync(
+            Feed, new HashSet<string>(), startCursor: 0, TimeSpan.FromMilliseconds(100), TimeSpan.FromSeconds(30), CancellationToken.None)).Advisories;
         sw.Stop();
 
         Assert.Empty(fetched);
@@ -502,8 +502,8 @@ public class AdvisoryFetcherTests
         var fetcher = new AdvisoryFetcher(http.Client());
 
         var sw = Stopwatch.StartNew();
-        var fetched = await fetcher.FetchAsync(
-            Feed, new HashSet<string>(), TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(200), CancellationToken.None);
+        var fetched = (await fetcher.FetchAsync(
+            Feed, new HashSet<string>(), startCursor: 0, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(200), CancellationToken.None)).Advisories;
         sw.Stop();
 
         Assert.Empty(fetched);
@@ -795,8 +795,8 @@ public class AdvisoryFetcherTests
         var http = new FakeHttp(routes, hangingRoutes: [hangingPath]);
         var fetcher = new AdvisoryFetcher(http.Client());
 
-        var fetched = await fetcher.FetchAsync(
-            Feed, new HashSet<string>(), TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(200), CancellationToken.None);
+        var fetched = (await fetcher.FetchAsync(
+            Feed, new HashSet<string>(), startCursor: 0, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(200), CancellationToken.None)).Advisories;
 
         var one = Assert.Single(fetched); // advisory.json already succeeded before the deadline fired
         Assert.False(one.SignaturesComplete);
@@ -834,5 +834,179 @@ public class AdvisoryFetcherTests
         Assert.Equal("SIG-ONE", sig); // sig-two.asc was never even attempted - budget exhausted first
         Assert.False(one.SignaturesComplete);
         Assert.Equal(4096, http.Requested.Count);
+    }
+
+    // ================================================================================
+    // Final whole-branch review, Finding C3 (Critical): 50 index entries that DOWNLOAD but never
+    // reach a terminal status blind the fetcher permanently.
+    //
+    // MaxAdvisoriesPerPoll counts an entry the instant advisory.json arrives - signatures are
+    // irrelevant to that count. An entry whose signatures never verify ends Unverified, which
+    // correctly withholds its ContentHash, so it is NOT in `known` next poll and is downloaded again,
+    // at the same index position, forever. Fifty of them filled the whole per-poll budget on every
+    // poll and nothing after them was ever fetched again - silently, since Unverified is excluded
+    // from notification, and without MaxRequestsPerPoll ever biting (50 x 66 = 3,300 < 4,096).
+    // build-index.sh globs in sorted order, so genuine advisories accumulate at the END of the index,
+    // exactly where this bites.
+    //
+    // The fix is the per-poll index cursor: the cap still bounds one poll's downloads, but the next
+    // poll resumes where this one stopped instead of re-walking the identical prefix.
+    // ================================================================================
+
+    /// Builds a feed of <paramref name="stuckCount"/> entries that all fetch perfectly - a real
+    /// advisory.json, a real signatures/index.json, a real signature file - and therefore consume a
+    /// MaxAdvisoriesPerPoll slot every single poll, but can never reach a terminal status downstream
+    /// (their signature never meets quorum), so their content hash is never cached and they are never
+    /// skipped. A single genuine advisory "a1" sits behind all of them.
+    static Dictionary<string, string> FeedWithStuckPrefix(int stuckCount)
+    {
+        var routes = Routes(); // supplies the genuine "a1" advisory's own routes
+        var indexEntries = new List<string>();
+        for (var i = 0; i < stuckCount; i++)
+        {
+            var id = $"stuck{i}";
+            indexEntries.Add($$"""{"id":"{{id}}","path":"advisories/{{id}}","contentHash":"h{{id}}"}""");
+            routes[$"{Feed}advisories/{id}/advisory.json"] = $$"""{"id":"{{id}}"}""";
+            routes[$"{Feed}advisories/{id}/signatures/index.json"] = """["bogus.asc"]""";
+            routes[$"{Feed}advisories/{id}/signatures/bogus.asc"] = "NOT-A-VALID-SIGNATURE";
+        }
+        indexEntries.Add("""{"id":"a1","path":"advisories/a1","contentHash":"h1"}""");
+        routes[$"{Feed}index.json"] = "[" + string.Join(",", indexEntries) + "]";
+        return routes;
+    }
+
+    [Fact]
+    public async Task A_genuine_advisory_behind_fifty_permanently_unverifiable_entries_is_still_reached()
+    {
+        // The headline reproduction. Fifty stuck entries fill poll 1's cap exactly, so "a1" is not
+        // reached that poll - that part is by design. What must NOT happen is poll 2 (and 3, and
+        // every poll after) starting over at index 0 and burning the same fifty slots again.
+        var http = new FakeHttp(FeedWithStuckPrefix(50));
+        var fetcher = new AdvisoryFetcher(http.Client());
+        // Nothing is ever added to `known`: none of the stuck entries reaches a terminal status, so
+        // SecSwitchMonitor withholds every one of their content hashes. That is precisely why the
+        // pre-fix code could never make progress.
+        var known = new HashSet<string>();
+
+        var firstPoll = await fetcher.FetchAsync(Feed, known, 0, CancellationToken.None);
+        Assert.Equal(50, firstPoll.Advisories.Count);
+        Assert.DoesNotContain(firstPoll.Advisories, x => x.Id == "a1"); // capped out this poll
+        Assert.NotEqual(0, firstPoll.NextCursor); // the scan moved
+
+        var secondPoll = await fetcher.FetchAsync(Feed, known, firstPoll.NextCursor, CancellationToken.None);
+
+        Assert.Contains(secondPoll.Advisories, x => x.Id == "a1"); // reached, not starved
+        Assert.Contains(http.Requested, r => r.Contains("advisories/a1/advisory.json"));
+    }
+
+    [Fact]
+    public async Task Discarding_the_cursor_reproduces_the_permanent_starvation()
+    {
+        // The control that makes the test above mean something: run the identical feed while always
+        // restarting at cursor 0 - i.e. exactly what the pre-fix code did - and "a1" is never reached
+        // on ANY poll, no matter how many times it is polled.
+        var http = new FakeHttp(FeedWithStuckPrefix(50));
+        var fetcher = new AdvisoryFetcher(http.Client());
+        var known = new HashSet<string>();
+
+        for (var poll = 0; poll < 5; poll++)
+        {
+            var result = await fetcher.FetchAsync(Feed, known, 0, CancellationToken.None);
+            Assert.Equal(50, result.Advisories.Count);
+            Assert.DoesNotContain(result.Advisories, x => x.Id == "a1");
+        }
+
+        Assert.DoesNotContain(http.Requested, r => r.Contains("advisories/a1/advisory.json"));
+    }
+
+    [Fact]
+    public async Task The_cursor_survives_request_budget_exhaustion_too()
+    {
+        // The cursor has to advance whatever stopped the scan, not only the download cap - a hostile
+        // index big enough to exhaust MaxRequestsPerPoll (4096) every poll was the residual
+        // MaxRequestsPerPoll's own doc comment used to accept as unclosable without a cursor.
+        var routes = Routes();
+        var indexEntries = new List<string>();
+        const int hostileCount = 4200; // > MaxRequestsPerPoll; each entry costs exactly 1 request
+        for (var i = 0; i < hostileCount; i++)
+            indexEntries.Add($$"""{"id":"stale{{i}}","path":"advisories/stale{{i}}","contentHash":"hstale{{i}}"}""");
+        indexEntries.Add("""{"id":"a1","path":"advisories/a1","contentHash":"h1"}""");
+        routes[$"{Feed}index.json"] = "[" + string.Join(",", indexEntries) + "]";
+
+        var http = new FakeHttp(routes);
+        var fetcher = new AdvisoryFetcher(http.Client());
+        var known = new HashSet<string>();
+
+        var firstPoll = await fetcher.FetchAsync(Feed, known, 0, CancellationToken.None);
+        Assert.Empty(firstPoll.Advisories); // "a1" is past the request ceiling this poll, as designed
+        Assert.Equal(4095, firstPoll.NextCursor); // the index fetch itself consumed one budget unit
+
+        var secondPoll = await fetcher.FetchAsync(Feed, known, firstPoll.NextCursor, CancellationToken.None);
+
+        var genuine = Assert.Single(secondPoll.Advisories);
+        Assert.Equal("a1", genuine.Id);
+    }
+
+    [Fact]
+    public async Task A_completed_scan_leaves_the_cursor_where_it_started()
+    {
+        // A healthy feed that fits in one poll must not drift: nothing was missed, so there is
+        // nothing to step over, and moving would only make the next poll's wrap harder to reason
+        // about.
+        var fetcher = new AdvisoryFetcher(new FakeHttp(Routes()).Client());
+
+        var result = await fetcher.FetchAsync(Feed, new HashSet<string>(), 0, CancellationToken.None);
+
+        Assert.Single(result.Advisories);
+        Assert.Equal(0, result.NextCursor);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(7)]             // past the end of a 3-entry index
+    [InlineData(-2)]            // negative, e.g. a corrupted or hand-edited settings row
+    [InlineData(int.MaxValue)]
+    [InlineData(int.MinValue)]  // the case a naive `cursor % count` gets wrong: stays negative
+    public async Task Every_entry_is_reached_from_any_starting_cursor_in_or_out_of_range(int cursor)
+    {
+        // Two properties at once. The cursor is a position, not an identity - it can outlive the
+        // index that produced it (the feed shrank, the row was hand-edited) - so an out-of-range or
+        // negative value must normalise into range rather than throw or skip the index entirely,
+        // which would be the same permanent blindness by another route. And because the scan WRAPS,
+        // a poll with budget to spare still sees every entry whatever position it starts at: the
+        // cursor changes the ORDER entries are visited, never which ones are reachable.
+        var routes = new Dictionary<string, string>();
+        var indexEntries = new List<string>();
+        foreach (var id in new[] { "a1", "a2", "a3" })
+        {
+            indexEntries.Add($$"""{"id":"{{id}}","path":"advisories/{{id}}","contentHash":"h{{id}}"}""");
+            routes[$"{Feed}advisories/{id}/advisory.json"] = $$"""{"id":"{{id}}"}""";
+            routes[$"{Feed}advisories/{id}/signatures/index.json"] = "[]";
+        }
+        routes[$"{Feed}index.json"] = "[" + string.Join(",", indexEntries) + "]";
+        var fetcher = new AdvisoryFetcher(new FakeHttp(routes).Client());
+
+        var result = await fetcher.FetchAsync(Feed, new HashSet<string>(), cursor, CancellationToken.None);
+
+        Assert.Equal(3, result.Advisories.Count);
+        Assert.Contains(result.Advisories, x => x.Id == "a1");
+        Assert.Contains(result.Advisories, x => x.Id == "a2");
+        Assert.Contains(result.Advisories, x => x.Id == "a3");
+        Assert.InRange(result.NextCursor, 0, 2); // always a valid position for this index
+    }
+
+    [Fact]
+    public async Task An_unfetchable_index_hands_the_caller_its_own_cursor_back_unchanged()
+    {
+        // Nothing was scanned, so nothing may be stepped over: inventing a new position here would
+        // skip entries the next poll should still look at.
+        var fetcher = new AdvisoryFetcher(new FakeHttp([]).Client());
+
+        var result = await fetcher.FetchAsync(Feed, new HashSet<string>(), 17, CancellationToken.None);
+
+        Assert.Empty(result.Advisories);
+        Assert.Equal(17, result.NextCursor);
     }
 }

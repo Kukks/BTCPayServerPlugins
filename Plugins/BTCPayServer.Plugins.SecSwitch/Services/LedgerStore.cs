@@ -278,6 +278,31 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
         }
     }
 
+    /// <summary>
+    /// Persists where the next poll should resume scanning the feed index (final whole-branch review,
+    /// Finding C3) - see <see cref="Models.SecSwitchLedger.FeedIndexCursor"/> and
+    /// <see cref="AdvisoryFetchResult.NextCursor"/> for what the value means. Skips the settings write
+    /// entirely when the cursor has not moved, which is the ordinary case for a healthy feed whose
+    /// whole index fits in one poll: without that check this would turn every single poll into a
+    /// ledger write, for no change.
+    /// </summary>
+    public async Task RecordFeedIndexCursorAsync(int cursor)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            var ledger = await GetAsync();
+            if (ledger.FeedIndexCursor == cursor)
+                return;
+            ledger.FeedIndexCursor = cursor;
+            await settingsRepository.UpdateSetting(ledger);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task RecordStartupAsync(DateTimeOffset now)
     {
         await _gate.WaitAsync();

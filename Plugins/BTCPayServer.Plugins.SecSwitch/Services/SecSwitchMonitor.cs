@@ -39,6 +39,13 @@ namespace BTCPayServer.Plugins.SecSwitch.Services;
 /// <see cref="ActionExecutor.ExecuteAsync"/> are only ever reached for an advisory whose GPG quorum
 /// already checked out - nothing here resolves or executes anything for an advisory that failed
 /// quorum.
+///
+/// Verification also precedes IDENTITY (final whole-branch review, Finding C2). An advisory has two
+/// ids: the one the feed's UNSIGNED index.json claims (<see cref="FetchedAdvisory.Id"/>) and the one
+/// inside the quorum-signed document (<c>Advisory.Id</c>). Only the second is trustworthy, so the
+/// two are required to match before either the action latch or any action is reached, and the
+/// authoritative latch is keyed on the signed one. See the mismatch branch in
+/// <see cref="ProcessOneAsync"/> for the two no-key-material attacks that closes.
 /// </summary>
 public sealed class SecSwitchMonitor(
     ActionExecutor executor,
@@ -129,19 +136,6 @@ public sealed class SecSwitchMonitor(
         if (item is null || string.IsNullOrWhiteSpace(item.Id))
             return; // Nothing to key a ledger entry by - never recorded is the same as ignored today.
 
-        // Hard requirement 3 (the action-loop guard) / Finding C1 fix: gates on IsActedAsync, NOT
-        // IsHandledAsync. IsHandledAsync latches on ANY recorded entry regardless of status - which
-        // would silently defeat hard requirement 1's own ContentHash-withholding fix, since the
-        // re-fetch it buys on the next poll would arrive here and be turned away anyway because
-        // SOME (non-terminal) entry already exists under this id. IsActedAsync only latches on a
-        // TERMINAL outcome (see LedgerStore.IsTerminalStatus's own doc comment for the current
-        // set), so an advisory recorded as Rejected/Unverified/NeedsAttention remains eligible for
-        // re-evaluation on every later poll until it either resolves to a terminal status or an
-        // admin suppresses it. Never bypassed, and always the first check for an advisory reached
-        // this far.
-        if (await ledger.IsActedAsync(item.Id))
-            return;
-
         var entry = new LedgerEntry { AdvisoryId = item.Id, RecordedAt = DateTimeOffset.UtcNow };
 
         // The candidate ContentHash is carried through here UNCONDITIONALLY - RecordAsync (see its
@@ -208,6 +202,87 @@ public sealed class SecSwitchMonitor(
             return;
         }
 
+        // Final whole-branch review, Finding C2 (Critical): index.json is the ONE artefact in the
+        // feed carrying no signature, yet `item.Id` (parsed from it) used to be the plugin's entire
+        // notion of an advisory's identity - it keyed the action latch AND the ledger row, while the
+        // SIGNED `advisory.Id` was read exactly once, in a prose string in PolicyResolver, and the
+        // two were never compared. An attacker who can write index.json but holds no signing keys
+        // therefore got two attacks for free:
+        //
+        //   * Silent drop - point a fresh index entry at a genuine, correctly-signed NEW advisory
+        //     while giving it the id of something already terminal. The old pre-parse
+        //     IsActedAsync(item.Id) check fired before parse and before verification, so the genuine
+        //     advisory vanished with no ledger row, no log, and no notification.
+        //   * Crash loop - rotate id AND contentHash on every publish while `path` keeps pointing at
+        //     a genuine, correctly-signed, unfixable-core advisory. Neither the fetcher's hash dedup
+        //     nor the id-keyed latch ever fires, so ShutdownCore runs every single poll. That is
+        //     precisely the scenario LedgerStore's own doc comment names as reason #1 the ledger
+        //     exists.
+        //
+        // Both close here: the signed id must equal the index id, and the latch below is keyed on
+        // the signed one. Placed AFTER the quorum check on purpose - before it, `advisory.Id` is
+        // just more attacker-supplied bytes, so a mismatch could not tell us which of the two ids
+        // (if either) is authentic, and the entry we write below could not safely be keyed on it.
+        if (!string.Equals(advisory.Id, item.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            // Keyed on the SIGNED id, never the index's. Two reasons, both load-bearing: (a) writing
+            // under item.Id would let a forged index id overwrite an unrelated advisory's ledger row
+            // - and a non-terminal row overwriting a TERMINAL one un-latches it, handing the attacker
+            // back the very re-action loop this check exists to stop (RecordAsync refuses that
+            // downgrade too, as defence in depth); (b) item.Id is unbounded attacker-chosen text, so
+            // keying on it would let one genuine advisory be re-filed under arbitrarily many ledger
+            // rows, growing the single settings row without limit. The signed id is quorum-proven at
+            // this point, so at most one row per genuinely-signed advisory can ever be created here.
+            //
+            // NeedsAttention, not Rejected: both are non-terminal and both withhold the ContentHash,
+            // but only NeedsAttention is notifiable (see SecSwitchPeriodicTask.IsNotifiable) and
+            // shows in the alert banner. This plugin's worst failure mode is failing to act while
+            // looking healthy, and a feed serving mismatched ids is exactly a case a human must look
+            // at - burying it in an audit log nobody watches would repeat the silence Finding R1
+            // already had to fix once.
+            //
+            // The Reason text deliberately does NOT embed item.Id, even though it is sanitized: an
+            // attacker rotating the index id every poll would otherwise change the Reason every poll,
+            // and the Finding I4 fix (notify only when the state is new or its reason changed) keys
+            // on exactly that - a rotating id would become an unbounded notification generator. The
+            // specific pair goes to the log instead, where it is bounded by the log sink.
+            logger.LogWarning(
+                "SecSwitch refused advisory {SignedId}: the feed index listed it under a different id ({IndexId}). " +
+                "The index is unsigned, so a mismatch means the feed cannot be trusted to say which advisory this is.",
+                advisory.Id, item.Id);
+            entry.AdvisoryId = advisory.Id;
+            entry.Status = LedgerStatus.NeedsAttention;
+            entry.Reason = "The feed index listed this advisory under a different id than the advisory " +
+                           "itself is signed for; refusing to act until the feed is consistent.";
+            await RecordAsync(entry, item.SignaturesComplete, recorded);
+            return;
+        }
+
+        // The ids are now proven equal, so this row is keyed by the signed identity even though the
+        // string happens to have come from the index - the assignment is what makes that true rather
+        // than incidental, and it normalises the casing to the signed document's own.
+        entry.AdvisoryId = advisory.Id;
+
+        // Hard requirement 3 (the action-loop guard) / Task 11 review Finding C1 fix: gates on
+        // IsActedAsync, NOT IsHandledAsync. IsHandledAsync latches on ANY recorded entry regardless
+        // of status - which would silently defeat hard requirement 1's own ContentHash-withholding
+        // fix, since the re-fetch it buys on the next poll would arrive here and be turned away
+        // anyway because SOME (non-terminal) entry already exists under this id. IsActedAsync only
+        // latches on a TERMINAL outcome (see LedgerStore.IsTerminalStatus's own doc comment for the
+        // current set), so an advisory recorded as Rejected/Unverified/NeedsAttention remains
+        // eligible for re-evaluation on every later poll until it either resolves to a terminal
+        // status or an admin suppresses it.
+        //
+        // Finding C2 moved this check here, from its original position as the very first thing done
+        // to an advisory. It is now keyed on the quorum-verified id and is unreachable until parse,
+        // verification, and the id-match check above have all passed - a forged index id can no
+        // longer make an advisory disappear before anything has looked at it. The cost is one parse
+        // plus one quorum verification for an advisory that turns out to be already handled; that is
+        // bounded by AdvisoryFetcher's own per-poll delivery cap, and in the ordinary case the
+        // fetcher's ContentHash dedup means a terminal advisory is never re-delivered here at all.
+        if (await ledger.IsActedAsync(advisory.Id))
+            return;
+
         var decision = PolicyResolver.Resolve(advisory, state, settings);
         entry.Action = decision.Action.ToString();
 
@@ -262,8 +337,35 @@ public sealed class SecSwitchMonitor(
         if (ct.IsCancellationRequested)
             return;
 
-        var outcome = await executor.ExecuteAsync(decision.Action, advisory);
-        entry.Status = decision.Action == SecSwitchAction.Notify ? LedgerStatus.NeedsDecision : LedgerStatus.Acted;
+        // Final whole-branch review, Finding C1 (Critical): ExecuteAsync's result is a
+        // (Succeeded, Outcome) pair and the flag is honoured. Previously only the prose was kept and
+        // EVERY non-Notify outcome was recorded as the terminal `Acted` - so a refused identifier, a
+        // queue step that queued nothing, or an SSH connect failure was latched out of every future
+        // poll by IsActedAsync, had its ContentHash cached so AdvisoryFetcher never re-downloaded it,
+        // and was reported to the admin as "Handled". Reachable with no attacker at all: core
+        // registers system plugins into the same IEnumerable<IBTCPayServerPlugin> BuildState reads,
+        // but a system plugin has no directory under PluginDir, so
+        // BtcPayActionSink.TryResolveInstalledDirectory cannot resolve one - an advisory against any
+        // core-bundled plugin is judged applicable, resolves to DisablePlugin, fails to queue, and
+        // was permanently filed as handled.
+        //
+        // A failure now records the NON-terminal, notifiable NeedsAttention instead: the advisory
+        // stays eligible for re-evaluation on every later poll (IsActedAsync stays false), its
+        // ContentHash stays withheld so the fetcher re-delivers it (see RecordAsync), and the admin
+        // actually gets a bell notification and an alert-banner entry rather than a green "Acted".
+        //
+        // Notify is mapped unconditionally, exactly as before: "hold this open for an admin" IS the
+        // action, so it is NeedsDecision whatever the flag says. None never reaches this line - it
+        // returns above.
+        var (succeeded, outcome) = await executor.ExecuteAsync(decision.Action, advisory);
+        entry.Status = decision.Action == SecSwitchAction.Notify
+            ? LedgerStatus.NeedsDecision
+            : succeeded ? LedgerStatus.Acted : LedgerStatus.NeedsAttention;
+        if (!succeeded && decision.Action != SecSwitchAction.Notify)
+            logger.LogError(
+                "SecSwitch could not apply {Action} for advisory {Id}: {Outcome}. Recorded as needing " +
+                "attention, not as acted - it will be re-evaluated on the next poll.",
+                decision.Action, entry.AdvisoryId, outcome);
         // outcome is already sanitized by ActionExecutor itself before being returned; sanitizedReason
         // (computed above) covers the other half of this string.
         entry.Reason = $"{sanitizedReason} {outcome}".Trim();
@@ -321,6 +423,25 @@ public sealed class SecSwitchMonitor(
     {
         if (!signaturesComplete || !LedgerStore.IsTerminalStatus(entry.Status))
             entry.ContentHash = "";
+
+        // Final whole-branch review, Finding C2: never downgrade a TERMINAL ledger row to a
+        // non-terminal one. Before C2 moved the latch, the pre-parse IsActedAsync check made this
+        // structurally impossible - nothing that could produce a non-terminal status was ever reached
+        // for an id already recorded terminal. Now that parse/quorum/id-mismatch failures are reached
+        // for such an id, that protection has to be stated rather than implied: overwriting, say, an
+        // Acted ShutdownCore row with "Rejected" would clear both halves of the action-loop guard at
+        // once (IsActedAsync goes false AND the ContentHash is withheld, so the fetcher re-delivers
+        // it), turning a hostile mirror serving one poll of malformed bytes into a repeatable
+        // stop-the-server loop. Terminal-over-terminal and anything-over-non-terminal are unaffected,
+        // so the legitimate progressions (Unverified -> Acted, Unsuppressed -> Acted,
+        // NeedsAttention -> Acted) all still apply normally.
+        if (!LedgerStore.IsTerminalStatus(entry.Status) && await ledger.IsActedAsync(entry.AdvisoryId))
+        {
+            logger.LogWarning(
+                "SecSwitch declined to overwrite the already-final ledger record for advisory {Id} with a " +
+                "non-final {Status} result; the existing record stands.", entry.AdvisoryId, entry.Status);
+            return;
+        }
 
         await ledger.RecordAsync(entry);
         recorded.Add(entry);

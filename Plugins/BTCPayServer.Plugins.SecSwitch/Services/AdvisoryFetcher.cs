@@ -52,6 +52,23 @@ public sealed record FetchedAdvisory(
     IReadOnlyList<string> ArmoredSignatures, bool SignaturesComplete);
 
 /// <summary>
+/// What one poll produced: the advisories downloaded, and where the NEXT poll should resume its scan
+/// of index.json (final whole-branch review, Finding C3).
+/// </summary>
+/// <param name="NextCursor">
+/// The index position the next call should start from, so a poll that could not get through the
+/// whole index does not restart from the same place and re-do the same prefix forever. Always a
+/// valid position for the index as it was seen THIS poll (or the unchanged input cursor when nothing
+/// could be scanned at all - an unusable feed URL, or an index that failed to fetch or parse); a
+/// caller persists it verbatim and hands it back next time. It is a position, not an identity: the
+/// index can legitimately grow, shrink, or be reordered between polls, so a cursor never guarantees
+/// which ENTRY comes next - only that the scan does not permanently re-start from the same offset.
+/// Correctness never depends on it, because the scan wraps: every entry is still reachable, and the
+/// hash dedup plus the ledger's own latch are what actually decide whether an advisory is acted on.
+/// </param>
+public sealed record AdvisoryFetchResult(IReadOnlyList<FetchedAdvisory> Advisories, int NextCursor);
+
+/// <summary>
 /// Downloads new advisories and their detached signatures from a GitHub-Pages-hosted feed. This is
 /// the plugin's network attack surface: every byte <see cref="FetchAsync(string,ISet{string},CancellationToken)"/>
 /// touches - the index, every advisory body, every signature file, every path and filename used to
@@ -143,6 +160,23 @@ public sealed class AdvisoryFetcher(HttpClient http)
     /// Bounds SUCCESSFUL advisory downloads (<c>results.Count</c>) per FetchAsync call -
     /// deliberately NOT attempts, and NOT how many index entries are scanned.
     ///
+    /// Final whole-branch review, Finding C3 (Critical): "successful" here means DOWNLOADED, and
+    /// nothing more - an entry counts the instant advisory.json arrives, whether or not its
+    /// signatures verify. The doc below assumed "a backlog of entries that all eventually succeed is
+    /// simply spread over more polls", but an entry that downloads and then ends Unverified never
+    /// reaches a terminal status, so its ContentHash is never cached (correctly - see
+    /// SecSwitchMonitor.RecordAsync) and it is re-downloaded on the very next poll, at the same index
+    /// position, forever. Fifty such entries filled this cap on every poll and no advisory after them
+    /// was ever fetched again - silently, since Unverified is excluded from notification, and without
+    /// MaxRequestsPerPoll ever biting (50 x 66 = 3,300 &lt; 4,096). build-index.sh globs in sorted
+    /// order, so genuine advisories accumulate at the END of the index, exactly where that bites.
+    /// The fix is the per-poll index CURSOR (see <see cref="AdvisoryFetchResult.NextCursor"/>): this
+    /// cap still bounds one poll's downloads, but a poll that hits it no longer starts the next poll
+    /// at the same offset, so the scan always advances past a stuck prefix rather than re-consuming
+    /// it. Deliberately not fixed by making this cap count only "entries that resolved terminally
+    /// last time", which would need the ledger to persist hashes it must not persist and would still
+    /// leave MaxRequestsPerPoll as a cheaper version of the same starvation.
+    ///
     /// Task 8 review, Finding 1 (Critical): an earlier version of this file incremented a separate
     /// `attempts` counter against this same cap for every entry that merely had three non-blank
     /// fields and an unknown content hash - BEFORE the containment check and BEFORE any download,
@@ -182,14 +216,18 @@ public sealed class AdvisoryFetcher(HttpClient http)
     /// MaxSignatureFilesPerAdvisory). This is set comfortably above that so a fully legitimate poll
     /// is never cut off by it, with headroom left over (roughly 800 more requests) to walk past a
     /// realistic amount of failing or rotted entries within the same poll before deferring the rest
-    /// to the next one. It does NOT guarantee an arbitrarily large hostile index can never starve a
-    /// genuine advisory positioned after it - an index with enough failing entries to exceed this
-    /// ceiling on every single poll (the index size cap, MaxIndexBytes, structurally allows up to
-    /// roughly 26,000 minimal entries) could still do that. That residual is accepted rather than
-    /// closed here: closing it fully needs a persisted per-poll cursor/offset into the index, which
-    /// is a materially bigger design change than a review fix-round, and reaching it requires an
-    /// attacker who already controls the bulk of the feed's own index content near its size cap -
-    /// a much higher bar than the 50-entry, no-index-control-needed trigger Finding 1 itself had.
+    /// to the next one.
+    ///
+    /// This ceiling stops a hostile index from issuing unbounded requests, but on its own it never
+    /// stopped one from STARVING a genuine advisory positioned after it: an index with enough failing
+    /// entries to exhaust this ceiling every poll (MaxIndexBytes structurally allows roughly 26,000
+    /// minimal entries) simply re-walked the same prefix forever. The doc here used to accept that
+    /// residual, noting the fix "needs a persisted per-poll cursor/offset into the index". Finding C3
+    /// forced exactly that cursor to be built anyway (for the much cheaper 50-entry, no-index-control
+    /// trigger), and it closes this residual too: exhausting the budget stops the scan, the cursor
+    /// records where it stopped, and the next poll resumes there. The worst case is now bounded
+    /// LATENCY rather than permanent non-discovery - roughly ceil(index length / entries reachable
+    /// per poll) polls before any given entry is reached again.
     /// </summary>
     const int MaxRequestsPerPoll = 4096;
 
@@ -228,9 +266,26 @@ public sealed class AdvisoryFetcher(HttpClient http)
     /// </summary>
     static readonly TimeSpan OverallPollDeadline = TimeSpan.FromMinutes(5);
 
-    public Task<IReadOnlyList<FetchedAdvisory>> FetchAsync(
+    /// <summary>
+    /// The production entry point (final whole-branch review, Finding C3): resumes the index scan at
+    /// <paramref name="startCursor"/> and reports where the next poll should resume. A caller that
+    /// polls on a schedule MUST use this overload and persist
+    /// <see cref="AdvisoryFetchResult.NextCursor"/> between calls - see that property's own doc
+    /// comment, and <see cref="MaxAdvisoriesPerPoll"/>'s, for the starvation this exists to prevent.
+    /// </summary>
+    public Task<AdvisoryFetchResult> FetchAsync(
+        string feedUrl, ISet<string> knownContentHashes, int startCursor, CancellationToken ct)
+        => FetchAsync(feedUrl, knownContentHashes, startCursor, RequestTimeout, OverallPollDeadline, ct);
+
+    /// <summary>
+    /// Cursor-less convenience overload: always starts at the top of the index and discards the
+    /// resulting cursor. Correct for a ONE-SHOT fetch (nothing is repeated, so there is no prefix to
+    /// get stuck on) and used by most of this class's own tests, which build a fresh feed per case.
+    /// A repeating caller must use the cursor overload above instead.
+    /// </summary>
+    public async Task<IReadOnlyList<FetchedAdvisory>> FetchAsync(
         string feedUrl, ISet<string> knownContentHashes, CancellationToken ct)
-        => FetchAsync(feedUrl, knownContentHashes, RequestTimeout, OverallPollDeadline, ct);
+        => (await FetchAsync(feedUrl, knownContentHashes, 0, ct)).Advisories;
 
     /// <summary>
     /// Internal so BTCPayServer.Plugins.SecSwitch.Tests (see the assembly-level
@@ -238,18 +293,23 @@ public sealed class AdvisoryFetcher(HttpClient http)
     /// and <paramref name="overallDeadline"/> values to prove both timeouts are actually enforced,
     /// without waiting out the real 10-second / 5-minute production defaults and without adding
     /// timeout parameters to the public
-    /// <see cref="FetchAsync(string,ISet{string},CancellationToken)"/> overload - whose signature
+    /// <see cref="FetchAsync(string,ISet{string},int,CancellationToken)"/> overload - whose signature
     /// is fixed by this class's contract with its caller and must not change.
     /// </summary>
-    internal async Task<IReadOnlyList<FetchedAdvisory>> FetchAsync(
-        string feedUrl, ISet<string> knownContentHashes, TimeSpan perRequestTimeout, TimeSpan overallDeadline,
+    internal async Task<AdvisoryFetchResult> FetchAsync(
+        string feedUrl, ISet<string> knownContentHashes, int startCursor,
+        TimeSpan perRequestTimeout, TimeSpan overallDeadline,
         CancellationToken ct)
     {
         var results = new List<FetchedAdvisory>();
+        // Every early return below hands the caller its own cursor straight back: nothing was
+        // scanned, so there is nothing to advance past, and inventing a different position would
+        // silently skip entries the next poll should still look at.
+        var nextCursor = startCursor;
         try
         {
-            if (string.IsNullOrWhiteSpace(feedUrl) || !Uri.TryCreate(feedUrl, UriKind.Absolute, out var parsedFeedUri))
-                return results; // No usable feed URL - a liveness gap, not an error.
+            if (!IsSupportedFeedUrl(feedUrl) || !Uri.TryCreate(feedUrl, UriKind.Absolute, out var parsedFeedUri))
+                return new AdvisoryFetchResult(results, nextCursor); // No usable feed URL - a liveness gap, not an error.
 
             // Task 8 review, Finding 9: SecSwitchSettings.FeedUrl is operator-settable with no
             // validation anywhere else in the plugin. An http:// feed URL whose host issues the
@@ -268,8 +328,11 @@ public sealed class AdvisoryFetcher(HttpClient http)
             // Transport security is defence in depth here, not load-bearing - the GPG quorum
             // (verified downstream, not by this class) is the actual trust root, so an http feed
             // would still be safe, merely leaky (poll timing) and trivially suppressible.
-            if (!string.Equals(parsedFeedUri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal))
-                return results;
+            // (Both that scheme requirement and the parse requirement now live in
+            // IsSupportedFeedUrl, checked above, so SecSwitchController can reject such a URL at save
+            // time with a visible validation error - final whole-branch review, Finding I2 - rather
+            // than leaving the plugin silently inert forever. The predicate is shared precisely so
+            // the two can never disagree about what this class will actually accept.)
 
             using var overallCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             overallCts.CancelAfter(overallDeadline);
@@ -292,14 +355,34 @@ public sealed class AdvisoryFetcher(HttpClient http)
 
             var indexBytes = await GetBytesAsync(new Uri(baseUri, "index.json"), MaxIndexBytes, perRequestTimeout, baseUri, budget, pollCt);
             if (indexBytes is null)
-                return results;
+                return new AdvisoryFetchResult(results, nextCursor);
 
             var index = AdvisoryParser.ParseIndex(indexBytes);
+            if (index.Length == 0)
+                return new AdvisoryFetchResult(results, 0); // Nothing to point at; any cursor is stale.
 
-            foreach (var entry in index)
+            // Finding C3: the scan starts at the caller's cursor and WRAPS, rather than always
+            // starting at index 0. Everything that can stop this loop early - the per-poll download
+            // cap, the poll-wide request budget, the overall deadline, cancellation - used to leave
+            // the next poll re-walking the identical prefix, so a stuck prefix (entries that download
+            // fine but can never reach a terminal status, so their hash is never cached) hid every
+            // entry behind it from every future poll. Resuming where the last poll stopped makes the
+            // scan advance regardless of WHY it stopped, and wrapping means no entry is ever skipped
+            // permanently either: a full pass still visits all of them, just spread across polls.
+            // The modulo is written defensively - a persisted cursor can outlive the index that
+            // produced it and be past the end (or, via a corrupted settings row, negative).
+            var start = ((startCursor % index.Length) + index.Length) % index.Length;
+            var scanned = 0;
+            while (scanned < index.Length)
             {
                 if (pollCt.IsCancellationRequested || results.Count >= MaxAdvisoriesPerPoll || budget.Exhausted)
                     break;
+
+                var entry = index[(start + scanned) % index.Length];
+                // Counted BEFORE the entry is examined, so `scanned` always means "positions this
+                // poll is done with" no matter which `continue` below is taken - the cursor
+                // arithmetic after the loop depends on that.
+                scanned++;
 
                 if (entry is null ||
                     string.IsNullOrWhiteSpace(entry.Id) ||
@@ -325,6 +408,11 @@ public sealed class AdvisoryFetcher(HttpClient http)
                     // This one entry is unusable - never let it abort the rest of the poll.
                 }
             }
+
+            // Resume at the first position this poll did NOT get to. A full pass (scanned ==
+            // index.Length) lands back on `start`, which is correct: everything was seen, so there is
+            // no stuck prefix to step over and no reason to move.
+            nextCursor = (start + scanned) % index.Length;
         }
         catch (Exception)
         {
@@ -332,8 +420,24 @@ public sealed class AdvisoryFetcher(HttpClient http)
             // throwing. This exists so a future change that misses a case fails toward "nothing
             // further this poll" instead of throwing out of FetchAsync - see the class doc comment.
         }
-        return results;
+        return new AdvisoryFetchResult(results, nextCursor);
     }
+
+    /// <summary>
+    /// Whether <paramref name="feedUrl"/> is a feed URL this class will actually poll: parseable as
+    /// an absolute URI, and <c>https</c>. Public and static so
+    /// <c>SecSwitchController</c> can reject an unusable value at save time with a visible validation
+    /// error, and <c>SecSwitchPeriodicTask</c> can log an already-persisted one, both against THIS
+    /// class's own rule rather than a re-stated copy of it (final whole-branch review, Finding I2:
+    /// an <c>http://</c> feed URL used to save cleanly and then produce no advisories, no error, and
+    /// no log entry, ever). See
+    /// <see cref="FetchAsync(string,ISet{string},int,TimeSpan,TimeSpan,CancellationToken)"/> for why
+    /// https specifically is required.
+    /// </summary>
+    public static bool IsSupportedFeedUrl(string? feedUrl) =>
+        !string.IsNullOrWhiteSpace(feedUrl) &&
+        Uri.TryCreate(feedUrl, UriKind.Absolute, out var uri) &&
+        string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal);
 
     /// <summary>
     /// Returns the signatures successfully fetched for one advisory, AND whether that set is known
@@ -426,7 +530,7 @@ public sealed class AdvisoryFetcher(HttpClient http)
     /// trusting anything about the response. <see cref="IsUnderBase"/> requires an EXACT scheme
     /// match (Task 8 review, Finding 9 - an earlier version of this comment incorrectly claimed a
     /// "scheme normalisation" redirect was accepted; it is not, deliberately - see
-    /// <see cref="FetchAsync(string,ISet{string},TimeSpan,TimeSpan,CancellationToken)"/>'s https-only
+    /// <see cref="FetchAsync(string,ISet{string},int,TimeSpan,TimeSpan,CancellationToken)"/>'s https-only
     /// guard for why that never needs to matter in practice), so what is actually accepted is a
     /// same-scheme, same-host, same-port redirect that stays under the base - e.g. a path
     /// normalisation - while a cross-host OR cross-scheme one is discarded regardless of what the
@@ -566,9 +670,9 @@ public sealed class AdvisoryFetcher(HttpClient http)
     }
 
     /// <summary>
-    /// A simple, non-thread-safe request counter - safe because <see cref="FetchAsync(string,ISet{string},TimeSpan,TimeSpan,CancellationToken)"/>
+    /// A simple, non-thread-safe request counter - safe because <see cref="FetchAsync(string,ISet{string},int,TimeSpan,TimeSpan,CancellationToken)"/>
     /// processes entries strictly sequentially (awaited one at a time; no parallel fan-out).
-    /// Constructed fresh per <see cref="FetchAsync(string,ISet{string},TimeSpan,TimeSpan,CancellationToken)"/>
+    /// Constructed fresh per <see cref="FetchAsync(string,ISet{string},int,TimeSpan,TimeSpan,CancellationToken)"/>
     /// call specifically so the budget cannot leak across two calls on the same
     /// <see cref="AdvisoryFetcher"/> instance (a plain instance field would have exactly that bug).
     /// </summary>

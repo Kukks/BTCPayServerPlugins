@@ -703,4 +703,77 @@ public class LedgerStoreTests
         Assert.Equal(LedgerStatus.Unsuppressed, final.Status);
         Assert.Equal("", final.ContentHash);
     }
+
+    // --- Final whole-branch review, Finding C3 (Critical): the feed-index cursor is persisted, so a
+    // process restart cannot reset the scan back onto a stuck prefix. ---
+
+    [Fact]
+    public async Task Feed_index_cursor_defaults_to_zero_for_a_ledger_that_predates_it()
+    {
+        // An existing ledger row deserialised without this field must start at the top of the index -
+        // both a valid cursor and exactly the pre-fix behaviour.
+        Assert.Equal(0, (await new LedgerStore(new FakeSettingsRepository()).GetAsync()).FeedIndexCursor);
+    }
+
+    [Fact]
+    public async Task Feed_index_cursor_survives_a_json_round_trip()
+    {
+        // A cursor that does not actually persist is the same permanent starvation with extra steps -
+        // every process start would resume from the stuck prefix.
+        var repo = new JsonRoundTrippingSettingsRepository();
+        await new LedgerStore(repo).RecordFeedIndexCursorAsync(50);
+
+        Assert.Equal(50, (await new LedgerStore(repo).GetAsync()).FeedIndexCursor);
+    }
+
+    [Fact]
+    public async Task Recording_an_unchanged_feed_index_cursor_writes_nothing()
+    {
+        // A healthy feed whose whole index fits in one poll returns the same cursor every time;
+        // without this check that would be a settings write every hour, for no change.
+        var repo = new CountingSettingsRepository();
+        var store = new LedgerStore(repo);
+        await store.RecordFeedIndexCursorAsync(7);
+        var afterFirst = repo.Writes;
+
+        await store.RecordFeedIndexCursorAsync(7);
+
+        Assert.Equal(afterFirst, repo.Writes);
+        Assert.Equal(7, (await store.GetAsync()).FeedIndexCursor);
+    }
+
+    [Fact]
+    public async Task Recording_the_feed_index_cursor_does_not_disturb_the_entries()
+    {
+        var repo = new FakeSettingsRepository();
+        var store = new LedgerStore(repo);
+        await store.RecordAsync(Entry("a1"));
+
+        await store.RecordFeedIndexCursorAsync(3);
+
+        var ledger = await store.GetAsync();
+        Assert.Equal(3, ledger.FeedIndexCursor);
+        Assert.True(ledger.Entries.ContainsKey("a1"));
+    }
+
+    /// Counts UpdateSetting calls so a "skips the write when nothing changed" claim can be proven
+    /// rather than assumed. Otherwise identical to FakeSettingsRepository.
+    sealed class CountingSettingsRepository : ISettingsRepository
+    {
+        readonly Dictionary<string, object> _store = new();
+        public int Writes { get; private set; }
+
+        public Task<T?> GetSettingAsync<T>(string? name = null) where T : class
+            => Task.FromResult(_store.TryGetValue(name ?? typeof(T).FullName!, out var v) ? (T?)v : null);
+
+        public Task UpdateSetting<T>(T obj, string? name = null) where T : class
+        {
+            Writes++;
+            _store[name ?? typeof(T).FullName!] = obj;
+            return Task.CompletedTask;
+        }
+
+        public Task<T> WaitSettingsChanged<T>(CancellationToken cancellationToken = default) where T : class
+            => throw new NotSupportedException();
+    }
 }

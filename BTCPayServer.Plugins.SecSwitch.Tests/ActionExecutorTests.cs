@@ -17,6 +17,14 @@ public sealed class RecordingSink : IActionSink
     public void StopApplication() => Calls.Add("stop");
 }
 
+// Final whole-branch review, Finding C1 (Critical): ExecuteAsync returns (bool Succeeded, string
+// Outcome), not a bare string. The prose alone was never a usable signal - "Queued disable of X..."
+// and "Failed to queue disable of X..." are the same type - and its only caller recorded both under
+// the terminal LedgerStatus.Acted, so a failed action was latched out of every future poll, had its
+// content hash cached against re-download, and was announced to the admin as "Handled". Every
+// Assert.False(succeeded) below therefore pins a load-bearing fact, not a redundant one: without it
+// the flag could silently regress to a constant `true` with every string assertion in this file
+// still green. Success_flag_is_true_for_every_path_that_actually_acted pins the other direction.
 public class ActionExecutorTests
 {
     static Advisory Adv(string identifier = "Plug", string? fixedVersion = "2.0.0") =>
@@ -83,7 +91,8 @@ public class ActionExecutorTests
     public async Task Sink_failure_is_reported_not_thrown()
     {
         var exec = new ActionExecutor(new ThrowingSink(), NullLogger<ActionExecutor>.Instance);
-        var outcome = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, Adv());
+        var (succeeded, outcome) = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, Adv());
+        Assert.False(succeeded); // Finding C1 - see the note above this class.
         Assert.Contains("failed", outcome, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -127,7 +136,8 @@ public class ActionExecutorTests
     public async Task Null_advisory_is_refused_not_disabled()
     {
         var (exec, sink) = Make();
-        var outcome = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, null);
+        var (succeeded, outcome) = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, null);
+        Assert.False(succeeded); // Finding C1 - see the note above this class.
         Assert.Empty(sink.Calls);
         Assert.Contains("unsafe", outcome, StringComparison.OrdinalIgnoreCase);
     }
@@ -136,7 +146,8 @@ public class ActionExecutorTests
     public async Task Null_advisory_is_refused_not_updated()
     {
         var (exec, sink) = Make();
-        var outcome = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, null);
+        var (succeeded, outcome) = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, null);
+        Assert.False(succeeded); // Finding C1 - see the note above this class.
         Assert.Empty(sink.Calls);
         Assert.Contains("unsafe", outcome, StringComparison.OrdinalIgnoreCase);
     }
@@ -146,7 +157,8 @@ public class ActionExecutorTests
     {
         var (exec, sink) = Make();
         var advisory = new Advisory { Id = "x", Identifier = null!, FixedVersion = "2.0.0", Title = "t" };
-        var outcome = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, advisory);
+        var (succeeded, outcome) = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, advisory);
+        Assert.False(succeeded); // Finding C1 - see the note above this class.
         Assert.Empty(sink.Calls);
         Assert.Contains("unsafe", outcome, StringComparison.OrdinalIgnoreCase);
     }
@@ -155,7 +167,8 @@ public class ActionExecutorTests
     public async Task Blank_identifier_is_refused_not_disabled()
     {
         var (exec, sink) = Make();
-        var outcome = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, Adv(identifier: "   "));
+        var (succeeded, outcome) = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, Adv(identifier: "   "));
+        Assert.False(succeeded); // Finding C1 - see the note above this class.
         Assert.Empty(sink.Calls);
         Assert.Contains("unsafe", outcome, StringComparison.OrdinalIgnoreCase);
     }
@@ -175,7 +188,8 @@ public class ActionExecutorTests
     public async Task Path_traversal_or_separator_identifiers_are_refused_not_disabled(string hostileIdentifier)
     {
         var (exec, sink) = Make();
-        var outcome = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, Adv(identifier: hostileIdentifier));
+        var (succeeded, outcome) = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, Adv(identifier: hostileIdentifier));
+        Assert.False(succeeded); // Finding C1 - see the note above this class.
         Assert.Empty(sink.Calls);
         Assert.Contains("unsafe", outcome, StringComparison.OrdinalIgnoreCase);
     }
@@ -184,7 +198,8 @@ public class ActionExecutorTests
     public async Task Path_traversal_identifier_is_refused_not_updated()
     {
         var (exec, sink) = Make();
-        var outcome = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv(identifier: "../evil", fixedVersion: "1.0.0"));
+        var (succeeded, outcome) = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv(identifier: "../evil", fixedVersion: "1.0.0"));
+        Assert.False(succeeded); // Finding C1 - see the note above this class.
         Assert.Empty(sink.Calls);
         Assert.Contains("unsafe", outcome, StringComparison.OrdinalIgnoreCase);
     }
@@ -193,7 +208,8 @@ public class ActionExecutorTests
     public async Task Unknown_action_value_is_refused_and_never_throws()
     {
         var (exec, sink) = Make();
-        var outcome = await exec.ExecuteAsync((SecSwitchAction)99, Adv());
+        var (succeeded, outcome) = await exec.ExecuteAsync((SecSwitchAction)99, Adv());
+        Assert.False(succeeded); // Finding C1 - see the note above this class.
         Assert.Empty(sink.Calls);
         Assert.False(string.IsNullOrWhiteSpace(outcome));
     }
@@ -227,7 +243,8 @@ public class ActionExecutorTests
     {
         var sink = new UnresolvableSink();
         var exec = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
-        var outcome = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, Adv());
+        var (succeeded, outcome) = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, Adv());
+        Assert.False(succeeded); // Finding C1 - see the note above this class.
         Assert.DoesNotContain("stop", sink.Calls);
         // "Plug" alone would also match the success message ("Queued disable of Plug; ..."), so this
         // asserts on wording only the refusal path produces.
@@ -239,7 +256,8 @@ public class ActionExecutorTests
     {
         var sink = new UnresolvableSink();
         var exec = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
-        var outcome = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv());
+        var (succeeded, outcome) = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv());
+        Assert.False(succeeded); // Finding C1 - see the note above this class.
         Assert.DoesNotContain("stop", sink.Calls);
         Assert.Contains("Failed to queue", outcome);
     }
@@ -249,7 +267,8 @@ public class ActionExecutorTests
     {
         var sink = new AsyncFaultingSink();
         var exec = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
-        var outcome = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, Adv());
+        var (succeeded, outcome) = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, Adv());
+        Assert.False(succeeded); // Finding C1 - see the note above this class.
         Assert.DoesNotContain("stop", sink.Calls);
         Assert.Contains("failed", outcome, StringComparison.OrdinalIgnoreCase);
     }
@@ -259,7 +278,8 @@ public class ActionExecutorTests
     {
         var sink = new AsyncFaultingSink();
         var exec = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
-        var outcome = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv());
+        var (succeeded, outcome) = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv());
+        Assert.False(succeeded); // Finding C1 - see the note above this class.
         Assert.DoesNotContain("stop", sink.Calls);
         Assert.Contains("failed", outcome, StringComparison.OrdinalIgnoreCase);
     }
@@ -268,7 +288,8 @@ public class ActionExecutorTests
     public async Task Update_queue_throwing_synchronously_is_reported_not_thrown()
     {
         var exec = new ActionExecutor(new ThrowingSink(), NullLogger<ActionExecutor>.Instance);
-        var outcome = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv());
+        var (succeeded, outcome) = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv());
+        Assert.False(succeeded); // Finding C1 - see the note above this class.
         Assert.Contains("failed", outcome, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -276,7 +297,8 @@ public class ActionExecutorTests
     public async Task Core_update_failure_is_reported_not_thrown()
     {
         var exec = new ActionExecutor(new ThrowingSink(), NullLogger<ActionExecutor>.Instance);
-        var outcome = await exec.ExecuteAsync(SecSwitchAction.UpdateCore, Adv("BTCPayServer"));
+        var (succeeded, outcome) = await exec.ExecuteAsync(SecSwitchAction.UpdateCore, Adv("BTCPayServer"));
+        Assert.False(succeeded); // Finding C1 - see the note above this class.
         Assert.Contains("failed", outcome, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -285,9 +307,44 @@ public class ActionExecutorTests
     {
         var sink = new AsyncFaultingSink();
         var exec = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
-        var outcome = await exec.ExecuteAsync(SecSwitchAction.UpdateCore, Adv("BTCPayServer"));
+        var (succeeded, outcome) = await exec.ExecuteAsync(SecSwitchAction.UpdateCore, Adv("BTCPayServer"));
+        Assert.False(succeeded); // Finding C1 - see the note above this class.
         Assert.DoesNotContain("stop", sink.Calls);
         Assert.Contains("failed", outcome, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // --- Finding C1, the other direction: a flag that is always false would pass every
+    // Assert.False above while permanently recording genuine actions as NeedsAttention - which would
+    // re-run a shutdown or a disable on every single poll, the exact action loop the ledger exists to
+    // prevent. Both directions have to be pinned. ---
+
+    [Theory]
+    [InlineData(SecSwitchAction.None)]
+    [InlineData(SecSwitchAction.Notify)]
+    [InlineData(SecSwitchAction.DisablePlugin)]
+    [InlineData(SecSwitchAction.UpdatePlugin)]
+    [InlineData(SecSwitchAction.UpdateCore)]
+    [InlineData(SecSwitchAction.ShutdownCore)]
+    public async Task Success_flag_is_true_for_every_path_that_actually_acted(SecSwitchAction action)
+    {
+        var (exec, _) = Make(); // RecordingSink queues successfully and never throws
+        var (succeeded, outcome) = await exec.ExecuteAsync(action, Adv());
+        Assert.True(succeeded);
+        Assert.False(string.IsNullOrWhiteSpace(outcome));
+    }
+
+    [Fact]
+    public async Task Update_without_a_fixed_version_reports_the_disable_fallbacks_own_success_flag()
+    {
+        // The UpdatePlugin -> Disable fallback must propagate Disable's result, not overwrite it: an
+        // unresolvable identifier that falls back to a disable which then queues nothing has to stay
+        // false all the way out, or the fallback becomes a hole in the Finding C1 fix.
+        var sink = new UnresolvableSink();
+        var exec = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
+        var (succeeded, outcome) = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv(fixedVersion: null));
+        Assert.False(succeeded);
+        Assert.Contains("Failed to queue disable", outcome);
+        Assert.DoesNotContain("stop", sink.Calls);
     }
 }
 

@@ -340,7 +340,13 @@ public class TrustStoreTests
             current, json, [a.SignDetached(json), b.SignDetached(json)], 2, out var updated, out var err);
 
         Assert.False(ok);
-        Assert.NotEmpty(err);
+        // Final whole-branch review, deferred-9: this asserted only Assert.NotEmpty(err), which every
+        // other failure branch in TryApplyRotation also satisfies - the test would have stayed green
+        // if the rotation had been refused for a completely different reason (unreadable key,
+        // add/remove conflict, below-quorum result), so it did not actually pin the regression it
+        // exists for. Assert on the specific refusal instead.
+        Assert.Contains("could never load as", err);
+        Assert.Contains(oversized.Fingerprint, err);
         Assert.Equal(2, updated.Count); // unchanged
         Assert.DoesNotContain(updated, k => k.Fingerprint == oversized.Fingerprint);
     }
