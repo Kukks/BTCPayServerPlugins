@@ -17,8 +17,9 @@ namespace BTCPayServer.Plugins.SecSwitch.Services;
 ///    switch.
 /// 2. <see cref="SuppressAsync"/> is the admin's escape hatch: a local-only override so a false
 ///    positive can never permanently lock an operator out of running their own server.
-///    Suppression makes <see cref="IsHandledAsync"/> return true, so a suppressed advisory is
-///    never acted on again.
+///    Suppression makes both <see cref="IsHandledAsync"/> and <see cref="IsActedAsync"/> return
+///    true, so a suppressed advisory is never acted on again (see <see cref="IsActedAsync"/>'s own
+///    doc comment - it, not <see cref="IsHandledAsync"/>, is what a re-action check should use).
 ///
 /// Both properties depend on advisory ids being compared case-INsensitively, matching the
 /// OrdinalIgnoreCase convention already used for every other identifier in this plugin
@@ -139,21 +140,25 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
 
     /// <summary>
     /// True only if <paramref name="advisoryId"/> has a ledger entry recorded under a TERMINAL
-    /// status - <c>Acted</c>, <c>NeedsDecision</c>, or <c>Suppressed</c>. Deliberately narrower
-    /// than <see cref="IsHandledAsync"/>, which returns true for ANY recorded entry regardless of
-    /// status: a non-terminal entry (e.g. Rejected, Unverified, or a not-applicable/needs-attention
-    /// result) means the advisory was looked at but nothing was actually decided or done about it,
-    /// so it must remain eligible for re-evaluation on a later poll. Gating a re-action check on
-    /// <see cref="IsHandledAsync"/> instead would let a single transient failure - a hostile mirror
-    /// serving malformed bytes for one poll, or a signature fetch truncated by the fetcher's own
-    /// request budget - permanently and silently disarm SecSwitch for that advisory id: the very
-    /// re-fetch a withheld ContentHash exists to buy would arrive at a poller that now refuses to
-    /// even look at it again, because SOME entry already exists under that id.
+    /// status - <c>Acted</c>, <c>NeedsDecision</c>, <c>NotApplicable</c>, or <c>Suppressed</c> (see
+    /// <see cref="IsTerminalStatus"/>) - OR carries <see cref="LedgerEntry.Suppressed"/> directly
+    /// (Task 11 review, Finding R2: checked independently of the Status string, because
+    /// <see cref="LedgerEntry.Suppressed"/> is a public settable property and today's ONLY writer,
+    /// <see cref="SuppressAsync"/>, happens to set both together - a future admin-UI suppression
+    /// path that sets the flag without also setting the matching Status string must not silently
+    /// defeat the escape hatch under this narrower gate). Deliberately narrower than
+    /// <see cref="IsHandledAsync"/>, which returns true for ANY recorded entry regardless of status:
+    /// a non-terminal entry (Rejected, Unverified, or NeedsAttention) means the advisory was looked
+    /// at but we could not evaluate it properly, so it must remain eligible for re-evaluation on a
+    /// later poll. Gating a re-action check on <see cref="IsHandledAsync"/> instead would let a
+    /// single transient failure - a hostile mirror serving malformed bytes for one poll, or a
+    /// signature fetch truncated by the fetcher's own request budget - permanently and silently
+    /// disarm SecSwitch for that advisory id: the very re-fetch a withheld ContentHash exists to buy
+    /// would arrive at a poller that now refuses to even look at it again, because SOME entry
+    /// already exists under that id.
     ///
-    /// "Suppressed" is included in the terminal set so the admin's suppression escape hatch stays
-    /// absolute even under this narrower gate - see <see cref="SuppressAsync"/>. A caller that wants
-    /// "has ANY entry ever been recorded, no matter the status" should keep using
-    /// <see cref="IsHandledAsync"/>; the two methods answer different questions and are not
+    /// A caller that wants "has ANY entry ever been recorded, no matter the status" should keep
+    /// using <see cref="IsHandledAsync"/>; the two methods answer different questions and are not
     /// interchangeable.
     /// </summary>
     public async Task<bool> IsActedAsync(string advisoryId)
@@ -161,13 +166,32 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
         if (string.IsNullOrWhiteSpace(advisoryId))
             return false;
         var ledger = await GetAsync();
-        return ledger.Entries.TryGetValue(advisoryId, out var entry) && IsTerminalStatus(entry.Status);
+        return ledger.Entries.TryGetValue(advisoryId, out var entry) &&
+            (entry.Suppressed || IsTerminalStatus(entry.Status));
     }
 
-    static bool IsTerminalStatus(string? status) =>
-        string.Equals(status, "Acted", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(status, "NeedsDecision", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(status, "Suppressed", StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// True for <see cref="LedgerStatus.Acted"/>, <see cref="LedgerStatus.NeedsDecision"/>,
+    /// <see cref="LedgerStatus.Suppressed"/>, and - as of Task 11 review Finding R1 -
+    /// <see cref="LedgerStatus.NotApplicable"/>. Shared by <see cref="IsActedAsync"/> (gates
+    /// re-ACTING: should <c>SecSwitchMonitor</c> even look at this advisory again) and, via this
+    /// same predicate, by <c>SecSwitchMonitor.RecordAsync</c> (gates hash-CACHING: may its
+    /// ContentHash be persisted, letting <c>AdvisoryFetcher</c> skip re-downloading it). The two
+    /// concerns share ONE predicate deliberately, promoted `internal` for exactly that reuse - see
+    /// <c>SecSwitchMonitor.RecordAsync</c>'s own doc comment for the full reasoning behind which
+    /// statuses belong here and why <c>NotApplicable</c> was added: in short, a status is terminal
+    /// here iff nothing about re-fetching BYTE-IDENTICAL content could ever change it. Deliberately
+    /// excludes <see cref="LedgerStatus.Rejected"/>, <see cref="LedgerStatus.Unverified"/>, and
+    /// <see cref="LedgerStatus.NeedsAttention"/> - each of those is final only because SecSwitch
+    /// could not look properly (a parse failure, a quorum failure, or an indeterminate installed
+    /// version/instance state), not because the content itself settles anything, so each must
+    /// remain eligible for both re-action and re-fetch.
+    /// </summary>
+    internal static bool IsTerminalStatus(string? status) =>
+        string.Equals(status, LedgerStatus.Acted, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, LedgerStatus.NeedsDecision, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, LedgerStatus.NotApplicable, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, LedgerStatus.Suppressed, StringComparison.OrdinalIgnoreCase);
 
     public async Task SuppressAsync(string advisoryId)
     {
@@ -184,7 +208,7 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
                 ledger.Entries[advisoryId] = entry;
             }
             entry.Suppressed = true;
-            entry.Status = "Suppressed";
+            entry.Status = LedgerStatus.Suppressed;
             await settingsRepository.UpdateSetting(ledger);
         }
         finally

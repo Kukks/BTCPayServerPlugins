@@ -134,9 +134,9 @@ public sealed class SecSwitchMonitor(
         // would silently defeat hard requirement 1's own ContentHash-withholding fix, since the
         // re-fetch it buys on the next poll would arrive here and be turned away anyway because
         // SOME (non-terminal) entry already exists under this id. IsActedAsync only latches on a
-        // TERMINAL outcome (Acted, NeedsDecision, or Suppressed - see its own doc comment), so an
-        // advisory recorded as Rejected/Unverified/NotApplicable/NeedsAttention remains eligible
-        // for re-evaluation on every later poll until it either resolves to a terminal status or an
+        // TERMINAL outcome (see LedgerStore.IsTerminalStatus's own doc comment for the current
+        // set), so an advisory recorded as Rejected/Unverified/NeedsAttention remains eligible for
+        // re-evaluation on every later poll until it either resolves to a terminal status or an
         // admin suppresses it. Never bypassed, and always the first check for an advisory reached
         // this far.
         if (await ledger.IsActedAsync(item.Id))
@@ -144,20 +144,16 @@ public sealed class SecSwitchMonitor(
 
         var entry = new LedgerEntry { AdvisoryId = item.Id, RecordedAt = DateTimeOffset.UtcNow };
 
-        // Hard requirement 1: only ever persist ContentHash when the fetch that produced this item
-        // gathered every signature file the feed listed. A fetch truncated by the fetcher's own
-        // request budget or the overall poll deadline can hand back a PARTIAL signature set with
-        // SignaturesComplete=false; persisting ContentHash in that case would mark the advisory
-        // "already seen" in AdvisoryFetcher's own dedup (fed the set of recorded content hashes on
-        // the next poll), so a signature set that can never grow could never reach quorum - a
-        // silent, permanent kill-switch failure. Applied uniformly, before branching on outcome
-        // below, so every status this method can produce - Rejected included - gets the same
-        // treatment; the gate is on SignaturesComplete alone, never on what happens afterwards.
-        entry.ContentHash = item.SignaturesComplete ? item.ContentHash ?? "" : "";
+        // The candidate ContentHash is carried through here UNCONDITIONALLY - RecordAsync (see its
+        // own doc comment - Task 11 review, Finding R1) decides whether to keep it or withhold it
+        // once entry.Status is final, since that decision depends on the FINAL outcome, which is
+        // not known yet at this point in the method.
+        entry.ContentHash = item.ContentHash ?? "";
 
         if (item.PayloadBytes is null)
         {
-            // Defence in depth, not a workaround for a real gap: empirically, AdvisoryParser.TryParse
+            // Defence in depth, not a workaround for a real gap: by inspection of the call site and
+            // .NET's byte[] -> ReadOnlyMemory<byte> conversion semantics, AdvisoryParser.TryParse
             // does NOT throw on a null payload - JsonDocument.Parse(byte[]) takes the byte[] via an
             // implicit conversion to ReadOnlyMemory<byte>, which maps a null array to an empty
             // ReadOnlyMemory rather than throwing, so parsing fails with JsonReaderException (a
@@ -166,21 +162,21 @@ public sealed class SecSwitchMonitor(
             // claim in this comment that TryParse was unguarded here). Kept anyway because it
             // produces a clearer, more specific Reason for the admin than a generic JSON parse
             // error would.
-            entry.Status = "Rejected";
+            entry.Status = LedgerStatus.Rejected;
             entry.Reason = "Advisory payload is missing.";
-            await RecordAsync(entry, recorded);
+            await RecordAsync(entry, item.SignaturesComplete, recorded);
             return;
         }
 
         if (!AdvisoryParser.TryParse(item.PayloadBytes, out var advisory, out var parseError))
         {
-            entry.Status = "Rejected";
+            entry.Status = LedgerStatus.Rejected;
             // parseError can embed a JsonException.Message derived from attacker-supplied bytes
             // (Task 11 review, Finding I2) - sanitized before it reaches the ledger, matching how
             // ActionExecutor.Sanitize is already used for every other attacker-influenced string
             // that reaches an admin-facing surface.
             entry.Reason = ActionExecutor.Sanitize(parseError ?? "Unparseable advisory.");
-            await RecordAsync(entry, recorded);
+            await RecordAsync(entry, item.SignaturesComplete, recorded);
             return;
         }
 
@@ -204,11 +200,11 @@ public sealed class SecSwitchMonitor(
 
         if (!verification.QuorumMet)
         {
-            entry.Status = "Unverified";
+            entry.Status = LedgerStatus.Unverified;
             entry.Reason =
                 $"Quorum not met ({verification.TrustedValidCount}/{verification.Required} trusted signatures).";
             logger.LogWarning("SecSwitch rejected advisory {Id}: {Reason}", item.Id, entry.Reason);
-            await RecordAsync(entry, recorded);
+            await RecordAsync(entry, item.SignaturesComplete, recorded);
             return;
         }
 
@@ -241,8 +237,8 @@ public sealed class SecSwitchMonitor(
 
         if (decision.Action == SecSwitchAction.None)
         {
-            entry.Status = isIndeterminate ? "NeedsAttention" : "NotApplicable";
-            await RecordAsync(entry, recorded);
+            entry.Status = isIndeterminate ? LedgerStatus.NeedsAttention : LedgerStatus.NotApplicable;
+            await RecordAsync(entry, item.SignaturesComplete, recorded);
             return;
         }
 
@@ -257,15 +253,52 @@ public sealed class SecSwitchMonitor(
             return;
 
         var outcome = await executor.ExecuteAsync(decision.Action, advisory);
-        entry.Status = decision.Action == SecSwitchAction.Notify ? "NeedsDecision" : "Acted";
+        entry.Status = decision.Action == SecSwitchAction.Notify ? LedgerStatus.NeedsDecision : LedgerStatus.Acted;
         // outcome is already sanitized by ActionExecutor itself before being returned; sanitizedReason
         // (computed above) covers the other half of this string.
         entry.Reason = $"{sanitizedReason} {outcome}".Trim();
-        await RecordAsync(entry, recorded);
+        await RecordAsync(entry, item.SignaturesComplete, recorded);
     }
 
-    async Task RecordAsync(LedgerEntry entry, List<LedgerEntry> recorded)
+    /// <summary>
+    /// Persists <paramref name="entry"/> and appends it to <paramref name="recorded"/>. Also owns
+    /// the hash-caching decision (Task 11 review, Finding R1 - moved here from a single
+    /// pre-branch assignment in <see cref="ProcessOneAsync"/>, because the decision genuinely
+    /// depends on the FINAL <see cref="LedgerEntry.Status"/>, which is not known until every branch
+    /// above has run):
+    ///
+    /// <see cref="LedgerEntry.ContentHash"/> is kept only when BOTH (a) <paramref name="signaturesComplete"/>
+    /// is true - a fetch truncated by the fetcher's own request budget or the overall poll deadline
+    /// must always be retried regardless of what status it produced, since a fuller signature set
+    /// next poll could still change the outcome - AND (b) <see cref="LedgerStore.IsTerminalStatus"/>
+    /// is true for <paramref name="entry"/>'s own <see cref="LedgerEntry.Status"/> - the SAME
+    /// predicate <see cref="LedgerStore.IsActedAsync"/> uses to gate re-action, so hash-caching and
+    /// re-action-latching can never independently drift into disagreement.
+    ///
+    /// This split matters because <see cref="AdvisoryFetcher"/>'s own dedup is the OUTER gate and
+    /// dominates: it skips an index entry outright the moment its ContentHash is already known,
+    /// BEFORE <c>advisory.json</c> or any signature file is ever requested again - and that hash is
+    /// carried verbatim from the feed's own index, never recomputed from the payload, while
+    /// signatures live in sibling files. So caching the hash for a status that is final only
+    /// because SecSwitch could not evaluate the advisory properly (Rejected, Unverified,
+    /// NeedsAttention) would let a single transient failure hide the advisory from every future
+    /// poll's fetch, forever - not merely from this class's own re-action check. Concretely: a
+    /// mirror hostile for exactly one poll can serve the genuine advisory.json alongside a
+    /// signatures/index.json listing only one of two real co-signers - every LISTED file still
+    /// fetches successfully, so SignaturesComplete is true, quorum fails, and without this fix the
+    /// resulting Unverified entry's hash would be cached, permanently disarming the advisory even
+    /// after the mirror goes back to listing both signatures. Caching for the TERMINAL statuses -
+    /// including NotApplicable - is what keeps AdvisoryFetcher's own per-poll success budget
+    /// (MaxAdvisoriesPerPoll, which counts successes) from being permanently exhausted by the
+    /// ordinary, non-adversarial bulk of advisories that simply do not target anything this
+    /// instance runs, reproducing Task 8's Critical starvation bug via successes instead of
+    /// failures.
+    /// </summary>
+    async Task RecordAsync(LedgerEntry entry, bool signaturesComplete, List<LedgerEntry> recorded)
     {
+        if (!signaturesComplete || !LedgerStore.IsTerminalStatus(entry.Status))
+            entry.ContentHash = "";
+
         await ledger.RecordAsync(entry);
         recorded.Add(entry);
     }
