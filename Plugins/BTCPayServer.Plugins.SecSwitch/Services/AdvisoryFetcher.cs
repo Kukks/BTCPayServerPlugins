@@ -74,6 +74,16 @@ public sealed record FetchedAdvisory(string Id, string ContentHash, byte[] Paylo
 /// <c>AllowAutoRedirect</c> at its default of <c>true</c>. Callers SHOULD still set
 /// <c>AllowAutoRedirect = false</c> on the handler backing the <see cref="HttpClient"/> passed to
 /// the constructor as defence in depth, but this class does not rely on that.
+///
+/// <see cref="FetchAsync(string,ISet{string},CancellationToken)"/> only accepts an <c>https</c>
+/// feed URL (Task 8 review, Finding 9): the redirect containment check above requires an EXACT
+/// scheme match, and .NET's redirect handling only ever follows http -> https, never the reverse -
+/// so an operator-supplied <c>http</c> feed URL whose host redirects to https (exactly what GitHub
+/// Pages does) would otherwise fail silently and permanently, every poll, with no exception, log,
+/// or signal. Refusing it outright up front converts that into an explicit, immediate empty
+/// result. Not a trust requirement - the GPG quorum verified downstream is the real trust root, so
+/// an http feed would still be safe, merely leaky and easy to interfere with - just a cost-free way
+/// to remove the trap entirely.
 /// </summary>
 public sealed class AdvisoryFetcher(HttpClient http)
 {
@@ -219,6 +229,26 @@ public sealed class AdvisoryFetcher(HttpClient http)
             if (string.IsNullOrWhiteSpace(feedUrl) || !Uri.TryCreate(feedUrl, UriKind.Absolute, out var parsedFeedUri))
                 return results; // No usable feed URL - a liveness gap, not an error.
 
+            // Task 8 review, Finding 9: SecSwitchSettings.FeedUrl is operator-settable with no
+            // validation anywhere else in the plugin. An http:// feed URL whose host issues the
+            // standard site-wide redirect to https - exactly what GitHub Pages does - would
+            // otherwise fail SILENTLY AND FOREVER: SocketsHttpHandler never follows https->http (so
+            // that direction is moot), but it DOES follow http->https, and IsUnderBase's post-
+            // response check (see GetBytesAsync) correctly requires an EXACT scheme match, so the
+            // https response from that redirect would be discarded every single poll with no
+            // exception, log, or signal. Refusing an http feed URL outright, here, converts that
+            // silent-forever failure into an explicit, immediate "nothing fetched" - still fails
+            // closed (see the class doc comment), never throws. Requiring https costs nothing (it
+            // is what the real feed already uses) and removes the trap entirely rather than trying
+            // to special-case it in the containment check itself - deliberately NOT fixed by
+            // letting IsUnderBase permit an http->https upgrade, which would weaken that check's
+            // guarantee for every caller for a case that, with this refusal, can no longer occur.
+            // Transport security is defence in depth here, not load-bearing - the GPG quorum
+            // (verified downstream, not by this class) is the actual trust root, so an http feed
+            // would still be safe, merely leaky (poll timing) and trivially suppressible.
+            if (!string.Equals(parsedFeedUri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal))
+                return results;
+
             using var overallCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             overallCts.CancelAfter(overallDeadline);
             var pollCt = overallCts.Token;
@@ -340,8 +370,13 @@ public sealed class AdvisoryFetcher(HttpClient http)
     /// can make it transparently return a body served by a completely different host, with no
     /// containment check ever applied to that host. This re-validates the ACTUAL final URL
     /// (<c>response.RequestMessage.RequestUri</c>) against <paramref name="baseUri"/> before
-    /// trusting anything about the response, so a same-host redirect (e.g. a path or scheme
-    /// normalisation) is still accepted but a cross-host one is discarded regardless of what the
+    /// trusting anything about the response. <see cref="IsUnderBase"/> requires an EXACT scheme
+    /// match (Task 8 review, Finding 9 - an earlier version of this comment incorrectly claimed a
+    /// "scheme normalisation" redirect was accepted; it is not, deliberately - see
+    /// <see cref="FetchAsync(string,ISet{string},TimeSpan,TimeSpan,CancellationToken)"/>'s https-only
+    /// guard for why that never needs to matter in practice), so what is actually accepted is a
+    /// same-scheme, same-host, same-port redirect that stays under the base - e.g. a path
+    /// normalisation - while a cross-host OR cross-scheme one is discarded regardless of what the
     /// caller's <see cref="HttpClient"/> handler is configured to do.
     /// </summary>
     async Task<byte[]?> GetBytesAsync(Uri url, int maxBytes, TimeSpan perRequestTimeout, Uri baseUri, RequestBudget budget, CancellationToken ct)
