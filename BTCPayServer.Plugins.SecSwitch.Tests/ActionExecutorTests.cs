@@ -1,5 +1,7 @@
+using BTCPayServer.Plugins;
 using BTCPayServer.Plugins.SecSwitch.Models;
 using BTCPayServer.Plugins.SecSwitch.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -425,5 +427,35 @@ public class BtcPayActionSinkResolutionTests
         {
             dir.Delete(recursive: true);
         }
+    }
+
+    // --- Task 12 review, Finding I1: BtcPayActionSink is registered as a singleton
+    // (SecSwitchPlugin.cs: services.AddSingleton<IActionSink, BtcPayActionSink>()), but core
+    // registers PluginService TRANSIENT (PluginManagerPlugin.cs) and PluginService itself owns a
+    // typed HttpClient (PluginBuilderClient) plus a PoliciesSettings snapshot - a
+    // constructor-injected PluginService here would be a captive dependency, frozen (along with its
+    // HttpClient's connection pool/DNS resolution and its settings snapshot) for the life of the
+    // process. NET's built-in scope validation does not catch a singleton depending on a transient,
+    // so this is a structural regression guard: it proves the constructor no longer takes
+    // PluginService directly, and does take an IServiceScopeFactory (see QueueUpdateAsync, which
+    // resolves PluginService from a fresh, disposed-after-use scope on every call instead).
+    //
+    // PluginService's own real constructor needs a working BTCPayNetworkProvider/TorServices/
+    // IWebHostEnvironment graph (see PluginService.cs and BTCPayServerEnvironment.cs) that is
+    // impractical to construct in this focused plugin test project - consistent with this test
+    // project never having exercised BtcPayActionSink's other PluginService-touching behaviour
+    // (QueueUpdateAsync) end to end either, only its pure static resolution helpers above. This test
+    // pins the constructor SHAPE the fix depends on, which is what a regression here would actually
+    // break first (re-adding a `PluginService pluginService` constructor parameter compiles fine and
+    // would otherwise go unnoticed).
+
+    [Fact]
+    public void Constructor_resolves_PluginService_from_a_scope_factory_not_a_captured_instance()
+    {
+        var ctor = typeof(BtcPayActionSink).GetConstructors().Single();
+        var parameterTypes = ctor.GetParameters().Select(p => p.ParameterType).ToList();
+
+        Assert.Contains(typeof(IServiceScopeFactory), parameterTypes);
+        Assert.DoesNotContain(typeof(PluginService), parameterTypes);
     }
 }

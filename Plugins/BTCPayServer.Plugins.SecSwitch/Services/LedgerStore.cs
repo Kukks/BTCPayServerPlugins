@@ -193,23 +193,84 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
         string.Equals(status, LedgerStatus.NotApplicable, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(status, LedgerStatus.Suppressed, StringComparison.OrdinalIgnoreCase);
 
-    public async Task SuppressAsync(string advisoryId)
+    /// <summary>
+    /// Suppresses an advisory that SecSwitch has already recorded - the admin's escape hatch (see
+    /// the class doc comment). Returns <c>false</c>, and changes nothing, if
+    /// <paramref name="advisoryId"/> is blank OR has no existing ledger entry.
+    ///
+    /// The "must already exist" half is deliberate (Task 12 review, Finding I3): the prior version
+    /// of this method created a new entry for an unknown id, which meant the id space accepted here
+    /// was unbounded - anything an admin (or a CSRF'd/misclicked request) typed. Advisory ids
+    /// ultimately come from the feed (see AdvisoryFetcher), a namespace SecSwitch does not control,
+    /// so accepting an arbitrary never-seen id would let a typo'd or deliberately-chosen id
+    /// pre-emptively and permanently disarm an advisory that has not even been published yet - the
+    /// exact opposite of what an escape hatch is for. Requiring a pre-existing entry closes that:
+    /// an id can only be suppressed after SecSwitch itself has actually recorded seeing it.
+    /// </summary>
+    public async Task<bool> SuppressAsync(string advisoryId)
     {
         if (string.IsNullOrWhiteSpace(advisoryId))
-            return;
+            return false;
 
         await _gate.WaitAsync();
         try
         {
             var ledger = await GetAsync();
             if (!ledger.Entries.TryGetValue(advisoryId, out var entry))
-            {
-                entry = new LedgerEntry { AdvisoryId = advisoryId, RecordedAt = DateTimeOffset.UtcNow };
-                ledger.Entries[advisoryId] = entry;
-            }
+                return false; // Finding I3: never fabricate an entry for an id we have not seen.
+
             entry.Suppressed = true;
             entry.Status = LedgerStatus.Suppressed;
             await settingsRepository.UpdateSetting(ledger);
+            return true;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// The inverse of <see cref="SuppressAsync"/> (Task 12 review, Finding I3): reverses a mistaken
+    /// or no-longer-wanted suppression so the advisory becomes eligible for automatic
+    /// re-evaluation again. Returns <c>false</c>, and changes nothing, if
+    /// <paramref name="advisoryId"/> is blank, has no existing entry, or is not currently
+    /// suppressed - there is nothing to reverse in any of those cases.
+    ///
+    /// Un-suppressing is NOT simply "set Suppressed back to false". <see cref="SuppressAsync"/> also
+    /// sets <see cref="LedgerEntry.Status"/> to <see cref="LedgerStatus.Suppressed"/>, which is a
+    /// TERMINAL status (<see cref="IsTerminalStatus"/>) - and a terminal, signatures-complete status
+    /// is exactly the condition under which <c>SecSwitchMonitor.RecordAsync</c> persists
+    /// <see cref="LedgerEntry.ContentHash"/> (see its own doc comment). So a suppressed entry's
+    /// ContentHash was cached the moment it was suppressed, which means <c>AdvisoryFetcher</c>'s own
+    /// hash-based dedup will keep silently skipping this advisory's directory on every future poll -
+    /// the advisory would never even be re-DOWNLOADED, regardless of what this method does to
+    /// <see cref="LedgerEntry.Status"/>. Un-suppressing must therefore clear all THREE of:
+    /// <see cref="LedgerEntry.Suppressed"/> (back to <c>false</c>), <see cref="LedgerEntry.Status"/>
+    /// (to the non-terminal <see cref="LedgerStatus.Unsuppressed"/>, so <see cref="IsActedAsync"/>
+    /// stops latching on it), AND <see cref="LedgerEntry.ContentHash"/> (back to empty, so the next
+    /// poll's fetch is not skipped). Missing the third makes un-suppress a silent no-op:
+    /// <see cref="IsActedAsync"/> would correctly start reporting <c>false</c>, but the advisory
+    /// would never actually be re-fetched for <c>SecSwitchMonitor</c> to re-evaluate in the first
+    /// place.
+    /// </summary>
+    public async Task<bool> UnsuppressAsync(string advisoryId)
+    {
+        if (string.IsNullOrWhiteSpace(advisoryId))
+            return false;
+
+        await _gate.WaitAsync();
+        try
+        {
+            var ledger = await GetAsync();
+            if (!ledger.Entries.TryGetValue(advisoryId, out var entry) || !entry.Suppressed)
+                return false; // Nothing recorded, or not currently suppressed - nothing to reverse.
+
+            entry.Suppressed = false;
+            entry.Status = LedgerStatus.Unsuppressed;
+            entry.ContentHash = ""; // See doc comment above - withheld so AdvisoryFetcher re-delivers it.
+            await settingsRepository.UpdateSetting(ledger);
+            return true;
         }
         finally
         {

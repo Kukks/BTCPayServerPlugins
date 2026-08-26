@@ -28,6 +28,17 @@
         (@Model.Result.TrustedValidCount / @Model.Result.Required)
     </h4>
 
+    @if (Model.Result.QuorumMet && Model.MatchedNewlineVariant is not null)
+    {
+        <p class="text-muted">
+            Verified using the advisory.json text <strong>@Model.MatchedNewlineVariant</strong>.
+            Browsers normalise every line break in a text box to CRLF on submit, so SecSwitch
+            verifies the bytes exactly as submitted first, then retries with CRLF converted back to
+            LF - since that is how most advisory.json files are actually signed - before concluding
+            quorum is not met.
+        </p>
+    }
+
     <p class="text-muted">
         Only a row marked "Verified" below is a cryptographically proven signer identity. Every
         other row shows, at most, an unauthenticated claim carried in the signature's own
@@ -51,7 +62,16 @@
                 <td><span class="badge bg-danger">Invalid signature</span></td>
                 <td>
                     <span class="badge bg-warning text-dark">claimed, NOT verified</span>
-                    <code>@sig.Fingerprint["claimed:".Length..]</code>
+                    @* Minor 1 + Minor 2 (Task 12 review): the "claimed:" prefix is rendered verbatim,
+                       never stripped - in-page the badges disambiguate this row from a genuinely
+                       verified one, but copied into a ticket or cropped into a screenshot, a bare
+                       40-hex value would become indistinguishable from the ValidTrusted row's
+                       verified fingerprint below. Rendering the prefix INSIDE the same <code>
+                       element (rather than as separate, droppable prose beside it) also removes the
+                       unguarded ["claimed:".Length..] range slice entirely, so a broken prefix
+                       invariant can no longer throw (-> 500) on this page, which is deliberately fed
+                       hostile input. *@
+                    <code>@sig.Fingerprint</code>
                 </td>
                 <td class="text-muted">
                     A trusted key was named by this signature, but cryptographic verification against
@@ -64,18 +84,34 @@
                 <td><span class="badge bg-warning text-dark">Unknown signer</span></td>
                 <td>
                     <span class="badge bg-secondary">unverified claim</span>
-                    key id <code>@sig.Fingerprint["keyid:".Length..]</code>
+                    @* Minor 1 + Minor 2: same reasoning as the InvalidSignature row above - the
+                       "keyid:" prefix stays inside the <code> element, unstripped. *@
+                    <code>@sig.Fingerprint</code>
                 </td>
                 <td class="text-muted">
                     No trusted key verified this signature. The key id shown is taken from
                     unauthenticated, attacker-controllable data — it does not identify any real signer.
                 </td>
             }
-            else
+            else if (sig.Status == SignatureStatus.Malformed)
             {
                 <td><span class="badge bg-danger">Malformed</span></td>
                 <td class="text-muted">—</td>
                 <td class="text-muted">Could not be parsed as an OpenPGP signature at all.</td>
+            }
+            else
+            {
+                @* Minor 3 (Task 12 review): a distinct fallback for any SignatureStatus member added
+                   in the future - previously this same `else` caught Malformed AND any unrecognised
+                   future value under the "Malformed" label, which would be a wrong label for
+                   whatever that future status actually meant. Fails closed with an explicit "do not
+                   trust this" message rather than guessing. *@
+                <td><span class="badge bg-dark">Unrecognised result</span></td>
+                <td class="text-muted">—</td>
+                <td class="text-muted">
+                    SecSwitch does not recognise this signature status (@sig.Status). Treat this as
+                    NOT verified until the plugin is updated to handle it explicitly.
+                </td>
             }
             </tr>
         }
