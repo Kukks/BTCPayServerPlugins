@@ -1,0 +1,12 @@
+@model BTCPayServer.Plugins.SecSwitch.Controllers.SecSwitchController.ConfirmActionViewModel
+@{ ViewData["Title"] = Model.Title; }
+
+<div class="sticky-header"><h2>@Model.Title</h2></div>
+
+<p>@Model.Description</p>
+
+<form method="post" asp-action="@Model.FormAction">
+    <input type="hidden" name="@Model.FieldName" value="@Model.FieldValue" />
+    <button type="submit" class="btn btn-danger">@Model.ButtonLabel</button>
+    <a asp-action="@Model.CancelAction" class="btn btn-secondary">Cancel</a>
+</form>

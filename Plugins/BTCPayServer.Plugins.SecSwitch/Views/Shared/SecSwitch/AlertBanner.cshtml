@@ -1,0 +1,67 @@
+@using BTCPayServer.Client
+@using BTCPayServer.Plugins.SecSwitch.Models
+@using BTCPayServer.Plugins.SecSwitch.Services
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Logging
+@inject LedgerStore Ledger
+@inject IAuthorizationService AuthorizationService
+@inject ILogger<LedgerStore> Logger
+@{
+    // Task 13 review, Finding I3 (Important): PermissionTagHelper
+    // (BTCPayServer.Abstractions.TagHelpers) only ever calls output.SuppressOutput() - a tag helper
+    // runs AFTER the Razor code that produced the element it is attached to, so it cannot stop this
+    // @{ } block itself from running. Gating only the <div>'s markup (this file's own previous
+    // version) still read the ledger and ran the LINQ below for EVERY signed-in user on EVERY
+    // authenticated backend page, non-admins included, only to discard the result. Checked first and
+    // explicitly, so a non-admin skips the read entirely rather than merely not seeing its output.
+    var canView = await AuthorizationService.AuthorizeAsync(User, Policies.CanModifyServerSettings);
+    if (!canView.Succeeded)
+    {
+        return;
+    }
+
+    // Task 13 review, Finding C1 (Critical): nothing between _Layout.cshtml's
+    // <vc:ui-extension-point location="layout-banner" /> and this partial catches an exception -
+    // confirmed by reading core's Components/UiExtensionPoint/Default.cshtml, which calls
+    // `await Html.RenderPartialAsync(partial, Model.Model)` with no surrounding try/catch, and
+    // _Layout.cshtml itself has none either. SettingsRepository (core) caches a setting's raw JSON by
+    // string key and calls _memoryCache.Remove on that same key inside UpdateSetting - so the very
+    // next GetSettingAsync<SecSwitchLedger> after ANY ledger write (the startup heartbeat, every
+    // RecordAsync, every trust-root-offered write) is guaranteed to be an uncached DB read, and the
+    // heartbeat write happens immediately at process start. A transient DB hiccup at exactly that
+    // moment - the single most likely time for one, right as the stack is coming up - would otherwise
+    // 500 every authenticated backend page this layout renders, /server/plugins included: the one
+    // page an operator needs to disable SecSwitch and recover. A banner that silently fails to render
+    // is strictly better than an admin UI that is unreachable because of it.
+    // Task 13 review round 2, Finding R1 (Important) fix: NeedsAttention now joins NeedsDecision here
+    // too (see SecSwitchPeriodicTask.IsNotifiable's own doc comment for the full reasoning) - a
+    // fixable core advisory deferred while SSH is configured but not yet verified can persist
+    // indefinitely (CheckConfigurationHostedService's probe never gives up but also never guarantees
+    // success), and without this the banner - like the bell notification before this fix - would never
+    // surface it. Kept INSIDE the same try/catch (Finding C1) and behind the same authorization check
+    // (Finding I3) as before - neither is regressed by this change.
+    List<LedgerEntry>? pending = null;
+    try
+    {
+        var ledgerState = await Ledger.GetAsync();
+        pending = ledgerState.Entries.Values
+            .Where(e => e is { Suppressed: false } && e.Status is LedgerStatus.NeedsDecision or LedgerStatus.NeedsAttention)
+            .OrderByDescending(e => e.RecordedAt)
+            .ToList();
+    }
+    catch (Exception e)
+    {
+        Logger.LogError(e, "SecSwitch alert banner failed to read the ledger; hiding the banner for this page render");
+    }
+}
+@if (pending is { Count: > 0 })
+{
+    <div class="alert alert-danger d-flex align-items-center justify-content-between mb-0" role="alert"
+         permission="@Policies.CanModifyServerSettings">
+        <span>
+            <strong>SecSwitch:</strong> @pending.Count security advisor@(pending.Count == 1 ? "y" : "ies")
+            need@(pending.Count == 1 ? "s" : "") your attention.
+        </span>
+        <a class="btn btn-sm btn-outline-light" asp-controller="SecSwitch" asp-action="Audit">Review</a>
+    </div>
+}

@@ -1,0 +1,122 @@
+@model BTCPayServer.Plugins.SecSwitch.Models.SecSwitchSettings
+@{
+    ViewData["Title"] = "SecSwitch";
+
+    // Final whole-branch review, Finding I1: the trust store being SMALLER than the quorum threshold
+    // is just as fatal as it being empty, and far harder to notice - every advisory fails quorum and
+    // is recorded Unverified, which is excluded from both the bell notification and the alert banner.
+    // Warned on here, not only at zero, so the state is visible on the page an admin actually looks at.
+    var minimumKeys = Math.Max(1, Model.QuorumThreshold);
+    var belowQuorum = Model.TrustedKeys.Count < minimumKeys;
+}
+
+<div class="sticky-header">
+    <h2>SecSwitch</h2>
+</div>
+<partial name="_StatusMessage" />
+
+<div class="alert alert-warning" role="alert">
+    SecSwitch can disable plugins, update them, or stop this server automatically when a
+    quorum-signed advisory applies. Review these settings carefully before enabling.
+</div>
+
+@if (belowQuorum)
+{
+    <div class="alert alert-danger" role="alert">
+        <strong>SecSwitch cannot verify any advisory.</strong>
+        It holds @Model.TrustedKeys.Count trusted key@(Model.TrustedKeys.Count == 1 ? "" : "s")
+        but requires @minimumKeys signature@(minimumKeys == 1 ? "" : "s") for quorum. Every advisory
+        will fail verification and no action will ever be taken@(Model.Enabled ? " — this instance is not protected" : "").
+        Add trusted keys below, or lower the required-signatures setting.
+    </div>
+}
+
+<form method="post">
+    <div class="form-check mb-3">
+        <input asp-for="Enabled" type="checkbox" class="form-check-input" />
+        <label asp-for="Enabled" class="form-check-label">Enable SecSwitch</label>
+    </div>
+    <div class="form-group mb-3">
+        <label asp-for="FeedUrl" class="form-label">Advisory feed URL</label>
+        <input asp-for="FeedUrl" class="form-control" />
+        <div class="form-text">Must be an absolute <code>https://</code> URL — SecSwitch will not poll anything else.</div>
+        <span asp-validation-for="FeedUrl" class="text-danger"></span>
+    </div>
+    <div class="form-group mb-3">
+        <label asp-for="QuorumThreshold" class="form-label">Required signatures (quorum)</label>
+        <input asp-for="QuorumThreshold" type="number" min="1" class="form-control" style="max-width:8rem" />
+        <span asp-validation-for="QuorumThreshold" class="text-danger"></span>
+    </div>
+    <div class="form-check mb-3">
+        <input asp-for="AutoApply" type="checkbox" class="form-check-input" />
+        <label asp-for="AutoApply" class="form-check-label">
+            Apply actions automatically (unchecked = notify only)
+        </label>
+    </div>
+    <div class="form-check mb-3">
+        <input asp-for="SeverityGateEnabled" type="checkbox" class="form-check-input" />
+        <label asp-for="SeverityGateEnabled" class="form-check-label">
+            Only act automatically on High and Critical advisories
+        </label>
+    </div>
+    <div class="form-check mb-4">
+        <input asp-for="PreferUpdateOverDisable" type="checkbox" class="form-check-input" />
+        <label asp-for="PreferUpdateOverDisable" class="form-check-label">
+            Prefer updating over disabling when a fixed version exists
+        </label>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Save</button>
+    <a asp-action="Audit" class="btn btn-secondary">Audit log</a>
+    <a asp-action="Verify" class="btn btn-secondary">Verify a signature</a>
+</form>
+
+<h4 class="mt-5">Trusted signing keys</h4>
+<p class="text-muted">
+    A key's fingerprint is always re-derived from its own key material below - never accepted as
+    typed text - so a mismatched or malicious fingerprint label can never be filed here. Keys are
+    also added or replaced via a quorum-signed key-rotation document co-signed by the existing
+    trusted signers.
+</p>
+@* Finding I4 (Task 12 review): this table's Remove links and the "add a key" form below are their
+   own POST endpoints (AddTrustedKey / RemoveTrustedKey) that mutate the persisted TrustedKeys
+   directly - deliberately NOT form-bound fields on the SecSwitchSettings model above. The Settings
+   POST action above restores TrustedKeys from the persisted record before saving specifically
+   because this view does not (and, by design, must not) round-trip them through that form - see its
+   own doc comment. *@
+<span asp-validation-for="TrustedKeys" class="text-danger"></span>
+<table class="table">
+    <thead><tr><th>Identity</th><th>Fingerprint</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var key in Model.TrustedKeys)
+    {
+        <tr>
+            <td>@key.Identity</td>
+            <td><code>@key.Fingerprint</code></td>
+            <td>
+                <a asp-action="RemoveTrustedKeyConfirm" asp-route-fingerprint="@key.Fingerprint"
+                   class="btn btn-sm btn-outline-danger">Remove</a>
+            </td>
+        </tr>
+    }
+    @if (Model.TrustedKeys.Count == 0)
+    {
+        <tr><td colspan="3" class="text-danger">
+            No trusted keys — SecSwitch cannot verify any advisory.
+        </td></tr>
+    }
+    </tbody>
+</table>
+
+<h5>Add a trusted key</h5>
+<p class="text-muted">
+    Paste the key's own armored public key (<code>-----BEGIN PGP PUBLIC KEY BLOCK-----</code> ...).
+    Its fingerprint will be derived from the key material itself, not from anything typed here.
+</p>
+<form method="post" asp-action="AddTrustedKey">
+    <div class="form-group mb-3">
+        <label for="armoredPublicKey" class="form-label">Armored public key</label>
+        <textarea id="armoredPublicKey" name="armoredPublicKey" class="form-control font-monospace" rows="8"></textarea>
+    </div>
+    <button type="submit" class="btn btn-secondary">Add key</button>
+</form>

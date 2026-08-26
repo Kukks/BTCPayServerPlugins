@@ -1,0 +1,123 @@
+@using BTCPayServer.Plugins.SecSwitch.Models
+@model BTCPayServer.Plugins.SecSwitch.Controllers.SecSwitchController.VerifyViewModel
+@{ ViewData["Title"] = "Verify an advisory signature"; }
+
+<div class="sticky-header"><h2>Verify an advisory signature</h2></div>
+<p class="text-muted">Read-only. Verifying here never triggers an action.</p>
+
+<form method="post">
+    <div class="form-group mb-3">
+        <label asp-for="AdvisoryJson" class="form-label">advisory.json (exact bytes)</label>
+        <textarea asp-for="AdvisoryJson" class="form-control font-monospace" rows="10"></textarea>
+    </div>
+    <div class="form-group mb-3">
+        <label asp-for="ArmoredSignatures" class="form-label">Armored detached signature(s)</label>
+        <textarea asp-for="ArmoredSignatures" class="form-control font-monospace" rows="10"></textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Verify</button>
+</form>
+
+@if (Model.Result is not null)
+{
+    <hr />
+    <h4>
+        @if (Model.Result.QuorumMet)
+        { <span class="text-success">Quorum met</span> }
+        else
+        { <span class="text-danger">Quorum NOT met</span> }
+        (@Model.Result.TrustedValidCount / @Model.Result.Required)
+    </h4>
+
+    @if (Model.Result.QuorumMet && Model.MatchedNewlineVariant is not null)
+    {
+        <p class="text-muted">
+            Verified using the advisory.json text <strong>@Model.MatchedNewlineVariant</strong>.
+            Browsers normalise every line break in a text box to CRLF on submit, so SecSwitch
+            verifies the bytes exactly as submitted first, then retries with CRLF converted back to
+            LF - since that is how most advisory.json files are actually signed - before concluding
+            quorum is not met.
+        </p>
+    }
+
+    <p class="text-muted">
+        Only a row marked "Verified" below is a cryptographically proven signer identity. Every
+        other row shows, at most, an unauthenticated claim carried in the signature's own
+        unhashed data — never treat it as attributing blame to (or clearing) anyone.
+    </p>
+
+    <table class="table">
+        <thead><tr><th>Result</th><th>Claimed / verified identity</th><th>What this means</th></tr></thead>
+        <tbody>
+        @foreach (var sig in Model.Result.Signatures)
+        {
+            <tr>
+            @if (sig.Status == SignatureStatus.ValidTrusted)
+            {
+                <td><span class="badge bg-success">Verified</span></td>
+                <td><code>@sig.Fingerprint</code></td>
+                <td class="text-muted">Cryptographically verified against a trusted key. This counts toward quorum.</td>
+            }
+            else if (sig.Status == SignatureStatus.InvalidSignature)
+            {
+                <td><span class="badge bg-danger">Invalid signature</span></td>
+                <td>
+                    <span class="badge bg-warning text-dark">claimed, NOT verified</span>
+                    @* Minor 1 + Minor 2 (Task 12 review): the "claimed:" prefix is rendered verbatim,
+                       never stripped - in-page the badges disambiguate this row from a genuinely
+                       verified one, but copied into a ticket or cropped into a screenshot, a bare
+                       40-hex value would become indistinguishable from the ValidTrusted row's
+                       verified fingerprint below. Rendering the prefix INSIDE the same <code>
+                       element (rather than as separate, droppable prose beside it) also removes the
+                       unguarded ["claimed:".Length..] range slice entirely, so a broken prefix
+                       invariant can no longer throw (-> 500) on this page, which is deliberately fed
+                       hostile input. *@
+                    <code>@sig.Fingerprint</code>
+                </td>
+                <td class="text-muted">
+                    A trusted key was named by this signature, but cryptographic verification against
+                    it FAILED. Do not attribute this to the named signer — the name comes from
+                    attacker-malleable data, and the signature itself did not check out.
+                </td>
+            }
+            else if (sig.Status == SignatureStatus.UnknownSigner)
+            {
+                <td><span class="badge bg-warning text-dark">Unknown signer</span></td>
+                <td>
+                    <span class="badge bg-secondary">unverified claim</span>
+                    @* Minor 1 + Minor 2: same reasoning as the InvalidSignature row above - the
+                       "keyid:" prefix stays inside the <code> element, unstripped. *@
+                    <code>@sig.Fingerprint</code>
+                </td>
+                <td class="text-muted">
+                    No trusted key verified this signature. The key id shown is taken from
+                    unauthenticated, attacker-controllable data — it does not identify any real signer.
+                </td>
+            }
+            else if (sig.Status == SignatureStatus.Malformed)
+            {
+                <td><span class="badge bg-danger">Malformed</span></td>
+                <td class="text-muted">—</td>
+                <td class="text-muted">Could not be parsed as an OpenPGP signature at all.</td>
+            }
+            else
+            {
+                @* Minor 3 (Task 12 review): a distinct fallback for any SignatureStatus member added
+                   in the future - previously this same `else` caught Malformed AND any unrecognised
+                   future value under the "Malformed" label, which would be a wrong label for
+                   whatever that future status actually meant. Fails closed with an explicit "do not
+                   trust this" message rather than guessing. *@
+                <td><span class="badge bg-dark">Unrecognised result</span></td>
+                <td class="text-muted">—</td>
+                <td class="text-muted">
+                    SecSwitch does not recognise this signature status (@sig.Status). Treat this as
+                    NOT verified until the plugin is updated to handle it explicitly.
+                </td>
+            }
+            </tr>
+        }
+        </tbody>
+    </table>
+
+    <h5>Currently trusted fingerprints</h5>
+    <ul>@foreach (var fp in Model.TrustedFingerprints) { <li><code>@fp</code></li> }</ul>
+}
