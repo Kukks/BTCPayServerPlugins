@@ -214,6 +214,40 @@ public class AdvisoryFetcherTests
     }
 
     [Fact]
+    public async Task Signature_index_of_literal_null_leaves_signatures_incomplete()
+    {
+        // Task 8 review round 4: JSON `null` deserializes to a C# null WITHOUT throwing, unlike
+        // every other wrong shape - the pre-round-4 `?? []` coalesce silently turned that into an
+        // empty array indistinguishable from a feed that legitimately listed zero signatures.
+        var routes = Routes();
+        routes[$"{Feed}advisories/a1/signatures/index.json"] = "null";
+        var fetcher = new AdvisoryFetcher(new FakeHttp(routes).Client());
+
+        var fetched = await fetcher.FetchAsync(Feed, new HashSet<string>(), CancellationToken.None);
+
+        var one = Assert.Single(fetched); // the advisory itself still comes through
+        Assert.Empty(one.ArmoredSignatures);
+        Assert.False(one.SignaturesComplete);
+    }
+
+    [Fact]
+    public async Task Signature_index_of_the_wrong_json_shape_leaves_signatures_incomplete()
+    {
+        // Pins the parse-EXCEPTION branch specifically - distinct from the literal-null case
+        // above, which does not throw. A syntactically valid JSON array of numbers throws when
+        // deserialized as string[] (element type mismatch).
+        var routes = Routes();
+        routes[$"{Feed}advisories/a1/signatures/index.json"] = "[1,2]";
+        var fetcher = new AdvisoryFetcher(new FakeHttp(routes).Client());
+
+        var fetched = await fetcher.FetchAsync(Feed, new HashSet<string>(), CancellationToken.None);
+
+        var one = Assert.Single(fetched);
+        Assert.Empty(one.ArmoredSignatures);
+        Assert.False(one.SignaturesComplete);
+    }
+
+    [Fact]
     public async Task Oversized_signature_file_is_skipped_but_sibling_signature_still_fetched()
     {
         var routes = Routes();
