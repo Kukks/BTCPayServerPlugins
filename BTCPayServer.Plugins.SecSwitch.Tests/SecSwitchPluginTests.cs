@@ -20,12 +20,14 @@ namespace BTCPayServer.Plugins.SecSwitch.Tests;
 /// </summary>
 public class SecSwitchPluginTests
 {
-    static ServiceProvider BuildProvider()
+    static ServiceCollection BuildServices()
     {
         var services = new ServiceCollection();
         new SecSwitchPlugin().Execute(services);
-        return services.BuildServiceProvider();
+        return services;
     }
+
+    static ServiceProvider BuildProvider() => BuildServices().BuildServiceProvider();
 
     [Fact]
     public void Execute_registers_the_layout_banner_alert()
@@ -73,5 +75,18 @@ public class SecSwitchPluginTests
 
         var client = factory.CreateClient(SecSwitchPeriodicTask.HttpClientName);
         Assert.NotNull(client);
+    }
+
+    [Fact]
+    public void Execute_does_not_register_a_typed_AdvisoryFetcher_client()
+    {
+        // Task 13 review, Finding I4 (Important): states hard requirement 2 ("do not capture an
+        // HttpClient for the process lifetime") as an assertion, not just a comment - the deleted
+        // services.AddHttpClient<AdvisoryFetcher>() (a TYPED client) would have registered
+        // AdvisoryFetcher itself as a DI service; the named registration this plugin actually uses
+        // never does. This genuinely fails if the typed-client registration ever comes back.
+        var services = BuildServices();
+
+        Assert.DoesNotContain(services, d => d.ServiceType == typeof(AdvisoryFetcher));
     }
 }

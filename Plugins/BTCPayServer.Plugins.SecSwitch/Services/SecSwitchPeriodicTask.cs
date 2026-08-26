@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
+using BTCPayServer.Configuration;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Plugins.SecSwitch.Models;
 using BTCPayServer.Services;
@@ -50,6 +51,7 @@ public sealed class SecSwitchPeriodicTask(
     IEnumerable<IBTCPayServerPlugin> installedPlugins,
     BTCPayServerEnvironment environment,
     CheckConfigurationHostedService sshState,
+    BTCPayServerOptions serverOptions,
     ILogger<SecSwitchPeriodicTask> logger) : IPeriodicTask
 {
     /// <summary>
@@ -60,9 +62,9 @@ public sealed class SecSwitchPeriodicTask(
 
     // Best-effort, in-process "already handled this run" guards so a healthy poll does not re-check
     // the ledger every single tick once it knows the answer - NOT the source of truth for the trust
-    // bootstrap (SecSwitchLedger.TrustRootBootstrapped is, checked fresh below the first time), and
-    // deliberately left false on failure so a LATER tick in the SAME process retries rather than the
-    // failure going permanently unnoticed for the rest of this process's life.
+    // bootstrap (SecSwitchLedger.OfferedTrustRootFingerprints is, checked fresh below every time this
+    // is false), and deliberately left false on failure so a LATER tick in the SAME process retries
+    // rather than the failure going permanently unnoticed for the rest of this process's life.
     bool _heartbeatRecorded;
     bool _trustRootChecked;
 
@@ -112,12 +114,17 @@ public sealed class SecSwitchPeriodicTask(
     /// <summary>
     /// Hard requirement 3 (Task 13): bootstraps <see cref="SecSwitchSettings.TrustedKeys"/> from the
     /// embedded trust-root resource - see <see cref="TrustRootBootstrapper"/> for the actual admission
-    /// logic. Runs unconditionally, independent of <see cref="SecSwitchSettings.Enabled"/>: the
+    /// logic and <see cref="SecSwitchLedger.OfferedTrustRootFingerprints"/>'s own doc comment for why
+    /// "already ran" is tracked per-fingerprint rather than as a single latch (Task 13 review, Finding
+    /// I1 fix). Runs unconditionally, independent of <see cref="SecSwitchSettings.Enabled"/>: the
     /// settings page refuses to let an admin enable SecSwitch with zero trusted keys at all, so
-    /// bootstrapping only while already enabled would be a deadlock. Gated on
-    /// <see cref="SecSwitchLedger.TrustRootBootstrapped"/>, which - once set - is never re-examined by
-    /// this method again for the life of the ledger, so a bundled key an admin later removes on
-    /// purpose never silently reappears on a subsequent restart.
+    /// bootstrapping only while already enabled would be a deadlock.
+    ///
+    /// The settings write is skipped entirely when nothing new was offered this run (today's shipped
+    /// resource - an empty <c>keys</c> array - is always this case): both because there is nothing to
+    /// persist, and because it removes the one theoretical lost-update race this method could
+    /// otherwise cause against SecSwitchController's own unguarded SecSwitchSettings read-modify-write
+    /// endpoints for the only scenario that exists today.
     /// </summary>
     async Task BootstrapTrustStoreOnceAsync()
     {
@@ -125,13 +132,6 @@ public sealed class SecSwitchPeriodicTask(
             return;
         try
         {
-            var ledgerState = await ledger.GetAsync();
-            if (ledgerState.TrustRootBootstrapped)
-            {
-                _trustRootChecked = true;
-                return;
-            }
-
             var resourceBytes = TrustRootBootstrapper.ReadEmbeddedTrustRoot(logger);
             if (resourceBytes is null)
                 return; // Fails closed with a log already emitted inside ReadEmbeddedTrustRoot.
@@ -139,10 +139,25 @@ public sealed class SecSwitchPeriodicTask(
                         // or absent on EVERY tick, but a future plugin upgrade fixing it should still
                         // get a chance to bootstrap rather than being stuck on a stale, unset flag.
 
+            var ledgerState = await ledger.GetAsync();
+            var alreadyOffered = new HashSet<string>(
+                ledgerState.OfferedTrustRootFingerprints ?? [], StringComparer.OrdinalIgnoreCase);
+
             var settings = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
-            settings.TrustedKeys = TrustRootBootstrapper.Apply(settings.TrustedKeys, resourceBytes, logger);
+            var (updatedKeys, newlyOffered) =
+                TrustRootBootstrapper.Apply(settings.TrustedKeys, resourceBytes, alreadyOffered, logger);
+
+            if (newlyOffered.Count == 0)
+            {
+                // Nothing new to offer - every fingerprint the bundle currently lists (if any) was
+                // already considered by a prior run. Skip both writes; see the method doc comment.
+                _trustRootChecked = true;
+                return;
+            }
+
+            settings.TrustedKeys = updatedKeys;
             await settingsRepository.UpdateSetting(settings);
-            await ledger.RecordTrustRootBootstrapAsync();
+            await ledger.RecordTrustRootOfferedAsync(newlyOffered);
             _trustRootChecked = true;
         }
         catch (Exception e)
@@ -166,26 +181,31 @@ public sealed class SecSwitchPeriodicTask(
             if (settings is not { Enabled: true })
                 return;
 
-            // Hard requirement 1 (Task 13): AdvisoryFetcher.FetchAsync's second parameter is compared
-            // against an AdvisoryIndexEntry's CONTENT HASH, not an advisory id - passing ids here
-            // would never match anything, so every advisory would be re-downloaded on every single
-            // poll, forever. Built from the ledger's persisted LedgerEntry.ContentHash values,
-            // skipping any withheld/empty one (see SecSwitchMonitor.RecordAsync's own doc comment for
-            // when a hash is withheld rather than cached). SecSwitchMonitor.ProcessAsync's own
-            // IsActedAsync check remains the authoritative dedupe - this is only an optimisation that
-            // avoids a network round trip for something already fully resolved.
             var ledgerState = await ledger.GetAsync();
-            var knownContentHashes = ledgerState.Entries.Values
-                .Select(e => e.ContentHash)
-                .Where(h => !string.IsNullOrWhiteSpace(h))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var knownContentHashes = BuildKnownContentHashes(ledgerState);
 
             var fetcher = new AdvisoryFetcher(httpClientFactory.CreateClient(HttpClientName));
             var fetched = await fetcher.FetchAsync(settings.FeedUrl, knownContentHashes, cancellationToken);
             if (fetched.Count == 0)
                 return;
 
-            var state = BuildState(installedPlugins, environment.Version, sshState.CanUseSSH);
+            // Task 13 review, Finding I2 (Important): CheckConfigurationHostedService.StartAsync fires
+            // its SSH connectivity probe WITHOUT awaiting it, and CanUseSSH only becomes true after
+            // that probe succeeds - on failure it retries with backoff out to 10 minutes, staying false
+            // throughout. Because the scheduled-task launcher enqueues every task immediately on
+            // startup (see BuildState's own doc comment), this poll's very first run can race that
+            // still-in-flight probe. sshConfigured distinguishes "no SSH configured at all"
+            // (serverOptions.SSHSettings is null - exactly what CheckConfigurationHostedService itself
+            // gates its probe on, and what UIServerController.cs:855 checks alongside CanUseSSH) from
+            // "configured, but not yet verified" (SSHSettings is not null yet CanUseSSH is still
+            // false) - PolicyResolver.Resolve treats the latter as a reason to DEFER a fixable core
+            // advisory to a later poll rather than resolving it as ShutdownCore, which
+            // SecSwitchMonitor would otherwise record as Acted - a TERMINAL ledger status that could
+            // never later self-correct to the real UpdateCore once the probe actually finishes.
+            var sshConfigured = serverOptions.SSHSettings is not null;
+            var state = BuildState(
+                installedPlugins, environment.Version, sshState.CanUseSSH,
+                sshVerificationPending: sshConfigured && !sshState.CanUseSSH);
             var recorded = await monitor.ProcessAsync(fetched, state, settings, cancellationToken);
 
             await NotifyAsync(recorded);
@@ -196,6 +216,29 @@ public sealed class SecSwitchPeriodicTask(
         {
             logger.LogError(e, "SecSwitch advisory poll failed unexpectedly");
         }
+    }
+
+    /// <summary>
+    /// Hard requirement 1 (Task 13), extracted into its own directly-testable method (Task 13 review,
+    /// Finding I4 - the brief's own test plan never exercised this line, the one whose regression
+    /// re-downloads every advisory on every poll forever): builds the set
+    /// <see cref="AdvisoryFetcher.FetchAsync(string,System.Collections.Generic.ISet{string},System.Threading.CancellationToken)"/>
+    /// compares against an <c>AdvisoryIndexEntry</c>'s CONTENT HASH - not an advisory id, which would
+    /// never match anything - from the ledger's persisted <see cref="LedgerEntry.ContentHash"/> values,
+    /// skipping any withheld/empty one (see <c>SecSwitchMonitor.RecordAsync</c>'s own doc comment for
+    /// when a hash is withheld rather than cached). <see cref="SecSwitchMonitor.ProcessAsync"/>'s own
+    /// <c>IsActedAsync</c> check remains the authoritative dedupe - this is only an optimisation that
+    /// avoids a network round trip for something already fully resolved.
+    /// </summary>
+    internal static ISet<string> BuildKnownContentHashes(SecSwitchLedger ledgerState)
+    {
+        if (ledgerState?.Entries is null)
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        return ledgerState.Entries.Values
+            .Select(e => e.ContentHash)
+            .Where(h => !string.IsNullOrWhiteSpace(h))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -235,10 +278,24 @@ public sealed class SecSwitchPeriodicTask(
     /// <see cref="PolicyResolver.Resolve"/> and <see cref="Services.AdvisoryApplicability.IsApplicable"/>
     /// need. Static and taking plain parameters (not <see cref="PluginService"/> or
     /// <see cref="BTCPayServerEnvironment"/> directly) so it is testable without constructing this
-    /// class's full DI graph.
+    /// class's full DI graph. Reachable at process startup, not an hour later: core's
+    /// <c>PeriodicTaskLauncherHostedService.StartAsync</c> enqueues every registered
+    /// <c>ScheduledTask</c> immediately and only schedules the NEXT run after the current one
+    /// completes (confirmed by reading <c>HostedServices/PeriodicTaskLauncherHostedService.cs</c>), so
+    /// <see cref="Do"/>'s first tick - and therefore this method's first call - happens as soon as the
+    /// host starts, concurrently with other startup-time probes such as
+    /// <see cref="CheckConfigurationHostedService"/>'s own (see <paramref name="sshVerificationPending"/>).
     /// </summary>
+    /// <param name="sshVerificationPending">
+    /// True only when SSH IS configured but <see cref="CheckConfigurationHostedService.CanUseSSH"/> has
+    /// not (yet, or ever) reported success - see the Task 13 review Finding I2 comment in
+    /// <see cref="PollForAdvisoriesAsync"/> for the full reasoning. Defaults to false so every call
+    /// site that predates this parameter (including this plugin's own existing tests) keeps its
+    /// original meaning: "no SSH available, and nothing pending either".
+    /// </param>
     public static InstanceState BuildState(
-        IEnumerable<IBTCPayServerPlugin> plugins, string coreVersion, bool canUseSsh)
+        IEnumerable<IBTCPayServerPlugin> plugins, string coreVersion, bool canUseSsh,
+        bool sshVerificationPending = false)
     {
         var installed = new Dictionary<string, Version>(StringComparer.OrdinalIgnoreCase);
         foreach (var plugin in plugins ?? [])
@@ -248,12 +305,17 @@ public sealed class SecSwitchPeriodicTask(
             installed[plugin.Identifier] = plugin.Version;
         }
 
-        // Mirrors PluginService.GetShortBtcpayVersion (BTCPayServer/Plugins/PluginManager/PluginService.cs):
-        // strip the leading 'v' and any +buildmeta - BTCPayServerEnvironment.Version carries both, and
-        // System.Version.TryParse cannot handle either.
+        // Defensively mirrors PluginService.GetShortBtcpayVersion
+        // (BTCPayServer/Plugins/PluginManager/PluginService.cs:61 - Env.Version.TrimStart('v').Split('+')[0]):
+        // strips a leading 'v' and any +buildmeta suffix IF present, neither of which
+        // System.Version.TryParse can handle. This build's own BTCPayServerEnvironment.Version is
+        // "2.4.2" - no 'v', no '+' (Build/Version.csproj sets a bare <Version>2.4.2</Version> with no
+        // SourceLink/+sha suffix) - so this stripping is a defensive no-op here today, not a
+        // description of what this specific string looks like; it exists to match core's own
+        // defensive handling for any build configuration where it would not be.
         var shortVersion = (coreVersion ?? "").TrimStart('v').Split('+')[0];
         var parsed = Version.TryParse(shortVersion, out var v) ? v : new Version(0, 0);
 
-        return new InstanceState(installed, parsed, canUseSsh);
+        return new InstanceState(installed, parsed, canUseSsh, sshVerificationPending);
     }
 }

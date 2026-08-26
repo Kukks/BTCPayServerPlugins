@@ -58,21 +58,36 @@ public static class TrustRootBootstrapper
 
     /// <summary>
     /// Returns <paramref name="current"/> plus any bundled key from <paramref name="trustRootJson"/>
-    /// not already present (matched by fingerprint, case-insensitively - the same convention every
-    /// other trusted-key comparison in this plugin uses). Never removes or replaces an existing entry
-    /// - an admin-added key, and a key added by a PRIOR call to this method, are both left untouched.
+    /// whose fingerprint is neither already present in <paramref name="current"/> NOR already in
+    /// <paramref name="alreadyOffered"/> (matched case-insensitively throughout - the same convention
+    /// every other trusted-key comparison in this plugin uses), alongside every fingerprint this call
+    /// newly considered - whether or not it ended up admitted - so the caller can persist them into
+    /// <see cref="SecSwitchLedger.OfferedTrustRootFingerprints"/> via
+    /// <see cref="LedgerStore.RecordTrustRootOfferedAsync"/> (Task 13 review, Finding I1 fix).
+    ///
+    /// Never removes or replaces an existing entry - an admin-added key, and a key added by a PRIOR
+    /// call to this method, are both left untouched. Critically, a fingerprint already in
+    /// <paramref name="alreadyOffered"/> is skipped OUTRIGHT, before even checking whether it is
+    /// currently present in <paramref name="current"/> - this is what makes a deliberate admin removal
+    /// of a bundled key permanent: once a fingerprint has been offered once, it is never reconsidered
+    /// again regardless of the trust store's current contents. A fingerprint that could not even be
+    /// derived (an unreadable bundled key) can never be added to the offered set either way, since
+    /// there is nothing to key it by - it is simply retried, harmlessly, on every future call.
+    ///
     /// A null/empty/malformed <paramref name="trustRootJson"/>, or a single unreadable bundled key
     /// entry, is logged and skipped rather than thrown - see the class doc comment.
     /// </summary>
-    public static List<TrustedKey> Apply(
-        IReadOnlyList<TrustedKey> current, byte[]? trustRootJson, ILogger logger)
+    public static (List<TrustedKey> Keys, List<string> NewlyOffered) Apply(
+        IReadOnlyList<TrustedKey> current, byte[]? trustRootJson, IReadOnlySet<string>? alreadyOffered, ILogger logger)
     {
         var working = (current ?? Array.Empty<TrustedKey>()).Where(k => k is not null).ToList();
+        var newlyOffered = new List<string>();
+        var offered = alreadyOffered ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         if (trustRootJson is null || trustRootJson.Length == 0)
         {
             logger.LogWarning("SecSwitch trust-root resource is missing or empty; no bundled trusted keys were added.");
-            return working;
+            return (working, newlyOffered);
         }
 
         TrustRootFile? file;
@@ -87,11 +102,11 @@ public static class TrustRootBootstrapper
             // "never throw has no carve-out for an unusual failure mode" posture for the identical
             // JsonSerializer.Deserialize call shape.
             logger.LogWarning(e, "SecSwitch trust-root resource is malformed; no bundled trusted keys were added.");
-            return working;
+            return (working, newlyOffered);
         }
 
         if (file?.Keys is null || file.Keys.Length == 0)
-            return working; // Nothing to add - not an error. Today's shipped resource is exactly this.
+            return (working, newlyOffered); // Nothing to add - not an error; today's shipped resource is exactly this.
 
         var existing = new HashSet<string>(
             working.Where(k => !string.IsNullOrWhiteSpace(k.Fingerprint)).Select(k => k.Fingerprint),
@@ -119,8 +134,16 @@ public static class TrustRootBootstrapper
                 continue;
             }
 
+            if (offered.Contains(fingerprint))
+                continue; // Already offered in a PRIOR run, whatever the outcome was then - never
+                          // reconsidered, so a deliberately-removed bundled key cannot reappear.
+
+            newlyOffered.Add(fingerprint); // Considered exactly once, from here on, regardless of
+                                            // whether it is actually admitted below.
+
             if (existing.Contains(fingerprint))
-                continue; // Already trusted (admin-added, or a prior bootstrap) - idempotent no-op.
+                continue; // Already trusted (admin-added, or added earlier in THIS same call for a
+                          // duplicate entry within the same resource) - idempotent no-op.
 
             // Beyond FingerprintOf's own guard: a blob it can parse is not necessarily one
             // AdvisoryVerifier.LoadTrustedKeys would ever actually load (e.g. one over its own
@@ -139,7 +162,11 @@ public static class TrustRootBootstrapper
             existing.Add(fingerprint);
         }
 
-        return working;
+        // A bundle listing the same fingerprint more than once (e.g. an accidental duplicate entry)
+        // would otherwise add it to newlyOffered twice - harmless to a caller that itself dedupes (see
+        // LedgerStore.RecordTrustRootOfferedAsync), but deduped here too so this method's own return
+        // value is self-consistent regardless of what the caller does with it.
+        return (working, newlyOffered.Distinct(StringComparer.OrdinalIgnoreCase).ToList());
     }
 
     /// <summary>

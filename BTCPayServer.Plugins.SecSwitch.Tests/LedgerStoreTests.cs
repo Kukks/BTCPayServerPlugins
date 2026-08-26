@@ -266,6 +266,75 @@ public class LedgerStoreTests
         Assert.Equal(now, (await store.GetAsync()).LastStartedAt);
     }
 
+    // --- Task 13 review, Finding I1 (Important) fix: RecordTrustRootOfferedAsync replaces a single
+    // permanent "bootstrap already ran" bool with a per-fingerprint offered set (see
+    // SecSwitchLedger.OfferedTrustRootFingerprints's own doc comment for why).
+
+    [Fact]
+    public async Task Trust_root_offered_fingerprints_are_persisted()
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        await store.RecordTrustRootOfferedAsync(["fp-1", "fp-2"]);
+
+        var offered = (await store.GetAsync()).OfferedTrustRootFingerprints;
+        Assert.Contains("fp-1", offered);
+        Assert.Contains("fp-2", offered);
+    }
+
+    [Fact]
+    public async Task Trust_root_offered_fingerprints_accumulate_across_calls_without_duplicating()
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        await store.RecordTrustRootOfferedAsync(["fp-1"]);
+        await store.RecordTrustRootOfferedAsync(["fp-1", "fp-2"]);
+
+        var offered = (await store.GetAsync()).OfferedTrustRootFingerprints;
+        Assert.Equal(2, offered.Count);
+        Assert.Contains("fp-1", offered);
+        Assert.Contains("fp-2", offered);
+    }
+
+    [Fact]
+    public async Task Trust_root_offered_fingerprint_match_is_case_insensitive()
+    {
+        // Matches the OrdinalIgnoreCase convention this plugin uses for every other fingerprint
+        // comparison (AdvisoryVerifier, TrustStore, TrustRootBootstrapper).
+        var store = new LedgerStore(new FakeSettingsRepository());
+        await store.RecordTrustRootOfferedAsync(["ABCDEF"]);
+        await store.RecordTrustRootOfferedAsync(["abcdef"]);
+
+        var offered = (await store.GetAsync()).OfferedTrustRootFingerprints;
+        Assert.Single(offered);
+    }
+
+    [Fact]
+    public async Task Trust_root_offered_fingerprints_does_not_disturb_other_ledger_state()
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        await store.RecordAsync(Entry("a1"));
+        var now = DateTimeOffset.UtcNow;
+        await store.RecordStartupAsync(now);
+
+        await store.RecordTrustRootOfferedAsync(["fp-1"]);
+
+        var ledger = await store.GetAsync();
+        Assert.True(ledger.Entries.ContainsKey("a1"));
+        Assert.Equal(now, ledger.LastStartedAt);
+        Assert.Contains("fp-1", ledger.OfferedTrustRootFingerprints);
+    }
+
+    [Fact]
+    public async Task Recording_no_new_trust_root_fingerprints_is_a_harmless_no_op()
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        await store.RecordTrustRootOfferedAsync([]); // must not throw
+        Assert.Empty((await store.GetAsync()).OfferedTrustRootFingerprints);
+
+        await store.RecordTrustRootOfferedAsync(["fp-1"]);
+        await store.RecordTrustRootOfferedAsync(["fp-1"]); // already offered - no-op
+        Assert.Single((await store.GetAsync()).OfferedTrustRootFingerprints);
+    }
+
     // --- Additional coverage beyond the brief's given tests: aliasing independence and
     // concurrency safety (see task instructions - both flagged as the likely places for a defect).
 

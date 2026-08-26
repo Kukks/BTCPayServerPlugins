@@ -294,21 +294,38 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
     }
 
     /// <summary>
-    /// Latches <see cref="SecSwitchLedger.TrustRootBootstrapped"/> so the embedded trust-root
-    /// resource (see <see cref="TrustRootBootstrapper"/>) is only ever applied once, permanently -
-    /// see that field's own doc comment for why this lives on the ledger rather than
-    /// <c>SecSwitchSettings</c>. Idempotent: safe to call again (e.g. a retried caller) even though
-    /// every real caller is expected to check <see cref="SecSwitchLedger.TrustRootBootstrapped"/>
-    /// first and skip calling this a second time.
+    /// Adds every fingerprint in <paramref name="fingerprints"/> to
+    /// <see cref="SecSwitchLedger.OfferedTrustRootFingerprints"/> that is not already present
+    /// (case-insensitively - see that field's own doc comment for why a fresh
+    /// <see cref="StringComparer.OrdinalIgnoreCase"/> set is built here rather than trusted from
+    /// whatever the list round-tripped as). A fingerprint, once recorded here, is never offered by
+    /// <see cref="TrustRootBootstrapper"/> again for the life of this ledger - this is the permanent
+    /// half of the Task 13 review Finding I1 fix; see that field's own doc comment for the full
+    /// reasoning. Idempotent and cheap to call with an empty or entirely-already-present
+    /// <paramref name="fingerprints"/>: skips the settings write entirely when nothing new was added,
+    /// both because there is nothing to persist and because every real caller (
+    /// <see cref="SecSwitchPeriodicTask"/>) is expected to skip calling this at all in that case.
     /// </summary>
-    public async Task RecordTrustRootBootstrapAsync()
+    public async Task RecordTrustRootOfferedAsync(IEnumerable<string> fingerprints)
     {
         await _gate.WaitAsync();
         try
         {
             var ledger = await GetAsync();
-            ledger.TrustRootBootstrapped = true;
-            await settingsRepository.UpdateSetting(ledger);
+            var existing = new HashSet<string>(
+                ledger.OfferedTrustRootFingerprints ?? [], StringComparer.OrdinalIgnoreCase);
+
+            var changed = false;
+            foreach (var fingerprint in fingerprints ?? [])
+            {
+                if (string.IsNullOrWhiteSpace(fingerprint) || !existing.Add(fingerprint))
+                    continue;
+                ledger.OfferedTrustRootFingerprints.Add(fingerprint);
+                changed = true;
+            }
+
+            if (changed)
+                await settingsRepository.UpdateSetting(ledger);
         }
         finally
         {
