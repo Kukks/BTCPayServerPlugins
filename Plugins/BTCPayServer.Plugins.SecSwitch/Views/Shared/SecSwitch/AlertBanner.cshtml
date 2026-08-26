@@ -1,0 +1,32 @@
+@using BTCPayServer.Client
+@using BTCPayServer.Plugins.SecSwitch.Models
+@using BTCPayServer.Plugins.SecSwitch.Services
+@inject LedgerStore Ledger
+@{
+    // Deviation from the Task 13 brief (ruling applied 2026-08-26): the brief's banner has no
+    // permission gating, so it would render for every signed-in user this "layout-banner" extension
+    // point reaches (any authenticated app page, not the public checkout/POS/crowdfunding surfaces -
+    // those use separate extension points, e.g. BTCPayServer.Plugins.ServerMessage's PublicBanner).
+    // Unlike ServerMessage's own AdminBanner on this same extension point (an admin's own free-text
+    // broadcast, intentionally shown to everyone), this banner discloses that the SERVER ITSELF has
+    // unresolved security advisories and how many - a store employee without CanModifyServerSettings
+    // has no use for that (the "Review" link below 403s for them) and telling them a specific
+    // vulnerability is currently unpatched is a real information disclosure, not merely a UX gap.
+    // Gated the same way SecSwitchController itself already is.
+    var ledger = await Ledger.GetAsync();
+    var pending = ledger.Entries.Values
+        .Where(e => e is { Status: LedgerStatus.NeedsDecision, Suppressed: false })
+        .OrderByDescending(e => e.RecordedAt)
+        .ToList();
+}
+@if (pending.Count > 0)
+{
+    <div class="alert alert-danger d-flex align-items-center justify-content-between mb-0" role="alert"
+         permission="@Policies.CanModifyServerSettings">
+        <span>
+            <strong>SecSwitch:</strong> @pending.Count security advisor@(pending.Count == 1 ? "y" : "ies")
+            need@(pending.Count == 1 ? "s" : "") your decision.
+        </span>
+        <a class="btn btn-sm btn-outline-light" asp-controller="SecSwitch" asp-action="Audit">Review</a>
+    </div>
+}

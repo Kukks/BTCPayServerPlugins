@@ -6,6 +6,22 @@ namespace BTCPayServer.Plugins.SecSwitch.Models;
 public sealed class SecSwitchLedger
 {
     public DateTimeOffset? LastStartedAt { get; set; }
+
+    // Deviation from the Task 13 brief (ruling applied 2026-08-26): the brief's periodic-task sample
+    // has no field tracking whether the embedded trust-root resource was ever applied, but "add a
+    // bundled key only if not already present, and never let a deliberately-removed bundled key
+    // silently reappear" needs a persisted, permanent "already ran" latch - re-deriving fingerprints
+    // and re-checking presence every poll would look idempotent today but re-admit a key an admin
+    // removed on purpose the moment nothing else in the store happens to collide with it. Placed on
+    // the ledger rather than SecSwitchSettings deliberately: SecSwitchController's Settings POST
+    // handler already restores TrustedKeys/NotifyOnlyIdentifiers from the persisted record before
+    // saving specifically because that form does not round-trip them (see its own doc comment) - a
+    // same-shaped bool added to SecSwitchSettings instead would need that same restore-before-save
+    // treatment remembered on every future settings-mutating endpoint, and forgetting it even once
+    // would silently reset this flag to false and re-trigger the bootstrap. The ledger is never
+    // partially overwritten by a web form; only LedgerStore's own methods ever mutate it.
+    public bool TrustRootBootstrapped { get; set; }
+
     public Dictionary<string, LedgerEntry> Entries { get; set; } = [];
 }
 
