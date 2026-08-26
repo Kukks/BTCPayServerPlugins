@@ -404,16 +404,51 @@ public class AdvisoryFetcherTests
 
         var sw = Stopwatch.StartNew();
         // Internal overload (test-only seam - see AdvisoryFetcher's InternalsVisibleTo): a
-        // millisecond-scale timeout so this test does not wait out the real 10-second production
-        // default. CancellationToken.None is deliberate here - it proves the fetcher enforces its
-        // OWN bound even when the caller supplies no cooperating token at all.
+        // millisecond-scale per-request timeout so this test does not wait out the real 10-second
+        // production default. The overall deadline is set generously (30s) so it is the
+        // PER-REQUEST timeout that fires first, keeping this test focused on that one mechanism -
+        // see Overall_poll_deadline_bounds_total_wall_time_even_with_many_hanging_requests for the
+        // other one. CancellationToken.None is deliberate here - it proves the fetcher enforces
+        // its OWN bound even when the caller supplies no cooperating token at all.
         var fetched = await fetcher.FetchAsync(
-            Feed, new HashSet<string>(), TimeSpan.FromMilliseconds(100), CancellationToken.None);
+            Feed, new HashSet<string>(), TimeSpan.FromMilliseconds(100), TimeSpan.FromSeconds(30), CancellationToken.None);
         sw.Stop();
 
         Assert.Empty(fetched);
         Assert.True(sw.ElapsedMilliseconds < 5000,
             $"Expected the per-request timeout to bound the hang; took {sw.ElapsedMilliseconds}ms.");
+    }
+
+    [Fact]
+    public async Task Overall_poll_deadline_bounds_total_wall_time_even_with_many_hanging_requests()
+    {
+        // Several advisories whose advisory.json all hang. Each is individually bounded by the
+        // (generous, 10s production default) per-request timeout, but if the OVERALL deadline did
+        // not exist, a poll could still take (per-request timeout) x (request count) to give up -
+        // Task 8 review, Finding 3. The much shorter overall deadline here is what must actually
+        // bound this test's wall time, not the per-request one.
+        var routes = new Dictionary<string, string>();
+        var indexEntries = new List<string>();
+        var hangingPaths = new List<string>();
+        for (var i = 0; i < 5; i++)
+        {
+            var id = $"a{i}";
+            indexEntries.Add($$"""{"id":"{{id}}","path":"advisories/{{id}}","contentHash":"h{{id}}"}""");
+            hangingPaths.Add($"{Feed}advisories/{id}/advisory.json");
+        }
+        routes[$"{Feed}index.json"] = "[" + string.Join(",", indexEntries) + "]";
+
+        var http = new FakeHttp(routes, hangingRoutes: hangingPaths);
+        var fetcher = new AdvisoryFetcher(http.Client());
+
+        var sw = Stopwatch.StartNew();
+        var fetched = await fetcher.FetchAsync(
+            Feed, new HashSet<string>(), TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(200), CancellationToken.None);
+        sw.Stop();
+
+        Assert.Empty(fetched);
+        Assert.True(sw.ElapsedMilliseconds < 5000,
+            $"Expected the overall poll deadline to bound total wall time; took {sw.ElapsedMilliseconds}ms.");
     }
 
     [Fact]
@@ -434,5 +469,221 @@ public class AdvisoryFetcherTests
         Assert.Empty(fetched);
         Assert.True(sw.ElapsedMilliseconds < 5000,
             $"Expected the caller's token to end the wait promptly; took {sw.ElapsedMilliseconds}ms.");
+    }
+
+    // ---- Task 8 review Finding 1 (Critical): failures must not permanently starve later entries ----
+
+    [Fact]
+    public async Task Failing_entries_do_not_permanently_starve_a_genuine_advisory_behind_them()
+    {
+        // 50 entries whose path is an absolute URL to a different host - containment-rejected,
+        // costing zero network requests, but each one WAS attempted - followed by one genuine,
+        // fetchable advisory. Before the fix, incrementing an "attempts" counter for each of these
+        // (before the containment check, before any download) burned all 50 cap slots on entries
+        // that could never succeed, so the genuine advisory was never reached on ANY poll - it
+        // fails again at the same index position every single time, since a rejected entry's
+        // content hash never reaches `known`. Reproduces on the FIRST poll now.
+        var routes = Routes(); // supplies the genuine "a1" advisory's routes
+        var indexEntries = new List<string>();
+        for (var i = 0; i < 50; i++)
+            indexEntries.Add($$"""{"id":"evil{{i}}","path":"https://evil.example/{{i}}","contentHash":"hevil{{i}}"}""");
+        indexEntries.Add("""{"id":"a1","path":"advisories/a1","contentHash":"h1"}""");
+        routes[$"{Feed}index.json"] = "[" + string.Join(",", indexEntries) + "]";
+
+        var http = new FakeHttp(routes);
+        var fetcher = new AdvisoryFetcher(http.Client());
+
+        var fetched = await fetcher.FetchAsync(Feed, new HashSet<string>(), CancellationToken.None);
+
+        var genuine = Assert.Single(fetched);
+        Assert.Equal("a1", genuine.Id);
+        Assert.Contains(http.Requested, r => r.Contains("advisories/a1/advisory.json"));
+    }
+
+    [Fact]
+    public async Task Advisories_whose_directory_404s_do_not_permanently_starve_a_genuine_advisory_behind_them()
+    {
+        // The same failure mode the review calls "benign feed rot": 50 entries that resolve fine
+        // (stay contained, so each costs one real request) but whose advisory.json is simply
+        // missing - no attacker involved at all, just stale directories that were removed.
+        var routes = Routes();
+        var indexEntries = new List<string>();
+        for (var i = 0; i < 50; i++)
+            indexEntries.Add($$"""{"id":"stale{{i}}","path":"advisories/stale{{i}}","contentHash":"hstale{{i}}"}""");
+        indexEntries.Add("""{"id":"a1","path":"advisories/a1","contentHash":"h1"}""");
+        routes[$"{Feed}index.json"] = "[" + string.Join(",", indexEntries) + "]";
+        // Deliberately no routes registered for advisories/staleN/advisory.json - each 404s.
+
+        var fetcher = new AdvisoryFetcher(new FakeHttp(routes).Client());
+
+        var fetched = await fetcher.FetchAsync(Feed, new HashSet<string>(), CancellationToken.None);
+
+        var genuine = Assert.Single(fetched);
+        Assert.Equal("a1", genuine.Id);
+    }
+
+    [Fact]
+    public async Task Hostile_index_with_many_failing_entries_is_bounded_by_the_request_ceiling()
+    {
+        // Enough 404-ing-but-contained entries (each costs exactly one request) to exceed
+        // MaxRequestsPerPoll (4096), followed by one genuine advisory placed after the ceiling.
+        // Proves the SEPARATE request ceiling actually bites, closing the DoS the fix for Finding 1
+        // would otherwise have reopened (uncapped failures cost nothing against the now-successes-
+        // only MaxAdvisoriesPerPoll). The genuine advisory is deliberately unreachable THIS poll -
+        // that is the ceiling working as designed, not a regression of Finding 1's fix, which only
+        // promises a genuine advisory is not starved by a realistic (tens of entries) amount of
+        // failures ahead of it.
+        var routes = Routes();
+        var indexEntries = new List<string>();
+        const int hostileCount = 4200; // > MaxRequestsPerPoll (4096); each entry costs exactly 1 request
+        for (var i = 0; i < hostileCount; i++)
+            indexEntries.Add($$"""{"id":"stale{{i}}","path":"advisories/stale{{i}}","contentHash":"hstale{{i}}"}""");
+        indexEntries.Add("""{"id":"a1","path":"advisories/a1","contentHash":"h1"}""");
+        routes[$"{Feed}index.json"] = "[" + string.Join(",", indexEntries) + "]";
+
+        var http = new FakeHttp(routes);
+        var fetcher = new AdvisoryFetcher(http.Client());
+
+        var fetched = await fetcher.FetchAsync(Feed, new HashSet<string>(), CancellationToken.None);
+
+        Assert.Empty(fetched); // "a1" sits past the request ceiling this poll
+        // +1 for the index.json fetch itself, which also consumes one unit of the same budget.
+        Assert.True(http.Requested.Count <= 4096 + 1,
+            $"Expected requests to be bounded by the request ceiling; issued {http.Requested.Count}.");
+        Assert.DoesNotContain(http.Requested, r => r.Contains("advisories/a1/"));
+    }
+
+    // ---- Task 8 review Finding 2 (Important, SSRF): a redirect must not bypass containment ----
+
+    [Fact]
+    public async Task Response_redirected_to_a_different_host_is_discarded()
+    {
+        var routes = Routes();
+        var redirectMap = new Dictionary<string, string>
+        {
+            [$"{Feed}advisories/a1/advisory.json"] = "https://evil.example/stolen-response"
+        };
+        var http = new FakeHttp(routes, redirectedFinalUri: redirectMap);
+        var fetcher = new AdvisoryFetcher(http.Client());
+
+        // FakeHttp returns HTTP 200 with a perfectly valid body for this path - only
+        // RequestMessage.RequestUri (what a real redirect-following handler would leave behind)
+        // says it actually came from evil.example. Must be discarded regardless.
+        var fetched = await fetcher.FetchAsync(Feed, new HashSet<string>(), CancellationToken.None);
+
+        Assert.Empty(fetched);
+    }
+
+    [Fact]
+    public async Task Response_redirected_to_a_different_path_on_the_same_host_is_still_accepted()
+    {
+        // Proves the Finding 2 fix is not over-broad: a same-host redirect (e.g. a path or
+        // trailing-slash normalisation a real GitHub Pages deployment might do) is not an SSRF
+        // concern - it is still the same trusted origin - so it must not be rejected.
+        var routes = Routes();
+        routes[$"{Feed}advisories/a1/advisory-v2.json"] = """{"id":"a1"}""";
+        var redirectMap = new Dictionary<string, string>
+        {
+            [$"{Feed}advisories/a1/advisory.json"] = $"{Feed}advisories/a1/advisory-v2.json"
+        };
+        var http = new FakeHttp(routes, redirectedFinalUri: redirectMap);
+        var fetcher = new AdvisoryFetcher(http.Client());
+
+        var fetched = await fetcher.FetchAsync(Feed, new HashSet<string>(), CancellationToken.None);
+
+        Assert.Single(fetched);
+    }
+
+    // ---- Task 8 review Minor 4: sibling-prefix defence must not depend on the CALLER's feed URL ----
+
+    [Theory]
+    [InlineData("https://feed.example/repo/")]
+    [InlineData("https://feed.example/repo")]
+    public async Task Sibling_directory_prefix_trick_is_rejected_regardless_of_trailing_slash_on_the_feed_url(string feedUrl)
+    {
+        // Guards the specific trap a naive string-prefix check falls into:
+        // "/repo-evil".StartsWith("/repo") is true. The defence is a path-SEGMENT prefix (baseUri's
+        // own path always ends in '/' by construction - see WithTrailingSlash), which is immune to
+        // this regardless of whether the CALLER's feed URL itself included a trailing slash.
+        var routes = new Dictionary<string, string>
+        {
+            ["https://feed.example/repo/index.json"] = """
+            [{"id":"a1","path":"../repo-evil/x","contentHash":"h1"}]
+            """
+        };
+        var http = new FakeHttp(routes);
+        var fetcher = new AdvisoryFetcher(http.Client());
+
+        var fetched = await fetcher.FetchAsync(feedUrl, new HashSet<string>(), CancellationToken.None);
+
+        Assert.Empty(fetched);
+        Assert.DoesNotContain(http.Requested, r => r.Contains("advisory.json"));
+    }
+
+    // ---- Task 8 review Minor 5: percent-encoded separators must be rejected too ----
+
+    [Theory]
+    [InlineData("..%2f..%2fetc%2fpasswd")]
+    [InlineData("..%2F..%2Fetc%2Fpasswd")]
+    [InlineData("%2e%2e%2f%2e%2e%2fetc%2fpasswd")]
+    [InlineData("..%5c..%5cetc%5cpasswd")]
+    public async Task Advisory_path_containing_a_percent_encoded_separator_is_rejected(string maliciousPath)
+    {
+        var routes = Routes();
+        routes[$"{Feed}index.json"] = $$"""[{"id":"a1","path":"{{maliciousPath}}","contentHash":"h1"}]""";
+        var fetcher = new AdvisoryFetcher(new FakeHttp(routes).Client());
+
+        var fetched = await fetcher.FetchAsync(Feed, new HashSet<string>(), CancellationToken.None);
+
+        Assert.Empty(fetched);
+    }
+
+    // ---- Task 8 review Minor 6: a query or fragment must not silently retarget the fetch ----
+
+    [Theory]
+    [InlineData("a1?x=1")]
+    [InlineData("a1#fragment")]
+    public async Task Advisory_path_containing_a_query_or_fragment_is_rejected(string maliciousPath)
+    {
+        var routes = Routes();
+        routes[$"{Feed}index.json"] = $$"""[{"id":"a1","path":"{{maliciousPath}}","contentHash":"h1"}]""";
+        var http = new FakeHttp(routes);
+        var fetcher = new AdvisoryFetcher(http.Client());
+
+        var fetched = await fetcher.FetchAsync(Feed, new HashSet<string>(), CancellationToken.None);
+
+        Assert.Empty(fetched);
+        // Specifically proves it is rejected outright, not silently retargeted to whatever sits at
+        // the feed's own base-level advisory.json.
+        Assert.DoesNotContain(http.Requested, r => r.Contains("advisory.json"));
+    }
+
+    // ---- Task 8 review Minor 7: known-content-hash comparison must be case-insensitive ----
+
+    [Fact]
+    public async Task Known_content_hash_comparison_is_case_insensitive()
+    {
+        var http = new FakeHttp(Routes()); // "a1" has contentHash "h1" (lowercase)
+        var fetcher = new AdvisoryFetcher(http.Client());
+
+        var fetched = await fetcher.FetchAsync(Feed, new HashSet<string> { "H1" }, CancellationToken.None);
+
+        Assert.Empty(fetched); // must be recognised as already-known despite the case difference
+    }
+
+    // ---- Task 8 review Minor 8: the honest Content-Length fast path must also be exercised ----
+
+    [Fact]
+    public async Task Oversized_advisory_body_with_an_honest_content_length_is_rejected_via_the_fast_path()
+    {
+        var routes = Routes();
+        var oversizedPath = $"{Feed}advisories/a1/advisory.json";
+        routes[oversizedPath] = new string('x', 300 * 1024); // over the 256 KB cap
+        var http = new FakeHttp(routes, honestContentLengthRoutes: [oversizedPath]);
+        var fetcher = new AdvisoryFetcher(http.Client());
+
+        var fetched = await fetcher.FetchAsync(Feed, new HashSet<string>(), CancellationToken.None);
+
+        Assert.Empty(fetched);
     }
 }
