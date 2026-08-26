@@ -141,7 +141,11 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
     // The two rejected characters below are written as \u escapes, not literal characters, on
     // purpose: U+2028/U+2029 are visually indistinguishable from a plain space in most editors and a
     // literal copy of either is easy to silently corrupt into something else entirely.
-    private static string Sanitize(string? value, int maxLength = 200)
+    // internal (not private): SecSwitchNotification.Handler.FillViewModel needs the exact same
+    // truncate-and-strip-control-characters treatment for advisory-derived text reaching the admin
+    // notification list, and duplicating it risks the two copies drifting apart. Still not public -
+    // this stays an implementation detail shared within the assembly, not part of the plugin's API.
+    internal static string Sanitize(string? value, int maxLength = 200)
     {
         if (string.IsNullOrEmpty(value))
             return "";
