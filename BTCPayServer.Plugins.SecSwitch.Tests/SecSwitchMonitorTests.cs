@@ -120,12 +120,24 @@ public class SecSwitchMonitorTests
         // Fix-round note (Task 12 review, Finding I3): SuppressAsync no longer fabricates an entry
         // for an id it has never seen, so the advisory is recorded first, matching the new "must
         // already exist" contract (see LedgerStoreTests.Suppressing_an_unknown_advisory_id_is_rejected).
+        //
+        // Fix-round note (Finding T1 - the load-bearing correction): seeded with the NON-terminal
+        // Unverified, not Acted. Acted is itself terminal, so recording it and then suppressing
+        // made this fixture byte-identical (in effect) to Already_handled_advisory_is_not_acted_on_again
+        // above - Assert.Empty(sink.Calls) would have passed even if SuppressAsync were gutted to a
+        // no-op, because IsActedAsync was already true from the Acted seed alone. Seeded
+        // non-terminal, IsActedAsync is provably false before SuppressAsync runs, so this test now
+        // only passes because suppression itself latches it: a no-op SuppressAsync would leave
+        // quorum met and PreferUpdateOverDisable applicable, and the monitor would genuinely queue
+        // "update:Plug:2.0.0" and stop - failing Assert.Empty(sink.Calls) below. This is the
+        // guarantee this test exists to protect: an admin's suppression of a false positive must
+        // actually stop the kill switch from acting, not merely look like it does.
         var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
         var payload = Payload;
         var settings = Settings(a, b);
         var (monitor, sink, ledger) = Make(settings);
         await ledger.RecordAsync(new LedgerEntry
-        { AdvisoryId = "a1", Status = LedgerStatus.Acted, RecordedAt = DateTimeOffset.UtcNow });
+        { AdvisoryId = "a1", Status = LedgerStatus.Unverified, RecordedAt = DateTimeOffset.UtcNow });
         Assert.True(await ledger.SuppressAsync("a1"));
 
         await monitor.ProcessAsync(
