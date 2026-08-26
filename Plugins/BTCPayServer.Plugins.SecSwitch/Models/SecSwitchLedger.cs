@@ -39,7 +39,21 @@ public static class LedgerStatus
     /// advisory.json could ever change this verdict, so it is safe (and necessary - see
     /// MaxAdvisoriesPerPoll's own starvation-avoidance reasoning) to cache. Re-evaluating this
     /// advisory later because LOCAL state changed (e.g. the operator installs the affected plugin)
-    /// is a known, explicitly out-of-scope gap for a later task - see task-11-report.md.</summary>
+    /// is a known, explicitly out-of-scope gap for a later task - see task-11-report.md.
+    ///
+    /// A second, DIFFERENT gap worth recording alongside that one (Task 11 review, Doc 2):
+    /// AdvisoryFetcher's own dedup is keyed by ContentHash, while
+    /// <see cref="Services.LedgerStore.IsActedAsync"/> - which this status feeds into being
+    /// terminal for - is keyed by advisory id. If an advisory were ever amended in place under a
+    /// STABLE id (same id, new ContentHash), it would be fetched again (the new hash is unknown to
+    /// the fetcher's dedup) but then turned away by the id-keyed latch on sight of a prior
+    /// NotApplicable entry, even though the amended content might resolve differently. This is
+    /// safe ONLY because the feed specification forbids amend-in-place: advisory.json must never
+    /// be edited after publication, since doing so would invalidate every signature over it - a
+    /// genuine correction is published as a NEW advisory (via <c>supersedes</c>) or a
+    /// <c>revoked</c> replacement, each under its own id and its own quorum, so an advisory
+    /// "amended" under a stable id would fail quorum on its own, independent of this latch. If
+    /// that feed-spec invariant were ever relaxed, this identity mismatch becomes live.</summary>
     public const string NotApplicable = "NotApplicable";
 
     /// <summary>Quorum met; PolicyResolver resolved SecSwitchAction.None specifically because the
