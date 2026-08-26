@@ -266,6 +266,48 @@ public class TrustRootBootstrapperTests
         Assert.Equal([newKey.Fingerprint], newlyOffered);
     }
 
+    // --- PR #151 review (CodeRabbit), Finding F2 (the most important of the batch): a fingerprint
+    // was previously added to newlyOffered BEFORE the TryLoadTrustedKey admission check ran, so a
+    // bundled key that derives a fingerprint but FAILS admission (e.g. one over AdvisoryVerifier's
+    // own MaxTrustedKeyBlobLength byte cap) got latched into the caller's persisted
+    // OfferedTrustRootFingerprints on its very first run - permanently, since "already offered" is
+    // never reconsidered. A later plugin release shipping the SAME key in a loadable form could then
+    // never install it: the trust store would stay empty and quorum could never be met, with the
+    // plugin inert save for a warning log. Fixed by only recording a fingerprint as offered once it
+    // is admitted or found already trusted - never on a failed admission attempt.
+
+    [Fact]
+    public void A_bundled_key_that_fails_admission_is_not_latched_and_is_added_once_it_becomes_loadable()
+    {
+        // Pads a genuine key's armored blob past AdvisoryVerifier's own 256 KiB
+        // MaxTrustedKeyBlobLength cap - the same oversized-blob construction
+        // TrustStoreTests.Rotation_refuses_to_add_a_key_that_AdvisoryVerifier_would_later_refuse_to_load
+        // uses for the identical admission failure. FingerprintOf has no such cap (armor decoding
+        // stops at the END marker, so the trailing filler is inert to parsing but still counts
+        // toward TryLoadTrustedKey's raw byte-length check), so the fingerprint derives cleanly even
+        // though the key can never actually be loaded as trusted.
+        var bundled = PgpTestKeys.Generate("founder@x");
+        var bloatedArmoredKey = bundled.ArmoredPublicKey + new string('X', 256 * 1024);
+
+        var (firstRunUpdated, firstRunNewlyOffered) = TrustRootBootstrapper.Apply(
+            [], TrustRootJson(bloatedArmoredKey), NoneOffered, NullLogger.Instance);
+
+        Assert.Empty(firstRunUpdated); // not admitted
+        Assert.Empty(firstRunNewlyOffered); // and, critically, NOT latched as offered either
+
+        // Simulates the caller (SecSwitchPeriodicTask) persisting run 1's (empty) newlyOffered via
+        // LedgerStore.RecordTrustRootOfferedAsync, then a LATER run - e.g. a follow-up plugin
+        // release correcting the bundle - presenting the SAME fingerprint in a genuinely loadable
+        // form.
+        var (secondRunUpdated, secondRunNewlyOffered) = TrustRootBootstrapper.Apply(
+            firstRunUpdated, TrustRootJson(bundled.ArmoredPublicKey),
+            new HashSet<string>(firstRunNewlyOffered, StringComparer.OrdinalIgnoreCase), NullLogger.Instance);
+
+        var key = Assert.Single(secondRunUpdated);
+        Assert.Equal(bundled.Fingerprint, key.Fingerprint);
+        Assert.Equal([bundled.Fingerprint], secondRunNewlyOffered);
+    }
+
     // --- End-to-end: proves the real embedded Resources/trust-root.json (shipped in the plugin
     // assembly, see the csproj's <EmbeddedResource Include="Resources\**" />) is actually discoverable
     // and readable through ReadEmbeddedTrustRoot - a resource-naming mismatch (e.g. an incorrect

@@ -61,9 +61,11 @@ public static class TrustRootBootstrapper
     /// whose fingerprint is neither already present in <paramref name="current"/> NOR already in
     /// <paramref name="alreadyOffered"/> (matched case-insensitively throughout - the same convention
     /// every other trusted-key comparison in this plugin uses), alongside every fingerprint this call
-    /// newly considered - whether or not it ended up admitted - so the caller can persist them into
-    /// <see cref="SecSwitchLedger.OfferedTrustRootFingerprints"/> via
-    /// <see cref="LedgerStore.RecordTrustRootOfferedAsync"/> (Task 13 review, Finding I1 fix).
+    /// newly considered AND either admitted or found already trusted - so the caller can persist them
+    /// into <see cref="SecSwitchLedger.OfferedTrustRootFingerprints"/> via
+    /// <see cref="LedgerStore.RecordTrustRootOfferedAsync"/> (Task 13 review, Finding I1 fix). A
+    /// fingerprint this call considered but that FAILED admission is deliberately excluded from that
+    /// return value - see the next paragraph and PR #151 review, Finding F2.
     ///
     /// Never removes or replaces an existing entry - an admin-added key, and a key added by a PRIOR
     /// call to this method, are both left untouched. Critically, a fingerprint already in
@@ -71,8 +73,15 @@ public static class TrustRootBootstrapper
     /// currently present in <paramref name="current"/> - this is what makes a deliberate admin removal
     /// of a bundled key permanent: once a fingerprint has been offered once, it is never reconsidered
     /// again regardless of the trust store's current contents. A fingerprint that could not even be
-    /// derived (an unreadable bundled key) can never be added to the offered set either way, since
-    /// there is nothing to key it by - it is simply retried, harmlessly, on every future call.
+    /// derived (an unreadable bundled key), OR that derives fine but fails the
+    /// <see cref="AdvisoryVerifier.TryLoadTrustedKey"/> admission check (e.g. one over
+    /// AdvisoryVerifier's own byte-length cap), can never be added to the offered set either way,
+    /// since neither is ever actually admitted - both are simply retried, harmlessly, on every future
+    /// call, so a maintainer who fixes either problem in a later release is never permanently locked
+    /// out by this run's failure (PR #151 review, Finding F2 - previously only the "cannot derive a
+    /// fingerprint at all" case had this property; a key that derived fine but failed admission was
+    /// latched into <paramref name="alreadyOffered"/> forever via the caller's persisted offered set,
+    /// even though it was never actually usable).
     ///
     /// A null/empty/malformed <paramref name="trustRootJson"/>, or a single unreadable bundled key
     /// entry, is logged and skipped rather than thrown - see the class doc comment.
@@ -138,18 +147,29 @@ public static class TrustRootBootstrapper
                 continue; // Already offered in a PRIOR run, whatever the outcome was then - never
                           // reconsidered, so a deliberately-removed bundled key cannot reappear.
 
-            newlyOffered.Add(fingerprint); // Considered exactly once, from here on, regardless of
-                                            // whether it is actually admitted below.
-
             if (existing.Contains(fingerprint))
-                continue; // Already trusted (admin-added, or added earlier in THIS same call for a
-                          // duplicate entry within the same resource) - idempotent no-op.
+            {
+                // Already trusted (admin-added, or added earlier in THIS same call for a duplicate
+                // entry within the same resource) - idempotent no-op, but still recorded as offered:
+                // it WAS genuinely considered and found trusted this call, so a later admin removal
+                // of it must still be respected (see the "already offered" skip above).
+                newlyOffered.Add(fingerprint);
+                continue;
+            }
 
             // Beyond FingerprintOf's own guard: a blob it can parse is not necessarily one
             // AdvisoryVerifier.LoadTrustedKeys would ever actually load (e.g. one over its own
             // byte-length cap) - admitting it here anyway would store a fingerprint that can never
             // again contribute to quorum. TryLoadTrustedKey is the exact same admission check
             // LoadTrustedKeys itself applies, shared so the two can never drift apart.
+            //
+            // PR #151 review (CodeRabbit), Finding F2: newlyOffered must NOT be touched here on a
+            // failed admission - see the Apply doc comment above. Recording it as offered before
+            // this check (as the code previously did) would have the caller persist it into
+            // SecSwitchLedger.OfferedTrustRootFingerprints, latching it permanently: a later plugin
+            // release shipping the SAME key in a loadable form could then never install it, the
+            // trust store would stay empty, quorum could never be met, and the plugin would stay
+            // inert with nothing but this warning to show for it.
             if (!AdvisoryVerifier.TryLoadTrustedKey(fingerprint, armored, out _))
             {
                 logger.LogWarning(
@@ -160,6 +180,8 @@ public static class TrustRootBootstrapper
 
             working.Add(new TrustedKey { Fingerprint = fingerprint, ArmoredPublicKey = armored, Identity = fingerprint });
             existing.Add(fingerprint);
+            newlyOffered.Add(fingerprint); // Considered AND admitted - recorded as offered now,
+                                            // never before admission succeeds (see above).
         }
 
         // A bundle listing the same fingerprint more than once (e.g. an accidental duplicate entry)
@@ -194,7 +216,18 @@ public static class TrustRootBootstrapper
 
             using var stream = assembly.GetManifestResourceStream(resourceName);
             if (stream is null)
+            {
+                // PR #151 review (CodeRabbit), Finding F3: this branch used to return null silently
+                // while every other failure path in this method emits a warning - and
+                // SecSwitchPeriodicTask.BootstrapTrustStoreOnceAsync's own comment already assumes a
+                // null return here always carries a log. Without this, an operator investigating
+                // "quorum never met" gets no diagnostic at all, and the caller just retries every
+                // tick with no signal.
+                logger.LogWarning(
+                    "SecSwitch found an embedded '{ResourceFileName}' resource name but could not open its stream; no bundled trusted keys were added.",
+                    ResourceFileName);
                 return null;
+            }
 
             using var buffer = new MemoryStream();
             stream.CopyTo(buffer);

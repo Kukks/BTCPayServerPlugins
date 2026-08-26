@@ -258,6 +258,32 @@ public class SecSwitchControllerTests
         Assert.Null(model.MatchedNewlineVariant);
     }
 
+    [Fact]
+    public async Task Verify_does_not_throw_when_a_persisted_trusted_key_is_null()
+    {
+        // PR #151 review (CodeRabbit), Finding F1: a persisted settings row whose trustedKeys array
+        // contains a JSON `null` deserializes to a List<TrustedKey> with a null element. The
+        // `trusted` dictionary built earlier in Verify already guards against this (see its own
+        // `key is null` check), but TrustedFingerprints was projected straight off
+        // settings.TrustedKeys with no such guard, so `k.Fingerprint` NREd on the null element - a
+        // 500 from the one page whose purpose is to inspect input safely even when the settings row
+        // itself is corrupt.
+        var a = PgpTestKeys.Generate("a@x");
+        var repo = new FakeSettingsRepository();
+        await repo.UpdateSetting(new SecSwitchSettings { QuorumThreshold = 2, TrustedKeys = [Key(a), null!] });
+        var controller = MakeController(repo, new LedgerStore(repo));
+
+        var result = await controller.Verify(new SecSwitchController.VerifyViewModel
+        {
+            AdvisoryJson = "{\"id\":\"a1\"}",
+            ArmoredSignatures = ""
+        });
+
+        var view = Assert.IsType<ViewResult>(result); // must not throw
+        var model = Assert.IsType<SecSwitchController.VerifyViewModel>(view.Model);
+        Assert.Contains(a.Fingerprint, model.TrustedFingerprints); // the non-null key still comes through
+    }
+
     // --- Finding I4: AddTrustedKey must never accept a typed fingerprint, must fail closed (not
     // 500) on malformed input, and must reject a key AdvisoryVerifier could never actually load. ---
 
@@ -336,6 +362,30 @@ public class SecSwitchControllerTests
         Assert.True(controller.TempData.ContainsKey(WellKnownTempData.ErrorMessage));
         var settings = await repo.GetSettingAsync<SecSwitchSettings>();
         Assert.Empty(settings!.TrustedKeys);
+    }
+
+    [Fact]
+    public async Task AddTrustedKey_RemoveTrustedKeyConfirm_and_RemoveTrustedKey_do_not_throw_when_a_persisted_trusted_key_is_null()
+    {
+        // Bonus, adjacent to Finding F1 (not itself one of the CodeRabbit PR #151 findings): the
+        // same corrupted-settings-row null TrustedKeys element F1 guards against in Verify would
+        // otherwise NRE inside the .Any/.Count/.RemoveAll fingerprint-equality predicates these
+        // three actions use.
+        var a = PgpTestKeys.Generate("a@x");
+        var b = PgpTestKeys.Generate("b@x");
+        var repo = new FakeSettingsRepository();
+        await repo.UpdateSetting(new SecSwitchSettings { TrustedKeys = [Key(a), null!] });
+
+        Assert.IsType<RedirectToActionResult>(
+            await MakeController(repo, new LedgerStore(repo)).AddTrustedKey(b.ArmoredPublicKey));
+        Assert.IsType<ViewResult>(
+            await MakeController(repo, new LedgerStore(repo)).RemoveTrustedKeyConfirm(a.Fingerprint));
+        Assert.IsType<RedirectToActionResult>(
+            await MakeController(repo, new LedgerStore(repo)).RemoveTrustedKey(a.Fingerprint));
+
+        var settings = await repo.GetSettingAsync<SecSwitchSettings>();
+        Assert.DoesNotContain(settings!.TrustedKeys, k => k is not null && k.Fingerprint == a.Fingerprint);
+        Assert.Contains(settings.TrustedKeys, k => k is not null && k.Fingerprint == b.Fingerprint);
     }
 
     // --- Finding I4: Remove must confirm first, and must actually remove by fingerprint. ---

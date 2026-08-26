@@ -9,9 +9,11 @@ Signed security advisories consumed by the BTCPay Server SecSwitch plugin.
    `&&` (`">=1.0.0 && <1.2.3"`). Space-separated ranges do not parse.
    `severity` must be exactly one of `low`, `medium`, `high`, `critical` (case-insensitive) —
    any other value fails to parse and the whole advisory is rejected.
-2. Create the advisory's `signatures/` directory (`mkdir -p signatures`), then have each signer
-   produce a detached, armored signature over the **exact bytes**:
-   `gpg --detach-sign --armor --output signatures/<FINGERPRINT>.asc advisory.json`
+2. Create the advisory's `signatures/` directory, then have each signer produce a detached,
+   armored signature over the **exact bytes** - both paths below are relative to the repository
+   root (where step 1's path already anchors you), not to the advisory's own directory:
+   `mkdir -p advisories/<YYYY-MM-DD-slug>/signatures`
+   `gpg --detach-sign --armor --output advisories/<YYYY-MM-DD-slug>/signatures/<FINGERPRINT>.asc advisories/<YYYY-MM-DD-slug>/advisory.json`
 3. Run `./build-index.sh` and commit the regenerated index files.
 4. Open a PR. Merging to `main` publishes to GitHub Pages.
 
