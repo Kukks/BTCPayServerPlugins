@@ -8,6 +8,7 @@ using BTCPayServer.Configuration;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Plugins;
 using BTCPayServer.Plugins.SecSwitch.Models;
+using BTCPayServer.SSH;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -77,7 +78,7 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
                     if (!await sink.QueueUpdateAsync(advisory.Identifier, advisory.FixedVersion))
                         return $"Failed to queue update of {Sanitize(advisory.Identifier)}: no installed plugin matches that identifier unambiguously.";
                     sink.StopApplication();
-                    return $"Queued update of {Sanitize(advisory.Identifier)} to {advisory.FixedVersion}; stopping for restart.";
+                    return $"Queued update of {Sanitize(advisory.Identifier)} to {Sanitize(advisory.FixedVersion)}; stopping for restart.";
 
                 case SecSwitchAction.UpdateCore:
                     // btcpay-update.sh brings the stack down and up itself; do not also stop here,
@@ -316,7 +317,22 @@ public sealed class BtcPayActionSink(
         // once, after the exec task has actually finished with the connection rather than
         // immediately when this method returns.
         const string command = ". /etc/profile.d/btcpay-env.sh && nohup btcpay-update.sh > /dev/null 2>&1 & disown";
-        var execTask = client.RunBash(command);
+        Task<SSHCommandResult> execTask;
+        try
+        {
+            execTask = client.RunBash(command);
+        }
+        catch
+        {
+            // RunBash is not itself async - it can throw synchronously, before any Task exists to
+            // attach the disposal continuation below to. The reachable case is
+            // SshClient.CreateCommand -> EnsureSessionIsOpen throwing SshConnectionException if the
+            // session is not open. The exception itself is still contained (it propagates to
+            // ActionExecutor's catch like any other failure); without this, only client's socket,
+            // Session, and listener thread would leak.
+            client.Dispose();
+            throw;
+        }
         _ = execTask.ContinueWith(t =>
         {
             if (t.IsFaulted)
