@@ -32,6 +32,7 @@ public class AdvisoryFetcherTests
         Assert.Equal("h1", one.ContentHash);
         Assert.Equal(2, one.ArmoredSignatures.Count);
         Assert.Contains("SIG-ONE", one.ArmoredSignatures);
+        Assert.True(one.SignaturesComplete); // every listed signature was fetched - pinned, not incidental.
     }
 
     [Fact]
@@ -65,19 +66,21 @@ public class AdvisoryFetcherTests
         Assert.Empty(fetched);
     }
 
-    // ---- FetchedAdvisory shape (Task 8 deviation: ContentHash added) ----
+    // ---- FetchedAdvisory shape (Task 8 deviation: ContentHash added; round 3: SignaturesComplete added) ----
 
     [Fact]
-    public void FetchedAdvisory_constructor_parameter_order_is_Id_then_ContentHash_then_PayloadBytes_then_ArmoredSignatures()
+    public void FetchedAdvisory_constructor_parameter_order_is_Id_ContentHash_PayloadBytes_ArmoredSignatures_SignaturesComplete()
     {
         // The compiler cannot catch an Id/ContentHash swap (both are `string`), so this pins the
-        // exact positional order the deviation ruling mandated rather than trusting call sites.
-        var advisory = new FetchedAdvisory("id-1", "hash-1", [0x01, 0x02], ["sig-a", "sig-b"]);
+        // exact positional order the deviation ruling (and, for the trailing bool, round 3's
+        // append-only requirement) mandated rather than trusting call sites.
+        var advisory = new FetchedAdvisory("id-1", "hash-1", [0x01, 0x02], ["sig-a", "sig-b"], false);
 
         Assert.Equal("id-1", advisory.Id);
         Assert.Equal("hash-1", advisory.ContentHash);
         Assert.Equal(new byte[] { 0x01, 0x02 }, advisory.PayloadBytes);
         Assert.Equal(["sig-a", "sig-b"], advisory.ArmoredSignatures);
+        Assert.False(advisory.SignaturesComplete);
     }
 
     // ---- Null/malformed input to FetchAsync itself must never throw ----
@@ -193,6 +196,21 @@ public class AdvisoryFetcherTests
 
         var one = Assert.Single(fetched); // the advisory itself still comes through
         Assert.Empty(one.ArmoredSignatures); // but with none of its signatures
+        Assert.False(one.SignaturesComplete); // zero because we could not look, not because there are none
+    }
+
+    [Fact]
+    public async Task Missing_signature_index_leaves_signatures_incomplete()
+    {
+        var routes = Routes();
+        routes.Remove($"{Feed}advisories/a1/signatures/index.json");
+        var fetcher = new AdvisoryFetcher(new FakeHttp(routes).Client());
+
+        var fetched = await fetcher.FetchAsync(Feed, new HashSet<string>(), CancellationToken.None);
+
+        var one = Assert.Single(fetched); // the advisory itself still comes through
+        Assert.Empty(one.ArmoredSignatures);
+        Assert.False(one.SignaturesComplete);
     }
 
     [Fact]
@@ -207,6 +225,7 @@ public class AdvisoryFetcherTests
         var one = Assert.Single(fetched);
         var sig = Assert.Single(one.ArmoredSignatures); // sig-one dropped, sig-two survives
         Assert.Equal("SIG-TWO", sig);
+        Assert.False(one.SignaturesComplete); // one of the two listed signatures failed to fetch
     }
 
     // ---- Bounded downloads: count caps ----
@@ -258,6 +277,7 @@ public class AdvisoryFetcherTests
 
         var one = Assert.Single(fetched);
         Assert.Equal(64, one.ArmoredSignatures.Count);
+        Assert.False(one.SignaturesComplete); // the 65th listed signature was never even attempted
     }
 
     // ---- Path traversal: entry.Path and signature file names are attacker-influenced ----
@@ -372,6 +392,11 @@ public class AdvisoryFetcherTests
         var sig = Assert.Single(one.ArmoredSignatures);
         Assert.Equal("SIG-TWO", sig);
         Assert.DoesNotContain(http.Requested, r => r.Contains("evil.asc"));
+        // Extension of round 3's SignaturesComplete contract to a case the coordinator's five
+        // enumerated triggers didn't name explicitly but the same rationale covers: the index
+        // LISTED this name, and no signature was ever fetched for it - "listed but unusable" is
+        // just as much "not everything listed" as a fetch failure or a truncating cap would be.
+        Assert.False(one.SignaturesComplete);
     }
 
     [Fact]
@@ -390,6 +415,7 @@ public class AdvisoryFetcherTests
         var sig = Assert.Single(one.ArmoredSignatures);
         Assert.Equal("SIG-TWO", sig);
         Assert.DoesNotContain(http.Requested, r => r.Contains("evil.example"));
+        Assert.False(one.SignaturesComplete); // same reasoning as the traversal case above
     }
 
     // ---- Per-request timeout: a hanging response must not stall the poll ----
@@ -719,5 +745,60 @@ public class AdvisoryFetcherTests
         Assert.Empty(fetched);
         // Refused before even the index fetch - not merely "ends up empty for some other reason".
         Assert.Empty(http.Requested);
+    }
+
+    // ---- Task 8 review round 3: SignaturesComplete must reflect truncation, not just emptiness ----
+
+    [Fact]
+    public async Task Overall_deadline_exhaustion_mid_signature_loop_leaves_signatures_incomplete()
+    {
+        // advisory.json and signatures/index.json both succeed fast (in-memory, no delay), so the
+        // advisory itself is fetched before the deadline fires; only sig-one.asc hangs. The much
+        // shorter overall deadline (200ms) must cut the signature loop off mid-way - the per-request
+        // timeout is left at the generous 10s production default so it is not what fires here.
+        var routes = Routes();
+        var hangingPath = $"{Feed}advisories/a1/signatures/sig-one.asc";
+        var http = new FakeHttp(routes, hangingRoutes: [hangingPath]);
+        var fetcher = new AdvisoryFetcher(http.Client());
+
+        var fetched = await fetcher.FetchAsync(
+            Feed, new HashSet<string>(), TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(200), CancellationToken.None);
+
+        var one = Assert.Single(fetched); // advisory.json already succeeded before the deadline fired
+        Assert.False(one.SignaturesComplete);
+    }
+
+    [Fact]
+    public async Task Request_budget_exhaustion_mid_signature_loop_leaves_signatures_incomplete()
+    {
+        // 4092 filler entries (each costs exactly one request via a 404 on advisory.json) placed
+        // before the target advisory "a1", chosen so the poll-wide request budget (4096 - see
+        // MaxRequestsPerPoll, Task 8 review Finding 1) is exhausted EXACTLY after "a1"'s
+        // advisory.json + signatures/index.json + first signature file (sig-one.asc) succeed:
+        // 1 (index.json) + 4092 (filler) + 1 (advisory.json) + 1 (signatures/index.json) +
+        // 1 (sig-one.asc) = 4096. The second listed signature (sig-two.asc) is then denied by that
+        // same budget - proving exhaustion marks the advisory it interrupts as incomplete
+        // regardless of WHERE in the poll (an earlier advisory's fan-out, or this one's own) the
+        // budget actually ran out.
+        var routes = Routes(); // supplies a1's advisory.json, signatures/index.json (2 names), and both signature files
+        var indexEntries = new List<string>();
+        const int fillerCount = 4092;
+        for (var i = 0; i < fillerCount; i++)
+            indexEntries.Add($$"""{"id":"filler{{i}}","path":"advisories/filler{{i}}","contentHash":"hfiller{{i}}"}""");
+        indexEntries.Add("""{"id":"a1","path":"advisories/a1","contentHash":"h1"}""");
+        routes[$"{Feed}index.json"] = "[" + string.Join(",", indexEntries) + "]";
+        // No routes registered for advisories/fillerN/advisory.json - each 404s, costing 1 request.
+
+        var http = new FakeHttp(routes);
+        var fetcher = new AdvisoryFetcher(http.Client());
+
+        var fetched = await fetcher.FetchAsync(Feed, new HashSet<string>(), CancellationToken.None);
+
+        var one = Assert.Single(fetched);
+        Assert.Equal("a1", one.Id);
+        var sig = Assert.Single(one.ArmoredSignatures);
+        Assert.Equal("SIG-ONE", sig); // sig-two.asc was never even attempted - budget exhausted first
+        Assert.False(one.SignaturesComplete);
+        Assert.Equal(4096, http.Requested.Count);
     }
 }

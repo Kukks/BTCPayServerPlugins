@@ -27,7 +27,29 @@ namespace BTCPayServer.Plugins.SecSwitch.Services;
 /// doing so would be a trust decision (asserting the bytes are what the index claims), which is
 /// exactly what this class must never do; see the class doc comment below.
 /// </summary>
-public sealed record FetchedAdvisory(string Id, string ContentHash, byte[] PayloadBytes, IReadOnlyList<string> ArmoredSignatures);
+/// <param name="SignaturesComplete">
+/// Task 8 review round 3: true only if EVERY signature file this advisory's signatures/index.json
+/// listed (up to <see cref="AdvisoryFetcher"/>'s own per-advisory cap) was itself successfully
+/// fetched during this poll. False if: the signature index itself could not be fetched or parsed
+/// at all; the request budget or the overall poll deadline was exhausted partway through gathering
+/// signatures; the per-advisory signature cap was hit before every listed name was reached; a
+/// listed name was blank or failed the path-containment check (listed, but never resolvable to
+/// anything to fetch); or any individual signature file failed to fetch. Zero signatures because
+/// the index could not even be read is <c>false</c> here, deliberately NOT <c>true</c> - "zero
+/// because we could not look" is not the same claim as "zero because there are none".
+///
+/// This says NOTHING about whether <see cref="ArmoredSignatures"/> are cryptographically valid or
+/// sufficient for quorum - only whether <see cref="AdvisoryFetcher"/> believes it retrieved every
+/// signature the feed listed. Verification is <see cref="AdvisoryVerifier"/>'s job, entirely
+/// separate from and downstream of this flag; this class performs none of it (see the class doc
+/// comment). A caller deciding whether to persist this advisory's <see cref="ContentHash"/> as
+/// "already seen" should treat <c>false</c> as "do not persist yet, so it is retried next poll" -
+/// persisting it anyway risks permanently caching a truncated signature set: an advisory that can
+/// never reach quorum and is never retried again, because its content hash already looks handled.
+/// </param>
+public sealed record FetchedAdvisory(
+    string Id, string ContentHash, byte[] PayloadBytes,
+    IReadOnlyList<string> ArmoredSignatures, bool SignaturesComplete);
 
 /// <summary>
 /// Downloads new advisories and their detached signatures from a GitHub-Pages-hosted feed. This is
@@ -295,8 +317,8 @@ public sealed class AdvisoryFetcher(HttpClient http)
                     if (payload is null)
                         continue;
 
-                    var signatures = await GetSignaturesAsync(dirUri, perRequestTimeout, baseUri, budget, pollCt);
-                    results.Add(new FetchedAdvisory(entry.Id, entry.ContentHash, payload, signatures));
+                    var (signatures, signaturesComplete) = await GetSignaturesAsync(dirUri, perRequestTimeout, baseUri, budget, pollCt);
+                    results.Add(new FetchedAdvisory(entry.Id, entry.ContentHash, payload, signatures, signaturesComplete));
                 }
                 catch (Exception)
                 {
@@ -313,13 +335,26 @@ public sealed class AdvisoryFetcher(HttpClient http)
         return results;
     }
 
-    async Task<IReadOnlyList<string>> GetSignaturesAsync(Uri dirUri, TimeSpan perRequestTimeout, Uri baseUri, RequestBudget budget, CancellationToken ct)
+    /// <summary>
+    /// Returns the signatures successfully fetched for one advisory, AND whether that set is known
+    /// to be complete - see <see cref="FetchedAdvisory.SignaturesComplete"/>'s doc comment for the
+    /// full contract this return value must satisfy (Task 8 review round 3). <c>Complete</c> starts
+    /// true and is set false the instant any of: the signature index fails to fetch or parse (the
+    /// early returns below); the loop stops before reaching every listed name (cancellation, the
+    /// per-advisory cap, or the request budget - Task 8 review, Finding 1's `budget.Exhausted` gate
+    /// applies here too, so a poll-wide exhaustion truncates THIS advisory's signatures exactly the
+    /// same way); a listed name is blank or fails containment; or an individual fetch fails. It is
+    /// never set back to true once false - one bad name or one failed fetch is enough to make the
+    /// whole set suspect, even if every other listed name succeeded.
+    /// </summary>
+    async Task<(IReadOnlyList<string> Signatures, bool Complete)> GetSignaturesAsync(
+        Uri dirUri, TimeSpan perRequestTimeout, Uri baseUri, RequestBudget budget, CancellationToken ct)
     {
         var signatures = new List<string>();
 
         var listBytes = await GetBytesAsync(new Uri(dirUri, "signatures/index.json"), MaxSignatureIndexBytes, perRequestTimeout, baseUri, budget, ct);
         if (listBytes is null)
-            return signatures;
+            return (signatures, false); // Could not even see what should be there - never "complete" by default.
 
         string[] names;
         try
@@ -330,25 +365,34 @@ public sealed class AdvisoryFetcher(HttpClient http)
         {
             // Broader than JsonException deliberately - "never throw" has no carve-out for an
             // unusual failure mode surfacing as a different exception type.
-            return signatures;
+            return (signatures, false);
         }
 
         var sigDirUri = new Uri(dirUri, "signatures/");
         var processed = 0;
+        var complete = true;
         foreach (var name in names)
         {
             if (ct.IsCancellationRequested || processed >= MaxSignatureFilesPerAdvisory || budget.Exhausted)
+            {
+                complete = false; // Stopped before reaching every listed name.
                 break;
+            }
 
             if (string.IsNullOrWhiteSpace(name) || !TryResolveUnderBase(sigDirUri, name, out var fileUri))
+            {
+                complete = false; // Listed, but never resolvable to anything to fetch.
                 continue; // Blank, or attempted to escape this advisory's own signatures/ dir.
+            }
 
             processed++;
             var bytes = await GetBytesAsync(fileUri, MaxSignatureBytes, perRequestTimeout, baseUri, budget, ct);
             if (bytes is not null)
                 signatures.Add(Encoding.UTF8.GetString(bytes));
+            else
+                complete = false; // Listed, resolved, but the fetch itself failed.
         }
-        return signatures;
+        return (signatures, complete);
     }
 
     /// <summary>
