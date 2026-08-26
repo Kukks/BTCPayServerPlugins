@@ -86,10 +86,17 @@ public static class LedgerStatus
     /// that feed-spec invariant were ever relaxed, this identity mismatch becomes live.</summary>
     public const string NotApplicable = "NotApplicable";
 
-    /// <summary>Quorum met; PolicyResolver resolved SecSwitchAction.None specifically because the
-    /// installed version could not be determined, or InstanceState itself was null - we do not
-    /// actually know whether this instance is affected. Final only because we could not look
-    /// properly - never cached; must be re-fetched.</summary>
+    /// <summary>Quorum met; PolicyResolver resolved SecSwitchAction.None (or, for a core advisory,
+    /// deferred entirely - see PolicyResolver.SshVerificationPendingPhrase) for one of several reasons
+    /// SecSwitch could not resolve on its own: the installed version could not be determined,
+    /// InstanceState itself was null, or - Task 13 review round 2, Finding R1 - a fixable core
+    /// advisory was reached while SSH is configured but CheckConfigurationHostedService has not (yet,
+    /// or ever) reported success. In every case we do not actually know whether/how to act. Final only
+    /// because we could not look properly - never cached; must be re-fetched. The SSH case specifically
+    /// can persist INDEFINITELY (the connectivity probe retries forever but never guarantees success),
+    /// which is why SecSwitchPeriodicTask.IsNotifiable now surfaces this status via the admin bell
+    /// notification and the alert banner from the first poll it is recorded on, not only in the audit
+    /// log - see that method's own doc comment.</summary>
     public const string NeedsAttention = "NeedsAttention";
 
     /// <summary>Quorum met and an action was computed, but policy (manual mode, a notify-only pin,

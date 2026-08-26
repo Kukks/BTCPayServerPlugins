@@ -243,16 +243,20 @@ public sealed class SecSwitchPeriodicTask(
 
     /// <summary>
     /// Notifies the admin bell icon for anything this poll recorded that either was acted on
-    /// automatically or is waiting on a manual decision - anything else (Rejected, Unverified,
-    /// NeedsAttention, NotApplicable) is not something an admin needs to be interrupted for, and
-    /// remains visible in the audit log regardless. One notification failing to send must not stop the
-    /// others in the same batch, matching the per-item posture used throughout this plugin.
+    /// automatically, is waiting on a manual decision, or (Task 13 review round 2, Finding R1 fix)
+    /// SecSwitch genuinely could not resolve on its own - Rejected, Unverified, and NotApplicable are
+    /// the only statuses excluded now: the first two are transient parse/quorum failures re-tried
+    /// automatically without needing an admin to do anything differently, and NotApplicable
+    /// affirmatively means "this does not affect you". <see cref="IsNotifiable"/>'s own doc comment
+    /// has the full reasoning for why NeedsAttention joined this set. One notification failing to send
+    /// must not stop the others in the same batch, matching the per-item posture used throughout this
+    /// plugin.
     /// </summary>
     async Task NotifyAsync(IReadOnlyList<LedgerEntry> recorded)
     {
         foreach (var entry in recorded)
         {
-            if (entry.Status is not (LedgerStatus.Acted or LedgerStatus.NeedsDecision))
+            if (!IsNotifiable(entry.Status))
                 continue;
 
             try
@@ -263,7 +267,14 @@ public sealed class SecSwitchPeriodicTask(
                     Title = entry.Title,
                     Severity = entry.Severity,
                     Outcome = entry.Reason,
-                    NeedsDecision = entry.Status == LedgerStatus.NeedsDecision
+                    // Acted is the only status here that was genuinely "Handled" - NeedsDecision and
+                    // NeedsAttention both mean an admin needs to look at this, just for different
+                    // reasons (an action is computed and held open, vs. SecSwitch could not tell
+                    // whether/how to act at all) - Outcome (entry.Reason) already carries the specific
+                    // distinguishing text (PolicyResolver.SshVerificationPendingPhrase,
+                    // AdvisoryApplicability.IndeterminateVersionPhrase, or a genuine manual-mode/pin/
+                    // severity-gate hold), so the boolean here only needs to pick the right prefix.
+                    NeedsDecision = entry.Status is LedgerStatus.NeedsDecision or LedgerStatus.NeedsAttention
                 });
             }
             catch (Exception e)
@@ -272,6 +283,38 @@ public sealed class SecSwitchPeriodicTask(
             }
         }
     }
+
+    /// <summary>
+    /// Task 13 review round 2, Finding R1 (Important) fix, extracted as its own directly-testable
+    /// method (mirroring <see cref="BuildKnownContentHashes"/>'s own Finding I4 precedent): true for
+    /// any status an admin should be notified about.
+    ///
+    /// <see cref="LedgerStatus.NeedsAttention"/> joined <see cref="LedgerStatus.Acted"/> and
+    /// <see cref="LedgerStatus.NeedsDecision"/> here because deferring a fixable CORE advisory while
+    /// SSH is configured but not yet verified (see <see cref="PolicyResolver.SshVerificationPendingPhrase"/>)
+    /// can persist INDEFINITELY: <c>CheckConfigurationHostedService.TestConnection</c> never gives up -
+    /// on failure it retries forever with backoff capped at 10 minutes and simply never sets
+    /// <c>CanUseSSH</c> true. Before this fix, an admin with a rotated SSH key, a wrong host, or
+    /// container networking trouble would get no bell notification and no alert-banner entry for that
+    /// advisory - ever - leaving it discoverable only in an audit log nobody is watching, while the
+    /// server keeps running unpatched against an advisory that, before the Finding I2 deferral existed,
+    /// would at least have stopped the server outright. Surfacing NeedsAttention from the FIRST poll it
+    /// is recorded on (not the Nth, not never) is what makes the deferral's silence acceptable instead
+    /// of a silent fail-open - the fix is deliberately NOT "fall back to ShutdownCore after N polls",
+    /// which would just reintroduce the exact stop-the-server hazard the deferral exists to remove.
+    ///
+    /// This also closes the identical, pre-existing silence for the indeterminate-installed-version
+    /// case (<see cref="Services.AdvisoryApplicability.IndeterminateVersionPhrase"/>), which has shared
+    /// this same status - and therefore this same lack of notification - since the status was
+    /// introduced; that was never specific to SSH.
+    ///
+    /// Rejected and Unverified are deliberately still excluded: both are re-tried automatically without
+    /// requiring any admin action, unlike NeedsAttention's core-vs-plugin, indefinitely-stuck
+    /// possibility. NotApplicable is excluded because it affirmatively means "this does not affect
+    /// you" - nothing for an admin to look at.
+    /// </summary>
+    internal static bool IsNotifiable(string status) =>
+        status is LedgerStatus.Acted or LedgerStatus.NeedsDecision or LedgerStatus.NeedsAttention;
 
     /// <summary>
     /// Maps installed plugins and the running core version into the <see cref="InstanceState"/>

@@ -573,6 +573,46 @@ public class SecSwitchMonitorTests
         Assert.True(await ledger.IsActedAsync("core1"));
     }
 
+    [Fact]
+    public async Task Core_advisory_is_updated_once_ssh_verification_finishes_on_a_later_sweep()
+    {
+        // Task 13 review round 2, Finding R1: the two facts above (NeedsAttention is non-terminal, and
+        // its ContentHash is withheld) are what make the retry described in PolicyResolver's own
+        // deferral comment actually possible - proven here end to end, not just by composition, by
+        // driving ProcessAsync twice for the SAME advisory: first while SSH verification is still
+        // pending (deferred), then again once it has finished (acted). Mirrors the shape of
+        // Unsuppressed_advisory_is_re_evaluated_by_a_later_sweep and
+        // Advisory_latched_as_non_terminal_is_still_acted_on_in_a_later_sweep above, for this new gate.
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var coreAdvisoryJson = """
+        {"id":"core1","identifier":"BTCPayServer","affectedVersions":"<2.5.0","fixedVersion":"2.5.0",
+         "severity":"critical","title":"Core bug","description":"d","references":[],
+         "publishedAt":"2026-08-25T00:00:00Z","revoked":false}
+        """;
+        var payload = Encoding.UTF8.GetBytes(coreAdvisoryJson);
+        var settings = Settings(a, b);
+        var (monitor, sink, ledger) = Make(settings);
+        var fetched = new FetchedAdvisory("core1", "hash-core1", payload,
+            [a.SignDetached(payload), b.SignDetached(payload)], true);
+
+        var pendingState = new InstanceState(
+            new Dictionary<string, Version>(), Version.Parse("2.4.2"), CanUseSsh: false, SshVerificationPending: true);
+        var firstSweep = await monitor.ProcessAsync([fetched], pendingState, settings, CancellationToken.None);
+
+        Assert.Equal(LedgerStatus.NeedsAttention, Assert.Single(firstSweep).Status);
+        Assert.Empty(sink.Calls);
+        Assert.False(await ledger.IsActedAsync("core1"));
+
+        var verifiedState = new InstanceState(new Dictionary<string, Version>(), Version.Parse("2.4.2"), CanUseSsh: true);
+        var secondSweep = await monitor.ProcessAsync([fetched], verifiedState, settings, CancellationToken.None);
+
+        var finalEntry = Assert.Single(secondSweep);
+        Assert.Equal(LedgerStatus.Acted, finalEntry.Status);
+        Assert.Contains("core-update", sink.Calls);
+        Assert.DoesNotContain("stop", sink.Calls); // UpdateCore never also stops - see ActionExecutor's own comment
+        Assert.True(await ledger.IsActedAsync("core1"));
+    }
+
     // --- Finding I3: Enabled has no initializer (defaults to false), and PolicyResolver's
     // "SecSwitch is disabled" None-reason carries no distinguishing phrase, so without a
     // short-circuit every advisory in the feed would be recorded as "NotApplicable" - a status

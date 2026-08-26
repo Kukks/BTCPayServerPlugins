@@ -312,8 +312,16 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
         try
         {
             var ledger = await GetAsync();
+            // Task 13 review round 2: the line below guarded the READ (existing), but ledger's own
+            // OfferedTrustRootFingerprints property itself was left unguarded for the WRITE two lines
+            // down - a ledger whose persisted JSON ever carried an explicit `null` for this field
+            // (Newtonsoft respects an explicit null over the field initializer default, unlike an
+            // absent property) would NRE on that .Add call. Unreachable today (nothing ever persists
+            // an explicit null here) and contained by this method's own caller's try/catch either way,
+            // but cheap to close outright rather than leave as a latent asymmetry.
+            ledger.OfferedTrustRootFingerprints ??= [];
             var existing = new HashSet<string>(
-                ledger.OfferedTrustRootFingerprints ?? [], StringComparer.OrdinalIgnoreCase);
+                ledger.OfferedTrustRootFingerprints, StringComparer.OrdinalIgnoreCase);
 
             var changed = false;
             foreach (var fingerprint in fingerprints ?? [])

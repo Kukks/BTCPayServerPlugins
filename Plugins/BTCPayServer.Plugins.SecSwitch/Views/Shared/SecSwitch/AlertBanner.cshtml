@@ -33,12 +33,19 @@
     // 500 every authenticated backend page this layout renders, /server/plugins included: the one
     // page an operator needs to disable SecSwitch and recover. A banner that silently fails to render
     // is strictly better than an admin UI that is unreachable because of it.
+    // Task 13 review round 2, Finding R1 (Important) fix: NeedsAttention now joins NeedsDecision here
+    // too (see SecSwitchPeriodicTask.IsNotifiable's own doc comment for the full reasoning) - a
+    // fixable core advisory deferred while SSH is configured but not yet verified can persist
+    // indefinitely (CheckConfigurationHostedService's probe never gives up but also never guarantees
+    // success), and without this the banner - like the bell notification before this fix - would never
+    // surface it. Kept INSIDE the same try/catch (Finding C1) and behind the same authorization check
+    // (Finding I3) as before - neither is regressed by this change.
     List<LedgerEntry>? pending = null;
     try
     {
         var ledgerState = await Ledger.GetAsync();
         pending = ledgerState.Entries.Values
-            .Where(e => e is { Status: LedgerStatus.NeedsDecision, Suppressed: false })
+            .Where(e => e is { Suppressed: false } && e.Status is LedgerStatus.NeedsDecision or LedgerStatus.NeedsAttention)
             .OrderByDescending(e => e.RecordedAt)
             .ToList();
     }
@@ -53,7 +60,7 @@
          permission="@Policies.CanModifyServerSettings">
         <span>
             <strong>SecSwitch:</strong> @pending.Count security advisor@(pending.Count == 1 ? "y" : "ies")
-            need@(pending.Count == 1 ? "s" : "") your decision.
+            need@(pending.Count == 1 ? "s" : "") your attention.
         </span>
         <a class="btn btn-sm btn-outline-light" asp-controller="SecSwitch" asp-action="Audit">Review</a>
     </div>
