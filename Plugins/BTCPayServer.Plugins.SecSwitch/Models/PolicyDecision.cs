@@ -16,4 +16,11 @@ public sealed record InstanceState(
 
 public enum SecSwitchAction { None, Notify, UpdatePlugin, DisablePlugin, UpdateCore, ShutdownCore }
 
-public sealed record PolicyDecision(SecSwitchAction Action, string Reason);
+/// <param name="IntendedAction">
+/// The action policy would have taken absent a downgrade (Manual mode, a notify-only pin, or the
+/// severity gate) - populated only at those three downgrade sites in PolicyResolver.Resolve, where
+/// <paramref name="Action"/> is Notify but something stronger was computed and set aside. Null
+/// everywhere else, including when <paramref name="Action"/> already IS the intended action, so
+/// there is never more than one source of truth for what the policy decided.
+/// </param>
+public sealed record PolicyDecision(SecSwitchAction Action, string Reason, SecSwitchAction? IntendedAction = null);
