@@ -8,6 +8,19 @@ public static class PolicyResolver
 {
     public static PolicyDecision Resolve(Advisory advisory, InstanceState state, SecSwitchSettings settings)
     {
+        // Fail closed on null input, mirroring AdvisoryApplicability.IsApplicable (see its own
+        // comment): a later task loops Resolve over parsed advisories, and an uncaught exception
+        // here would silently abort the whole sweep rather than just skipping the one bad
+        // advisory. Checked in the same order these arguments are first dereferenced below.
+        if (settings is null)
+            return new PolicyDecision(SecSwitchAction.None, "Settings is null.");
+
+        if (advisory is null)
+            return new PolicyDecision(SecSwitchAction.None, "Advisory is null.");
+
+        if (state is null)
+            return new PolicyDecision(SecSwitchAction.None, "Instance state is null.");
+
         if (!settings.Enabled)
             return new PolicyDecision(SecSwitchAction.None, "SecSwitch is disabled.");
 
@@ -34,15 +47,19 @@ public static class PolicyResolver
 
         if (!settings.AutoApply)
             return new PolicyDecision(SecSwitchAction.Notify,
-                $"Manual mode: {intended} required for {advisory.Identifier}. {reason}");
+                $"Manual mode: {intended} required for {advisory.Identifier}. {reason}", intended);
 
-        if (settings.NotifyOnlyIdentifiers.Contains(advisory.Identifier, StringComparer.OrdinalIgnoreCase))
+        // A null NotifyOnlyIdentifiers is treated as "no pins", not dereferenced - settings is
+        // admin/config-supplied input the same way advisory and state are, so it gets the same
+        // fail-closed treatment rather than throwing out of the loop a later task drives this from.
+        if (settings.NotifyOnlyIdentifiers is not null &&
+            settings.NotifyOnlyIdentifiers.Contains(advisory.Identifier, StringComparer.OrdinalIgnoreCase))
             return new PolicyDecision(SecSwitchAction.Notify,
-                $"{advisory.Identifier} is pinned to notify-only. {intended} required.");
+                $"{advisory.Identifier} is pinned to notify-only. {intended} required.", intended);
 
         if (settings.SeverityGateEnabled && advisory.Severity < AdvisorySeverity.High)
             return new PolicyDecision(SecSwitchAction.Notify,
-                $"Severity {advisory.Severity} is below the automatic-action threshold. {intended} required.");
+                $"Severity {advisory.Severity} is below the automatic-action threshold. {intended} required.", intended);
 
         return new PolicyDecision(intended, reason);
     }

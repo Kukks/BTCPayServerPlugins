@@ -93,6 +93,15 @@ public class PolicyResolverTests
     {
         var settings = Settings(s => s.NotifyOnlyIdentifiers.Add("Plug"));
         Assert.Equal(SecSwitchAction.Notify, PolicyResolver.Resolve(Adv(), State(), settings).Action);
+
+        // The "...only" half of this test's name: a second, unpinned identifier resolved against
+        // the very same settings object must still receive its own intended action, not be swept
+        // into Notify by the pin meant for "Plug" alone.
+        var otherState = new InstanceState(
+            new Dictionary<string, Version> { ["Other"] = Version.Parse("1.5.0") },
+            Version.Parse("2.4.2"), CanUseSsh: false);
+        var otherDecision = PolicyResolver.Resolve(Adv(identifier: "Other"), otherState, settings);
+        Assert.Equal(SecSwitchAction.UpdatePlugin, otherDecision.Action);
     }
 
     [Theory]
@@ -146,5 +155,73 @@ public class PolicyResolverTests
     {
         Assert.NotEmpty(PolicyResolver.Resolve(Adv(), State(), Settings()).Reason);
         Assert.NotEmpty(PolicyResolver.Resolve(Adv(identifier: "Nope"), State(), Settings()).Reason);
+    }
+
+    [Fact]
+    public void Manual_mode_downgrade_populates_intended_action()
+    {
+        var d = PolicyResolver.Resolve(Adv(), State(), Settings(s => s.AutoApply = false));
+        Assert.Equal(SecSwitchAction.Notify, d.Action);
+        Assert.Equal(SecSwitchAction.UpdatePlugin, d.IntendedAction);
+    }
+
+    [Fact]
+    public void Notify_only_pin_downgrade_populates_intended_action()
+    {
+        var settings = Settings(s => s.NotifyOnlyIdentifiers.Add("Plug"));
+        var d = PolicyResolver.Resolve(Adv(), State(), settings);
+        Assert.Equal(SecSwitchAction.Notify, d.Action);
+        Assert.Equal(SecSwitchAction.UpdatePlugin, d.IntendedAction);
+    }
+
+    [Fact]
+    public void Severity_gate_downgrade_populates_intended_action()
+    {
+        var d = PolicyResolver.Resolve(Adv(severity: AdvisorySeverity.Low), State(), Settings());
+        Assert.Equal(SecSwitchAction.Notify, d.Action);
+        Assert.Equal(SecSwitchAction.UpdatePlugin, d.IntendedAction);
+    }
+
+    [Fact]
+    public void Non_downgraded_decision_has_no_intended_action()
+    {
+        var d = PolicyResolver.Resolve(Adv(), State(), Settings());
+        Assert.Equal(SecSwitchAction.UpdatePlugin, d.Action);
+        Assert.Null(d.IntendedAction);
+    }
+
+    [Fact]
+    public void Null_settings_fails_closed_without_throwing()
+    {
+        var d = PolicyResolver.Resolve(Adv(), State(), null!);
+        Assert.Equal(SecSwitchAction.None, d.Action);
+        Assert.NotEmpty(d.Reason);
+    }
+
+    [Fact]
+    public void Null_advisory_fails_closed_without_throwing()
+    {
+        var d = PolicyResolver.Resolve(null!, State(), Settings());
+        Assert.Equal(SecSwitchAction.None, d.Action);
+        Assert.NotEmpty(d.Reason);
+    }
+
+    [Fact]
+    public void Null_state_fails_closed_without_throwing()
+    {
+        var d = PolicyResolver.Resolve(Adv(), null!, Settings());
+        Assert.Equal(SecSwitchAction.None, d.Action);
+        Assert.NotEmpty(d.Reason);
+    }
+
+    [Fact]
+    public void Null_notify_only_identifiers_is_treated_as_no_pins()
+    {
+        // Reachable once Enabled/AutoApply are both true and the advisory is applicable - deeper
+        // in the chain than the other null-input tests, so it needs its own case: a null list must
+        // not be dereferenced by Contains(), and must behave exactly like an empty one (no pin).
+        var settings = Settings(s => s.NotifyOnlyIdentifiers = null!);
+        var d = PolicyResolver.Resolve(Adv(), State(), settings);
+        Assert.Equal(SecSwitchAction.UpdatePlugin, d.Action);
     }
 }
