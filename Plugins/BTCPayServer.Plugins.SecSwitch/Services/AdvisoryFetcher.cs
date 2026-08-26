@@ -356,10 +356,10 @@ public sealed class AdvisoryFetcher(HttpClient http)
         if (listBytes is null)
             return (signatures, false); // Could not even see what should be there - never "complete" by default.
 
-        string[] names;
+        string[]? names;
         try
         {
-            names = JsonSerializer.Deserialize<string[]>(listBytes) ?? [];
+            names = JsonSerializer.Deserialize<string[]>(listBytes);
         }
         catch (Exception)
         {
@@ -367,6 +367,15 @@ public sealed class AdvisoryFetcher(HttpClient http)
             // unusual failure mode surfacing as a different exception type.
             return (signatures, false);
         }
+
+        // Task 8 review round 4: a JSON body of literal `null` deserializes to a C# null WITHOUT
+        // throwing - unlike every other wrong shape ({"x":1}, [1,2], truncated JSON), which throws
+        // and is caught above. A `?? []` here would silently turn that null into an empty array
+        // indistinguishable from a feed that legitimately listed zero signatures - exactly the gap
+        // SignaturesComplete exists to close: "zero because the index said null" is not "zero
+        // because there are none".
+        if (names is null)
+            return (signatures, false);
 
         var sigDirUri = new Uri(dirUri, "signatures/");
         var processed = 0;
