@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using BTCPayServer.HostedServices;
 using BTCPayServer.Plugins.SecSwitch.Models;
 using Microsoft.Extensions.Logging;
 
@@ -15,6 +14,15 @@ namespace BTCPayServer.Plugins.SecSwitch.Services;
 /// wrong wiring here would silently disarm the whole kill switch without any single component
 /// itself being at fault.
 ///
+/// Deliberately does NOT implement <c>IPeriodicTask</c> (Task 11 review, Finding M6): this class's
+/// constructor carries no advisory source, settings store, or instance-state provider - gathering
+/// those for a real poll is a later task's job (see task-11-report.md). Implementing the scheduled-
+/// task interface here anyway would advertise schedulability that isn't backed by anything, which
+/// is exactly the "looks healthy, protects nothing" failure mode this task exists to avoid: a
+/// future `AddScheduledTask&lt;SecSwitchMonitor&gt;()` would compile and run forever, doing nothing.
+/// The later periodic-task class owns that interface and calls <see cref="ProcessAsync"/> once it
+/// can actually supply real inputs.
+///
 /// <see cref="ProcessAsync"/> NEVER THROWS. It iterates over attacker-influenced advisories - both
 /// the payload bytes and the armored signatures ultimately come from a network feed (see
 /// <see cref="AdvisoryFetcher"/>'s own class doc comment) - and every component it calls
@@ -25,9 +33,7 @@ namespace BTCPayServer.Plugins.SecSwitch.Services;
 /// A per-item try/catch is kept anyway as a structural backstop - mirroring the same "backstop, not
 /// the only line of defence" posture <see cref="AdvisoryFetcher.FetchAsync(string,ISet{string},System.Threading.CancellationToken)"/>
 /// itself documents - and a second, outer try/catch protects the loop-control code that runs
-/// before any single advisory is reached (building the trusted-key lookup from admin-supplied
-/// settings, which are configuration, not attacker content, but still not something a single
-/// malformed entry should be able to turn into a total processing failure).
+/// before any single advisory is reached.
 ///
 /// Verification always precedes policy: <see cref="PolicyResolver.Resolve"/> and
 /// <see cref="ActionExecutor.ExecuteAsync"/> are only ever reached for an advisory whose GPG quorum
@@ -37,7 +43,7 @@ namespace BTCPayServer.Plugins.SecSwitch.Services;
 public sealed class SecSwitchMonitor(
     ActionExecutor executor,
     LedgerStore ledger,
-    ILogger<SecSwitchMonitor> logger) : IPeriodicTask
+    ILogger<SecSwitchMonitor> logger)
 {
     public async Task<IReadOnlyList<LedgerEntry>> ProcessAsync(
         IReadOnlyList<FetchedAdvisory> fetched,
@@ -50,6 +56,18 @@ public sealed class SecSwitchMonitor(
             return recorded; // Nothing to process - a liveness gap, not an error (matches
                               // AdvisoryFetcher's own "unusable input -> empty result" contract).
 
+        // Finding I3: SecSwitchSettings.Enabled has no initializer, so it defaults to false, and
+        // PolicyResolver's "SecSwitch is disabled" None-reason carries no distinguishing phrase -
+        // without this check every advisory would be recorded as "NotApplicable", a status that
+        // affirmatively tells the admin "you are not affected", which is false: the advisory was
+        // simply never evaluated because the plugin was off (or settings itself was unavailable).
+        // Checked before a single advisory is even looked at, so nothing is written to the ledger
+        // at all while disabled - a backlog that accumulated before an admin turns SecSwitch on is
+        // therefore never latched by anything (there is nothing recorded yet to latch), and it gets
+        // a normal first look the moment Enabled flips true.
+        if (settings?.Enabled != true)
+            return recorded;
+
         try
         {
             // Built once, defensively, outside the per-advisory loop: settings.TrustedKeys is
@@ -58,22 +76,19 @@ public sealed class SecSwitchMonitor(
             // which would abort the ENTIRE sweep, not just one advisory. Mirrors
             // TrustStore.TryApplyRotation's own defensive dictionary-building loop: null/blank
             // entries are skipped, and a duplicate fingerprint is last-write-wins, silently, rather
-            // than thrown.
+            // than thrown. settings itself is guaranteed non-null here - the only way past the
+            // Enabled check above is settings being non-null AND Enabled == true.
             var trusted = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var quorumThreshold = 0;
-            if (settings is not null)
+            if (settings.TrustedKeys is not null)
             {
-                quorumThreshold = settings.QuorumThreshold;
-                if (settings.TrustedKeys is not null)
+                foreach (var key in settings.TrustedKeys)
                 {
-                    foreach (var key in settings.TrustedKeys)
-                    {
-                        if (key is null || string.IsNullOrWhiteSpace(key.Fingerprint) || key.ArmoredPublicKey is null)
-                            continue;
-                        trusted[key.Fingerprint] = key.ArmoredPublicKey;
-                    }
+                    if (key is null || string.IsNullOrWhiteSpace(key.Fingerprint) || key.ArmoredPublicKey is null)
+                        continue;
+                    trusted[key.Fingerprint] = key.ArmoredPublicKey;
                 }
             }
+            var quorumThreshold = settings.QuorumThreshold;
 
             foreach (var item in fetched)
             {
@@ -82,7 +97,7 @@ public sealed class SecSwitchMonitor(
 
                 try
                 {
-                    await ProcessOneAsync(item, state, settings, trusted, quorumThreshold, recorded);
+                    await ProcessOneAsync(item, state, settings, trusted, quorumThreshold, recorded, ct);
                 }
                 catch (Exception e)
                 {
@@ -107,17 +122,24 @@ public sealed class SecSwitchMonitor(
     }
 
     async Task ProcessOneAsync(
-        FetchedAdvisory item, InstanceState state, SecSwitchSettings? settings,
-        IReadOnlyDictionary<string, string> trusted, int quorumThreshold, List<LedgerEntry> recorded)
+        FetchedAdvisory item, InstanceState state, SecSwitchSettings settings,
+        IReadOnlyDictionary<string, string> trusted, int quorumThreshold, List<LedgerEntry> recorded,
+        CancellationToken ct)
     {
         if (item is null || string.IsNullOrWhiteSpace(item.Id))
             return; // Nothing to key a ledger entry by - never recorded is the same as ignored today.
 
-        // Hard requirement 3 (the action-loop guard): if SecSwitch stops the server over an
-        // unfixable core advisory and a supervisor restarts it, IsHandledAsync is the only thing
-        // preventing it re-acting on the same advisory forever - a crash loop, not a kill switch.
-        // Never bypassed, and always the first check for an advisory reached this far.
-        if (await ledger.IsHandledAsync(item.Id))
+        // Hard requirement 3 (the action-loop guard) / Finding C1 fix: gates on IsActedAsync, NOT
+        // IsHandledAsync. IsHandledAsync latches on ANY recorded entry regardless of status - which
+        // would silently defeat hard requirement 1's own ContentHash-withholding fix, since the
+        // re-fetch it buys on the next poll would arrive here and be turned away anyway because
+        // SOME (non-terminal) entry already exists under this id. IsActedAsync only latches on a
+        // TERMINAL outcome (Acted, NeedsDecision, or Suppressed - see its own doc comment), so an
+        // advisory recorded as Rejected/Unverified/NotApplicable/NeedsAttention remains eligible
+        // for re-evaluation on every later poll until it either resolves to a terminal status or an
+        // admin suppresses it. Never bypassed, and always the first check for an advisory reached
+        // this far.
+        if (await ledger.IsActedAsync(item.Id))
             return;
 
         var entry = new LedgerEntry { AdvisoryId = item.Id, RecordedAt = DateTimeOffset.UtcNow };
@@ -135,10 +157,15 @@ public sealed class SecSwitchMonitor(
 
         if (item.PayloadBytes is null)
         {
-            // AdvisoryParser.TryParse was never contracted against a null payload (JsonDocument.Parse
-            // throws ArgumentNullException, not a caught JsonException) - guard explicitly rather
-            // than lean on the per-item try/catch alone, so this still surfaces as a visible,
-            // recorded Rejected entry for the admin instead of silently vanishing from the sweep.
+            // Defence in depth, not a workaround for a real gap: empirically, AdvisoryParser.TryParse
+            // does NOT throw on a null payload - JsonDocument.Parse(byte[]) takes the byte[] via an
+            // implicit conversion to ReadOnlyMemory<byte>, which maps a null array to an empty
+            // ReadOnlyMemory rather than throwing, so parsing fails with JsonReaderException (a
+            // JsonException subtype) exactly like any other malformed input, and TryParse's own
+            // catch already handles it (Task 11 review, Finding I4 - retracts an earlier, incorrect
+            // claim in this comment that TryParse was unguarded here). Kept anyway because it
+            // produces a clearer, more specific Reason for the admin than a generic JSON parse
+            // error would.
             entry.Status = "Rejected";
             entry.Reason = "Advisory payload is missing.";
             await RecordAsync(entry, recorded);
@@ -148,14 +175,28 @@ public sealed class SecSwitchMonitor(
         if (!AdvisoryParser.TryParse(item.PayloadBytes, out var advisory, out var parseError))
         {
             entry.Status = "Rejected";
-            entry.Reason = parseError ?? "Unparseable advisory.";
+            // parseError can embed a JsonException.Message derived from attacker-supplied bytes
+            // (Task 11 review, Finding I2) - sanitized before it reaches the ledger, matching how
+            // ActionExecutor.Sanitize is already used for every other attacker-influenced string
+            // that reaches an admin-facing surface.
+            entry.Reason = ActionExecutor.Sanitize(parseError ?? "Unparseable advisory.");
             await RecordAsync(entry, recorded);
             return;
         }
 
-        entry.Title = advisory!.Title;
-        entry.Identifier = advisory.Identifier;
-        entry.Severity = advisory.Severity.ToString();
+        // Finding I2: Title/Identifier/Severity are advisory-derived, attacker-influenced free text
+        // (AdvisoryParser caps none of them in length), assigned and persisted here BEFORE
+        // verification even runs - so an unverified, forged advisory.json up to the parser's byte
+        // cap could otherwise write an oversized, control-character-laden blob into the single
+        // SecSwitchLedger settings row and, eventually, an admin audit page. Sanitized via the same
+        // ActionExecutor.Sanitize routine SecSwitchNotifications already uses for identical reasons
+        // (see its own doc comment: "before either reaches the admin UI, the ledger, or a log
+        // sink"). This only affects the LEDGER'S copy - the real `advisory` object below is left
+        // untouched, since AdvisoryApplicability/ActionExecutor need its real Identifier to match
+        // and act on the correct installed plugin.
+        entry.Title = ActionExecutor.Sanitize(advisory!.Title);
+        entry.Identifier = ActionExecutor.Sanitize(advisory.Identifier);
+        entry.Severity = ActionExecutor.Sanitize(advisory.Severity.ToString());
 
         // Verification precedes policy: nothing below this point is reached for an advisory that
         // failed quorum.
@@ -171,36 +212,55 @@ public sealed class SecSwitchMonitor(
             return;
         }
 
-        // PolicyResolver.Resolve is declared to take a non-nullable SecSwitchSettings but, like
-        // AdvisoryApplicability.IsApplicable, checks for null internally and fails closed to
-        // SecSwitchAction.None rather than throwing (Task 6) - the same contract
-        // PolicyResolverTests itself relies on via a null! argument. settings is threaded through
-        // as received (possibly null - see the class doc comment on ProcessAsync's own defensive
-        // handling above) rather than assumed non-null here.
-        var decision = PolicyResolver.Resolve(advisory, state, settings!);
+        var decision = PolicyResolver.Resolve(advisory, state, settings);
         entry.Action = decision.Action.ToString();
-        entry.Reason = decision.Reason;
+
+        // Hard requirement 2 / Finding I3 (the "use your judgement" note): PolicyResolver folds
+        // several distinct SecSwitchAction.None reasons into ONE action value - genuinely not
+        // applicable, AND "resolved an identifier but the installed version is indeterminate"
+        // (AdvisoryApplicability.IndeterminateVersionPhrase, shared via the constant - Finding M5).
+        // A null `state` produces a THIRD such reason ("Instance state is null.") that PolicyResolver
+        // also maps to None - checked directly here via `state is null` rather than by matching yet
+        // another prose string, since the real condition is already in scope and a direct type check
+        // can never drift out of sync with PolicyResolver's wording the way a second string literal
+        // could. Both cases mean "we do not actually know whether this instance is affected", which
+        // is a needs-attention case, not a clean "nothing to do" - neither may silently disappear
+        // under the same status a genuine not-applicable advisory gets. (PolicyResolver's other two
+        // None reasons - null settings, null advisory - are unreachable through this method: `settings`
+        // is proven non-null by the Enabled check in ProcessAsync, and `advisory` is only ever passed
+        // here after a successful parse.)
+        var isIndeterminate = state is null ||
+            decision.Reason.Contains(AdvisoryApplicability.IndeterminateVersionPhrase, StringComparison.OrdinalIgnoreCase);
+        var sanitizedReason = ActionExecutor.Sanitize(decision.Reason); // Finding I2: decision.Reason
+            // can itself embed attacker-controlled text (e.g. advisory.Identifier or
+            // AffectedVersions, via AdvisoryApplicability's own reason strings) - computed once here,
+            // against the ORIGINAL (unsanitized) decision.Reason for the indeterminate check above,
+            // so truncation/stripping can never affect phrase detection, then reused for every Reason
+            // assignment below.
+        entry.Reason = sanitizedReason;
 
         if (decision.Action == SecSwitchAction.None)
         {
-            // Hard requirement 2: PolicyResolver folds "genuinely not applicable" and "resolved an
-            // identifier but the installed version is indeterminate" into the SAME
-            // SecSwitchAction.None - the distinction survives only in Reason's exact wording (the
-            // phrase "could not be determined", verbatim - see AdvisoryApplicability.IsApplicable
-            // and PolicyResolver.Resolve). An indeterminate result means we do not actually know
-            // whether the instance is affected, which is a needs-attention case, not a clean
-            // "nothing to do" - it must not silently disappear under the same status a genuine
-            // not-applicable advisory gets.
-            entry.Status = decision.Reason.Contains("could not be determined", StringComparison.OrdinalIgnoreCase)
-                ? "NeedsAttention"
-                : "NotApplicable";
+            entry.Status = isIndeterminate ? "NeedsAttention" : "NotApplicable";
             await RecordAsync(entry, recorded);
             return;
         }
 
+        // Finding M7: LedgerStore and ActionExecutor's own public methods accept no
+        // CancellationToken (confirmed by inspection of both classes), so cancellation cannot be
+        // threaded INTO an in-flight call to either. This is the last point where honouring a late
+        // cancellation is still possible: it stops SecSwitch from STARTING the one potentially slow
+        // or destructive step in this method (an SSH call, a plugin download, or stopping the
+        // process) after cancellation was requested, even though an already-started one could not
+        // itself be interrupted.
+        if (ct.IsCancellationRequested)
+            return;
+
         var outcome = await executor.ExecuteAsync(decision.Action, advisory);
         entry.Status = decision.Action == SecSwitchAction.Notify ? "NeedsDecision" : "Acted";
-        entry.Reason = $"{decision.Reason} {outcome}".Trim();
+        // outcome is already sanitized by ActionExecutor itself before being returned; sanitizedReason
+        // (computed above) covers the other half of this string.
+        entry.Reason = $"{sanitizedReason} {outcome}".Trim();
         await RecordAsync(entry, recorded);
     }
 
@@ -208,25 +268,5 @@ public sealed class SecSwitchMonitor(
     {
         await ledger.RecordAsync(entry);
         recorded.Add(entry);
-    }
-
-    /// <summary>
-    /// <see cref="IPeriodicTask"/> entry point. SecSwitchMonitor's constructor deliberately carries
-    /// no advisory source, settings store, or instance-state provider - <see cref="ProcessAsync"/>
-    /// takes all three as parameters instead, which is what makes it independently testable.
-    /// Gathering those for a real poll (fetching advisories over HTTP, reading
-    /// <see cref="SecSwitchSettings"/> from <c>ISettingsRepository</c>, and building
-    /// <see cref="InstanceState"/> from the installed-plugin list, the running core version, and
-    /// SSH availability) is later-task wiring, not part of this task's scope (see task-11-report.md).
-    /// Until that wiring exists, this is a deliberate, logged no-op - never a silent one - so
-    /// registering this type as a scheduled task before that wiring lands is visible in the logs
-    /// rather than silently appearing to run while actually protecting nothing. It still satisfies
-    /// the same never-throw contract as <see cref="ProcessAsync"/>.
-    /// </summary>
-    public Task Do(CancellationToken cancellationToken)
-    {
-        logger.LogDebug(
-            "SecSwitchMonitor.Do invoked, but no advisory source is wired to this instance yet; nothing to do.");
-        return Task.CompletedTask;
     }
 }

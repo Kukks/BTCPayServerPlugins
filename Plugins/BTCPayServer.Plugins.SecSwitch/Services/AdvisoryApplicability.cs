@@ -9,6 +9,15 @@ public static class AdvisoryApplicability
 {
     public const string CoreIdentifier = "BTCPayServer";
 
+    // Load-bearing wording, not incidental phrasing: a later component (SecSwitchMonitor) greps
+    // this exact phrase out of IsApplicable's `reason` output - via PolicyResolver.Resolve, which
+    // passes the reason through verbatim - to tell "we resolved an identifier but could not
+    // establish its installed version" apart from a clean, genuine not-applicable result. Extracted
+    // to a shared constant (Task 11 review, Finding M5) so that coupling is compile-enforced rather
+    // than resting on two files independently typing the same literal string; changing this value
+    // changes what SecSwitchMonitor treats as a needs-attention result.
+    public const string IndeterminateVersionPhrase = "could not be determined";
+
     public static bool IsApplicable(Advisory advisory, InstanceState state,
         out Version? installedVersion, out string reason)
     {
@@ -71,7 +80,7 @@ public static class AdvisoryApplicability
         // explicit, deterministic outcome rather than letting it fall into IsFulfilled.
         if (installedVersion is null)
         {
-            reason = $"Installed version of {advisory.Identifier} could not be determined.";
+            reason = $"Installed version of {advisory.Identifier} {IndeterminateVersionPhrase}.";
             return false;
         }
 

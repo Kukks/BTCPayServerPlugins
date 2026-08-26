@@ -125,6 +125,78 @@ public class LedgerStoreTests
         Assert.True((await store.GetAsync()).Entries["a1"].Suppressed);
     }
 
+    // --- IsActedAsync (Task 11 review, Finding C1): narrower than IsHandledAsync - true only for
+    // a TERMINAL status (Acted, NeedsDecision, Suppressed), not for any recorded entry at all.
+
+    [Fact]
+    public async Task Empty_ledger_reports_nothing_acted_on()
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        Assert.False(await store.IsActedAsync("nope"));
+    }
+
+    [Theory]
+    [InlineData("Acted")]
+    [InlineData("NeedsDecision")]
+    [InlineData("Suppressed")]
+    public async Task Terminal_status_counts_as_acted_on(string terminalStatus)
+    {
+        // LedgerEntry is a plain mutable class, not a record - no `with` expression available, so
+        // the Status set by the Entry() helper is overwritten by direct assignment instead.
+        var store = new LedgerStore(new FakeSettingsRepository());
+        var entry = Entry("a1");
+        entry.Status = terminalStatus;
+        await store.RecordAsync(entry);
+        Assert.True(await store.IsActedAsync("a1"));
+    }
+
+    [Theory]
+    [InlineData("Rejected")]
+    [InlineData("Unverified")]
+    [InlineData("NotApplicable")]
+    [InlineData("NeedsAttention")]
+    [InlineData("")]
+    public async Task Non_terminal_status_does_not_count_as_acted_on(string nonTerminalStatus)
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        var entry = Entry("a1");
+        entry.Status = nonTerminalStatus;
+        await store.RecordAsync(entry);
+        Assert.False(await store.IsActedAsync("a1"));
+        // IsHandledAsync still sees it - the two methods answer different questions.
+        Assert.True(await store.IsHandledAsync("a1"));
+    }
+
+    [Fact]
+    public async Task Terminal_status_match_is_case_insensitive()
+    {
+        // Matches the OrdinalIgnoreCase convention this class already uses for advisory ids
+        // (see the class doc comment) - a status string's casing should not be load-bearing either.
+        var store = new LedgerStore(new FakeSettingsRepository());
+        var entry = Entry("a1");
+        entry.Status = "acted";
+        await store.RecordAsync(entry);
+        Assert.True(await store.IsActedAsync("a1"));
+    }
+
+    [Fact]
+    public async Task Suppressed_via_SuppressAsync_counts_as_acted_on()
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        await store.SuppressAsync("a1");
+        Assert.True(await store.IsActedAsync("a1"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task IsActedAsync_with_blank_advisory_id_returns_false(string? advisoryId)
+    {
+        var store = new LedgerStore(new FakeSettingsRepository());
+        Assert.False(await store.IsActedAsync(advisoryId!)); // must not throw
+    }
+
     [Fact]
     public async Task Startup_heartbeat_is_persisted()
     {
