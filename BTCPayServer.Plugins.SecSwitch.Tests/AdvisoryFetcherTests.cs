@@ -547,9 +547,10 @@ public class AdvisoryFetcherTests
         var fetched = await fetcher.FetchAsync(Feed, new HashSet<string>(), CancellationToken.None);
 
         Assert.Empty(fetched); // "a1" sits past the request ceiling this poll
-        // +1 for the index.json fetch itself, which also consumes one unit of the same budget.
-        Assert.True(http.Requested.Count <= 4096 + 1,
-            $"Expected requests to be bounded by the request ceiling; issued {http.Requested.Count}.");
+        // Exactly 4096, not "at most": the index.json fetch itself consumes one of the 4096 budget
+        // units (it goes through the same GetBytesAsync gate as everything else), leaving 4095 for
+        // entries - so the budget is exhausted after the index fetch plus the first 4095 entries.
+        Assert.Equal(4096, http.Requested.Count);
         Assert.DoesNotContain(http.Requested, r => r.Contains("advisories/a1/"));
     }
 
@@ -580,8 +581,13 @@ public class AdvisoryFetcherTests
         // Proves the Finding 2 fix is not over-broad: a same-host redirect (e.g. a path or
         // trailing-slash normalisation a real GitHub Pages deployment might do) is not an SSRF
         // concern - it is still the same trusted origin - so it must not be rejected.
+        //
+        // No separate route is registered for advisory-v2.json: FakeHttp's redirect simulation
+        // serves the body already registered under the ORIGINALLY-requested path (advisory.json,
+        // from Routes()) and only relabels RequestMessage.RequestUri to the "final" URL - it does
+        // not re-dispatch to a route keyed by that final URL. A route here would never be read and
+        // would misleadingly suggest otherwise (Task 8 review round 2 nit).
         var routes = Routes();
-        routes[$"{Feed}advisories/a1/advisory-v2.json"] = """{"id":"a1"}""";
         var redirectMap = new Dictionary<string, string>
         {
             [$"{Feed}advisories/a1/advisory.json"] = $"{Feed}advisories/a1/advisory-v2.json"
@@ -685,5 +691,33 @@ public class AdvisoryFetcherTests
         var fetched = await fetcher.FetchAsync(Feed, new HashSet<string>(), CancellationToken.None);
 
         Assert.Empty(fetched);
+    }
+
+    // ---- Task 8 review round 2, Finding 9: only an https feed URL is accepted ----
+
+    [Fact]
+    public async Task Http_feed_url_returns_empty_rather_than_being_silently_unfetchable_forever()
+    {
+        // An http feed URL is refused outright rather than attempted: IsUnderBase's post-response
+        // redirect check requires an EXACT scheme match, and the standard http -> https redirect a
+        // real GitHub Pages host issues would otherwise make every poll silently fetch nothing,
+        // forever, with no exception, log, or signal. This proves the explicit, immediate refusal
+        // instead - not the redirect scenario itself, which would need a real socket to reproduce
+        // and is exactly what this refusal makes unreachable in the first place.
+        var httpFeed = "http://feed.example/";
+        var routes = new Dictionary<string, string>
+        {
+            [$"{httpFeed}index.json"] = """
+            [{"id":"a1","path":"advisories/a1","contentHash":"h1"}]
+            """
+        };
+        var http = new FakeHttp(routes);
+        var fetcher = new AdvisoryFetcher(http.Client());
+
+        var fetched = await fetcher.FetchAsync(httpFeed, new HashSet<string>(), CancellationToken.None);
+
+        Assert.Empty(fetched);
+        // Refused before even the index fetch - not merely "ends up empty for some other reason".
+        Assert.Empty(http.Requested);
     }
 }
