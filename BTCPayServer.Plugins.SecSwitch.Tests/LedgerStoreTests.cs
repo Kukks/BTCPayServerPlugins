@@ -84,7 +84,7 @@ public class LedgerStoreTests
     static LedgerEntry Entry(string id, string action = "UpdatePlugin") => new()
     {
         AdvisoryId = id, Title = "t", Identifier = "Plug", Severity = "High",
-        Status = "Acted", Action = action, Reason = "r", RecordedAt = DateTimeOffset.UtcNow
+        Status = LedgerStatus.Acted, Action = action, Reason = "r", RecordedAt = DateTimeOffset.UtcNow
     };
 
     [Fact]
@@ -126,7 +126,12 @@ public class LedgerStoreTests
     }
 
     // --- IsActedAsync (Task 11 review, Finding C1): narrower than IsHandledAsync - true only for
-    // a TERMINAL status (Acted, NeedsDecision, Suppressed), not for any recorded entry at all.
+    // a TERMINAL status, not for any recorded entry at all. As of Finding R1, the terminal set is
+    // Acted, NeedsDecision, NotApplicable, and Suppressed - a status is terminal iff nothing about
+    // re-fetching byte-identical content could ever change it; Rejected/Unverified/NeedsAttention
+    // are excluded because each is final only because SecSwitch could not evaluate the advisory
+    // properly, not because its content settled anything. As of Finding R2, entry.Suppressed is
+    // ALSO honoured directly, independent of the Status string - see IsActedAsync's own doc comment.
 
     [Fact]
     public async Task Empty_ledger_reports_nothing_acted_on()
@@ -136,9 +141,10 @@ public class LedgerStoreTests
     }
 
     [Theory]
-    [InlineData("Acted")]
-    [InlineData("NeedsDecision")]
-    [InlineData("Suppressed")]
+    [InlineData(LedgerStatus.Acted)]
+    [InlineData(LedgerStatus.NeedsDecision)]
+    [InlineData(LedgerStatus.NotApplicable)]
+    [InlineData(LedgerStatus.Suppressed)]
     public async Task Terminal_status_counts_as_acted_on(string terminalStatus)
     {
         // LedgerEntry is a plain mutable class, not a record - no `with` expression available, so
@@ -151,13 +157,15 @@ public class LedgerStoreTests
     }
 
     [Theory]
-    [InlineData("Rejected")]
-    [InlineData("Unverified")]
-    [InlineData("NotApplicable")]
-    [InlineData("NeedsAttention")]
+    [InlineData(LedgerStatus.Rejected)]
+    [InlineData(LedgerStatus.Unverified)]
+    [InlineData(LedgerStatus.NeedsAttention)]
     [InlineData("")]
     public async Task Non_terminal_status_does_not_count_as_acted_on(string nonTerminalStatus)
     {
+        // Finding R1 promotes NotApplicable to terminal - it is intentionally NOT one of the cases
+        // here any more (see Terminal_status_counts_as_acted_on above for its inverted, now-correct
+        // expectation).
         var store = new LedgerStore(new FakeSettingsRepository());
         var entry = Entry("a1");
         entry.Status = nonTerminalStatus;
@@ -184,6 +192,24 @@ public class LedgerStoreTests
     {
         var store = new LedgerStore(new FakeSettingsRepository());
         await store.SuppressAsync("a1");
+        Assert.True(await store.IsActedAsync("a1"));
+    }
+
+    [Fact]
+    public async Task Suppressed_flag_without_a_matching_status_string_still_counts_as_acted_on()
+    {
+        // Task 11 review, Finding R2: IsActedAsync must honour entry.Suppressed directly, not only
+        // via the "Suppressed" Status string. Today SuppressAsync is the sole writer and always
+        // sets both together, but Suppressed is a public settable property - a future admin-UI
+        // suppression path that sets the flag without also setting a matching Status must not
+        // silently defeat the escape hatch under this narrower gate. Constructs that exact
+        // (currently hypothetical, but structurally possible) mismatch directly.
+        var store = new LedgerStore(new FakeSettingsRepository());
+        var entry = Entry("a1");
+        entry.Status = LedgerStatus.Unverified; // deliberately NOT a terminal status string
+        entry.Suppressed = true;
+        await store.RecordAsync(entry);
+
         Assert.True(await store.IsActedAsync("a1"));
     }
 

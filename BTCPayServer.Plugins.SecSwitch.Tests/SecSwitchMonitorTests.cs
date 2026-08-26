@@ -59,9 +59,9 @@ public class SecSwitchMonitorTests
         Assert.Contains("update:Plug:2.0.0", sink.Calls);
         var entry = Assert.Single(entries);
         Assert.Equal("a1", entry.AdvisoryId);
-        Assert.Equal("Acted", entry.Status);
-        // SignaturesComplete was true, so the content hash IS persisted - see the incomplete-set
-        // test below for the converse.
+        Assert.Equal(LedgerStatus.Acted, entry.Status);
+        // SignaturesComplete was true and Acted is terminal, so the content hash IS persisted -
+        // see the Complete_but_below_quorum test below for the adversarial converse.
         Assert.Equal("hash-a1", entry.ContentHash);
         Assert.True(await ledger.IsActedAsync("a1"));
     }
@@ -78,7 +78,7 @@ public class SecSwitchMonitorTests
             [Fetched("hash-a1", true, a.SignDetached(payload))], State(), settings, CancellationToken.None);
 
         Assert.Empty(sink.Calls);
-        Assert.Equal("Unverified", Assert.Single(entries).Status);
+        Assert.Equal(LedgerStatus.Unverified, Assert.Single(entries).Status);
     }
 
     [Fact]
@@ -88,7 +88,7 @@ public class SecSwitchMonitorTests
         // a crash loop, not a kill switch. IsActedAsync is the only thing preventing that.
         //
         // Fixture note (Task 11 review, Finding C1 fix): the pre-recorded entry now carries
-        // Status="Acted" rather than a blank status. Under the pre-fix code (gated on
+        // Status=Acted rather than a blank status. Under the pre-fix code (gated on
         // IsHandledAsync, which latches on ANY recorded entry) a blank status was enough to prove
         // this property; under the fix (gated on IsActedAsync, which latches on TERMINAL statuses
         // only) a blank status is not terminal and would no longer represent "already handled" -
@@ -99,7 +99,7 @@ public class SecSwitchMonitorTests
         var settings = Settings(a, b);
         var (monitor, sink, ledger) = Make(settings);
         await ledger.RecordAsync(new LedgerEntry
-        { AdvisoryId = "a1", Status = "Acted", RecordedAt = DateTimeOffset.UtcNow });
+        { AdvisoryId = "a1", Status = LedgerStatus.Acted, RecordedAt = DateTimeOffset.UtcNow });
 
         await monitor.ProcessAsync(
             [Fetched("hash-a1", true, a.SignDetached(payload), b.SignDetached(payload))],
@@ -112,8 +112,10 @@ public class SecSwitchMonitorTests
     public async Task Suppressed_advisory_is_not_acted_on()
     {
         // Task 11 review, Finding C1 fix requirement: "Keep SuppressAsync latching - the admin's
-        // escape hatch must stay absolute." Suppressed is one of IsActedAsync's three terminal
-        // statuses, so this must hold even under the narrowed gate.
+        // escape hatch must stay absolute." Suppressed is one of IsActedAsync's terminal statuses
+        // (and, per Finding R2, entry.Suppressed is ALSO checked directly - see LedgerStoreTests
+        // for a test that isolates that specific path), so this must hold even under the narrowed
+        // gate.
         var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
         var payload = Payload;
         var settings = Settings(a, b);
@@ -133,12 +135,11 @@ public class SecSwitchMonitorTests
         // Reproduces Task 11 review Finding C1 (Critical) end to end: hard requirement 1 withholds
         // ContentHash for an incomplete signature set specifically so AdvisoryFetcher re-downloads
         // it next poll. If THIS method then treated any recorded entry (Rejected, Unverified,
-        // NotApplicable, NeedsAttention) as "already handled", that re-fetch would arrive here and
-        // be turned away anyway - silently, permanently disarming SecSwitch for this advisory id,
-        // with no key material needed: a hostile mirror serving malformed bytes, or simply
-        // stripping signature files, for a single poll would be enough. Two sweeps for the SAME
-        // advisory id: first below quorum (non-terminal), then quorum-met - the second sweep must
-        // actually act.
+        // NeedsAttention) as "already handled", that re-fetch would arrive here and be turned away
+        // anyway - silently, permanently disarming SecSwitch for this advisory id, with no key
+        // material needed: a hostile mirror serving malformed bytes, or simply stripping signature
+        // files, for a single poll would be enough. Two sweeps for the SAME advisory id: first
+        // below quorum (non-terminal), then quorum-met - the second sweep must actually act.
         var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
         var payload = Payload;
         var settings = Settings(a, b);
@@ -147,7 +148,7 @@ public class SecSwitchMonitorTests
         var firstSweep = await monitor.ProcessAsync(
             [Fetched("hash-a1", signaturesComplete: false, a.SignDetached(payload))],
             State(), settings, CancellationToken.None);
-        Assert.Equal("Unverified", Assert.Single(firstSweep).Status);
+        Assert.Equal(LedgerStatus.Unverified, Assert.Single(firstSweep).Status);
         Assert.Empty(sink.Calls);
 
         var secondSweep = await monitor.ProcessAsync(
@@ -155,24 +156,25 @@ public class SecSwitchMonitorTests
             State(), settings, CancellationToken.None);
 
         var entry = Assert.Single(secondSweep);
-        Assert.Equal("Acted", entry.Status);
+        Assert.Equal(LedgerStatus.Acted, entry.Status);
         Assert.Contains("update:Plug:2.0.0", sink.Calls);
         Assert.True(await ledger.IsActedAsync("a1"));
     }
 
     [Theory]
-    [InlineData("Rejected")]
-    [InlineData("Unverified")]
-    [InlineData("NotApplicable")]
-    [InlineData("NeedsAttention")]
+    [InlineData(LedgerStatus.Rejected)]
+    [InlineData(LedgerStatus.Unverified)]
+    [InlineData(LedgerStatus.NeedsAttention)]
     [InlineData("")]
     public async Task Non_terminal_prior_status_does_not_block_a_later_sweep(string priorStatus)
     {
         // Direct, per-status companion to Advisory_latched_as_non_terminal_is_still_acted_on_in_a_
-        // later_sweep above: every non-terminal status this monitor can itself produce (plus a
-        // blank one, for a pre-existing/foreign entry) must leave the advisory eligible for
-        // re-evaluation - not just the specific Unverified case that arises naturally from an
-        // incomplete-then-complete fetch pair.
+        // later_sweep above: every status this monitor can itself produce that is final ONLY
+        // because it could not evaluate the advisory properly (plus a blank one, for a
+        // pre-existing/foreign entry) must leave the advisory eligible for re-evaluation. Does NOT
+        // include NotApplicable (Task 11 review, Finding R1 promotes it to terminal - see
+        // NotApplicable_prior_status_blocks_a_later_sweep below for the inverted, now-correct
+        // expectation for that specific case).
         var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
         var payload = Payload;
         var settings = Settings(a, b);
@@ -188,6 +190,32 @@ public class SecSwitchMonitorTests
     }
 
     [Fact]
+    public async Task NotApplicable_prior_status_blocks_a_later_sweep()
+    {
+        // Task 11 review, Finding R1 promotes NotApplicable to a TERMINAL status (see
+        // LedgerStatus.NotApplicable's and LedgerStore.IsTerminalStatus's own doc comments):
+        // unlike Rejected/Unverified/NeedsAttention, nothing about re-fetching byte-identical
+        // advisory.json could change a genuine not-applicable verdict, and caching its ContentHash
+        // is what keeps AdvisoryFetcher's own per-poll success budget (MaxAdvisoriesPerPoll) from
+        // being permanently exhausted by the ordinary, non-adversarial bulk of advisories that
+        // simply do not target anything this instance runs. Re-evaluating a NotApplicable advisory
+        // after LOCAL state changes (e.g. installing the affected plugin later) is explicitly out
+        // of scope for this task - see task-11-report.md.
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var payload = Payload;
+        var settings = Settings(a, b);
+        var (monitor, sink, ledger) = Make(settings);
+        await ledger.RecordAsync(new LedgerEntry
+        { AdvisoryId = "a1", Status = LedgerStatus.NotApplicable, RecordedAt = DateTimeOffset.UtcNow });
+
+        await monitor.ProcessAsync(
+            [Fetched("hash-a1", true, a.SignDetached(payload), b.SignDetached(payload))],
+            State(), settings, CancellationToken.None);
+
+        Assert.Empty(sink.Calls);
+    }
+
+    [Fact]
     public async Task Unparseable_advisory_is_recorded_as_rejected_without_acting()
     {
         var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
@@ -200,14 +228,24 @@ public class SecSwitchMonitorTests
             State(), settings, CancellationToken.None);
 
         Assert.Empty(sink.Calls);
-        Assert.Equal("Rejected", Assert.Single(entries).Status);
+        var entry = Assert.Single(entries);
+        Assert.Equal(LedgerStatus.Rejected, entry.Status);
+        // Finding R1: Rejected is final only because SecSwitch could not parse the advisory, never
+        // because the content settled anything - must never be cached, or a mirror hostile for a
+        // single poll could permanently disarm this advisory id.
+        Assert.Equal("", entry.ContentHash);
     }
 
-    // --- Hard requirement 1: an advisory whose signature set was truncated by the fetcher's own
-    // request budget or poll deadline must never have its content hash persisted. Persisting it
-    // would mark the advisory "already seen" by AdvisoryFetcher's own dedup (it is fed the set of
-    // recorded content hashes on the next poll), so a signature set that can never grow can never
-    // reach quorum - a silent, permanent kill-switch failure for that advisory.
+    // --- Hard requirement 1, refined by Task 11 review Finding R1: an advisory's ContentHash may
+    // only be persisted when BOTH the fetch that produced it was complete (SignaturesComplete) AND
+    // its resulting Status is terminal "on content" (LedgerStore.IsTerminalStatus - Acted,
+    // NeedsDecision, NotApplicable, or Suppressed). AdvisoryFetcher's own hash-based dedup is the
+    // OUTER gate and dominates: it skips an index entry outright once its ContentHash is known,
+    // before advisory.json or any signature file is ever requested again, and that hash is carried
+    // verbatim from the feed's index - never recomputed from the payload - while signatures live in
+    // sibling files. So caching for a status that is final only because SecSwitch could NOT look
+    // properly (Rejected/Unverified/NeedsAttention) would silently and permanently hide the
+    // advisory from every future poll's fetch, not just from this class's own re-action check.
 
     [Fact]
     public async Task Incomplete_signature_set_is_recorded_but_content_hash_is_withheld()
@@ -232,7 +270,7 @@ public class SecSwitchMonitorTests
         // The gate is on SignaturesComplete alone, independent of whether the truncated fetch
         // happened to already carry a quorum-sufficient set: SignaturesComplete=false means the
         // fetcher does not know it saw everything the feed currently offers, so caching this
-        // content hash as "seen" is wrong regardless of today's outcome.
+        // content hash as "seen" is wrong regardless of today's outcome - even a terminal one.
         var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
         var payload = Payload;
         var settings = Settings(a, b);
@@ -243,17 +281,25 @@ public class SecSwitchMonitorTests
             State(), settings, CancellationToken.None);
 
         var entry = Assert.Single(entries);
-        Assert.Equal("Acted", entry.Status); // quorum WAS met - proves the gate is not just "unverified => no hash"
+        Assert.Equal(LedgerStatus.Acted, entry.Status); // quorum WAS met - proves the gate is not
+                                                          // just "unverified => no hash"
         Assert.Equal("", entry.ContentHash);
         Assert.Contains("update:Plug:2.0.0", sink.Calls);
     }
 
     [Fact]
-    public async Task Complete_signature_set_persists_content_hash_regardless_of_outcome()
+    public async Task Complete_but_below_quorum_advisory_does_not_cache_content_hash()
     {
-        // Converse of the above: a COMPLETE fetch that still fails quorum is safe to mark seen -
-        // the fetcher gathered everything the feed currently lists for this advisory, so nothing
-        // is lost by not re-fetching identical bytes next poll.
+        // Task 11 review, Finding R1 - THE ADVERSARIAL ROUTE. Supersedes this test's Round-1 name
+        // (Complete_signature_set_persists_content_hash_regardless_of_outcome) and its assertion,
+        // which asserted the CONTENT HASH WAS cached here - a real defect, not a style choice (see
+        // task-11-report.md's Round 2 section for the full reasoning). A mirror hostile for exactly
+        // one poll can serve the genuine advisory.json alongside a signatures/index.json listing
+        // only one of two real co-signers: every LISTED file still fetches successfully, so
+        // SignaturesComplete is true, but quorum fails. Caching the hash here would let
+        // AdvisoryFetcher's own dedup skip this advisory's directory FOREVER, even after the mirror
+        // goes back to listing both signatures - because ContentHash never changes and signatures
+        // live in sibling files the fetcher would then never request again.
         var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
         var payload = Payload;
         var settings = Settings(a, b);
@@ -264,9 +310,65 @@ public class SecSwitchMonitorTests
             State(), settings, CancellationToken.None);
 
         var entry = Assert.Single(entries);
-        Assert.Equal("Unverified", entry.Status);
-        Assert.Equal("hash-a1", entry.ContentHash);
+        Assert.Equal(LedgerStatus.Unverified, entry.Status);
+        Assert.Equal("", entry.ContentHash);
         Assert.Empty(sink.Calls);
+    }
+
+    [Fact]
+    public async Task NeedsDecision_advisory_caches_its_content_hash()
+    {
+        // NeedsDecision (a computed action held open for an admin by manual mode, a notify-only
+        // pin, or the severity gate) is final "on content" - an admin resolves it through the
+        // ledger itself, not by the advisory's bytes changing - so it belongs in the terminal/cache
+        // set alongside Acted, Suppressed, and NotApplicable.
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var payload = Payload;
+        var settings = Settings(a, b);
+        settings.AutoApply = false; // Manual mode -> SecSwitchAction.Notify -> NeedsDecision
+        var (monitor, sink, _) = Make(settings);
+
+        var entries = await monitor.ProcessAsync(
+            [Fetched("hash-a1", true, a.SignDetached(payload), b.SignDetached(payload))],
+            State(), settings, CancellationToken.None);
+
+        var entry = Assert.Single(entries);
+        Assert.Equal(LedgerStatus.NeedsDecision, entry.Status);
+        Assert.Equal("hash-a1", entry.ContentHash);
+        Assert.Empty(sink.Calls); // Notify never touches the instance (ActionExecutor's own contract)
+    }
+
+    [Fact]
+    public async Task Adversarial_partial_signature_list_does_not_permanently_disarm_the_advisory()
+    {
+        // End-to-end shape from Task 11 review Finding R1: sweep 1 is COMPLETE (every signature
+        // file the hostile-for-one-poll mirror LISTED was fetched) but lists only one of the two
+        // real signatures, so quorum fails and the advisory is recorded Unverified with its
+        // ContentHash withheld. Sweep 2 - the mirror now honest, listing both signatures - proves
+        // the withheld hash actually mattered: the SAME advisory id reaches the monitor again and
+        // quorum is met.
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var payload = Payload;
+        var settings = Settings(a, b);
+        var (monitor, sink, ledger) = Make(settings);
+
+        var firstSweep = await monitor.ProcessAsync(
+            [Fetched("hash-a1", signaturesComplete: true, a.SignDetached(payload))],
+            State(), settings, CancellationToken.None);
+        var firstEntry = Assert.Single(firstSweep);
+        Assert.Equal(LedgerStatus.Unverified, firstEntry.Status);
+        Assert.Equal("", firstEntry.ContentHash);
+        Assert.Empty(sink.Calls);
+
+        var secondSweep = await monitor.ProcessAsync(
+            [Fetched("hash-a1", signaturesComplete: true, a.SignDetached(payload), b.SignDetached(payload))],
+            State(), settings, CancellationToken.None);
+
+        var secondEntry = Assert.Single(secondSweep);
+        Assert.Equal(LedgerStatus.Acted, secondEntry.Status);
+        Assert.Equal("hash-a1", secondEntry.ContentHash);
+        Assert.Contains("update:Plug:2.0.0", sink.Calls);
+        Assert.True(await ledger.IsActedAsync("a1"));
     }
 
     // --- Hard requirement 2: AdvisoryApplicability.IsApplicable returns false with a reason
@@ -291,8 +393,11 @@ public class SecSwitchMonitorTests
             indeterminateState, settings, CancellationToken.None);
 
         var entry = Assert.Single(entries);
-        Assert.Equal("NeedsAttention", entry.Status);
-        Assert.NotEqual("NotApplicable", entry.Status);
+        Assert.Equal(LedgerStatus.NeedsAttention, entry.Status);
+        Assert.NotEqual(LedgerStatus.NotApplicable, entry.Status);
+        // NeedsAttention is final only because we could not tell, never because content settled
+        // anything - must not be cached (Finding R1).
+        Assert.Equal("", entry.ContentHash);
         Assert.Empty(sink.Calls);
     }
 
@@ -313,7 +418,10 @@ public class SecSwitchMonitorTests
             stateWithoutPlugin, settings, CancellationToken.None);
 
         var entry = Assert.Single(entries);
-        Assert.Equal("NotApplicable", entry.Status);
+        Assert.Equal(LedgerStatus.NotApplicable, entry.Status);
+        // Finding R1: NotApplicable IS cached - nothing about re-fetching identical bytes could
+        // change a genuine not-applicable verdict.
+        Assert.Equal("hash-a1", entry.ContentHash);
         Assert.Empty(sink.Calls);
     }
 
@@ -336,7 +444,7 @@ public class SecSwitchMonitorTests
             null!, settings, CancellationToken.None);
 
         var entry = Assert.Single(entries);
-        Assert.Equal("NeedsAttention", entry.Status);
+        Assert.Equal(LedgerStatus.NeedsAttention, entry.Status);
         Assert.Empty(sink.Calls);
     }
 
@@ -410,7 +518,7 @@ public class SecSwitchMonitorTests
             State(), settings, CancellationToken.None);
 
         var entry = Assert.Single(entries);
-        Assert.Equal("Unverified", entry.Status);
+        Assert.Equal(LedgerStatus.Unverified, entry.Status);
         Assert.Equal("BadTitle", entry.Title); // the separator is gone, not merely hidden by truncation
         Assert.Empty(sink.Calls);
     }
@@ -475,7 +583,7 @@ public class SecSwitchMonitorTests
             State(), settings, CancellationToken.None);
 
         var entry = Assert.Single(entries);
-        Assert.Equal("Rejected", entry.Status);
+        Assert.Equal(LedgerStatus.Rejected, entry.Status);
         Assert.True(entry.Reason.Length <= 203);
     }
 
@@ -502,7 +610,7 @@ public class SecSwitchMonitorTests
             State(), settings, CancellationToken.None);
 
         var entry = Assert.Single(entries);
-        Assert.Equal("NotApplicable", entry.Status);
+        Assert.Equal(LedgerStatus.NotApplicable, entry.Status);
         Assert.True(entry.Reason.Length <= 203);
         Assert.Empty(sink.Calls);
     }
@@ -536,7 +644,7 @@ public class SecSwitchMonitorTests
 
         var entries = await monitor.ProcessAsync([bad, good], State(), settings, CancellationToken.None);
 
-        Assert.Contains(entries, e => e.AdvisoryId == "a1" && e.Status == "Acted");
+        Assert.Contains(entries, e => e.AdvisoryId == "a1" && e.Status == LedgerStatus.Acted);
         Assert.Contains("update:Plug:2.0.0", sink.Calls);
     }
 
@@ -571,7 +679,7 @@ public class SecSwitchMonitorTests
             State(), settings, CancellationToken.None);
 
         Assert.Contains("update:Plug:2.0.0", sink.Calls);
-        Assert.Equal("Acted", Assert.Single(entries).Status);
+        Assert.Equal(LedgerStatus.Acted, Assert.Single(entries).Status);
     }
 
     [Fact]
@@ -591,7 +699,7 @@ public class SecSwitchMonitorTests
             [withNullSignature], State(), settings, CancellationToken.None);
 
         var entry = Assert.Single(entries);
-        Assert.Equal("Acted", entry.Status);
+        Assert.Equal(LedgerStatus.Acted, entry.Status);
         Assert.Contains("update:Plug:2.0.0", sink.Calls);
     }
 
