@@ -1,5 +1,14 @@
 @model BTCPayServer.Plugins.SecSwitch.Models.SecSwitchSettings
-@{ ViewData["Title"] = "SecSwitch"; }
+@{
+    ViewData["Title"] = "SecSwitch";
+
+    // Final whole-branch review, Finding I1: the trust store being SMALLER than the quorum threshold
+    // is just as fatal as it being empty, and far harder to notice - every advisory fails quorum and
+    // is recorded Unverified, which is excluded from both the bell notification and the alert banner.
+    // Warned on here, not only at zero, so the state is visible on the page an admin actually looks at.
+    var minimumKeys = Math.Max(1, Model.QuorumThreshold);
+    var belowQuorum = Model.TrustedKeys.Count < minimumKeys;
+}
 
 <div class="sticky-header">
     <h2>SecSwitch</h2>
@@ -11,6 +20,17 @@
     quorum-signed advisory applies. Review these settings carefully before enabling.
 </div>
 
+@if (belowQuorum)
+{
+    <div class="alert alert-danger" role="alert">
+        <strong>SecSwitch cannot verify any advisory.</strong>
+        It holds @Model.TrustedKeys.Count trusted key@(Model.TrustedKeys.Count == 1 ? "" : "s")
+        but requires @minimumKeys signature@(minimumKeys == 1 ? "" : "s") for quorum. Every advisory
+        will fail verification and no action will ever be taken@(Model.Enabled ? " — this instance is not protected" : "").
+        Add trusted keys below, or lower the required-signatures setting.
+    </div>
+}
+
 <form method="post">
     <div class="form-check mb-3">
         <input asp-for="Enabled" type="checkbox" class="form-check-input" />
@@ -19,6 +39,8 @@
     <div class="form-group mb-3">
         <label asp-for="FeedUrl" class="form-label">Advisory feed URL</label>
         <input asp-for="FeedUrl" class="form-control" />
+        <div class="form-text">Must be an absolute <code>https://</code> URL — SecSwitch will not poll anything else.</div>
+        <span asp-validation-for="FeedUrl" class="text-danger"></span>
     </div>
     <div class="form-group mb-3">
         <label asp-for="QuorumThreshold" class="form-label">Required signatures (quorum)</label>

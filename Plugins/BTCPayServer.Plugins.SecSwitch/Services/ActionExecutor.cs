@@ -39,6 +39,20 @@ public interface IActionSink
 /// lives behind <see cref="IActionSink"/>) and it never lets an exception - or a hostile/malformed
 /// input - escape as a thrown exception. Every path returns a human-readable outcome instead, and
 /// the application is only ever stopped after a queue step has confirmed it actually queued something.
+///
+/// Final whole-branch review, Finding C1 (Critical): <see cref="ExecuteAsync"/> returns a
+/// <c>(bool Succeeded, string Outcome)</c> pair, NOT a bare string. It used to return one string for
+/// both success and failure ("Queued disable of X..." and "Failed to queue disable of X..." are the
+/// same type), and its only caller - <c>SecSwitchMonitor</c> - never inspected it, recording every
+/// outcome alike under the TERMINAL <c>LedgerStatus.Acted</c>: a failed action was latched out of
+/// every future poll, had its ContentHash cached so the feed entry was never re-downloaded, and was
+/// reported to the admin as "Handled". <see cref="IActionSink"/> already returns <c>bool</c>
+/// specifically so a caller cannot stop the application on the strength of a queue that never
+/// happened; folding that signal back into prose here destroyed it one layer up. The Succeeded flag
+/// carries it the rest of the way, and it is <c>false</c> for EVERY path that did not actually
+/// perform the requested action - a refused identifier, a queue step that reported nothing queued, an
+/// unknown action value, and any caught exception - so a caller can never mistake a refusal for an
+/// applied action.
 /// </summary>
 public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> logger)
 {
@@ -56,7 +70,7 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
     // exceptions", closing that gap.
     private static readonly Regex SafeIdentifierPattern = new(@"\A[A-Za-z0-9._-]{1,128}\z", RegexOptions.Compiled);
 
-    public async Task<string> ExecuteAsync(SecSwitchAction action, Advisory? advisory)
+    public async Task<(bool Succeeded, string Outcome)> ExecuteAsync(SecSwitchAction action, Advisory? advisory)
     {
         try
         {
@@ -64,55 +78,67 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
             {
                 case SecSwitchAction.None:
                 case SecSwitchAction.Notify:
-                    return "No instance change made.";
+                    // Deliberately Succeeded=true: doing nothing IS the requested action here, so
+                    // this is a real success, not a silent failure. Notify's ledger status
+                    // (NeedsDecision) does not depend on this flag either way - see
+                    // SecSwitchMonitor's own mapping.
+                    return (true, "No instance change made.");
 
                 case SecSwitchAction.DisablePlugin:
                     return Disable(advisory);
 
                 case SecSwitchAction.UpdatePlugin:
                     // Never call the update path with a null/blank version - PluginService throws
-                    // on it. With no fixed version, disabling is the only safe automatic action.
+                    // on it. With no fixed version, disabling is the only safe automatic action -
+                    // including its Succeeded flag, which is propagated rather than overwritten.
                     if (advisory is null || string.IsNullOrWhiteSpace(advisory.FixedVersion))
                         return Disable(advisory);
                     if (!IsSafeIdentifier(advisory.Identifier))
-                        return $"Refusing to update: plugin identifier '{Sanitize(advisory.Identifier)}' is missing or unsafe.";
+                        return (false, $"Refusing to update: plugin identifier '{Sanitize(advisory.Identifier)}' is missing or unsafe.");
                     if (!await sink.QueueUpdateAsync(advisory.Identifier, advisory.FixedVersion))
-                        return $"Failed to queue update of {Sanitize(advisory.Identifier)}: no installed plugin matches that identifier unambiguously.";
+                        return (false, $"Failed to queue update of {Sanitize(advisory.Identifier)}: no installed plugin matches that identifier unambiguously.");
                     sink.StopApplication();
-                    return $"Queued update of {Sanitize(advisory.Identifier)} to {Sanitize(advisory.FixedVersion)}; stopping for restart.";
+                    return (true, $"Queued update of {Sanitize(advisory.Identifier)} to {Sanitize(advisory.FixedVersion)}; stopping for restart.");
 
                 case SecSwitchAction.UpdateCore:
                     // btcpay-update.sh brings the stack down and up itself; do not also stop here,
                     // or we would race our own SSH-triggered restart. Core actions never consume
                     // the advisory identifier, so a missing advisory does not block this.
+                    // "Succeeded" here means "dispatched", which is the strongest claim this path
+                    // can honestly make - TriggerCoreUpdateAsync deliberately does not wait for
+                    // btcpay-update.sh to finish (see BtcPayActionSink's own doc comment). A failure
+                    // to even dispatch - SSH not configured, or a connect failure - throws, and is
+                    // caught below as Succeeded=false.
                     await sink.TriggerCoreUpdateAsync();
-                    return "Triggered BTCPay Server update over SSH.";
+                    return (true, "Triggered BTCPay Server update over SSH.");
 
                 case SecSwitchAction.ShutdownCore:
                     sink.StopApplication();
-                    return "Stopped BTCPay Server due to an unfixable core advisory.";
+                    return (true, "Stopped BTCPay Server due to an unfixable core advisory.");
 
                 default:
                     // Fails closed on an out-of-range enum value (e.g. an unchecked cast) instead of
-                    // falling through to a destructive branch.
-                    return $"Unknown action {action}; nothing done.";
+                    // falling through to a destructive branch. Succeeded=false: an action was
+                    // resolved and nothing was done about it, which is precisely the state an admin
+                    // must be told about rather than have filed as "Acted".
+                    return (false, $"Unknown action {action}; nothing done.");
             }
         }
         catch (Exception e)
         {
             logger.LogError(e, "SecSwitch action {Action} for {Identifier} failed", action, Sanitize(advisory?.Identifier));
-            return $"Action {action} failed: {Sanitize(e.Message)}";
+            return (false, $"Action {action} failed: {Sanitize(e.Message)}");
         }
     }
 
-    private string Disable(Advisory? advisory)
+    private (bool Succeeded, string Outcome) Disable(Advisory? advisory)
     {
         if (!IsSafeIdentifier(advisory?.Identifier))
-            return $"Refusing to disable: plugin identifier '{Sanitize(advisory?.Identifier)}' is missing or unsafe.";
+            return (false, $"Refusing to disable: plugin identifier '{Sanitize(advisory?.Identifier)}' is missing or unsafe.");
         if (!sink.QueueDisable(advisory!.Identifier))
-            return $"Failed to queue disable of {Sanitize(advisory.Identifier)}: no installed plugin matches that identifier unambiguously.";
+            return (false, $"Failed to queue disable of {Sanitize(advisory.Identifier)}: no installed plugin matches that identifier unambiguously.");
         sink.StopApplication();
-        return $"Queued disable of {Sanitize(advisory.Identifier)}; stopping for restart.";
+        return (true, $"Queued disable of {Sanitize(advisory.Identifier)}; stopping for restart.");
     }
 
     // A plugin identifier ultimately feeds a file path inside BtcPayActionSink, and neither primitive

@@ -370,4 +370,249 @@ public class SecSwitchControllerTests
         var settings = await repo.GetSettingAsync<SecSwitchSettings>();
         Assert.Empty(settings!.TrustedKeys);
     }
+
+    // ================================================================================
+    // Final whole-branch review, Finding I1 (Important): SecSwitch could be enabled - and left
+    // running - with FEWER trusted keys than its own quorum threshold. Quorum 2 with 1 key makes
+    // every advisory Unverified, which is excluded from both the bell notification AND the alert
+    // banner: a green settings page, a populated key table, and zero protection, indefinitely.
+    // TrustStore.TryApplyRotation already enforced the right invariant
+    // (working.Count < Math.Max(1, quorumThreshold)) - it was simply absent from the live admin path.
+    // ================================================================================
+
+    static SecSwitchSettings EnabledWith(int quorum, params PgpTestKey[] keys) => new()
+    {
+        Enabled = true,
+        QuorumThreshold = quorum,
+        TrustedKeys = keys.Select(Key).ToList()
+    };
+
+    [Fact]
+    public async Task Settings_refuses_to_enable_with_fewer_trusted_keys_than_the_quorum()
+    {
+        var only = PgpTestKeys.Generate("only@x");
+        var repo = new FakeSettingsRepository();
+        await repo.UpdateSetting(new SecSwitchSettings { TrustedKeys = [Key(only)] });
+        var controller = MakeController(repo, new LedgerStore(repo));
+
+        // One trusted key, quorum 2: not empty, so the old Count == 0 guard let this straight through.
+        var result = await controller.Settings(new SecSwitchSettings { Enabled = true, QuorumThreshold = 2 });
+
+        Assert.IsType<ViewResult>(result); // redisplayed with errors, not redirected after a save
+        Assert.False(controller.ModelState.IsValid);
+        Assert.True(controller.ModelState.ContainsKey(nameof(SecSwitchSettings.TrustedKeys)));
+        var persisted = await repo.GetSettingAsync<SecSwitchSettings>();
+        Assert.False(persisted!.Enabled); // nothing was saved
+    }
+
+    [Fact]
+    public async Task Settings_refuses_to_raise_the_quorum_above_the_trusted_key_count()
+    {
+        // The same hole from the other side: an already-enabled, correctly-configured instance can be
+        // pushed below quorum by raising the threshold rather than by removing a key.
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var repo = new FakeSettingsRepository();
+        await repo.UpdateSetting(EnabledWith(2, a, b));
+        var controller = MakeController(repo, new LedgerStore(repo));
+
+        var result = await controller.Settings(new SecSwitchSettings { Enabled = true, QuorumThreshold = 5 });
+
+        Assert.IsType<ViewResult>(result);
+        Assert.True(controller.ModelState.ContainsKey(nameof(SecSwitchSettings.TrustedKeys)));
+        var persisted = await repo.GetSettingAsync<SecSwitchSettings>();
+        Assert.Equal(2, persisted!.QuorumThreshold); // unchanged
+    }
+
+    [Fact]
+    public async Task Settings_saves_when_the_key_count_meets_the_quorum()
+    {
+        // The control: the guard must not block a legitimate, correctly-configured enable.
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var repo = new FakeSettingsRepository();
+        await repo.UpdateSetting(new SecSwitchSettings { TrustedKeys = [Key(a), Key(b)] });
+        var controller = MakeController(repo, new LedgerStore(repo));
+
+        var result = await controller.Settings(new SecSwitchSettings
+        { Enabled = true, QuorumThreshold = 2, FeedUrl = "https://feed.example/" });
+
+        Assert.IsType<RedirectToActionResult>(result);
+        var persisted = await repo.GetSettingAsync<SecSwitchSettings>();
+        Assert.True(persisted!.Enabled);
+        Assert.Equal(2, persisted.TrustedKeys.Count); // restored, not erased, by the save
+    }
+
+    [Fact]
+    public async Task RemoveTrustedKey_refuses_to_drop_an_enabled_store_below_its_quorum()
+    {
+        // The endpoint had no floor guard at all - keys could be removed one at a time until a
+        // still-enabled SecSwitch could no longer verify anything.
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var repo = new FakeSettingsRepository();
+        await repo.UpdateSetting(EnabledWith(2, a, b));
+        var controller = MakeController(repo, new LedgerStore(repo));
+
+        var result = await controller.RemoveTrustedKey(a.Fingerprint);
+
+        Assert.IsType<RedirectToActionResult>(result);
+        Assert.True(controller.TempData.ContainsKey(WellKnownTempData.ErrorMessage));
+        var persisted = await repo.GetSettingAsync<SecSwitchSettings>();
+        Assert.Equal(2, persisted!.TrustedKeys.Count); // nothing removed
+        Assert.Contains(persisted.TrustedKeys, k => k.Fingerprint == a.Fingerprint);
+    }
+
+    [Fact]
+    public async Task RemoveTrustedKey_still_allows_removal_above_the_quorum_floor()
+    {
+        // The control: three keys with a quorum of 2 leaves two after a removal, which is fine. A
+        // guard that refused every removal outright would be its own usability trap.
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var c = PgpTestKeys.Generate("c@x");
+        var repo = new FakeSettingsRepository();
+        await repo.UpdateSetting(EnabledWith(2, a, b, c));
+        var controller = MakeController(repo, new LedgerStore(repo));
+
+        var result = await controller.RemoveTrustedKey(c.Fingerprint);
+
+        Assert.IsType<RedirectToActionResult>(result);
+        Assert.True(controller.TempData.ContainsKey(WellKnownTempData.SuccessMessage));
+        var persisted = await repo.GetSettingAsync<SecSwitchSettings>();
+        Assert.Equal(2, persisted!.TrustedKeys.Count);
+        Assert.DoesNotContain(persisted.TrustedKeys, k => k.Fingerprint == c.Fingerprint);
+    }
+
+    [Fact]
+    public async Task RemoveTrustedKey_still_allows_clearing_the_store_while_SecSwitch_is_disabled()
+    {
+        // The floor is scoped to Enabled deliberately: while SecSwitch is off nothing is being
+        // protected, and an admin must still be able to remove a mistakenly-added key - including the
+        // very first one, which an unconditional floor would make permanently unremovable. Re-enabling
+        // is what the Settings guard above then blocks until the store is back at quorum, so there is
+        // no window in which an ENABLED SecSwitch sits below its own quorum.
+        var only = PgpTestKeys.Generate("only@x");
+        var repo = new FakeSettingsRepository();
+        await repo.UpdateSetting(new SecSwitchSettings { Enabled = false, QuorumThreshold = 2, TrustedKeys = [Key(only)] });
+        var controller = MakeController(repo, new LedgerStore(repo));
+
+        var result = await controller.RemoveTrustedKey(only.Fingerprint);
+
+        Assert.IsType<RedirectToActionResult>(result);
+        Assert.True(controller.TempData.ContainsKey(WellKnownTempData.SuccessMessage));
+        var persisted = await repo.GetSettingAsync<SecSwitchSettings>();
+        Assert.Empty(persisted!.TrustedKeys);
+    }
+
+    // ================================================================================
+    // Final whole-branch review, Finding I2 (Important): FeedUrl was unvalidated, and AdvisoryFetcher
+    // refuses a non-https or unparseable URL silently by design (fails closed to "nothing fetched",
+    // never throws, has no logger). Typing "http://..." saved cleanly and left SecSwitch permanently,
+    // invisibly inert - no error, no log, no notification, ever.
+    // ================================================================================
+
+    [Theory]
+    [InlineData("http://kukks.github.io/secswitch-advisories/")] // the exact trap: GitHub Pages redirects http->https
+    [InlineData("not a url")]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("ftp://feed.example/")]
+    [InlineData("/relative/path")]
+    public async Task Settings_rejects_a_feed_url_AdvisoryFetcher_would_never_poll(string feedUrl)
+    {
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var repo = new FakeSettingsRepository();
+        await repo.UpdateSetting(EnabledWith(2, a, b));
+        var controller = MakeController(repo, new LedgerStore(repo));
+
+        var result = await controller.Settings(new SecSwitchSettings
+        { Enabled = true, QuorumThreshold = 2, FeedUrl = feedUrl });
+
+        Assert.IsType<ViewResult>(result);
+        Assert.True(controller.ModelState.ContainsKey(nameof(SecSwitchSettings.FeedUrl)));
+        var persisted = await repo.GetSettingAsync<SecSwitchSettings>();
+        Assert.NotEqual(feedUrl, persisted!.FeedUrl); // never saved
+        // The validation and the fetcher must agree - a URL the page accepts that the fetcher then
+        // refuses is the same silent-inertness bug wearing a different hat.
+        Assert.False(AdvisoryFetcher.IsSupportedFeedUrl(feedUrl));
+    }
+
+    [Fact]
+    public async Task Settings_accepts_an_https_feed_url()
+    {
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var repo = new FakeSettingsRepository();
+        await repo.UpdateSetting(EnabledWith(2, a, b));
+        var controller = MakeController(repo, new LedgerStore(repo));
+
+        var result = await controller.Settings(new SecSwitchSettings
+        { Enabled = true, QuorumThreshold = 2, FeedUrl = "https://feed.example/advisories/" });
+
+        Assert.IsType<RedirectToActionResult>(result);
+        var persisted = await repo.GetSettingAsync<SecSwitchSettings>();
+        Assert.Equal("https://feed.example/advisories/", persisted!.FeedUrl);
+    }
+
+    [Fact]
+    public void The_default_feed_url_is_one_the_fetcher_will_actually_poll()
+    {
+        // A shipped default that fails its own validation would make a fresh install unsaveable.
+        Assert.True(AdvisoryFetcher.IsSupportedFeedUrl(new SecSwitchSettings().FeedUrl));
+    }
+
+    // ================================================================================
+    // Final whole-branch review, Finding I3 (Important): AddTrustedKey screened neither revocation
+    // nor expiry, while TrustStore.TryApplyRotation screened both - the stronger checks lived only on
+    // the code path that is never executed today. AdvisoryVerifier.Verify deliberately checks neither
+    // (out of scope for this wave, and noted as a residual), so this admission point is the only
+    // place a revoked or expired signer can be kept out of the trust store at all.
+    // ================================================================================
+
+    [Fact]
+    public async Task AddTrustedKey_refuses_a_revoked_key()
+    {
+        var revoked = PgpTestKeys.GenerateRevoked("revoked@x");
+        var repo = new FakeSettingsRepository();
+        await repo.UpdateSetting(new SecSwitchSettings());
+        var controller = MakeController(repo, new LedgerStore(repo));
+
+        var result = await controller.AddTrustedKey(revoked.ArmoredPublicKey);
+
+        Assert.IsType<RedirectToActionResult>(result);
+        Assert.True(controller.TempData.ContainsKey(WellKnownTempData.ErrorMessage));
+        Assert.False(controller.TempData.ContainsKey(WellKnownTempData.SuccessMessage));
+        var persisted = await repo.GetSettingAsync<SecSwitchSettings>();
+        Assert.Empty(persisted!.TrustedKeys);
+    }
+
+    [Fact]
+    public async Task AddTrustedKey_refuses_an_expired_key()
+    {
+        var expired = PgpTestKeys.GenerateExpired("expired@x");
+        var repo = new FakeSettingsRepository();
+        await repo.UpdateSetting(new SecSwitchSettings());
+        var controller = MakeController(repo, new LedgerStore(repo));
+
+        var result = await controller.AddTrustedKey(expired.ArmoredPublicKey);
+
+        Assert.IsType<RedirectToActionResult>(result);
+        Assert.True(controller.TempData.ContainsKey(WellKnownTempData.ErrorMessage));
+        Assert.False(controller.TempData.ContainsKey(WellKnownTempData.SuccessMessage));
+        var persisted = await repo.GetSettingAsync<SecSwitchSettings>();
+        Assert.Empty(persisted!.TrustedKeys);
+    }
+
+    [Fact]
+    public async Task AddTrustedKey_still_accepts_an_ordinary_unrevoked_unexpired_key()
+    {
+        // The control for the two refusals above: the screen must not reject healthy key material.
+        var healthy = PgpTestKeys.Generate("healthy@x");
+        var repo = new FakeSettingsRepository();
+        await repo.UpdateSetting(new SecSwitchSettings());
+        var controller = MakeController(repo, new LedgerStore(repo));
+
+        var result = await controller.AddTrustedKey(healthy.ArmoredPublicKey);
+
+        Assert.IsType<RedirectToActionResult>(result);
+        Assert.True(controller.TempData.ContainsKey(WellKnownTempData.SuccessMessage));
+        var persisted = await repo.GetSettingAsync<SecSwitchSettings>();
+        Assert.Equal(healthy.Fingerprint, Assert.Single(persisted!.TrustedKeys).Fingerprint);
+    }
 }

@@ -45,9 +45,36 @@ public class SecSwitchController(ISettingsRepository settingsRepository, LedgerS
 
         if (settings.QuorumThreshold < 1)
             ModelState.AddModelError(nameof(settings.QuorumThreshold), "Quorum must be at least 1.");
-        if (settings.Enabled && settings.TrustedKeys.Count == 0)
+
+        // Final whole-branch review, Finding I2 (Important): FeedUrl was accepted unvalidated, and
+        // AdvisoryFetcher refuses anything that is not absolute https by silently returning "nothing
+        // fetched" (it has no logger, and never throws - by design). Typing "http://..." therefore
+        // saved cleanly and left SecSwitch permanently, invisibly inert. Validated against
+        // AdvisoryFetcher's OWN predicate rather than a re-stated copy, so the page can never accept
+        // a URL the fetcher will not poll.
+        if (!AdvisoryFetcher.IsSupportedFeedUrl(settings.FeedUrl))
+            ModelState.AddModelError(nameof(settings.FeedUrl),
+                "The advisory feed URL must be an absolute https:// URL. SecSwitch will not poll anything else, " +
+                "and would silently fetch nothing if it were saved.");
+
+        // Final whole-branch review, Finding I1 (Important): the guard was Count == 0, but a trust
+        // store SMALLER THAN THE QUORUM is exactly as useless and far less obvious - quorum 2 with 1
+        // key makes every advisory Unverified, which is excluded from both the bell notification and
+        // the alert banner, so the settings page stays green and the key table stays populated while
+        // the instance has no protection at all, indefinitely. This is the same invariant
+        // TrustStore.TryApplyRotation already enforces for a quorum-signed rotation
+        // (working.Count < Math.Max(1, quorumThreshold)); it was simply missing from the live admin
+        // path, which is the one that actually runs. Uses the NEWLY submitted QuorumThreshold against
+        // the persisted key count, so raising the quorum past the key count is refused too, not just
+        // enabling with too few keys.
+        var minimumKeys = Math.Max(1, settings.QuorumThreshold);
+        if (settings.Enabled && settings.TrustedKeys.Count < minimumKeys)
             ModelState.AddModelError(nameof(settings.TrustedKeys),
-                "At least one trusted key is required before SecSwitch can verify anything.");
+                settings.TrustedKeys.Count == 0
+                    ? "At least one trusted key is required before SecSwitch can verify anything."
+                    : $"SecSwitch has only {settings.TrustedKeys.Count} trusted key(s) but requires {minimumKeys} " +
+                      "signature(s) for quorum. Every advisory would fail verification and no action would ever " +
+                      "be taken. Add more trusted keys, or lower the quorum, before enabling.");
         if (!ModelState.IsValid)
             return View(settings);
 
@@ -282,11 +309,57 @@ public class SecSwitchController(ISettingsRepository settingsRepository, LedgerS
         // not necessarily one LoadTrustedKeys would ever load (e.g. one over its own byte-length
         // cap) - skipping this would let an admin "successfully" add a key that silently
         // contributes nothing to quorum forever, with no error to explain why.
-        if (!AdvisoryVerifier.TryLoadTrustedKey(fingerprint, armoredPublicKey, out _))
+        if (!AdvisoryVerifier.TryLoadTrustedKey(fingerprint, armoredPublicKey, out var matchedRing) ||
+            matchedRing is null)
         {
             TempData[WellKnownTempData.ErrorMessage] =
                 $"That key was readable but SecSwitch could never actually load it as trusted " +
                 $"(fingerprint {fingerprint}); nothing was added.";
+            return RedirectToAction(nameof(Settings));
+        }
+
+        // Final whole-branch review, Finding I3 (Important): screen the key for revocation and expiry,
+        // exactly as TrustStore.TryApplyRotation already does for a key arriving via a quorum-signed
+        // rotation. AdvisoryVerifier.Verify deliberately performs neither check, so a revoked or
+        // expired signer counts toward quorum there - which means this admission point is the only
+        // place a revoked key can be kept out at all, and it was the one path missing the check. Same
+        // limits as the rotation-side copy: IsRevoked() is packet-presence only (BouncyCastle does not
+        // cryptographically validate the revocation signature it finds), so this catches an honest or
+        // keyserver-sourced revoked blob and lets a hostile paste force a refusal - fail-closed, a
+        // false refuse rather than a false accept. All three BouncyCastle calls share one try/catch:
+        // GetValidSeconds() walks self-certification subpackets, the same class of parsing that can
+        // throw on hostile input, and a key whose status cannot be determined at all must be refused
+        // rather than silently admitted.
+        bool isRevoked;
+        DateTime? expiresAt;
+        try
+        {
+            var primaryKey = matchedRing.GetPublicKey();
+            isRevoked = primaryKey.IsRevoked();
+            // GetValidSeconds() == 0 means "no expiry", per OpenPGP (RFC 4880) and BouncyCastle's own
+            // documented contract on PgpPublicKey.GetValidSeconds().
+            var validSeconds = primaryKey.GetValidSeconds();
+            expiresAt = validSeconds == 0 ? null : primaryKey.CreationTime.AddSeconds(validSeconds);
+        }
+        catch (Exception)
+        {
+            TempData[WellKnownTempData.ErrorMessage] =
+                $"SecSwitch could not determine whether that key ({fingerprint}) is revoked or expired; " +
+                "nothing was added.";
+            return RedirectToAction(nameof(Settings));
+        }
+
+        if (isRevoked)
+        {
+            TempData[WellKnownTempData.ErrorMessage] =
+                $"That key ({fingerprint}) carries a revocation; refusing to trust it.";
+            return RedirectToAction(nameof(Settings));
+        }
+
+        if (expiresAt is not null && expiresAt <= DateTime.UtcNow)
+        {
+            TempData[WellKnownTempData.ErrorMessage] =
+                $"That key ({fingerprint}) expired on {expiresAt:u}; refusing to trust it.";
             return RedirectToAction(nameof(Settings));
         }
 
@@ -335,14 +408,41 @@ public class SecSwitchController(ISettingsRepository settingsRepository, LedgerS
     public async Task<IActionResult> RemoveTrustedKey(string fingerprint)
     {
         var persisted = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
-        var removed = persisted.TrustedKeys.RemoveAll(
+        var matches = persisted.TrustedKeys.Count(
             k => string.Equals(k.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase));
-        if (removed == 0)
+        if (matches == 0)
         {
             TempData[WellKnownTempData.ErrorMessage] = "No trusted key with that fingerprint.";
             return RedirectToAction(nameof(Settings));
         }
 
+        // Final whole-branch review, Finding I1 (Important): this endpoint had NO floor guard at all -
+        // an admin could remove keys one at a time until the store held fewer than the quorum
+        // threshold (or nothing at all) while SecSwitch stayed enabled, at which point every advisory
+        // becomes Unverified: excluded from notifications AND from the alert banner, so the instance
+        // looks protected and is not. Same invariant TrustStore.TryApplyRotation enforces for a
+        // rotation (working.Count < Math.Max(1, quorumThreshold)), applied here to the live admin
+        // path. Computed against what the store WOULD hold after this removal, not what it holds now.
+        //
+        // Scoped to Enabled deliberately: while SecSwitch is switched off nothing is being protected,
+        // so an admin must still be able to clear out a mistakenly-added key - including the very
+        // first one, which an unconditional floor would make permanently unremovable. Re-enabling then
+        // runs the Settings POST guard above, which refuses to turn SecSwitch back on until the store
+        // is at or above quorum again, so the two guards together leave no window in which an ENABLED
+        // SecSwitch sits below its own quorum.
+        var minimumKeys = Math.Max(1, persisted.QuorumThreshold);
+        if (persisted.Enabled && persisted.TrustedKeys.Count - matches < minimumKeys)
+        {
+            TempData[WellKnownTempData.ErrorMessage] =
+                $"Removing that key would leave {persisted.TrustedKeys.Count - matches} trusted key(s), below " +
+                $"the quorum threshold of {minimumKeys}. Every advisory would then fail verification and " +
+                "SecSwitch would silently stop protecting this instance. Lower the quorum, add another key, " +
+                "or disable SecSwitch first.";
+            return RedirectToAction(nameof(Settings));
+        }
+
+        persisted.TrustedKeys.RemoveAll(
+            k => string.Equals(k.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase));
         await settingsRepository.UpdateSetting(persisted);
         TempData[WellKnownTempData.SuccessMessage] = $"Trusted key {fingerprint} removed.";
         return RedirectToAction(nameof(Settings));

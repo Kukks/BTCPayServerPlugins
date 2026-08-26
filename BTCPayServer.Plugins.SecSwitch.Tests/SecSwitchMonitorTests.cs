@@ -734,12 +734,30 @@ public class SecSwitchMonitorTests
     }
 
     [Fact]
-    public async Task Malformed_json_error_text_is_sanitized_before_reaching_the_ledger_reason()
+    public async Task Parse_error_text_embedding_attacker_content_is_sanitized_before_reaching_the_ledger_reason()
     {
-        // parseError can embed a raw JsonException.Message; sanitized the same way as every other
-        // attacker-influenced string reaching the ledger.
+        // Final whole-branch review, Finding M9: this test used to feed `"{ " + new string('"', 5000)`
+        // and assert only Reason.Length <= 203. That was vacuous - System.Text.Json's reader
+        // exception reports a byte position and never echoes the payload, so its message is short and
+        // control-character-free either way, and the assertion passed identically with the Sanitize
+        // call deleted. AdvisoryParser DOES have a parse-error path that embeds attacker bytes
+        // verbatim: `Unrecognised severity '{severityRaw}'`, where severityRaw is an unbounded string
+        // straight out of the (still unverified) advisory. Feeding an oversized, control-character-
+        // laden severity makes both halves of Sanitize load-bearing - remove the call and Reason is
+        // ~5,000 characters long and carries a raw control character into the persisted ledger row and
+        // the admin audit page.
         var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
-        var junk = Encoding.UTF8.GetBytes("{ " + new string('"', 5000));
+        // The control character goes FIRST, not last, on purpose: appended after 5,000 filler
+        // characters it would be cut off by the length cap alone, and the strip half of Sanitize
+        // would never be exercised. Written as the JSON escape  rather than a literal control
+        // character in this source file, matching ActionExecutor's own reasoning about U+2028/U+2029.
+        var hostileSeverity = "\\u0007" + new string('s', 5000);
+        var json = $$"""
+        {"id":"a1","identifier":"Plug","affectedVersions":">=1.0.0 && <2.0.0","fixedVersion":"2.0.0",
+         "severity":"{{hostileSeverity}}","title":"t","description":"d","references":[],
+         "publishedAt":"2026-08-25T00:00:00Z","revoked":false}
+        """;
+        var junk = Encoding.UTF8.GetBytes(json);
         var settings = Settings(a, b);
         var (monitor, sink, _) = Make(settings);
 
@@ -749,7 +767,10 @@ public class SecSwitchMonitorTests
 
         var entry = Assert.Single(entries);
         Assert.Equal(LedgerStatus.Rejected, entry.Status);
-        Assert.True(entry.Reason.Length <= 203);
+        Assert.Contains("Unrecognised severity", entry.Reason); // the error path that embeds the payload
+        Assert.True(entry.Reason.Length <= 203, $"Reason was {entry.Reason.Length} characters; Sanitize caps it at 200 plus an ellipsis.");
+        Assert.DoesNotContain("", entry.Reason, StringComparison.Ordinal); // stripped, not merely truncated away
+        Assert.Empty(sink.Calls);
     }
 
     [Fact]
@@ -956,5 +977,388 @@ public class SecSwitchMonitorTests
             State(), settings, CancellationToken.None); // must not throw
 
         Assert.Empty(entries);
+    }
+
+    // ================================================================================
+    // Final whole-branch review, Finding C1 (Critical): a FAILED action must never be recorded as
+    // the terminal `Acted`.
+    //
+    // ActionExecutor returned one string for success and failure alike and this class ignored it,
+    // so "Failed to queue disable of X", "Refusing to update: ... is missing or unsafe", and
+    // "Action UpdateCore failed: SSH is not configured" all landed under `Acted`: terminal, so
+    // IsActedAsync latched the advisory out of every future poll AND the content hash was cached so
+    // the fetcher never re-downloaded it, while the bell said "Handled" and the audit page showed a
+    // green "Acted - SecSwitch applied the resulting action automatically". Reachable with no
+    // attacker at all - a core-bundled plugin has no directory under PluginDir for
+    // BtcPayActionSink.TryResolveInstalledDirectory to resolve, so an advisory against one is
+    // applicable, resolves to DisablePlugin, queues nothing, and was filed as handled forever.
+    //
+    // Each test below asserts the full set of consequences, not just the status: NeedsAttention,
+    // an EMPTY ContentHash (so AdvisoryFetcher re-delivers it), IsActedAsync false (so this class
+    // will look again), and a later sweep that actually does re-evaluate and act.
+    // ================================================================================
+
+    /// A sink that resolves nothing and queues nothing - what BtcPayActionSink genuinely does for an
+    /// identifier with no matching installed plugin directory (a core-bundled/system plugin), or an
+    /// ambiguous case-only match. Reports failure by return value, without throwing.
+    sealed class UnresolvableSink : IActionSink
+    {
+        public List<string> Calls { get; } = [];
+        public bool QueueDisable(string identifier) { Calls.Add($"disable-attempt:{identifier}"); return false; }
+        public Task<bool> QueueUpdateAsync(string identifier, string version)
+        { Calls.Add($"update-attempt:{identifier}:{version}"); return Task.FromResult(false); }
+        public Task TriggerCoreUpdateAsync() { Calls.Add("core-update-attempt"); return Task.CompletedTask; }
+        public void StopApplication() => Calls.Add("stop");
+    }
+
+    /// A sink whose core-update path throws the way BtcPayActionSink.TriggerCoreUpdateAsync really
+    /// does when SSH is not configured, or when ConnectAsync cannot reach the host.
+    sealed class SshFailingSink : IActionSink
+    {
+        public List<string> Calls { get; } = [];
+        public bool QueueDisable(string identifier) { Calls.Add($"disable:{identifier}"); return true; }
+        public Task<bool> QueueUpdateAsync(string identifier, string version)
+        { Calls.Add($"update:{identifier}:{version}"); return Task.FromResult(true); }
+        public Task TriggerCoreUpdateAsync() =>
+            throw new InvalidOperationException("SSH is not configured; cannot trigger a core update.");
+        public void StopApplication() => Calls.Add("stop");
+    }
+
+    static SecSwitchMonitor MonitorWith(IActionSink sink, LedgerStore ledger) =>
+        new(new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance),
+            ledger, NullLogger<SecSwitchMonitor>.Instance);
+
+    // An advisory with NO fixedVersion, so PolicyResolver resolves DisablePlugin rather than
+    // UpdatePlugin regardless of PreferUpdateOverDisable.
+    static readonly string NoFixAdvisoryJson = """
+    {"id":"a1","identifier":"Plug","affectedVersions":">=1.0.0 && <2.0.0",
+     "severity":"critical","title":"Bad","description":"d","references":[],
+     "publishedAt":"2026-08-25T00:00:00Z","revoked":false}
+    """;
+
+    // A CORE advisory with a fixedVersion, so PolicyResolver resolves UpdateCore when SSH is usable.
+    static readonly string CoreFixableAdvisoryJson = """
+    {"id":"core1","identifier":"BTCPayServer","affectedVersions":"<2.5.0","fixedVersion":"2.5.0",
+     "severity":"critical","title":"Core bug","description":"d","references":[],
+     "publishedAt":"2026-08-25T00:00:00Z","revoked":false}
+    """;
+
+    [Fact]
+    public async Task Failed_disable_is_recorded_as_needing_attention_and_re_evaluated_later()
+    {
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var payload = Encoding.UTF8.GetBytes(NoFixAdvisoryJson);
+        var settings = Settings(a, b);
+        var ledger = new LedgerStore(new FakeSettingsRepository());
+        var failing = new UnresolvableSink();
+        var fetched = new FetchedAdvisory(
+            "a1", "hash-a1", payload, [a.SignDetached(payload), b.SignDetached(payload)], true);
+
+        var entries = await MonitorWith(failing, ledger)
+            .ProcessAsync([fetched], State(), settings, CancellationToken.None);
+
+        var entry = Assert.Single(entries);
+        Assert.Equal("DisablePlugin", entry.Action); // the action really was resolved and attempted
+        Assert.Contains("disable-attempt:Plug", failing.Calls);
+        Assert.DoesNotContain("stop", failing.Calls); // never stop on the strength of a queue that did not happen
+        Assert.Equal(LedgerStatus.NeedsAttention, entry.Status);
+        Assert.NotEqual(LedgerStatus.Acted, entry.Status);
+        Assert.Equal("", entry.ContentHash); // withheld, so AdvisoryFetcher re-delivers it next poll
+        Assert.False(await ledger.IsActedAsync("a1")); // not latched out of future polls
+        Assert.Contains("Failed to queue disable", entry.Reason);
+
+        // The whole point of the non-terminal status: a later sweep must genuinely re-evaluate, and
+        // act, once the underlying cause is gone.
+        var working = new RecordingSink();
+        var second = await MonitorWith(working, ledger)
+            .ProcessAsync([fetched], State(), settings, CancellationToken.None);
+
+        Assert.Equal(LedgerStatus.Acted, Assert.Single(second).Status);
+        Assert.Equal(["disable:Plug", "stop"], working.Calls);
+        Assert.True(await ledger.IsActedAsync("a1"));
+    }
+
+    [Fact]
+    public async Task Failed_update_is_recorded_as_needing_attention_and_re_evaluated_later()
+    {
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var payload = Payload; // has fixedVersion 2.0.0 -> UpdatePlugin
+        var settings = Settings(a, b);
+        var ledger = new LedgerStore(new FakeSettingsRepository());
+        var failing = new UnresolvableSink();
+        var fetched = new FetchedAdvisory(
+            "a1", "hash-a1", payload, [a.SignDetached(payload), b.SignDetached(payload)], true);
+
+        var entries = await MonitorWith(failing, ledger)
+            .ProcessAsync([fetched], State(), settings, CancellationToken.None);
+
+        var entry = Assert.Single(entries);
+        Assert.Equal("UpdatePlugin", entry.Action);
+        Assert.Contains("update-attempt:Plug:2.0.0", failing.Calls);
+        Assert.DoesNotContain("stop", failing.Calls);
+        Assert.Equal(LedgerStatus.NeedsAttention, entry.Status);
+        Assert.Equal("", entry.ContentHash);
+        Assert.False(await ledger.IsActedAsync("a1"));
+        Assert.Contains("Failed to queue update", entry.Reason);
+
+        var working = new RecordingSink();
+        var second = await MonitorWith(working, ledger)
+            .ProcessAsync([fetched], State(), settings, CancellationToken.None);
+
+        Assert.Equal(LedgerStatus.Acted, Assert.Single(second).Status);
+        Assert.Contains("update:Plug:2.0.0", working.Calls);
+        Assert.True(await ledger.IsActedAsync("a1"));
+    }
+
+    [Fact]
+    public async Task Failed_core_update_is_recorded_as_needing_attention_and_re_evaluated_later()
+    {
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var payload = Encoding.UTF8.GetBytes(CoreFixableAdvisoryJson);
+        var settings = Settings(a, b);
+        var ledger = new LedgerStore(new FakeSettingsRepository());
+        var failing = new SshFailingSink();
+        // CanUseSsh true -> UpdateCore. The sink then fails to connect, exactly as a rotated key or
+        // an unreachable host would at runtime.
+        var sshState = new InstanceState(
+            new Dictionary<string, Version>(), Version.Parse("2.4.2"), CanUseSsh: true);
+        var fetched = new FetchedAdvisory(
+            "core1", "hash-core1", payload, [a.SignDetached(payload), b.SignDetached(payload)], true);
+
+        var entries = await MonitorWith(failing, ledger)
+            .ProcessAsync([fetched], sshState, settings, CancellationToken.None);
+
+        var entry = Assert.Single(entries);
+        Assert.Equal("UpdateCore", entry.Action);
+        Assert.Equal(LedgerStatus.NeedsAttention, entry.Status);
+        Assert.NotEqual(LedgerStatus.Acted, entry.Status);
+        Assert.Equal("", entry.ContentHash);
+        Assert.False(await ledger.IsActedAsync("core1"));
+        Assert.Contains("failed", entry.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("stop", failing.Calls); // a failed core update must not stop the server either
+
+        var working = new RecordingSink();
+        var second = await MonitorWith(working, ledger)
+            .ProcessAsync([fetched], sshState, settings, CancellationToken.None);
+
+        Assert.Equal(LedgerStatus.Acted, Assert.Single(second).Status);
+        Assert.Contains("core-update", working.Calls);
+        Assert.True(await ledger.IsActedAsync("core1"));
+    }
+
+    [Fact]
+    public async Task Refused_unsafe_identifier_is_recorded_as_needing_attention_not_acted()
+    {
+        // ActionExecutor refuses a traversal-shaped identifier before any sink call at all. That is
+        // still a resolved-but-unapplied action, so it belongs in the same non-terminal bucket -
+        // otherwise a hostile identifier is the cheapest possible way to get an advisory permanently
+        // filed as handled.
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var json = """
+        {"id":"a1","identifier":"../evil","affectedVersions":">=1.0.0 && <2.0.0","fixedVersion":"2.0.0",
+         "severity":"critical","title":"Bad","description":"d","references":[],
+         "publishedAt":"2026-08-25T00:00:00Z","revoked":false}
+        """;
+        var payload = Encoding.UTF8.GetBytes(json);
+        var settings = Settings(a, b);
+        var ledger = new LedgerStore(new FakeSettingsRepository());
+        var sink = new RecordingSink();
+        var state = new InstanceState(
+            new Dictionary<string, Version> { ["../evil"] = Version.Parse("1.5.0") },
+            Version.Parse("2.4.2"), CanUseSsh: false);
+
+        var entries = await MonitorWith(sink, ledger)
+            .ProcessAsync(
+                [new FetchedAdvisory("a1", "hash-a1", payload, [a.SignDetached(payload), b.SignDetached(payload)], true)],
+                state, settings, CancellationToken.None);
+
+        var entry = Assert.Single(entries);
+        Assert.Equal(LedgerStatus.NeedsAttention, entry.Status);
+        Assert.Empty(sink.Calls);
+        Assert.Equal("", entry.ContentHash);
+        Assert.False(await ledger.IsActedAsync("a1"));
+    }
+
+    // ================================================================================
+    // Final whole-branch review, Finding C2 (Critical): the ledger identity and the action latch must
+    // come from the SIGNED advisory, never from the unsigned index.json.
+    //
+    // FetchedAdvisory.Id is parsed from index.json - the one artefact in the feed carrying no
+    // signature - and it used to key the pre-parse IsActedAsync check AND the ledger row, while the
+    // signed Advisory.Id was never compared against it. An attacker who can write index.json and
+    // holds NO signing keys therefore got a silent drop and a crash loop for free. Both directions
+    // are pinned below.
+    // ================================================================================
+
+    // A genuine, correctly-signed CORE advisory with no fix: resolves to ShutdownCore. Signed id
+    // "core1".
+    static readonly string CoreUnfixableAdvisoryJson = """
+    {"id":"core1","identifier":"BTCPayServer","affectedVersions":"<2.5.0",
+     "severity":"critical","title":"Unfixable core bug","description":"d","references":[],
+     "publishedAt":"2026-08-25T00:00:00Z","revoked":false}
+    """;
+
+    [Fact]
+    public async Task Forged_index_id_cannot_silently_drop_a_genuine_new_advisory()
+    {
+        // ATTACK 1 (silent drop): rewrite one index `id` so a genuine, correctly-signed NEW advisory
+        // carries the id of something already terminal. Pre-fix, IsActedAsync(item.Id) fired before
+        // parse and before verification, so the advisory vanished entirely - no ledger row, no log,
+        // no notification, nothing for an admin to ever see.
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var payload = Payload; // genuinely signed, and its OWN id is "a1"
+        var settings = Settings(a, b);
+        var ledger = new LedgerStore(new FakeSettingsRepository());
+        var sink = new RecordingSink();
+        await ledger.RecordAsync(new LedgerEntry
+        {
+            AdvisoryId = "old-terminal", Status = LedgerStatus.Acted, ContentHash = "hash-old",
+            Reason = "the original, genuine outcome", RecordedAt = DateTimeOffset.UtcNow
+        });
+
+        var entries = await MonitorWith(sink, ledger).ProcessAsync(
+            [new FetchedAdvisory("old-terminal", "hash-forged", payload,
+                [a.SignDetached(payload), b.SignDetached(payload)], true)],
+            State(), settings, CancellationToken.None);
+
+        // Not dropped: a row exists, and it is filed under the SIGNED id, not the index's.
+        var entry = Assert.Single(entries);
+        Assert.Equal("a1", entry.AdvisoryId);
+        Assert.Equal(LedgerStatus.NeedsAttention, entry.Status);
+        Assert.True(SecSwitchPeriodicTask.IsNotifiable(entry.Status)); // the admin is actually told
+        Assert.Equal("", entry.ContentHash); // non-terminal -> re-fetched, never cached away
+        Assert.False(await ledger.IsActedAsync("a1"));
+        Assert.Empty(sink.Calls); // and nothing was acted on off the back of a lying index
+
+        // The unrelated terminal row the forged id pointed at is untouched - a non-terminal write
+        // over it would have un-latched it and handed the attacker a re-action loop.
+        var state = await ledger.GetAsync();
+        Assert.Equal(LedgerStatus.Acted, state.Entries["old-terminal"].Status);
+        Assert.Equal("hash-old", state.Entries["old-terminal"].ContentHash);
+        Assert.Equal("the original, genuine outcome", state.Entries["old-terminal"].Reason);
+        Assert.True(await ledger.IsActedAsync("old-terminal"));
+    }
+
+    [Fact]
+    public async Task Rotating_index_ids_cannot_re_run_a_shutdown_on_every_poll()
+    {
+        // ATTACK 2 (crash loop on a live payment server): rotate `id` AND `contentHash` on every
+        // publish while `path` keeps pointing at a genuine, correctly-signed, unfixable-core
+        // advisory. The fetcher's hash dedup never fires (the hash is always new) and the id-keyed
+        // latch never fires (the id is always new), so ShutdownCore ran every single poll. This is
+        // the exact scenario LedgerStore's own doc comment names as reason #1 the ledger exists.
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var payload = Encoding.UTF8.GetBytes(CoreUnfixableAdvisoryJson); // signed id is "core1"
+        var settings = Settings(a, b);
+        var ledger = new LedgerStore(new FakeSettingsRepository());
+        var sink = new RecordingSink();
+        var monitor = MonitorWith(sink, ledger);
+        var noSshState = new InstanceState(
+            new Dictionary<string, Version>(), Version.Parse("2.4.2"), CanUseSsh: false);
+
+        for (var poll = 0; poll < 5; poll++)
+        {
+            var entries = await monitor.ProcessAsync(
+                [new FetchedAdvisory($"rotated-{poll}", $"hash-{poll}", payload,
+                    [a.SignDetached(payload), b.SignDetached(payload)], true)],
+                noSshState, settings, CancellationToken.None);
+
+            Assert.Equal(LedgerStatus.NeedsAttention, Assert.Single(entries).Status);
+        }
+
+        Assert.Empty(sink.Calls); // five polls, zero shutdowns - the loop never starts
+        // One ledger row across all five polls, keyed by the signed id: the attacker's rotating ids
+        // cannot inflate the single settings row either.
+        var state = await ledger.GetAsync();
+        var onlyKey = Assert.Single(state.Entries.Keys);
+        Assert.Equal("core1", onlyKey);
+    }
+
+    [Fact]
+    public async Task Honest_index_id_still_acts_once_and_is_then_latched_by_the_signed_id()
+    {
+        // The control for the two attacks above: with a truthful index the advisory is acted on
+        // exactly once, and a later poll with a DIFFERENT content hash (so the fetcher re-delivers
+        // it) is turned away by the signed-id latch rather than re-running the shutdown.
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var payload = Encoding.UTF8.GetBytes(CoreUnfixableAdvisoryJson);
+        var settings = Settings(a, b);
+        var ledger = new LedgerStore(new FakeSettingsRepository());
+        var sink = new RecordingSink();
+        var monitor = MonitorWith(sink, ledger);
+        var noSshState = new InstanceState(
+            new Dictionary<string, Version>(), Version.Parse("2.4.2"), CanUseSsh: false);
+
+        var first = await monitor.ProcessAsync(
+            [new FetchedAdvisory("core1", "hash-1", payload,
+                [a.SignDetached(payload), b.SignDetached(payload)], true)],
+            noSshState, settings, CancellationToken.None);
+        Assert.Equal(LedgerStatus.Acted, Assert.Single(first).Status);
+        Assert.Equal(["stop"], sink.Calls);
+
+        var second = await monitor.ProcessAsync(
+            [new FetchedAdvisory("core1", "hash-2", payload,
+                [a.SignDetached(payload), b.SignDetached(payload)], true)],
+            noSshState, settings, CancellationToken.None);
+
+        Assert.Empty(second);
+        Assert.Equal(["stop"], sink.Calls); // still exactly one stop, not two
+    }
+
+    [Fact]
+    public async Task Index_id_differing_only_by_case_is_accepted_as_a_match()
+    {
+        // Every other identifier comparison in this plugin is OrdinalIgnoreCase (TrustStore,
+        // PolicyResolver, AdvisoryVerifier, AdvisoryApplicability, LedgerStore) - the id-match check
+        // must be too, or an honest feed that merely differs in casing would be permanently refused.
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var payload = Payload; // signed id "a1"
+        var settings = Settings(a, b);
+        var ledger = new LedgerStore(new FakeSettingsRepository());
+        var sink = new RecordingSink();
+
+        var entries = await MonitorWith(sink, ledger).ProcessAsync(
+            [new FetchedAdvisory("A1", "hash-a1", payload,
+                [a.SignDetached(payload), b.SignDetached(payload)], true)],
+            State(), settings, CancellationToken.None);
+
+        var entry = Assert.Single(entries);
+        Assert.Equal(LedgerStatus.Acted, entry.Status);
+        Assert.Equal("a1", entry.AdvisoryId); // normalised to the signed document's own casing
+        Assert.Contains("update:Plug:2.0.0", sink.Calls);
+    }
+
+    [Fact]
+    public async Task A_terminal_ledger_record_is_never_downgraded_by_a_later_parse_failure()
+    {
+        // The protection the pre-parse latch used to provide implicitly, now stated explicitly (see
+        // SecSwitchMonitor.RecordAsync). With the latch moved after verification, a parse or quorum
+        // failure is REACHED for an id that is already terminal - and overwriting an Acted
+        // ShutdownCore row with a non-terminal "Rejected" would clear both halves of the action-loop
+        // guard at once (IsActedAsync goes false, and the content hash is withheld so the advisory is
+        // re-delivered), turning one poll of malformed bytes from a hostile mirror into a repeatable
+        // stop-the-server loop.
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var junk = Encoding.UTF8.GetBytes("{ not json");
+        var settings = Settings(a, b);
+        var ledger = new LedgerStore(new FakeSettingsRepository());
+        var sink = new RecordingSink();
+        await ledger.RecordAsync(new LedgerEntry
+        {
+            AdvisoryId = "a1", Status = LedgerStatus.Acted, ContentHash = "hash-a1",
+            Reason = "Stopped BTCPay Server due to an unfixable core advisory.",
+            RecordedAt = DateTimeOffset.UtcNow
+        });
+
+        var entries = await MonitorWith(sink, ledger).ProcessAsync(
+            [new FetchedAdvisory("a1", "hash-forged", junk, [a.SignDetached(junk), b.SignDetached(junk)], true)],
+            State(), settings, CancellationToken.None);
+
+        Assert.Empty(entries); // nothing recorded - the existing final record stands
+        var state = await ledger.GetAsync();
+        Assert.Equal(LedgerStatus.Acted, state.Entries["a1"].Status);
+        Assert.Equal("hash-a1", state.Entries["a1"].ContentHash);
+        Assert.True(await ledger.IsActedAsync("a1"));
+        Assert.Empty(sink.Calls);
     }
 }

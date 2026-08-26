@@ -181,11 +181,40 @@ public sealed class SecSwitchPeriodicTask(
             if (settings is not { Enabled: true })
                 return;
 
+            // Final whole-branch review, Finding I2 (Important): SecSwitchController now validates
+            // FeedUrl on save, but a settings row written before that validation existed - or by any
+            // other route - can still hold an unusable value, and AdvisoryFetcher's own refusal is
+            // silent by design (it fails closed to "nothing fetched", never throws, and has no
+            // logger). Without this, an enabled SecSwitch pointed at an http:// or unparseable feed
+            // produces no advisories, no error, and no log line, forever - the exact "looks healthy,
+            // protects nothing" state this plugin must never be in. Checked against
+            // AdvisoryFetcher's own predicate so the two can never disagree.
+            if (!AdvisoryFetcher.IsSupportedFeedUrl(settings.FeedUrl))
+            {
+                logger.LogError(
+                    "SecSwitch is ENABLED but its advisory feed URL is not usable ({FeedUrl}): it must be an " +
+                    "absolute https:// URL. No advisory can be fetched, and no advisory can be acted on, until " +
+                    "this is corrected on the SecSwitch settings page.",
+                    ActionExecutor.Sanitize(settings.FeedUrl));
+                return;
+            }
+
             var ledgerState = await ledger.GetAsync();
             var knownContentHashes = BuildKnownContentHashes(ledgerState);
+            // Snapshotted BEFORE ProcessAsync overwrites these rows - see NotifyAsync (Finding I4).
+            var priorStates = BuildPriorNotificationStates(ledgerState);
 
             var fetcher = new AdvisoryFetcher(httpClientFactory.CreateClient(HttpClientName));
-            var fetched = await fetcher.FetchAsync(settings.FeedUrl, knownContentHashes, cancellationToken);
+            var fetchResult = await fetcher.FetchAsync(
+                settings.FeedUrl, knownContentHashes, ledgerState.FeedIndexCursor, cancellationToken);
+
+            // Finding C3: persisted BEFORE the "nothing fetched" early return below, not after. A
+            // poll that downloads nothing can still have consumed its whole request budget walking a
+            // wall of failing entries - that is exactly the case the cursor exists for, and dropping
+            // it here would leave the next poll re-walking the identical prefix, which is the bug.
+            await ledger.RecordFeedIndexCursorAsync(fetchResult.NextCursor);
+
+            var fetched = fetchResult.Advisories;
             if (fetched.Count == 0)
                 return;
 
@@ -208,7 +237,7 @@ public sealed class SecSwitchPeriodicTask(
                 sshVerificationPending: sshConfigured && !sshState.CanUseSSH);
             var recorded = await monitor.ProcessAsync(fetched, state, settings, cancellationToken);
 
-            await NotifyAsync(recorded);
+            await NotifyAsync(recorded, priorStates);
 
             logger.LogInformation("SecSwitch processed {Count} new advisory record(s) this poll", recorded.Count);
         }
@@ -251,12 +280,18 @@ public sealed class SecSwitchPeriodicTask(
     /// has the full reasoning for why NeedsAttention joined this set. One notification failing to send
     /// must not stop the others in the same batch, matching the per-item posture used throughout this
     /// plugin.
+    ///
+    /// Final whole-branch review, Finding I4 (Important): notifiable is necessary but no longer
+    /// sufficient - <see cref="ShouldNotify"/> also requires the entry's state to be new or changed
+    /// since <paramref name="priorStates"/> was snapshotted, so a stuck advisory announces itself once
+    /// rather than every hour forever. See that method's own doc comment.
     /// </summary>
-    async Task NotifyAsync(IReadOnlyList<LedgerEntry> recorded)
+    async Task NotifyAsync(
+        IReadOnlyList<LedgerEntry> recorded, IReadOnlyDictionary<string, NotifiedState> priorStates)
     {
         foreach (var entry in recorded)
         {
-            if (!IsNotifiable(entry.Status))
+            if (!ShouldNotify(entry, priorStates))
                 continue;
 
             try
@@ -267,13 +302,17 @@ public sealed class SecSwitchPeriodicTask(
                     Title = entry.Title,
                     Severity = entry.Severity,
                     Outcome = entry.Reason,
-                    // Acted is the only status here that was genuinely "Handled" - NeedsDecision and
+                    // Acted is the only status here that is genuinely "Handled" - NeedsDecision and
                     // NeedsAttention both mean an admin needs to look at this, just for different
                     // reasons (an action is computed and held open, vs. SecSwitch could not tell
-                    // whether/how to act at all) - Outcome (entry.Reason) already carries the specific
-                    // distinguishing text (PolicyResolver.SshVerificationPendingPhrase,
-                    // AdvisoryApplicability.IndeterminateVersionPhrase, or a genuine manual-mode/pin/
-                    // severity-gate hold), so the boolean here only needs to pick the right prefix.
+                    // whether/how to act at all, or tried and failed) - Outcome (entry.Reason) already
+                    // carries the specific distinguishing text (PolicyResolver.SshVerificationPendingPhrase,
+                    // AdvisoryApplicability.IndeterminateVersionPhrase, an ActionExecutor refusal or
+                    // failure message, or a genuine manual-mode/pin/severity-gate hold), so the boolean
+                    // here only needs to pick the right prefix. Finding C1 is what makes the "Acted
+                    // means handled" half of that true rather than aspirational: a failed action is now
+                    // recorded as NeedsAttention, so it takes the "Action required" prefix here instead
+                    // of being announced as "Handled".
                     NeedsDecision = entry.Status is LedgerStatus.NeedsDecision or LedgerStatus.NeedsAttention
                 });
             }
@@ -315,6 +354,64 @@ public sealed class SecSwitchPeriodicTask(
     /// </summary>
     internal static bool IsNotifiable(string status) =>
         status is LedgerStatus.Acted or LedgerStatus.NeedsDecision or LedgerStatus.NeedsAttention;
+
+    /// <summary>
+    /// The <see cref="LedgerEntry.Status"/>/<see cref="LedgerEntry.Reason"/> pair an advisory held
+    /// BEFORE this poll re-recorded it - the only two fields
+    /// <see cref="ShouldNotify"/> compares. A snapshot by value, deliberately: it is taken from the
+    /// same <see cref="SecSwitchLedger"/> instance <see cref="LedgerStore.RecordAsync"/> may later
+    /// mutate in place, so holding the <see cref="LedgerEntry"/> objects themselves would compare an
+    /// entry against its own updated self and never report a change.
+    /// </summary>
+    internal readonly record struct NotifiedState(string Status, string Reason);
+
+    /// <summary>
+    /// Snapshots every ledger entry's notification-relevant state, keyed by advisory id
+    /// (OrdinalIgnoreCase, matching <see cref="LedgerStore"/>'s own convention). Must be called
+    /// BEFORE <see cref="SecSwitchMonitor.ProcessAsync"/> runs - afterwards the prior state is gone.
+    /// </summary>
+    internal static Dictionary<string, NotifiedState> BuildPriorNotificationStates(SecSwitchLedger ledgerState)
+    {
+        var snapshot = new Dictionary<string, NotifiedState>(StringComparer.OrdinalIgnoreCase);
+        if (ledgerState?.Entries is null)
+            return snapshot;
+
+        foreach (var pair in ledgerState.Entries)
+            snapshot[pair.Key] = new NotifiedState(pair.Value?.Status ?? "", pair.Value?.Reason ?? "");
+        return snapshot;
+    }
+
+    /// <summary>
+    /// Final whole-branch review, Finding I4 (Important): true only when
+    /// <paramref name="entry"/> is notifiable AND its state is actually NEW - either the advisory had
+    /// no ledger row before this poll, or its status or reason changed. A notifiable-but-non-terminal
+    /// status (in practice <see cref="LedgerStatus.NeedsAttention"/>) is deliberately NOT latched by
+    /// <see cref="LedgerStore.IsActedAsync"/>, so it is re-evaluated and re-recorded on every poll -
+    /// and the causes that produce it can persist indefinitely (an SSH probe that never succeeds, an
+    /// installed version that stays indeterminate, an action that keeps failing to queue). Before
+    /// this check, each of those sent a fresh notification EVERY hour, and core's
+    /// <c>NotificationSender</c> inserts one row per admin per call with no dedupe of its own: an
+    /// unbounded notification table plus a bell an admin quickly learns to ignore, degrading the very
+    /// signal the NeedsAttention notification was added to provide.
+    ///
+    /// Only the notification is suppressed. The entry is still recorded on every poll, so the audit
+    /// log and the alert banner (which read the ledger directly, not this method) keep showing it for
+    /// as long as it persists - a stuck advisory stays visible, it just stops re-announcing itself.
+    /// Reason is compared ordinally and in full: a changed reason means something about the situation
+    /// genuinely moved (e.g. an indeterminate version became an SSH deferral), which is worth
+    /// re-announcing. That is also why the id-mismatch entry's reason is deliberately free of the
+    /// attacker-rotatable index id - see SecSwitchMonitor's mismatch branch.
+    /// </summary>
+    internal static bool ShouldNotify(LedgerEntry entry, IReadOnlyDictionary<string, NotifiedState> priorStates)
+    {
+        if (entry is null || !IsNotifiable(entry.Status))
+            return false;
+        if (priorStates is null || !priorStates.TryGetValue(entry.AdvisoryId ?? "", out var prior))
+            return true; // Never recorded before this poll - always announce it.
+
+        return !string.Equals(prior.Status, entry.Status, StringComparison.OrdinalIgnoreCase) ||
+               !string.Equals(prior.Reason, entry.Reason ?? "", StringComparison.Ordinal);
+    }
 
     /// <summary>
     /// Maps installed plugins and the running core version into the <see cref="InstanceState"/>
