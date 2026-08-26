@@ -169,6 +169,7 @@ public class ActionExecutorTests
     [InlineData("foo?bar")]
     [InlineData("foo\u2028bar")]
     [InlineData("foo\u2029bar")]
+    [InlineData("Plug\n")] // .NET regex '$' (without Multiline) matches before a trailing '\n'; \A/\z must not.
     public async Task Path_traversal_or_separator_identifiers_are_refused_not_disabled(string hostileIdentifier)
     {
         var (exec, sink) = Make();
@@ -226,7 +227,9 @@ public class ActionExecutorTests
         var exec = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
         var outcome = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, Adv());
         Assert.DoesNotContain("stop", sink.Calls);
-        Assert.Contains("Plug", outcome);
+        // "Plug" alone would also match the success message ("Queued disable of Plug; ..."), so this
+        // asserts on wording only the refusal path produces.
+        Assert.Contains("Failed to queue", outcome);
     }
 
     [Fact]
@@ -236,7 +239,7 @@ public class ActionExecutorTests
         var exec = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
         var outcome = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv());
         Assert.DoesNotContain("stop", sink.Calls);
-        Assert.Contains("Plug", outcome);
+        Assert.Contains("Failed to queue", outcome);
     }
 
     [Fact]
@@ -301,7 +304,7 @@ public class BtcPayActionSinkResolutionTests
             Directory.CreateDirectory(Path.Combine(dir.FullName, "BTCPayServer.Plugins.Prism"));
 
             var resolved = BtcPayActionSink.TryResolveInstalledDirectory(
-                dir.FullName, "btcpayserver.plugins.prism", out var name);
+                dir.FullName, "btcpayserver.plugins.prism", out var name, out _);
 
             Assert.True(resolved);
             Assert.Equal("BTCPayServer.Plugins.Prism", name);
@@ -321,7 +324,7 @@ public class BtcPayActionSinkResolutionTests
             Directory.CreateDirectory(Path.Combine(dir.FullName, "BTCPayServer.Plugins.Prism"));
 
             var resolved = BtcPayActionSink.TryResolveInstalledDirectory(
-                dir.FullName, "BTCPayServer.Plugins.Prism", out var name);
+                dir.FullName, "BTCPayServer.Plugins.Prism", out var name, out _);
 
             Assert.True(resolved);
             Assert.Equal("BTCPayServer.Plugins.Prism", name);
@@ -341,7 +344,7 @@ public class BtcPayActionSinkResolutionTests
             Directory.CreateDirectory(Path.Combine(dir.FullName, "BTCPayServer.Plugins.Prism"));
 
             var resolved = BtcPayActionSink.TryResolveInstalledDirectory(
-                dir.FullName, "SomeOtherPlugin", out _);
+                dir.FullName, "SomeOtherPlugin", out _, out _);
 
             Assert.False(resolved);
         }
@@ -356,8 +359,71 @@ public class BtcPayActionSinkResolutionTests
     {
         var missing = Path.Combine(Path.GetTempPath(), "secswitch-does-not-exist-" + Guid.NewGuid());
 
-        var resolved = BtcPayActionSink.TryResolveInstalledDirectory(missing, "AnyPlugin", out _);
+        var resolved = BtcPayActionSink.TryResolveInstalledDirectory(missing, "AnyPlugin", out _, out _);
 
         Assert.False(resolved);
+    }
+
+    // --- Review round 2, Finding B: enumeration order is not a safe way to pick between two
+    // directories that differ only by case - a case-sensitive filesystem (production Linux) can
+    // genuinely have both, and the update path itself can create such a sibling (PluginManager's
+    // "install" replay has no Directory.Exists gate). An exact match must always win, and with no
+    // exact match, two-or-more case-insensitive candidates must refuse to guess.
+    //
+    // These exercise TryResolveAmongCandidates directly, with an explicit list of names, rather than
+    // creating two real directories differing only by case: this codebase's own dev/CI environment is
+    // Windows, where NTFS is case-insensitive by default, so two such directories cannot be reliably
+    // created side by side on a real temp directory here even though they can - and do - coexist on
+    // the case-sensitive Linux filesystems SecSwitch actually targets in production. ---
+
+    [Fact]
+    public void Exact_match_is_preferred_when_a_case_variant_sibling_exists()
+    {
+        string[] candidates = ["btcpayserver.plugins.prism", "BTCPayServer.Plugins.Prism"];
+
+        var resolved = BtcPayActionSink.TryResolveAmongCandidates(
+            candidates, "BTCPayServer.Plugins.Prism", out var name, out var ambiguous);
+
+        Assert.True(resolved);
+        Assert.Equal("BTCPayServer.Plugins.Prism", name);
+        Assert.Empty(ambiguous);
+    }
+
+    [Fact]
+    public void Ambiguous_case_variants_with_no_exact_match_fail_to_resolve()
+    {
+        string[] candidates = ["BTCPayServer.Plugins.Prism", "btcpayserver.plugins.prism"];
+
+        // Matches neither candidate exactly, but both case-insensitively.
+        var resolved = BtcPayActionSink.TryResolveAmongCandidates(
+            candidates, "BTCPAYSERVER.PLUGINS.PRISM", out _, out var ambiguous);
+
+        Assert.False(resolved);
+        Assert.Equal(2, ambiguous.Count);
+        Assert.Contains("BTCPayServer.Plugins.Prism", ambiguous);
+        Assert.Contains("btcpayserver.plugins.prism", ambiguous);
+    }
+
+    [Fact]
+    public void Single_case_insensitive_match_still_resolves_via_the_disk_backed_overload()
+    {
+        // Confirms TryResolveInstalledDirectory's own filesystem plumbing (not just the pure
+        // matching rule) still resolves the ordinary, non-ambiguous case correctly.
+        var dir = Directory.CreateTempSubdirectory("secswitch-test-");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(dir.FullName, "BTCPayServer.Plugins.Prism"));
+
+            var resolved = BtcPayActionSink.TryResolveInstalledDirectory(
+                dir.FullName, "btcpayserver.plugins.prism", out var name, out var ambiguous);
+
+            Assert.True(resolved);
+            Assert.Equal("BTCPayServer.Plugins.Prism", name);
+            Assert.Empty(ambiguous);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
     }
 }

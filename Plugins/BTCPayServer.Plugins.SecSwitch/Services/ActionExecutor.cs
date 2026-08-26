@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -10,7 +11,6 @@ using BTCPayServer.Plugins.SecSwitch.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Renci.SshNet.Common;
 
 namespace BTCPayServer.Plugins.SecSwitch.Services;
 
@@ -19,9 +19,9 @@ namespace BTCPayServer.Plugins.SecSwitch.Services;
 /// <see cref="ActionExecutor"/> can be tested without disabling a real plugin or stopping the
 /// process - <see cref="BtcPayActionSink"/> is the only implementation that touches BTCPayServer.
 /// <see cref="QueueDisable"/> and <see cref="QueueUpdateAsync"/> report whether anything was
-/// actually queued: the identifier they are given may not resolve to anything the sink can act on
-/// (see <see cref="BtcPayActionSink"/>'s remarks), and a caller must not stop the application on the
-/// strength of a queue that never happened.
+/// actually queued: the identifier they are given may not resolve to anything the sink can act on,
+/// or may resolve ambiguously (see <see cref="BtcPayActionSink"/>'s remarks), and a caller must not
+/// stop the application on the strength of a queue that never happened.
 /// </summary>
 public interface IActionSink
 {
@@ -47,7 +47,12 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
     // question mark, Windows reserved device names, trailing dots/spaces, and the Unicode line and
     // paragraph separators U+2028/U+2029 (NOT in the Unicode "control" category, so char.IsControl
     // alone does not catch them). The length cap matches what any real catalog identifier looks like.
-    private static readonly Regex SafeIdentifierPattern = new("^[A-Za-z0-9._-]{1,128}$", RegexOptions.Compiled);
+    //
+    // Anchored with \A/\z, not ^/$: in .NET regex (without RegexOptions.Multiline), $ matches either
+    // at the end of the string OR immediately before a single trailing '\n' - confirmed empirically
+    // ("Plug\n" matches "^...{1,128}$"). \A and \z both mean "absolute start/end of the string, no
+    // exceptions", closing that gap.
+    private static readonly Regex SafeIdentifierPattern = new(@"\A[A-Za-z0-9._-]{1,128}\z", RegexOptions.Compiled);
 
     public async Task<string> ExecuteAsync(SecSwitchAction action, Advisory? advisory)
     {
@@ -70,9 +75,9 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
                     if (!IsSafeIdentifier(advisory.Identifier))
                         return $"Refusing to update: plugin identifier '{Sanitize(advisory.Identifier)}' is missing or unsafe.";
                     if (!await sink.QueueUpdateAsync(advisory.Identifier, advisory.FixedVersion))
-                        return $"Failed to queue update of {advisory.Identifier}: no installed plugin matches that identifier.";
+                        return $"Failed to queue update of {Sanitize(advisory.Identifier)}: no installed plugin matches that identifier unambiguously.";
                     sink.StopApplication();
-                    return $"Queued update of {advisory.Identifier} to {advisory.FixedVersion}; stopping for restart.";
+                    return $"Queued update of {Sanitize(advisory.Identifier)} to {advisory.FixedVersion}; stopping for restart.";
 
                 case SecSwitchAction.UpdateCore:
                     // btcpay-update.sh brings the stack down and up itself; do not also stop here,
@@ -103,9 +108,9 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
         if (!IsSafeIdentifier(advisory?.Identifier))
             return $"Refusing to disable: plugin identifier '{Sanitize(advisory?.Identifier)}' is missing or unsafe.";
         if (!sink.QueueDisable(advisory!.Identifier))
-            return $"Failed to queue disable of {advisory.Identifier}: no installed plugin matches that identifier.";
+            return $"Failed to queue disable of {Sanitize(advisory.Identifier)}: no installed plugin matches that identifier unambiguously.";
         sink.StopApplication();
-        return $"Queued disable of {advisory.Identifier}; stopping for restart.";
+        return $"Queued disable of {Sanitize(advisory.Identifier)}; stopping for restart.";
     }
 
     // A plugin identifier ultimately feeds a file path inside BtcPayActionSink, and neither primitive
@@ -125,11 +130,13 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
         return !identifier.Contains("..", StringComparison.Ordinal);
     }
 
-    // Outcome strings and log messages sometimes carry a *rejected* identifier, or an exception's own
-    // Message, verbatim - both are untrusted at that point (that is precisely why the identifier was
-    // rejected), and an SSH exception's Message can carry host/connection detail. Cap the length and
-    // drop control characters (plus the two Unicode separators char.IsControl misses - see
-    // SafeIdentifierPattern's remarks) before either reaches the admin UI, the ledger, or a log sink.
+    // Outcome strings and log messages sometimes carry an identifier or an exception's own Message
+    // verbatim. Applied even to identifiers that already passed IsSafeIdentifier - an upstream guard
+    // is not a substitute for sanitizing what we actually emit, and a *rejected* identifier is by
+    // definition not clean to begin with. An SSH exception's Message can also carry host/connection
+    // detail. Cap the length and drop control characters (plus the two Unicode separators
+    // char.IsControl misses - see SafeIdentifierPattern's remarks) before either reaches the admin
+    // UI, the ledger, or a log sink.
     // The two rejected characters below are written as \u escapes, not literal characters, on
     // purpose: U+2028/U+2029 are visually indistinguishable from a plain space in most editors and a
     // literal copy of either is easy to silently corrupt into something else entirely.
@@ -160,6 +167,16 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
 /// same-plugin-different-casing advisory pass applicability, get queued, and stop the server - then
 /// silently no-op on replay because the directory "doesn't exist" under that casing, leaving the
 /// vulnerable plugin loaded while the outcome string falsely claims it was disabled.
+///
+/// Resolution prefers an exact (ordinal) match, and refuses to guess between two or more
+/// differently-cased directories that all match case-insensitively but not exactly: on a
+/// case-sensitive filesystem (production Linux) two such directories can coexist - the update path
+/// itself can create one, since PluginManager's "install" replay (PluginManager.cs:464-482) has no
+/// Directory.Exists gate, only a File.Exists check on the downloaded .btcpay file, so extracting an
+/// update queued under the wrong casing creates a same-plugin sibling rather than overwriting the
+/// original. Directory.EnumerateDirectories's enumeration order is not guaranteed, so picking
+/// arbitrarily between two such siblings could disable/update the wrong one while leaving the real,
+/// vulnerable plugin directory untouched.
 /// </summary>
 public sealed class BtcPayActionSink(
     PluginService pluginService,
@@ -171,11 +188,9 @@ public sealed class BtcPayActionSink(
 {
     public bool QueueDisable(string identifier)
     {
-        if (!TryResolveInstalledDirectory(dataDirectories.Value.PluginDir, identifier, out var resolved))
+        if (!TryResolveInstalledDirectory(dataDirectories.Value.PluginDir, identifier, out var resolved, out var ambiguous))
         {
-            logger.LogWarning(
-                "SecSwitch could not resolve plugin identifier {Identifier} to an installed plugin directory; not queueing a disable.",
-                identifier);
+            LogUnresolved("disable", identifier, ambiguous);
             return false;
         }
         PluginManager.DisablePlugin(dataDirectories.Value.PluginDir, resolved);
@@ -184,11 +199,9 @@ public sealed class BtcPayActionSink(
 
     public async Task<bool> QueueUpdateAsync(string identifier, string version)
     {
-        if (!TryResolveInstalledDirectory(dataDirectories.Value.PluginDir, identifier, out var resolved))
+        if (!TryResolveInstalledDirectory(dataDirectories.Value.PluginDir, identifier, out var resolved, out var ambiguous))
         {
-            logger.LogWarning(
-                "SecSwitch could not resolve plugin identifier {Identifier} to an installed plugin directory; not queueing an update.",
-                identifier);
+            LogUnresolved("update", identifier, ambiguous);
             return false;
         }
         // Two separate calls: downloading a plugin does not queue its install. Both use the
@@ -200,25 +213,76 @@ public sealed class BtcPayActionSink(
         return true;
     }
 
+    private void LogUnresolved(string actionVerb, string identifier, IReadOnlyList<string> ambiguous)
+    {
+        if (ambiguous.Count > 0)
+            logger.LogWarning(
+                "SecSwitch found multiple installed plugin directories matching {Identifier} case-insensitively ({Candidates}); refusing to guess which one to {ActionVerb}.",
+                identifier, string.Join(", ", ambiguous), actionVerb);
+        else
+            logger.LogWarning(
+                "SecSwitch could not resolve plugin identifier {Identifier} to an installed plugin directory; the {ActionVerb} was not queued.",
+                identifier, actionVerb);
+    }
+
     /// <summary>
-    /// Finds the on-disk plugin directory matching <paramref name="identifier"/> case-insensitively
-    /// and returns its exact on-disk casing. Public and static so it can be tested directly against
-    /// a real (temporary) directory, without constructing this class's full BTCPayServer DI graph.
+    /// Finds the on-disk plugin directory matching <paramref name="identifier"/>. An exact (ordinal)
+    /// match always wins outright. Failing that, exactly one case-insensitive match resolves to that
+    /// match's exact on-disk casing; zero or two-or-more case-insensitive matches both fail to
+    /// resolve (the latter via <paramref name="ambiguousMatches"/>, populated only in the
+    /// two-or-more case, so a caller can log which candidates it refused to choose between). Public
+    /// and static so it can be tested directly against a real (temporary) directory, without
+    /// constructing this class's full BTCPayServer DI graph.
     /// </summary>
-    public static bool TryResolveInstalledDirectory(string pluginDir, string identifier, out string resolvedIdentifier)
+    public static bool TryResolveInstalledDirectory(
+        string pluginDir, string identifier, out string resolvedIdentifier, out IReadOnlyList<string> ambiguousMatches)
     {
         resolvedIdentifier = identifier;
+        ambiguousMatches = [];
         if (string.IsNullOrEmpty(identifier) || !Directory.Exists(pluginDir))
             return false;
-        foreach (var dir in Directory.EnumerateDirectories(pluginDir))
+
+        var names = Directory.EnumerateDirectories(pluginDir).Select(dir => Path.GetFileName(dir)!);
+        return TryResolveAmongCandidates(names, identifier, out resolvedIdentifier, out ambiguousMatches);
+    }
+
+    /// <summary>
+    /// The matching rule itself, kept separate from <see cref="TryResolveInstalledDirectory"/>'s
+    /// filesystem call so it can be unit-tested with an explicit, platform-independent list of
+    /// candidate names: two directories differing only by case cannot be reliably created side by
+    /// side on a real temporary directory on this codebase's own Windows dev/CI environment (NTFS is
+    /// case-insensitive by default there), even though that is exactly the scenario that matters on
+    /// the case-sensitive Linux filesystems SecSwitch actually runs against in production.
+    /// </summary>
+    public static bool TryResolveAmongCandidates(
+        IEnumerable<string> candidateNames, string identifier, out string resolvedIdentifier, out IReadOnlyList<string> ambiguousMatches)
+    {
+        resolvedIdentifier = identifier;
+        ambiguousMatches = [];
+
+        var caseInsensitiveMatches = new List<string>();
+        foreach (var name in candidateNames)
         {
-            var name = Path.GetFileName(dir);
-            if (string.Equals(name, identifier, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(name, identifier, StringComparison.Ordinal))
             {
+                // An exact match is unambiguous and wins outright, regardless of any
+                // case-insensitive collision found so far or still to come.
                 resolvedIdentifier = name;
                 return true;
             }
+            if (string.Equals(name, identifier, StringComparison.OrdinalIgnoreCase))
+                caseInsensitiveMatches.Add(name);
         }
+
+        if (caseInsensitiveMatches.Count == 1)
+        {
+            resolvedIdentifier = caseInsensitiveMatches[0];
+            return true;
+        }
+
+        // Either nothing matched (list stays empty), or two-or-more differently-cased directories
+        // claim the same identifier and enumeration order is not a safe way to pick between them.
+        ambiguousMatches = caseInsensitiveMatches;
         return false;
     }
 
@@ -227,34 +291,41 @@ public sealed class BtcPayActionSink(
         if (!sshState.CanUseSSH || serverOptions.SSHSettings is null)
             throw new InvalidOperationException("SSH is not configured; cannot trigger a core update.");
 
-        using var client = await serverOptions.SSHSettings.ConnectAsync();
-        // Mirrors UIServerController.RunSSH/RunSSHCore: same command string, same RunBash helper.
-        // RunSSH itself never awaits RunSSHCore's completion (`_ = RunSSHCore(...)`), precisely
-        // because RunBash blocks until the exec channel closes, and nohup+disown here only
-        // redirects btcpay-update.sh's stdout/stderr, not its inherited stdin - the classic case
-        // where a backgrounded job keeps an SSH exec channel open server-side for as long as that
-        // job runs (here, however many minutes it takes to bring the whole stack down and back up),
-        // independent of anything our side of the connection does. We cannot fire-and-forget in
-        // quite the same way - we still want to catch a fast failure (bad auth, unreachable host,
-        // command not found) and report it - so we await with a short CommandTimeout instead of
-        // RunSSHCore's 60 seconds: long enough to observe a fast local/connection failure, short
-        // enough not to block a policy sweep on a command that may legitimately keep running for
-        // minutes. Hitting that timeout throws SshOperationTimeoutException (confirmed against the
-        // SSH.NET 2025.1.0 source used here: CommandTimeout cancels our own local wait via
-        // CancelAsync and sets that exception once the wait is cancelled) - it means our local wait
-        // was cancelled, not that the remote command failed, so it is treated as success: dispatched,
-        // still running remotely.
+        var client = await serverOptions.SSHSettings.ConnectAsync();
+        // Mirrors UIServerController.RunSSH/RunSSHCore's command string and its use of the RunBash
+        // helper, but NOT its CommandTimeout: RunSSHCore passes TimeSpan.FromMinutes(1.0), which
+        // (confirmed against the SSH.NET 2025.1.0 source used here, SshCommand.cs:296-301) arms a
+        // CancellationTokenSource off CommandTimeout; hitting that timeout calls CancelAsync
+        // (SshCommand.cs:439-475), which sends an actual SSH "signal" channel request ("TERM") to
+        // the remote process - not a purely local give-up. btcpay-update.sh backgrounds itself with
+        // nohup+disown, which protects it from SIGHUP, not SIGTERM, and a non-interactive
+        // `bash -c '... &'` does not put the backgrounded job in its own process group, so a
+        // CommandTimeout here risks SIGTERMing the very update it just launched. Core carries this
+        // same latent risk on its own 60-second value and evidently rarely if ever hits it in
+        // practice (its Update button works) - we remove the risk outright rather than lean on that:
+        // by never setting CommandTimeout at all (RunBash's `timeout` argument stays unset, so
+        // SshCommand.CommandTimeout keeps its Timeout.InfiniteTimeSpan default), nothing ever calls
+        // CancelAsync on our behalf, so we never send that signal ourselves.
+        //
+        // The tradeoff: we can no longer wait for the command to finish without risking exactly the
+        // multi-minute block this whole chain of reasoning exists to avoid (a policy sweep should
+        // not hang for as long as bringing the whole stack down and up takes), and we cannot safely
+        // dispose `client` until the command is done with it. So this method reports "launched", not
+        // "completed" - it does not, and cannot, confirm btcpay-update.sh succeeded - and disposal
+        // moves to a continuation on the command's own task instead of a `using` here, so it fires
+        // once, after the exec task has actually finished with the connection rather than
+        // immediately when this method returns.
         const string command = ". /etc/profile.d/btcpay-env.sh && nohup btcpay-update.sh > /dev/null 2>&1 & disown";
-        try
+        var execTask = client.RunBash(command);
+        _ = execTask.ContinueWith(t =>
         {
-            var result = await client.RunBash(command, TimeSpan.FromSeconds(10));
-            logger.LogInformation("SecSwitch triggered btcpay-update.sh over SSH; exit status {ExitStatus}", result.ExitStatus);
-        }
-        catch (SshOperationTimeoutException)
-        {
-            logger.LogInformation(
-                "SecSwitch dispatched btcpay-update.sh over SSH; the local wait timed out as expected while it keeps running remotely.");
-        }
+            if (t.IsFaulted)
+                logger.LogWarning(t.Exception, "SecSwitch's SSH command for btcpay-update.sh reported an error after being dispatched");
+            else if (t.IsCompletedSuccessfully)
+                logger.LogInformation("SecSwitch's SSH command for btcpay-update.sh completed with exit status {ExitStatus}", t.Result.ExitStatus);
+            client.Dispose();
+        }, TaskScheduler.Default);
+        logger.LogInformation("SecSwitch dispatched btcpay-update.sh over SSH; not waiting for it to finish.");
     }
 
     public void StopApplication() => lifetime.StopApplication();
