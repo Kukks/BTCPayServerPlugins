@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Text;
 using System.Text.Json;
 using BTCPayServer.Plugins.SecSwitch.Models;
 using Org.BouncyCastle.Bcpg.OpenPgp;
@@ -112,6 +110,15 @@ public static class TrustStore
             working.RemoveAll(k => string.Equals(k.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase));
         }
 
+        // Review Minor 4: a rotation's `remove` array shows a human-readable fingerprint, but its
+        // `add` array shows an opaque armored blob - a reviewing signer who trusts what `remove`
+        // visibly says could be co-signing what reads as "revoke K" while Remove-then-Add ordering
+        // would actually leave K trusted (removed above, then immediately re-admitted by the
+        // matching Add entry below). Reject the whole rotation outright rather than defining a
+        // precedence rule for an author's (possibly malicious) self-contradictory document.
+        var removeFingerprints = new HashSet<string>(
+            rotation.Remove ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+
         foreach (var armored in rotation.Add ?? Array.Empty<string>())
         {
             // CRITICAL CONTRACT: the fingerprint stored for a newly admitted key must be exactly
@@ -131,20 +138,69 @@ public static class TrustStore
                 return false;
             }
 
+            if (removeFingerprints.Contains(fingerprint))
+            {
+                error = $"Rotation both adds and removes the same key ({fingerprint}); refusing " +
+                        "rather than guessing which was intended.";
+                return false;
+            }
+
             if (working.Any(k => string.Equals(k.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase)))
                 continue; // Already trusted - idempotent no-op, and deliberately not re-screened
                           // below: retroactively scanning an already-trusted key for revocation is
                           // a separate, out-of-scope concern (see the comment on the checks below).
 
-            // Deferred from Task 4's review: AdvisoryVerifier.Verify deliberately does not check
-            // revocation or expiry, so a revoked or expired signer still counts toward quorum
-            // THERE. This is the right layer to close that specific gap, but only for a key being
-            // newly admitted right now - never a retroactive scan of a key already in `working`
-            // (see the "already trusted" continue above).
-            PgpPublicKey primaryKey;
+            // Review Finding 1: a blob AdvisoryVerifier.FingerprintOf can parse is not necessarily
+            // one AdvisoryVerifier.LoadTrustedKeys would ever actually load (e.g. one over its own
+            // byte-length cap) - admitting it here anyway would store a *correct* fingerprint for a
+            // key that can never again contribute to quorum, permanently and silently bricking the
+            // store. TryLoadTrustedKey is the exact admission check LoadTrustedKeys itself now calls
+            // (see AdvisoryVerifier.cs), so the two can never drift apart.
+            bool admitted;
+            PgpPublicKeyRing? matchedRing;
             try
             {
-                primaryKey = ReadPrimaryKey(armored);
+                admitted = AdvisoryVerifier.TryLoadTrustedKey(fingerprint, armored, out matchedRing);
+            }
+            catch (Exception e)
+            {
+                error = $"Rotation contained a public key that could not be checked for admission " +
+                        $"({fingerprint}): {e.Message}";
+                return false;
+            }
+
+            if (!admitted || matchedRing is null)
+            {
+                error = $"Rotation contained a public key that AdvisoryVerifier could never load as " +
+                        $"trusted ({fingerprint}); refusing rather than admitting a key that can " +
+                        "never actually contribute to a future quorum.";
+                return false;
+            }
+
+            // Deferred from Task 4's review: AdvisoryVerifier.Verify deliberately does not check
+            // revocation or expiry, so a revoked or expired signer still counts toward quorum
+            // THERE. This screens a key being newly admitted right now against the bytes actually
+            // submitted in this rotation - never a retroactive scan of a key already in `working`
+            // (see the "already trusted" continue above). Review Minor 2: IsRevoked() is
+            // packet-presence only - BouncyCastle does not cryptographically validate the
+            // revocation signature it finds, so this cannot detect a revocation the submitter
+            // simply omitted from the blob. What it actually buys: it catches an honest/
+            // keyserver-sourced revoked blob, and lets an adversary who staples on a bogus
+            // revocation packet force this rotation to fail (fail-closed - a false refuse, never a
+            // false accept - acceptable). Review Minor 3: all three BouncyCastle calls below share
+            // one try/catch, not just the parse above - GetValidSeconds() walks self-certification
+            // hashed subpackets on real key material, the same class of parsing that can throw on
+            // hostile input.
+            var primaryKey = matchedRing.GetPublicKey();
+            bool isRevoked;
+            DateTime? expiresAt;
+            try
+            {
+                isRevoked = primaryKey.IsRevoked();
+                // GetValidSeconds() == 0 means "no expiry", per OpenPGP (RFC 4880) and BouncyCastle's
+                // own documented contract on PgpPublicKey.GetValidSeconds().
+                var validSeconds = primaryKey.GetValidSeconds();
+                expiresAt = validSeconds == 0 ? null : primaryKey.CreationTime.AddSeconds(validSeconds);
             }
             catch (Exception e)
             {
@@ -155,16 +211,13 @@ public static class TrustStore
                 return false;
             }
 
-            if (primaryKey.IsRevoked())
+            if (isRevoked)
             {
                 error = $"Rotation attempted to add an already-revoked key ({fingerprint}); refusing.";
                 return false;
             }
 
-            // GetValidSeconds() == 0 means "no expiry", per OpenPGP (RFC 4880) and BouncyCastle's
-            // own documented contract on PgpPublicKey.GetValidSeconds().
-            var validSeconds = primaryKey.GetValidSeconds();
-            if (validSeconds != 0 && primaryKey.CreationTime.AddSeconds(validSeconds) <= DateTime.UtcNow)
+            if (expiresAt is not null && expiresAt <= DateTime.UtcNow)
             {
                 error = $"Rotation attempted to add an already-expired key ({fingerprint}); refusing.";
                 return false;
@@ -178,35 +231,22 @@ public static class TrustStore
             });
         }
 
-        if (working.Count == 0)
+        // Review Minor 5: non-empty is not the property that actually matters - a store holding
+        // fewer keys than the quorum threshold can never again reach quorum for any future rotation,
+        // which is just as permanently stuck as an empty one (e.g. threshold 2, {A, B} -> remove A
+        // -> {B}: not empty, but B alone can never meet a quorum of 2 again). Refuse whenever the
+        // result would hold fewer keys than the quorum this very rotation was itself held to.
+        var minimumTrustStoreSize = Math.Max(1, quorumThreshold);
+        if (working.Count < minimumTrustStoreSize)
         {
-            error = "Rotation would leave the trust store empty; refusing.";
+            error = working.Count == 0
+                ? "Rotation would leave the trust store empty; refusing."
+                : $"Rotation would leave the trust store with only {working.Count} key(s), below " +
+                  $"the quorum threshold of {minimumTrustStoreSize}; refusing.";
             return false;
         }
 
         updated = working;
         return true;
-    }
-
-    /// <summary>
-    /// Parses the same "first ring's primary key" that <see cref="AdvisoryVerifier.FingerprintOf"/>
-    /// derives a fingerprint from. Re-implemented here rather than called, because that helper's
-    /// own parsing internals (<c>ReadPublicKeyRing</c>/<c>PrimaryKeyOf</c>) are private to
-    /// <see cref="AdvisoryVerifier"/>. Used only to obtain a <see cref="PgpPublicKey"/> object to
-    /// run the revocation/expiry checks above against - never used to derive the fingerprint that
-    /// gets stored on a <see cref="TrustedKey"/>, which always comes from a direct call to
-    /// <see cref="AdvisoryVerifier.FingerprintOf"/> instead (see the CRITICAL CONTRACT comment
-    /// above).
-    /// </summary>
-    static PgpPublicKey ReadPrimaryKey(string armoredPublicKey)
-    {
-        using var input = PgpUtilities.GetDecoderStream(
-            new MemoryStream(Encoding.ASCII.GetBytes(armoredPublicKey)));
-        var bundle = new PgpPublicKeyRingBundle(input);
-
-        foreach (PgpPublicKeyRing ring in bundle.GetKeyRings())
-            return ring.GetPublicKey();
-
-        throw new InvalidDataException("No usable public key ring found in armored block.");
     }
 }
