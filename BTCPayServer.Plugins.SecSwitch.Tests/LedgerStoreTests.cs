@@ -122,8 +122,18 @@ public class LedgerStoreTests
         // Fix-round note (Finding I3): SuppressAsync no longer fabricates an entry for an id it has
         // never seen (see Suppressing_an_unknown_advisory_id_is_rejected below) - this test now
         // records the advisory first, matching the new "must already exist" contract.
+        //
+        // Fix-round note (Finding T1): seeded with a NON-terminal status (Unverified) rather than
+        // the Entry() helper's default Acted, for consistency with the other corrected fixtures
+        // below. This does NOT change what IsHandledAsync discriminates here - it is true for ANY
+        // recorded entry regardless of status (see its own doc comment), so that assertion is a
+        // sanity check that the entry still exists, not proof SuppressAsync ran, whichever status
+        // is seeded. The Entries["a1"].Suppressed assertion is what actually proves the write - it
+        // is only ever set by a successful SuppressAsync call, terminal seed status or not.
         var store = new LedgerStore(new FakeSettingsRepository());
-        await store.RecordAsync(Entry("a1"));
+        var entry = Entry("a1");
+        entry.Status = LedgerStatus.Unverified;
+        await store.RecordAsync(entry);
         Assert.True(await store.SuppressAsync("a1"));
         Assert.True(await store.IsHandledAsync("a1"));
         Assert.True((await store.GetAsync()).Entries["a1"].Suppressed);
@@ -164,12 +174,18 @@ public class LedgerStoreTests
     [InlineData(LedgerStatus.Rejected)]
     [InlineData(LedgerStatus.Unverified)]
     [InlineData(LedgerStatus.NeedsAttention)]
+    [InlineData(LedgerStatus.Unsuppressed)]
     [InlineData("")]
     public async Task Non_terminal_status_does_not_count_as_acted_on(string nonTerminalStatus)
     {
         // Finding R1 promotes NotApplicable to terminal - it is intentionally NOT one of the cases
         // here any more (see Terminal_status_counts_as_acted_on above for its inverted, now-correct
-        // expectation).
+        // expectation). Unsuppressed added per Finding T1's symmetry request: all eight
+        // LedgerStatus constants are now enumerated across this theory and
+        // Terminal_status_counts_as_acted_on (4 terminal + Rejected/Unverified/NeedsAttention/
+        // Unsuppressed non-terminal = 8), rather than Unsuppressed being pinned non-terminal only
+        // via the standalone Assert.False(IsTerminalStatus(...)) inside
+        // Unsuppressing_an_advisory_clears_suppressed_status_and_content_hash below.
         var store = new LedgerStore(new FakeSettingsRepository());
         var entry = Entry("a1");
         entry.Status = nonTerminalStatus;
@@ -196,8 +212,19 @@ public class LedgerStoreTests
     {
         // Fix-round note (Finding I3): records the advisory first - see the note on
         // Suppressed_advisory_counts_as_handled above.
+        //
+        // Fix-round note (Finding T1 - the load-bearing correction, not just style): the
+        // Entry() helper defaults to Status = Acted, which is ITSELF terminal - recording it and
+        // then asserting IsActedAsync would have passed even if SuppressAsync were gutted to a
+        // no-op, because Acted alone already satisfies IsTerminalStatus. Seeded here with the
+        // NON-terminal Unverified instead: before SuppressAsync runs, IsActedAsync is provably
+        // false (see Non_terminal_status_does_not_count_as_acted_on), so the assertion below only
+        // passes if SuppressAsync itself is what flips it - a genuine no-op SuppressAsync would
+        // now fail this test.
         var store = new LedgerStore(new FakeSettingsRepository());
-        await store.RecordAsync(Entry("a1"));
+        var entry = Entry("a1");
+        entry.Status = LedgerStatus.Unverified;
+        await store.RecordAsync(entry);
         Assert.True(await store.SuppressAsync("a1"));
         Assert.True(await store.IsActedAsync("a1"));
     }
@@ -267,8 +294,12 @@ public class LedgerStoreTests
     {
         // Fix-round note (Finding I3): records the advisory first - see the note on
         // Suppressed_advisory_counts_as_handled above.
+        // Fix-round note (Finding T1): seeded non-terminal for consistency - see the same note on
+        // Suppressed_advisory_counts_as_handled above for why this does (and does not) matter here.
         var store = new LedgerStore(new JsonRoundTrippingSettingsRepository());
-        await store.RecordAsync(Entry("a1"));
+        var entry = Entry("a1");
+        entry.Status = LedgerStatus.Unverified;
+        await store.RecordAsync(entry);
         Assert.True(await store.SuppressAsync("a1"));
         Assert.True(await store.IsHandledAsync("a1"));
         Assert.True((await store.GetAsync()).Entries["a1"].Suppressed);
