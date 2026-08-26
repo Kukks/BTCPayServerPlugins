@@ -141,6 +141,71 @@ public class PolicyResolverTests
         Assert.Equal(SecSwitchAction.ShutdownCore, d.Action);
     }
 
+    // --- Task 13 review, Finding I2 (Important) fix: CheckConfigurationHostedService.StartAsync
+    // fires its SSH probe without awaiting it, so CanUseSsh can still be false purely because
+    // verification has not finished yet - distinct from SSH never having been configured at all.
+    // A fixable core advisory must be DEFERRED in the former case, not resolved as ShutdownCore
+    // (SecSwitchMonitor would cache that as the terminal Acted, which no later poll could ever
+    // correct back to the real UpdateCore once the probe actually succeeds).
+
+    [Fact]
+    public void Core_with_fix_and_ssh_configured_but_not_yet_verified_defers_rather_than_shutting_down()
+    {
+        var state = new InstanceState(
+            new Dictionary<string, Version> { ["Plug"] = Version.Parse("1.5.0") },
+            Version.Parse("2.4.2"), CanUseSsh: false, SshVerificationPending: true);
+
+        var d = PolicyResolver.Resolve(
+            Adv(identifier: "BTCPayServer", affected: "<2.5.0", fixedVersion: "2.5.0"), state, Settings());
+
+        Assert.Equal(SecSwitchAction.None, d.Action);
+        Assert.Contains(PolicyResolver.SshVerificationPendingPhrase, d.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Core_with_fix_and_ssh_genuinely_not_configured_still_shuts_down()
+    {
+        // Regression guard: SshVerificationPending defaults to false (matches every pre-existing
+        // InstanceState construction in this file), so "SSH not configured at all" must still take
+        // the ORIGINAL ShutdownCore path, not the new deferred one - the two must never collapse
+        // into the same behaviour.
+        var d = PolicyResolver.Resolve(
+            Adv(identifier: "BTCPayServer", affected: "<2.5.0", fixedVersion: "2.5.0"),
+            State(canUseSsh: false), Settings());
+
+        Assert.Equal(SecSwitchAction.ShutdownCore, d.Action);
+    }
+
+    [Fact]
+    public void Core_without_fix_shuts_down_even_when_ssh_verification_is_pending()
+    {
+        // The deferral only ever applies to a FIXABLE core advisory - one with no fix at all has
+        // nothing to wait for SSH to apply, so it must still shut down immediately regardless of
+        // SSH's verification state.
+        var state = new InstanceState(
+            new Dictionary<string, Version> { ["Plug"] = Version.Parse("1.5.0") },
+            Version.Parse("2.4.2"), CanUseSsh: false, SshVerificationPending: true);
+
+        var d = PolicyResolver.Resolve(
+            Adv(identifier: "BTCPayServer", affected: "<2.5.0", fixedVersion: null), state, Settings());
+
+        Assert.Equal(SecSwitchAction.ShutdownCore, d.Action);
+    }
+
+    [Fact]
+    public void Plugin_advisory_is_unaffected_by_ssh_verification_pending()
+    {
+        // SshVerificationPending only ever matters for core-targeted advisories - a plugin advisory
+        // must resolve exactly as it always did regardless of SSH's state.
+        var state = new InstanceState(
+            new Dictionary<string, Version> { ["Plug"] = Version.Parse("1.5.0") },
+            Version.Parse("2.4.2"), CanUseSsh: false, SshVerificationPending: true);
+
+        var d = PolicyResolver.Resolve(Adv(), state, Settings());
+
+        Assert.Equal(SecSwitchAction.UpdatePlugin, d.Action);
+    }
+
     [Fact]
     public void Core_without_fix_shuts_down_even_with_ssh()
     {

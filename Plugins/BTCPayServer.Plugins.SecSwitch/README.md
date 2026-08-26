@@ -19,19 +19,34 @@ trust store (both described below), so it is ready to enable as soon as you turn
 
 ## Trusted keys
 
-SecSwitch ships with a trust-root bundle embedded in the plugin. On first run it adds
-any bundled key that is not already in your trust store, then remembers that it has done
-so and never repeats the step — if you deliberately remove a bundled key afterwards, it
-will not silently reappear on a later restart or upgrade. You can also add or remove
-keys by hand from the settings page.
+SecSwitch has a mechanism to bootstrap `QuorumThreshold` trusted keys from a trust-root
+bundle embedded in the plugin: on first run it adds any bundled key that is not already
+in your trust store, then remembers each key it has offered so it never re-adds one you
+deliberately removed, even across restarts and upgrades. **The bundle shipped in this
+build is currently empty** (`Resources/trust-root.json`'s `keys` array has nothing in
+it), so out of the box SecSwitch has no trusted keys and cannot verify anything — an
+admin must paste at least one key by hand (below) before SecSwitch can be enabled at
+all. This is expected to change in a future release once founding signer keys are
+published; when it does, existing instances will pick up any newly-bundled key
+automatically on their next restart.
 
-**Removing a key via a quorum-signed key-rotation document is refused if it would leave
-the trust store with fewer keys than `QuorumThreshold`.** The remaining keys could never
-reach quorum again for any future rotation, so the whole rotation is rejected outright —
-lower the quorum threshold first if you genuinely intend to run with fewer trusted
-signers. The settings page's own manual "Remove" button has no such guard: it only stops
-you from re-enabling SecSwitch with zero trusted keys, not from leaving fewer keys than
-your quorum threshold actually requires, so take care when removing keys by hand.
+You can add or remove keys by hand from the settings page — each add re-derives the
+key's fingerprint from the pasted key material itself, never from anything typed. The
+plugin also has a separate, fully-implemented and tested mechanism for rotating keys via
+a quorum-signed key-rotation document (co-signed by the existing trusted signers,
+refusing to shrink the trust store below `QuorumThreshold` - see below) but **it is not
+currently wired to anything**: nothing in this version of the plugin fetches, accepts, or
+applies a rotation document from the feed or anywhere else, so today the only way to
+change trusted keys on a running instance is the manual add/remove UI.
+
+**A quorum-signed key-rotation document is refused if it would leave the trust store with
+fewer keys than `QuorumThreshold`** (once rotation is wired up and reachable — see
+above). The remaining keys could never reach quorum again for any future rotation, so the
+whole rotation would be rejected outright — lower the quorum threshold first if you
+genuinely intend to run with fewer trusted signers. The settings page's own manual
+"Remove" button has no such guard today regardless: it only stops you from re-enabling
+SecSwitch with zero trusted keys, not from leaving fewer keys than your quorum threshold
+actually requires, so take care when removing keys by hand.
 
 ## Actions
 

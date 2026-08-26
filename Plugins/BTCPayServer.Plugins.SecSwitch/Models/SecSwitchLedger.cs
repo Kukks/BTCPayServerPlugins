@@ -7,20 +7,34 @@ public sealed class SecSwitchLedger
 {
     public DateTimeOffset? LastStartedAt { get; set; }
 
-    // Deviation from the Task 13 brief (ruling applied 2026-08-26): the brief's periodic-task sample
-    // has no field tracking whether the embedded trust-root resource was ever applied, but "add a
-    // bundled key only if not already present, and never let a deliberately-removed bundled key
-    // silently reappear" needs a persisted, permanent "already ran" latch - re-deriving fingerprints
-    // and re-checking presence every poll would look idempotent today but re-admit a key an admin
-    // removed on purpose the moment nothing else in the store happens to collide with it. Placed on
-    // the ledger rather than SecSwitchSettings deliberately: SecSwitchController's Settings POST
-    // handler already restores TrustedKeys/NotifyOnlyIdentifiers from the persisted record before
-    // saving specifically because that form does not round-trip them (see its own doc comment) - a
-    // same-shaped bool added to SecSwitchSettings instead would need that same restore-before-save
-    // treatment remembered on every future settings-mutating endpoint, and forgetting it even once
-    // would silently reset this flag to false and re-trigger the bootstrap. The ledger is never
-    // partially overwritten by a web form; only LedgerStore's own methods ever mutate it.
-    public bool TrustRootBootstrapped { get; set; }
+    // Task 13 review, Finding I1 (Important) fix: this was originally a single `bool
+    // TrustRootBootstrapped`, latched true the first time the embedded trust-root resource was
+    // successfully PARSED, regardless of how many keys it actually contained. Today's shipped
+    // resource is "keys": [] - every existing instance would latch true having installed nothing, and
+    // a LATER plugin release that finally populates the bundle would then never install those keys on
+    // any already-upgraded instance, because the latch was already permanently set. That defeats the
+    // only reason this bootstrap exists.
+    //
+    // Tracking the set of fingerprints the bundle has ever OFFERED - rather than a single "did this
+    // ever run" bool - fixes that: a fingerprint not yet in this list is genuinely new and gets
+    // considered (added if not already trusted); a fingerprint already in this list is never
+    // reconsidered, no matter how many more times the bundle lists it, which is exactly what "an
+    // admin who deliberately removed a bundled key must not have it silently reappear" requires. A
+    // plain List<string>, not a HashSet: unlike Dictionary's comparer (see Entries's own history
+    // below), a List has no comparer to lose on a JSON round trip in the first place - callers always
+    // wrap this in a fresh OrdinalIgnoreCase HashSet at the point they check membership (matching the
+    // fingerprint-comparison convention used everywhere else in this plugin) rather than relying on
+    // List.Contains's default (ordinal, case-sensitive) comparison.
+    //
+    // Placed on the ledger rather than SecSwitchSettings deliberately (unchanged reasoning from the
+    // original design): SecSwitchController's Settings POST handler already restores
+    // TrustedKeys/NotifyOnlyIdentifiers from the persisted record before saving specifically because
+    // that form does not round-trip them (see its own doc comment) - an equivalent field added to
+    // SecSwitchSettings instead would need that same restore-before-save treatment remembered on
+    // every future settings-mutating endpoint, and forgetting it even once would silently reset this
+    // and re-offer everything. The ledger is never partially overwritten by a web form; only
+    // LedgerStore's own methods ever mutate it.
+    public List<string> OfferedTrustRootFingerprints { get; set; } = [];
 
     public Dictionary<string, LedgerEntry> Entries { get; set; } = [];
 }

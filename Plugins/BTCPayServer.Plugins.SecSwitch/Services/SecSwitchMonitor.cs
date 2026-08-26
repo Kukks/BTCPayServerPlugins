@@ -225,8 +225,18 @@ public sealed class SecSwitchMonitor(
         // None reasons - null settings, null advisory - are unreachable through this method: `settings`
         // is proven non-null by the Enabled check in ProcessAsync, and `advisory` is only ever passed
         // here after a successful parse.)
+        //
+        // Task 13 review, Finding I2 (Important) fix: a FOURTH such reason -
+        // PolicyResolver.SshVerificationPendingPhrase, for a fixable core advisory reached while SSH
+        // connectivity has not finished verifying yet - joins the same NeedsAttention bucket for the
+        // identical reason: "we cannot yet tell whether this should be UpdateCore or ShutdownCore" is
+        // not a clean "nothing to do" either, and above all must never be cached as the terminal
+        // NotApplicable (or, worse, reach the Acted branch below as ShutdownCore) - see
+        // InstanceState.SshVerificationPending's own doc comment for why that would be effectively
+        // permanent.
         var isIndeterminate = state is null ||
-            decision.Reason.Contains(AdvisoryApplicability.IndeterminateVersionPhrase, StringComparison.OrdinalIgnoreCase);
+            decision.Reason.Contains(AdvisoryApplicability.IndeterminateVersionPhrase, StringComparison.OrdinalIgnoreCase) ||
+            decision.Reason.Contains(PolicyResolver.SshVerificationPendingPhrase, StringComparison.OrdinalIgnoreCase);
         var sanitizedReason = ActionExecutor.Sanitize(decision.Reason); // Finding I2: decision.Reason
             // can itself embed attacker-controlled text (e.g. advisory.Identifier or
             // AffectedVersions, via AdvisoryApplicability's own reason strings) - computed once here,

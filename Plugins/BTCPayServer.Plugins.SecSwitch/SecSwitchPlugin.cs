@@ -1,4 +1,5 @@
 using System;
+using System.Net.Http;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Plugins.SecSwitch.Services;
@@ -25,7 +26,15 @@ public class SecSwitchPlugin : BaseBTCPayServerPlugin
         // handler/connection pool - for the life of the process, never rotating and going DNS-stale on
         // a long-running server. A NAMED client is registered instead; SecSwitchPeriodicTask resolves
         // IHttpClientFactory and constructs a fresh AdvisoryFetcher, from a fresh client, on every poll.
-        services.AddHttpClient(SecSwitchPeriodicTask.HttpClientName);
+        //
+        // Task 13 review, Finding M1 (Minor): AdvisoryFetcher's own class doc comment asks callers to
+        // set AllowAutoRedirect = false on the handler backing its HttpClient as defence in depth -
+        // GetBytesAsync's post-response containment re-check (IsUnderBase against
+        // response.RequestMessage.RequestUri) is the real guarantee and does not depend on this, but
+        // this plugin is now that caller, so it honours the ask rather than relying solely on the
+        // downstream check.
+        services.AddHttpClient(SecSwitchPeriodicTask.HttpClientName)
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddSingleton<LedgerStore>();
         services.AddSingleton<IActionSink, BtcPayActionSink>();
         services.AddSingleton<ActionExecutor>();

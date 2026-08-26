@@ -511,6 +511,68 @@ public class SecSwitchMonitorTests
         Assert.Empty(sink.Calls);
     }
 
+    // --- Task 13 review, Finding I2 (Important) fix, end to end: a fixable core advisory reaching
+    // this monitor while SSH is configured but CheckConfigurationHostedService has not yet reported
+    // success must be retried next poll (NeedsAttention), never cached as the terminal
+    // Acted/ShutdownCore - see InstanceState.SshVerificationPending's own doc comment for why getting
+    // this wrong would be effectively permanent (Acted is terminal; no later poll could ever correct
+    // it back to the real UpdateCore).
+
+    [Fact]
+    public async Task Core_advisory_with_ssh_verification_pending_is_recorded_as_needing_attention()
+    {
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var coreAdvisoryJson = """
+        {"id":"core1","identifier":"BTCPayServer","affectedVersions":"<2.5.0","fixedVersion":"2.5.0",
+         "severity":"critical","title":"Core bug","description":"d","references":[],
+         "publishedAt":"2026-08-25T00:00:00Z","revoked":false}
+        """;
+        var payload = Encoding.UTF8.GetBytes(coreAdvisoryJson);
+        var settings = Settings(a, b);
+        var (monitor, sink, ledger) = Make(settings);
+        var pendingState = new InstanceState(
+            new Dictionary<string, Version>(), Version.Parse("2.4.2"), CanUseSsh: false, SshVerificationPending: true);
+
+        var entries = await monitor.ProcessAsync(
+            [new FetchedAdvisory("core1", "hash-core1", payload,
+                [a.SignDetached(payload), b.SignDetached(payload)], true)],
+            pendingState, settings, CancellationToken.None);
+
+        var entry = Assert.Single(entries);
+        Assert.Equal(LedgerStatus.NeedsAttention, entry.Status);
+        Assert.Empty(sink.Calls); // nothing stopped, nothing triggered over SSH
+        // NeedsAttention is never cached (Finding R1) - must remain eligible for re-evaluation.
+        Assert.Equal("", entry.ContentHash);
+        Assert.False(await ledger.IsActedAsync("core1"));
+    }
+
+    [Fact]
+    public async Task Core_advisory_with_ssh_genuinely_not_configured_still_shuts_down()
+    {
+        // Regression guard: SshVerificationPending false (the default every pre-existing State()
+        // helper call in this file already uses) must still take the original ShutdownCore path.
+        var a = PgpTestKeys.Generate("a@x"); var b = PgpTestKeys.Generate("b@x");
+        var coreAdvisoryJson = """
+        {"id":"core1","identifier":"BTCPayServer","affectedVersions":"<2.5.0","fixedVersion":"2.5.0",
+         "severity":"critical","title":"Core bug","description":"d","references":[],
+         "publishedAt":"2026-08-25T00:00:00Z","revoked":false}
+        """;
+        var payload = Encoding.UTF8.GetBytes(coreAdvisoryJson);
+        var settings = Settings(a, b);
+        var (monitor, sink, ledger) = Make(settings);
+        var noSshState = new InstanceState(new Dictionary<string, Version>(), Version.Parse("2.4.2"), CanUseSsh: false);
+
+        var entries = await monitor.ProcessAsync(
+            [new FetchedAdvisory("core1", "hash-core1", payload,
+                [a.SignDetached(payload), b.SignDetached(payload)], true)],
+            noSshState, settings, CancellationToken.None);
+
+        var entry = Assert.Single(entries);
+        Assert.Equal(LedgerStatus.Acted, entry.Status);
+        Assert.Contains("stop", sink.Calls);
+        Assert.True(await ledger.IsActedAsync("core1"));
+    }
+
     // --- Finding I3: Enabled has no initializer (defaults to false), and PolicyResolver's
     // "SecSwitch is disabled" None-reason carries no distinguishing phrase, so without a
     // short-circuit every advisory in the feed would be recorded as "NotApplicable" - a status
