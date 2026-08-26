@@ -271,9 +271,22 @@ public sealed class SecSwitchMonitor(
     /// is true - a fetch truncated by the fetcher's own request budget or the overall poll deadline
     /// must always be retried regardless of what status it produced, since a fuller signature set
     /// next poll could still change the outcome - AND (b) <see cref="LedgerStore.IsTerminalStatus"/>
-    /// is true for <paramref name="entry"/>'s own <see cref="LedgerEntry.Status"/> - the SAME
-    /// predicate <see cref="LedgerStore.IsActedAsync"/> uses to gate re-action, so hash-caching and
-    /// re-action-latching can never independently drift into disagreement.
+    /// is true for <paramref name="entry"/>'s own <see cref="LedgerEntry.Status"/>.
+    ///
+    /// (Task 11 review, Doc 1) (b) shares the exact SAME <see cref="LedgerStore.IsTerminalStatus"/>
+    /// predicate <see cref="LedgerStore.IsActedAsync"/> uses to gate re-action - that piece can never
+    /// drift. The two call sites' FULL conditions are not identical, though: IsActedAsync is
+    /// <c>entry.Suppressed || IsTerminalStatus(...)</c>, while this method's is
+    /// <c>signaturesComplete &amp;&amp; IsTerminalStatus(...)</c> - the Finding R2
+    /// <see cref="LedgerEntry.Suppressed"/> flag is honoured only on the re-action-latching side,
+    /// never here. Consequence, currently unreachable (today's only writer of
+    /// <see cref="LedgerEntry.Suppressed"/>, <see cref="LedgerStore.SuppressAsync"/>, always sets a
+    /// matching terminal Status too) but worth recording rather than rediscovering later: a
+    /// hypothetical entry with Suppressed true and a non-terminal Status would have its ContentHash
+    /// withheld here forever - IsActedAsync would still correctly block re-ACTION on it, but
+    /// AdvisoryFetcher would re-download it on every single future poll, burning a
+    /// MaxAdvisoriesPerPoll success slot each time for no benefit. Fail-safe in direction (nothing
+    /// is ever mis-acted on), but it is Finding R1's own starvation argument in miniature.
     ///
     /// This split matters because <see cref="AdvisoryFetcher"/>'s own dedup is the OUTER gate and
     /// dominates: it skips an index entry outright the moment its ContentHash is already known,
