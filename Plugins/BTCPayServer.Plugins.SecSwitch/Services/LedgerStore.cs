@@ -292,4 +292,27 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
             _gate.Release();
         }
     }
+
+    /// <summary>
+    /// Latches <see cref="SecSwitchLedger.TrustRootBootstrapped"/> so the embedded trust-root
+    /// resource (see <see cref="TrustRootBootstrapper"/>) is only ever applied once, permanently -
+    /// see that field's own doc comment for why this lives on the ledger rather than
+    /// <c>SecSwitchSettings</c>. Idempotent: safe to call again (e.g. a retried caller) even though
+    /// every real caller is expected to check <see cref="SecSwitchLedger.TrustRootBootstrapped"/>
+    /// first and skip calling this a second time.
+    /// </summary>
+    public async Task RecordTrustRootBootstrapAsync()
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            var ledger = await GetAsync();
+            ledger.TrustRootBootstrapped = true;
+            await settingsRepository.UpdateSetting(ledger);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
 }
