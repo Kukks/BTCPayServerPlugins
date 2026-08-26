@@ -86,6 +86,14 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
     {
         var ledger = await settingsRepository.GetSettingAsync<SecSwitchLedger>() ?? new SecSwitchLedger();
 
+        // PR #151 review (CodeRabbit), Finding F4: a ledger whose persisted JSON ever carried an
+        // explicit `null` for Entries (Newtonsoft respects an explicit null over the field
+        // initializer default, unlike an absent property) would NRE on the Comparer access just
+        // below - the same asymmetry RecordTrustRootOfferedAsync's own
+        // `ledger.OfferedTrustRootFingerprints ??= [];` guard closes for that field; closed here for
+        // parity so the file is internally consistent about which persisted-null fields it guards.
+        ledger.Entries ??= new Dictionary<string, LedgerEntry>(StringComparer.OrdinalIgnoreCase);
+
         // Re-establish case-insensitive keys on every fetch - see the class doc comment for why
         // this cannot be delegated to SecSwitchLedger.Entries's own comparer. Rebuilt key-by-key
         // via indexer assignment rather than the Dictionary(IDictionary, comparer) copy-constructor

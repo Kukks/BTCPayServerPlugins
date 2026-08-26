@@ -490,6 +490,24 @@ public class LedgerStoreTests
     }
 
     [Fact]
+    public async Task Persisted_null_entries_does_not_throw_on_read()
+    {
+        // PR #151 review (CodeRabbit), Finding F4: Entries relied solely on its field-initializer
+        // default, which a persisted explicit `null` (Newtonsoft respects an explicit null over the
+        // initializer default, unlike an absent property - see
+        // RecordTrustRootOfferedAsync's identical guard on OfferedTrustRootFingerprints,
+        // `ledger.OfferedTrustRootFingerprints ??= [];`) bypasses entirely, NREing on the Comparer
+        // access inside GetAsync. Same internal-inconsistency class as that guard; closed for parity.
+        var repo = new FakeSettingsRepository();
+        var preExisting = new SecSwitchLedger { Entries = null! };
+        await repo.UpdateSetting(preExisting);
+
+        var store = new LedgerStore(repo);
+        var ledger = await store.GetAsync(); // must not throw
+        Assert.Empty(ledger.Entries);
+    }
+
+    [Fact]
     public void Newtonsoft_round_trip_does_not_preserve_a_custom_dictionary_comparer()
     {
         // Empirical check requested at review, informing Finding 1's fix: does a custom

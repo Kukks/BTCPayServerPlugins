@@ -268,7 +268,12 @@ public class SecSwitchController(ISettingsRepository settingsRepository, LedgerS
             }
         }
 
-        model.TrustedFingerprints = settings.TrustedKeys.Select(k => k.Fingerprint).ToList();
+        // PR #151 review (CodeRabbit), Finding F1: the `trusted` dictionary built above already
+        // skips a null TrustedKey (see the loop's `key is null` check), but this projection
+        // dereferenced every element unguarded - a persisted settings row whose trustedKeys array
+        // contains a JSON `null` would NRE here, 500-ing the one page whose purpose is to inspect
+        // input safely even when the settings row itself is corrupt.
+        model.TrustedFingerprints = settings.TrustedKeys.Where(k => k is not null).Select(k => k.Fingerprint).ToList();
         return View(model);
     }
 
@@ -364,7 +369,9 @@ public class SecSwitchController(ISettingsRepository settingsRepository, LedgerS
         }
 
         var persisted = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
-        if (persisted.TrustedKeys.Any(k => string.Equals(k.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase)))
+        // Adjacent to Finding F1 above (same corrupt-settings-row NRE class): a null TrustedKeys
+        // element would otherwise NRE on k.Fingerprint here too.
+        if (persisted.TrustedKeys.Any(k => k is not null && string.Equals(k.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase)))
         {
             TempData[WellKnownTempData.ErrorMessage] = $"A key with fingerprint {fingerprint} is already trusted.";
             return RedirectToAction(nameof(Settings));
@@ -381,8 +388,10 @@ public class SecSwitchController(ISettingsRepository settingsRepository, LedgerS
     public async Task<IActionResult> RemoveTrustedKeyConfirm(string fingerprint)
     {
         var persisted = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
+        // Adjacent to Finding F1 above (same corrupt-settings-row NRE class): a null TrustedKeys
+        // element would otherwise NRE on k.Fingerprint here too.
         if (string.IsNullOrWhiteSpace(fingerprint) ||
-            !persisted.TrustedKeys.Any(k => string.Equals(k.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase)))
+            !persisted.TrustedKeys.Any(k => k is not null && string.Equals(k.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase)))
         {
             TempData[WellKnownTempData.ErrorMessage] = "No trusted key with that fingerprint.";
             return RedirectToAction(nameof(Settings));
@@ -408,8 +417,10 @@ public class SecSwitchController(ISettingsRepository settingsRepository, LedgerS
     public async Task<IActionResult> RemoveTrustedKey(string fingerprint)
     {
         var persisted = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
+        // Adjacent to Finding F1 above (same corrupt-settings-row NRE class): a null TrustedKeys
+        // element would otherwise NRE on k.Fingerprint here too.
         var matches = persisted.TrustedKeys.Count(
-            k => string.Equals(k.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase));
+            k => k is not null && string.Equals(k.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase));
         if (matches == 0)
         {
             TempData[WellKnownTempData.ErrorMessage] = "No trusted key with that fingerprint.";
@@ -441,8 +452,11 @@ public class SecSwitchController(ISettingsRepository settingsRepository, LedgerS
             return RedirectToAction(nameof(Settings));
         }
 
+        // Null-guarded for the same reason as the Count call above; a null element is left in place
+        // (never matches) rather than opportunistically stripped, matching this method's narrow
+        // "don't crash" remit rather than silently also self-healing the persisted list.
         persisted.TrustedKeys.RemoveAll(
-            k => string.Equals(k.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase));
+            k => k is not null && string.Equals(k.Fingerprint, fingerprint, StringComparison.OrdinalIgnoreCase));
         await settingsRepository.UpdateSetting(persisted);
         TempData[WellKnownTempData.SuccessMessage] = $"Trusted key {fingerprint} removed.";
         return RedirectToAction(nameof(Settings));
