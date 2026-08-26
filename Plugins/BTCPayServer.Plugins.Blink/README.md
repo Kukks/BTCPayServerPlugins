@@ -23,6 +23,14 @@ type=blink;server=https://api.blink.sv/graphql;api-key=blink_...;wallet-id=xyz;c
 Create an API key on the [Blink dashboard](https://dashboard.blink.sv). For BTCPay receiving you
 need at least the `READ` and `RECEIVE` scopes; `WRITE` is additionally required to pay invoices.
 
+> **The API key is stored on this server, and its operator can read it.** BTCPay keeps the key in the
+> store's Lightning settings, so whoever operates the server can read it and use it for whatever the key
+> is scoped to — a `WRITE` key can spend the account's balance. Grant only the scopes BTCPay needs
+> (`READ` + `RECEIVE` to receive; add `WRITE` only if BTCPay must also pay invoices), and if you do not
+> operate and trust this server, treat the key as exposed to its operator. A key can be revoked and
+> replaced from the Blink dashboard at any time. The non-custodial `ln-address=` path below stores no
+> credential and is not affected.
+
 ### Non-custodial (Spark) account — receive only
 
 The new Blink non-custodial accounts do not expose an API key or a GraphQL wallet id. Receiving is
