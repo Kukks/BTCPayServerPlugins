@@ -1,11 +1,51 @@
 using BTCPayServer.Abstractions.Contracts;
+using BTCPayServer.Configuration;
 using BTCPayServer.Plugins.SecSwitch.Services;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Xunit;
 
 namespace BTCPayServer.Plugins.SecSwitch.Tests;
 
 public class SecSwitchNotificationTests
 {
+    // Handler now takes LinkGenerator + BTCPayServerOptions (matching core's
+    // PluginUpdateNotification.Handler) instead of a zero-arg constructor - see
+    // SecSwitchNotifications.cs. DefaultLinkGenerator (the real ASP.NET Core implementation) is
+    // internal and needs a full routing/DI host to resolve anything meaningful, so this is a
+    // minimal, self-contained fake covering LinkGenerator's four abstract members - confirmed
+    // against the real Microsoft.AspNetCore.Routing.Abstractions assembly before writing this,
+    // rather than assumed from memory. Only the no-HttpContext GetPathByAddress<TAddress> overload
+    // is ever actually reached (GetPathByAction funnels into it), but every abstract member must be
+    // implemented for the subclass to compile.
+    sealed class FakeLinkGenerator : LinkGenerator
+    {
+        public override string? GetPathByAddress<TAddress>(
+            HttpContext httpContext, TAddress address, RouteValueDictionary values,
+            RouteValueDictionary? ambientValues = null, PathString? pathBase = null,
+            FragmentString fragment = default, LinkOptions? options = null)
+            => throw new NotSupportedException("Not used by SecSwitchNotification.Handler.");
+
+        public override string? GetPathByAddress<TAddress>(
+            TAddress address, RouteValueDictionary values, PathString pathBase = default,
+            FragmentString fragment = default, LinkOptions? options = null)
+            => pathBase + "/plugins/secswitch/audit";
+
+        public override string? GetUriByAddress<TAddress>(
+            HttpContext httpContext, TAddress address, RouteValueDictionary values,
+            RouteValueDictionary? ambientValues = null, string? scheme = null, HostString? host = null,
+            PathString? pathBase = null, FragmentString fragment = default, LinkOptions? options = null)
+            => throw new NotSupportedException("Not used by SecSwitchNotification.Handler.");
+
+        public override string? GetUriByAddress<TAddress>(
+            TAddress address, RouteValueDictionary values, string scheme, HostString host,
+            PathString pathBase = default, FragmentString fragment = default, LinkOptions? options = null)
+            => throw new NotSupportedException("Not used by SecSwitchNotification.Handler.");
+    }
+
+    static SecSwitchNotification.Handler MakeHandler(string rootPath = "/")
+        => new(new FakeLinkGenerator(), new BTCPayServerOptions { RootPath = rootPath });
+
     [Fact]
     public void Has_a_parameterless_constructor_for_blob_deserialisation()
     {
@@ -30,7 +70,7 @@ public class SecSwitchNotificationTests
             Outcome = "Queued disable of Plug", NeedsDecision = false
         };
         var vm = new NotificationViewModel();
-        ((INotificationHandler)new SecSwitchNotification.Handler()).FillViewModel(n, vm);
+        ((INotificationHandler)MakeHandler()).FillViewModel(n, vm);
 
         Assert.Contains("Stored XSS", vm.Body);
         Assert.Contains("Queued disable of Plug", vm.Body);
@@ -46,7 +86,7 @@ public class SecSwitchNotificationTests
             Outcome = "Manual mode", NeedsDecision = true
         };
         var vm = new NotificationViewModel();
-        ((INotificationHandler)new SecSwitchNotification.Handler()).FillViewModel(n, vm);
+        ((INotificationHandler)MakeHandler()).FillViewModel(n, vm);
         Assert.Contains("action required", vm.Body, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -61,7 +101,7 @@ public class SecSwitchNotificationTests
             AdvisoryId = null!, Title = null!, Severity = null!, Outcome = null!, NeedsDecision = false
         };
         var vm = new NotificationViewModel();
-        var ex = Record.Exception(() => ((INotificationHandler)new SecSwitchNotification.Handler()).FillViewModel(n, vm));
+        var ex = Record.Exception(() => ((INotificationHandler)MakeHandler()).FillViewModel(n, vm));
         Assert.Null(ex);
         Assert.NotNull(vm.Body);
     }
@@ -83,10 +123,28 @@ public class SecSwitchNotificationTests
             AdvisoryId = "a1", Title = hostileTitle, Severity = "High", Outcome = "ok", NeedsDecision = false
         };
         var vm = new NotificationViewModel();
-        ((INotificationHandler)new SecSwitchNotification.Handler()).FillViewModel(n, vm);
+        ((INotificationHandler)MakeHandler()).FillViewModel(n, vm);
 
         Assert.DoesNotContain(bel, vm.Body);
         Assert.DoesNotContain(lineSeparator, vm.Body);
         Assert.True(vm.Body.Length < hostileTitle.Length);
+    }
+
+    [Fact]
+    public void Action_link_is_built_via_LinkGenerator_and_honours_a_non_root_RootPath()
+    {
+        // The regression this pins: ActionLink used to be the hardcoded literal
+        // "/plugins/secswitch/audit", which 404s on an instance served under a non-root
+        // BTCPayServerOptions.RootPath prefix. Handler must now route pathBase through to
+        // LinkGenerator instead.
+        var n = new SecSwitchNotification
+        {
+            AdvisoryId = "a1", Title = "Stored XSS", Severity = "High",
+            Outcome = "Queued disable of Plug", NeedsDecision = false
+        };
+        var vm = new NotificationViewModel();
+        ((INotificationHandler)MakeHandler("/byob")).FillViewModel(n, vm);
+
+        Assert.Equal("/byob/plugins/secswitch/audit", vm.ActionLink);
     }
 }

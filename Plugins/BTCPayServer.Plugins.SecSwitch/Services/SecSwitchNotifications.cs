@@ -1,5 +1,8 @@
 using BTCPayServer.Abstractions.Contracts;
+using BTCPayServer.Configuration;
+using BTCPayServer.Plugins.SecSwitch.Controllers;
 using BTCPayServer.Services.Notifications;
+using Microsoft.AspNetCore.Routing;
 
 namespace BTCPayServer.Plugins.SecSwitch.Services;
 
@@ -41,7 +44,8 @@ public sealed class SecSwitchNotification : BaseNotification
     /// ActionExecutor.Sanitize before reaching vm.Body so unbounded length or control characters
     /// (including U+2028/U+2029) never reach this persisted, rendered admin surface.
     /// </summary>
-    public sealed class Handler : NotificationHandler<SecSwitchNotification>
+    public sealed class Handler(LinkGenerator linkGenerator, BTCPayServerOptions options)
+        : NotificationHandler<SecSwitchNotification>
     {
         public override string NotificationType => TypeName;
 
@@ -56,16 +60,18 @@ public sealed class SecSwitchNotification : BaseNotification
             var title = ActionExecutor.Sanitize(notification.Title);
             var outcome = ActionExecutor.Sanitize(notification.Outcome);
             vm.Body = $"{prefix}: [{severity}] {title} — {outcome}";
-            // Hardcoded rather than LinkGenerator-built like core's PluginUpdateNotification.Handler
-            // (which resolves controller/action + pathBase: options.RootPath). On an instance served
-            // under a non-root path prefix (BTCPayServerOptions.RootPath set), this absolute path
-            // resolves against the web server root and 404s instead of landing on the prefixed route.
-            // Fixing that means this Handler must take LinkGenerator + BTCPayServerOptions as
-            // constructor dependencies (Handler classes ARE DI-constructed - core registers its own
-            // via services.AddSingleton<INotificationHandler, Handler>()) - deferred and flagged for
-            // review rather than changed here, since every test in this file constructs Handler with
-            // "new SecSwitchNotification.Handler()".
-            vm.ActionLink = "/plugins/secswitch/audit";
+            // LinkGenerator-built, matching core's PluginUpdateNotification.Handler
+            // (BTCPayServer/Plugins/PluginManager/PluginUpdateFetcher.cs): resolves the route by
+            // controller/action rather than a hardcoded absolute path, and threads pathBase:
+            // options.RootPath through so this still lands on the right route on an instance served
+            // under a non-root path prefix. GetPathByAction returns null (never throws) if the route
+            // cannot be resolved (e.g. a hostile/stub LinkGenerator in a test) - FillViewModel's own
+            // "must never throw" contract holds either way.
+            vm.ActionLink = linkGenerator.GetPathByAction(
+                action: nameof(SecSwitchController.Audit),
+                controller: "SecSwitch",
+                values: null,
+                pathBase: options.RootPath);
         }
     }
 }
