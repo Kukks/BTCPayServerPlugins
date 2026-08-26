@@ -8,9 +8,9 @@ namespace BTCPayServer.Plugins.SecSwitch.Tests;
 public sealed class RecordingSink : IActionSink
 {
     public List<string> Calls { get; } = [];
-    public void QueueDisable(string identifier) => Calls.Add($"disable:{identifier}");
-    public Task QueueUpdateAsync(string identifier, string version)
-    { Calls.Add($"update:{identifier}:{version}"); return Task.CompletedTask; }
+    public bool QueueDisable(string identifier) { Calls.Add($"disable:{identifier}"); return true; }
+    public Task<bool> QueueUpdateAsync(string identifier, string version)
+    { Calls.Add($"update:{identifier}:{version}"); return Task.FromResult(true); }
     public Task TriggerCoreUpdateAsync() { Calls.Add("core-update"); return Task.CompletedTask; }
     public void StopApplication() => Calls.Add("stop");
 }
@@ -87,10 +87,35 @@ public class ActionExecutorTests
 
     sealed class ThrowingSink : IActionSink
     {
-        public void QueueDisable(string identifier) => throw new InvalidOperationException("boom");
-        public Task QueueUpdateAsync(string identifier, string version) => throw new InvalidOperationException("boom");
+        public bool QueueDisable(string identifier) => throw new InvalidOperationException("boom");
+        public Task<bool> QueueUpdateAsync(string identifier, string version) => throw new InvalidOperationException("boom");
         public Task TriggerCoreUpdateAsync() => throw new InvalidOperationException("boom");
         public void StopApplication() => throw new InvalidOperationException("boom");
+    }
+
+    // A sink whose async members fault via Task.FromException instead of throwing synchronously,
+    // and whose StopApplication records rather than throws - so a test can assert it was never
+    // reached, not just that some exception happened to surface.
+    sealed class AsyncFaultingSink : IActionSink
+    {
+        public List<string> Calls { get; } = [];
+        public bool QueueDisable(string identifier) => throw new InvalidOperationException("boom");
+        public Task<bool> QueueUpdateAsync(string identifier, string version) =>
+            Task.FromException<bool>(new InvalidOperationException("boom"));
+        public Task TriggerCoreUpdateAsync() => Task.FromException(new InvalidOperationException("boom"));
+        public void StopApplication() => Calls.Add("stop");
+    }
+
+    // Simulates BtcPayActionSink failing to resolve the identifier to an installed plugin directory:
+    // reports failure via the return value, without throwing and without queueing anything.
+    sealed class UnresolvableSink : IActionSink
+    {
+        public List<string> Calls { get; } = [];
+        public bool QueueDisable(string identifier) { Calls.Add($"disable-attempt:{identifier}"); return false; }
+        public Task<bool> QueueUpdateAsync(string identifier, string version)
+        { Calls.Add($"update-attempt:{identifier}:{version}"); return Task.FromResult(false); }
+        public Task TriggerCoreUpdateAsync() => throw new NotSupportedException();
+        public void StopApplication() => Calls.Add("stop");
     }
 
     // --- Hardening beyond the brief: ExecuteAsync must fail closed for every hostile or malformed
@@ -100,7 +125,7 @@ public class ActionExecutorTests
     public async Task Null_advisory_is_refused_not_disabled()
     {
         var (exec, sink) = Make();
-        var outcome = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, null!);
+        var outcome = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, null);
         Assert.Empty(sink.Calls);
         Assert.Contains("unsafe", outcome, StringComparison.OrdinalIgnoreCase);
     }
@@ -109,7 +134,7 @@ public class ActionExecutorTests
     public async Task Null_advisory_is_refused_not_updated()
     {
         var (exec, sink) = Make();
-        var outcome = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, null!);
+        var outcome = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, null);
         Assert.Empty(sink.Calls);
         Assert.Contains("unsafe", outcome, StringComparison.OrdinalIgnoreCase);
     }
@@ -140,6 +165,10 @@ public class ActionExecutorTests
     [InlineData("foo\\bar")]
     [InlineData("foo:bar")]
     [InlineData("..")]
+    [InlineData("foo*bar")]
+    [InlineData("foo?bar")]
+    [InlineData("foo\u2028bar")]
+    [InlineData("foo\u2029bar")]
     public async Task Path_traversal_or_separator_identifiers_are_refused_not_disabled(string hostileIdentifier)
     {
         var (exec, sink) = Make();
@@ -172,7 +201,7 @@ public class ActionExecutorTests
         // UpdateCore/ShutdownCore never consume the identifier, so a missing advisory should not
         // block them the way it blocks the plugin-identifier actions.
         var (exec, sink) = Make();
-        await exec.ExecuteAsync(SecSwitchAction.UpdateCore, null!);
+        await exec.ExecuteAsync(SecSwitchAction.UpdateCore, null);
         Assert.Equal(["core-update"], sink.Calls);
     }
 
@@ -180,7 +209,155 @@ public class ActionExecutorTests
     public async Task Core_shutdown_with_null_advisory_still_stops()
     {
         var (exec, sink) = Make();
-        await exec.ExecuteAsync(SecSwitchAction.ShutdownCore, null!);
+        await exec.ExecuteAsync(SecSwitchAction.ShutdownCore, null);
         Assert.Equal(["stop"], sink.Calls);
+    }
+
+    // --- Review round 2: a queue step can now report "nothing was actually queued" (an identifier
+    // that doesn't resolve to an installed plugin, case-insensitively or otherwise), and the
+    // application must not be stopped when that happens - stopping on a no-op queue is an outage
+    // for nothing, worse than doing nothing at all. Covers both failure shapes a sink can produce:
+    // a synchronous throw, and a Task that completes faulted (Task.FromException). ---
+
+    [Fact]
+    public async Task Disable_queue_failure_does_not_stop_the_application()
+    {
+        var sink = new UnresolvableSink();
+        var exec = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
+        var outcome = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, Adv());
+        Assert.DoesNotContain("stop", sink.Calls);
+        Assert.Contains("Plug", outcome);
+    }
+
+    [Fact]
+    public async Task Update_queue_failure_does_not_stop_the_application()
+    {
+        var sink = new UnresolvableSink();
+        var exec = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
+        var outcome = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv());
+        Assert.DoesNotContain("stop", sink.Calls);
+        Assert.Contains("Plug", outcome);
+    }
+
+    [Fact]
+    public async Task Disable_queue_throwing_synchronously_does_not_stop_the_application()
+    {
+        var sink = new AsyncFaultingSink();
+        var exec = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
+        var outcome = await exec.ExecuteAsync(SecSwitchAction.DisablePlugin, Adv());
+        Assert.DoesNotContain("stop", sink.Calls);
+        Assert.Contains("failed", outcome, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Update_queue_failure_via_faulted_task_does_not_stop_the_application()
+    {
+        var sink = new AsyncFaultingSink();
+        var exec = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
+        var outcome = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv());
+        Assert.DoesNotContain("stop", sink.Calls);
+        Assert.Contains("failed", outcome, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Update_queue_throwing_synchronously_is_reported_not_thrown()
+    {
+        var exec = new ActionExecutor(new ThrowingSink(), NullLogger<ActionExecutor>.Instance);
+        var outcome = await exec.ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv());
+        Assert.Contains("failed", outcome, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Core_update_failure_is_reported_not_thrown()
+    {
+        var exec = new ActionExecutor(new ThrowingSink(), NullLogger<ActionExecutor>.Instance);
+        var outcome = await exec.ExecuteAsync(SecSwitchAction.UpdateCore, Adv("BTCPayServer"));
+        Assert.Contains("failed", outcome, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Core_update_failure_via_faulted_task_does_not_stop_and_is_reported()
+    {
+        var sink = new AsyncFaultingSink();
+        var exec = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
+        var outcome = await exec.ExecuteAsync(SecSwitchAction.UpdateCore, Adv("BTCPayServer"));
+        Assert.DoesNotContain("stop", sink.Calls);
+        Assert.Contains("failed", outcome, StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+// Resolution is what makes the case-mismatch fix actually work: it is exercised against a real
+// (temporary) directory rather than through RecordingSink, because the resolution logic lives
+// entirely inside BtcPayActionSink - RecordingSink replaces that class outright in the tests above,
+// so it cannot observe what BtcPayActionSink itself does with an identifier before queueing.
+public class BtcPayActionSinkResolutionTests
+{
+    [Fact]
+    public void Resolves_identifier_differing_only_in_case_to_the_canonical_on_disk_name()
+    {
+        var dir = Directory.CreateTempSubdirectory("secswitch-test-");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(dir.FullName, "BTCPayServer.Plugins.Prism"));
+
+            var resolved = BtcPayActionSink.TryResolveInstalledDirectory(
+                dir.FullName, "btcpayserver.plugins.prism", out var name);
+
+            Assert.True(resolved);
+            Assert.Equal("BTCPayServer.Plugins.Prism", name);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Exact_case_match_resolves_to_itself()
+    {
+        var dir = Directory.CreateTempSubdirectory("secswitch-test-");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(dir.FullName, "BTCPayServer.Plugins.Prism"));
+
+            var resolved = BtcPayActionSink.TryResolveInstalledDirectory(
+                dir.FullName, "BTCPayServer.Plugins.Prism", out var name);
+
+            Assert.True(resolved);
+            Assert.Equal("BTCPayServer.Plugins.Prism", name);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void No_matching_directory_fails_to_resolve()
+    {
+        var dir = Directory.CreateTempSubdirectory("secswitch-test-");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(dir.FullName, "BTCPayServer.Plugins.Prism"));
+
+            var resolved = BtcPayActionSink.TryResolveInstalledDirectory(
+                dir.FullName, "SomeOtherPlugin", out _);
+
+            Assert.False(resolved);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Missing_plugin_directory_fails_to_resolve_without_throwing()
+    {
+        var missing = Path.Combine(Path.GetTempPath(), "secswitch-does-not-exist-" + Guid.NewGuid());
+
+        var resolved = BtcPayActionSink.TryResolveInstalledDirectory(missing, "AnyPlugin", out _);
+
+        Assert.False(resolved);
     }
 }
