@@ -54,12 +54,38 @@ actually requires, so take care when removing keys by hand.
 |---|---|---|---|
 | Plugin | yes | prefer-update on | Download + queue update, then stop for restart |
 | Plugin | no | — | Queue disable, then stop for restart |
-| Core | yes | SSH configured | Run `btcpay-update.sh` over SSH |
-| Core | no or no SSH | — | Stop the server |
+| Core | yes | SSH **verified** working | Run `btcpay-update.sh` over SSH |
+| Core | yes | SSH configured but **not yet verified** | Defer — re-evaluated on the next poll |
+| Core | no, or SSH not configured at all | — | Stop the server |
+
+"SSH verified working" means BTCPayServer's own connectivity check
+(`CheckConfigurationHostedService`) has actually succeeded at least once since this
+process started, not merely that SSH settings are present. That check runs in the
+background and can still be in progress — or endlessly retrying — when SecSwitch's own
+poll runs, which is exactly the "configured but not yet verified" row above:
+**SecSwitch deliberately waits rather than guessing.** Guessing wrong in either
+direction is bad — stopping a server whose SSH genuinely does work, or trying to run an
+update over SSH that cannot actually connect — so a fixable core advisory reached in
+this state is deferred instead, and re-evaluated on every later poll. If SSH is
+misconfigured (a rotated key, a wrong host, container networking trouble) and never
+starts working, **this deferral can persist indefinitely** — the server keeps running,
+unpatched, against that specific core advisory, until the SSH connection issue is fixed
+or the advisory is otherwise addressed. SecSwitch surfaces this state via an admin bell
+notification and the alert banner from the very first poll it happens on (not buried in
+the audit log alone) specifically so an indefinite deferral is never a silent one — see
+"Needs attention" below.
 
 Manual mode, a notify-only pin, or an advisory below the severity gate never takes any
 of the actions above automatically — SecSwitch only records a notification and leaves
 the decision to an admin in the audit log.
+
+**"Needs attention" vs. "needs decision".** The audit log (and the alert banner, and
+bell notifications) can show two different holds, and they mean different things: a
+"needs decision" advisory has a computed action SecSwitch is holding open for you to
+approve (manual mode, a notify-only pin, or the severity gate); a "needs attention"
+advisory means SecSwitch could not resolve it at all — either it cannot tell whether
+your installed version is affected, or (the SSH case above) it cannot yet tell whether
+to update or stop the server. The audit log's Reason column always says which.
 
 **Disabling and updating a plugin only take effect on the next start, and BTCPay Server
 does not restart itself.** Stopping the process is the only enforcement point SecSwitch

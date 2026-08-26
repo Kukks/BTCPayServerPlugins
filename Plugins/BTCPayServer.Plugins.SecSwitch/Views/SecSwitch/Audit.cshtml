@@ -15,7 +15,7 @@
         LedgerStatus.NotApplicable => ("bg-secondary", "Not applicable",
             "Quorum met; this advisory does not apply to this instance. Final — cached, and will not be re-checked."),
         LedgerStatus.NeedsAttention => ("bg-warning text-dark", "Needs attention",
-            "Quorum met, but SecSwitch could not tell whether this instance is affected (installed version indeterminate). Not final — retried on the next poll."),
+            "Quorum met, but SecSwitch could not resolve this advisory on its own — either the installed version is indeterminate, or (for a core advisory) SSH connectivity has not finished verifying yet, so it cannot yet tell whether to update or stop the server. Not final — retried on the next poll, which can mean indefinitely if SSH never verifies. See the Reason column for which case this is."),
         LedgerStatus.NeedsDecision => ("bg-warning text-dark", "Needs decision",
             "Quorum met and an action was computed, but policy is holding it open for a manual decision."),
         LedgerStatus.Acted => ("bg-success", "Acted",

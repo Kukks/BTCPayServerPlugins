@@ -165,6 +165,39 @@ public class PeriodicTaskTests
         Assert.Empty(known);
     }
 
+    // --- Task 13 review round 2, Finding R1 (Important) fix: NeedsAttention joined the notify-worthy
+    // set alongside Acted and NeedsDecision, so a deferred fixable core advisory (SSH configured but
+    // not yet verified - see PolicyResolver.SshVerificationPendingPhrase) is surfaced on the FIRST
+    // poll rather than only in an audit log nobody is watching, given
+    // CheckConfigurationHostedService's probe can retry forever and never succeed. This also closes
+    // the identical, pre-existing silence for the indeterminate-installed-version case, which shares
+    // this same status.
+
+    [Theory]
+    [InlineData(LedgerStatus.Acted)]
+    [InlineData(LedgerStatus.NeedsDecision)]
+    [InlineData(LedgerStatus.NeedsAttention)]
+    public void Notifiable_statuses_are_notified(string status)
+    {
+        Assert.True(SecSwitchPeriodicTask.IsNotifiable(status));
+    }
+
+    [Theory]
+    [InlineData(LedgerStatus.Rejected)]
+    [InlineData(LedgerStatus.Unverified)]
+    [InlineData(LedgerStatus.NotApplicable)]
+    [InlineData(LedgerStatus.Suppressed)]
+    [InlineData(LedgerStatus.Unsuppressed)]
+    [InlineData("")]
+    public void Non_notifiable_statuses_are_not_notified(string status)
+    {
+        // Regression guard: Rejected/Unverified retry automatically without needing an admin to do
+        // anything differently, NotApplicable affirmatively means "not affected", and
+        // Suppressed/Unsuppressed are the admin's own escape-hatch bookkeeping - none of these should
+        // have started being notified as a side effect of this fix.
+        Assert.False(SecSwitchPeriodicTask.IsNotifiable(status));
+    }
+
     sealed class StubPlugin(string id, Version version) : BTCPayServer.Abstractions.Models.BaseBTCPayServerPlugin
     {
         public override string Identifier => id;
