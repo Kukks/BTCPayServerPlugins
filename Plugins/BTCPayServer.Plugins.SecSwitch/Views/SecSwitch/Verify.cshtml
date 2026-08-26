@@ -1,0 +1,87 @@
+@using BTCPayServer.Plugins.SecSwitch.Models
+@model BTCPayServer.Plugins.SecSwitch.Controllers.SecSwitchController.VerifyViewModel
+@{ ViewData["Title"] = "Verify an advisory signature"; }
+
+<div class="sticky-header"><h2>Verify an advisory signature</h2></div>
+<p class="text-muted">Read-only. Verifying here never triggers an action.</p>
+
+<form method="post">
+    <div class="form-group mb-3">
+        <label asp-for="AdvisoryJson" class="form-label">advisory.json (exact bytes)</label>
+        <textarea asp-for="AdvisoryJson" class="form-control font-monospace" rows="10"></textarea>
+    </div>
+    <div class="form-group mb-3">
+        <label asp-for="ArmoredSignatures" class="form-label">Armored detached signature(s)</label>
+        <textarea asp-for="ArmoredSignatures" class="form-control font-monospace" rows="10"></textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Verify</button>
+</form>
+
+@if (Model.Result is not null)
+{
+    <hr />
+    <h4>
+        @if (Model.Result.QuorumMet)
+        { <span class="text-success">Quorum met</span> }
+        else
+        { <span class="text-danger">Quorum NOT met</span> }
+        (@Model.Result.TrustedValidCount / @Model.Result.Required)
+    </h4>
+
+    <p class="text-muted">
+        Only a row marked "Verified" below is a cryptographically proven signer identity. Every
+        other row shows, at most, an unauthenticated claim carried in the signature's own
+        unhashed data — never treat it as attributing blame to (or clearing) anyone.
+    </p>
+
+    <table class="table">
+        <thead><tr><th>Result</th><th>Claimed / verified identity</th><th>What this means</th></tr></thead>
+        <tbody>
+        @foreach (var sig in Model.Result.Signatures)
+        {
+            <tr>
+            @if (sig.Status == SignatureStatus.ValidTrusted)
+            {
+                <td><span class="badge bg-success">Verified</span></td>
+                <td><code>@sig.Fingerprint</code></td>
+                <td class="text-muted">Cryptographically verified against a trusted key. This counts toward quorum.</td>
+            }
+            else if (sig.Status == SignatureStatus.InvalidSignature)
+            {
+                <td><span class="badge bg-danger">Invalid signature</span></td>
+                <td>
+                    <span class="badge bg-warning text-dark">claimed, NOT verified</span>
+                    <code>@sig.Fingerprint["claimed:".Length..]</code>
+                </td>
+                <td class="text-muted">
+                    A trusted key was named by this signature, but cryptographic verification against
+                    it FAILED. Do not attribute this to the named signer — the name comes from
+                    attacker-malleable data, and the signature itself did not check out.
+                </td>
+            }
+            else if (sig.Status == SignatureStatus.UnknownSigner)
+            {
+                <td><span class="badge bg-warning text-dark">Unknown signer</span></td>
+                <td>
+                    <span class="badge bg-secondary">unverified claim</span>
+                    key id <code>@sig.Fingerprint["keyid:".Length..]</code>
+                </td>
+                <td class="text-muted">
+                    No trusted key verified this signature. The key id shown is taken from
+                    unauthenticated, attacker-controllable data — it does not identify any real signer.
+                </td>
+            }
+            else
+            {
+                <td><span class="badge bg-danger">Malformed</span></td>
+                <td class="text-muted">—</td>
+                <td class="text-muted">Could not be parsed as an OpenPGP signature at all.</td>
+            }
+            </tr>
+        }
+        </tbody>
+    </table>
+
+    <h5>Currently trusted fingerprints</h5>
+    <ul>@foreach (var fp in Model.TrustedFingerprints) { <li><code>@fp</code></li> }</ul>
+}
