@@ -24,6 +24,8 @@ public class LnurlRailRecorder : EventHostedServiceBase
     private sealed record RailSettled(TrackedDestination Destination, string Reference);
     private sealed record RailForgotten(TrackedDestination Destination, string Reason);
 
+    private static readonly TimeSpan RebuildRetryDelay = TimeSpan.FromMinutes(1);
+
     private readonly InvoiceRepository _invoices;
     private readonly PaymentService _payments;
     private readonly InvoiceActivator _activator;
@@ -71,9 +73,7 @@ public class LnurlRailRecorder : EventHostedServiceBase
         switch (evt)
         {
             case Rebuild:
-                foreach (var rail in LnurlRails.All)
-                foreach (var invoice in await _invoices.GetMonitoredInvoices(rail.PaymentMethodId, cancellationToken))
-                    Track(invoice, rail);
+                await RebuildTracking(cancellationToken);
                 break;
             case RailSettled s:
                 await Record(s.Destination, s.Reference);
@@ -93,6 +93,43 @@ public class LnurlRailRecorder : EventHostedServiceBase
         }
     }
 
+    private async Task RebuildTracking(CancellationToken cancellationToken)
+    {
+        var queryFailed = false;
+        foreach (var rail in LnurlRails.All)
+        {
+            InvoiceEntity[] monitored;
+            try { monitored = await _invoices.GetMonitoredInvoices(rail.PaymentMethodId, cancellationToken); }
+            catch (Exception e) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(e, "Could not list the invoices monitored for {PaymentMethodId}; retrying the rebuild in {Delay}",
+                    rail.PaymentMethodId, RebuildRetryDelay);
+                queryFailed = true;
+                continue;
+            }
+            foreach (var invoice in monitored)
+            {
+                try { Track(invoice, rail); }
+                catch (Exception e)
+                {
+                    _logger.LogWarning(e, "Could not track the {PaymentMethodId} destinations of invoice {InvoiceId}", rail.PaymentMethodId, invoice.Id);
+                }
+            }
+        }
+        // Nothing re-tracks these destinations until a restart, so a failed rebuild retries itself.
+        if (queryFailed) _ = RetryRebuildLater();
+    }
+
+    private async Task RetryRebuildLater()
+    {
+        try
+        {
+            await Task.Delay(RebuildRetryDelay, CancellationToken);
+            PushEvent(new Rebuild());
+        }
+        catch (OperationCanceledException) { }
+    }
+
     private void Track(InvoiceEntity invoice, LnurlRail rail)
     {
         if (invoice.GetPaymentPrompt(rail.PaymentMethodId) is not { Activated: true, Details: { } json } prompt ||
@@ -110,14 +147,27 @@ public class LnurlRailRecorder : EventHostedServiceBase
             var invoice = await _invoices.GetInvoice(d.InvoiceId);
             if (invoice is null || !_handlers.TryGetValue(pmi, out var handler)) return;
             var id = PaymentId(reference, d.VerifyUrl);
-            if (invoice.GetPayments(false).Any(p => p.Id == id && p.PaymentMethodId == pmi)) return;
+            if (invoice.GetPayments(false).Any(p => p.Id == id && p.PaymentMethodId == pmi))
+            {
+                // An earlier attempt may have stored the payment and failed before telling the watcher.
+                EventAggregator.Publish(new InvoiceNeedUpdateEvent(invoice.Id));
+                return;
+            }
             var data = new PaymentData
             {
                 Id = id, Created = DateTimeOffset.UtcNow, Status = PaymentStatus.Settled, Currency = "BTC",
                 Amount = LnurlRailPaymentHandler.AmountBtc(d.AmountMsat)
             }.Set(invoice, handler, new LnurlRailPaymentData { PaymentReference = reference, VerifyUrl = d.VerifyUrl, Destination = d.Destination });
-            if (await _payments.AddPayment(data) is { } payment)
-                EventAggregator.Publish(new InvoiceEvent(invoice, InvoiceEvent.ReceivedPayment) { Payment = payment });
+            if (await _payments.AddPayment(data) is not { } payment)
+            {
+                // null is a duplicate or a failed insert, and Apply already untracked the destination; retrying is idempotent.
+                _logger.LogWarning("The LNURL rail payment {Reference} for invoice {InvoiceId} was not stored; retrying on the next poll",
+                    reference, d.InvoiceId);
+                TrackedDestinationRegistry.Add(d);
+                return;
+            }
+            // Core's listeners publish the post-payment invoice; LightningListener sizes a new BOLT11 from its due.
+            EventAggregator.Publish(new InvoiceEvent(await _invoices.GetInvoice(invoice.Id) ?? invoice, InvoiceEvent.ReceivedPayment) { Payment = payment });
             EventAggregator.Publish(new InvoiceNeedUpdateEvent(invoice.Id));
         }
         catch (Exception e)
