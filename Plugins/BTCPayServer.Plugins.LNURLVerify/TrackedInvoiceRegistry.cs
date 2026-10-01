@@ -36,6 +36,10 @@ public static class TrackedInvoiceRegistry
     // invoice must keep reporting Paid until BTCPay has recorded it — not vanish the instant we detect it.
     private static readonly ConcurrentDictionary<string, (LightningInvoice Invoice, DateTimeOffset PruneAfter)> _settled = new();
 
+    // The poller's latest answer per tracked hash that settled nothing: Unpaid, or null when the service
+    // does not know the invoice. GetInvoice serves it so BTCPay's polling costs no extra requests.
+    private static readonly ConcurrentDictionary<string, LightningInvoice?> _lastResult = new();
+
     /// <summary>Fired when the poller observes a settled invoice. Listeners filter to their connection.</summary>
     public static event Action<TrackedInvoice, LightningInvoice>? Settled;
 
@@ -67,8 +71,24 @@ public static class TrackedInvoiceRegistry
             Interlocked.Increment(ref _version);
     }
 
+    public static void RecordResult(string paymentHash, LightningInvoice? invoice)
+    {
+        if (_hostOf.ContainsKey(paymentHash)) _lastResult[paymentHash] = invoice;
+    }
+
+    public static bool TryGetResult(string paymentHash, out LightningInvoice? invoice) =>
+        _lastResult.TryGetValue(paymentHash, out invoice);
+
+    public static void PruneResults()
+    {
+        foreach (var key in _lastResult.Keys)
+            if (!_hostOf.ContainsKey(key))
+                _lastResult.TryRemove(key, out _);
+    }
+
     public static void Remove(string paymentHash)
     {
+        _lastResult.TryRemove(paymentHash, out _);
         if (!_hostOf.TryRemove(paymentHash, out var host)) return;
         if (_byHost.TryGetValue(host, out var inner))
             inner.TryRemove(paymentHash, out _);

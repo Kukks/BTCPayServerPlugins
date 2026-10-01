@@ -81,6 +81,7 @@ public sealed class LNURLVerifyPollerService : IHostedService
             try
             {
                 TrackedInvoiceRegistry.PruneSettled(DateTimeOffset.UtcNow);
+                TrackedInvoiceRegistry.PruneResults();
                 SentPaymentRegistry.Prune(DateTimeOffset.UtcNow.AddHours(-24)); // keep the registry bounded
 
                 // Poll every tracked invoice across every host under one global concurrency cap, so a
@@ -157,21 +158,7 @@ public sealed class LNURLVerifyPollerService : IHostedService
                 : await LNURLReceiver.PollAndBuild(t, http!, ct);
 
             _backoff.TryRemove(t.PaymentHash, out _); // success resets backoff
-            if (inv is null) return;
-
-            if (inv.Status == LightningInvoiceStatus.Paid)
-            {
-                // Keep it retrievable as Paid for a grace window (BTCPay's poll path evicts an invoice
-                // whose GetInvoice returns null) and publish for any live listener.
-                var pruneAfter = (t.ExpiresAt > DateTimeOffset.UtcNow ? t.ExpiresAt : DateTimeOffset.UtcNow)
-                                 + TimeSpan.FromHours(1);
-                TrackedInvoiceRegistry.MarkSettled(t.PaymentHash, inv, pruneAfter);
-                TrackedInvoiceRegistry.PublishSettled(t, inv);
-            }
-            else if (inv.Status == LightningInvoiceStatus.Expired)
-            {
-                TrackedInvoiceRegistry.Remove(t.PaymentHash);
-            }
+            Apply(t, inv);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception e)
@@ -181,6 +168,23 @@ public sealed class LNURLVerifyPollerService : IHostedService
             _backoff[t.PaymentHash] = (errors, DateTimeOffset.UtcNow.AddMilliseconds(delay));
             _logger.LogDebug(e, "Error polling LNURL verify for {Hash} (attempt {N})", t.PaymentHash, errors);
         }
+    }
+
+    private static void Apply(TrackedInvoice t, LightningInvoice? inv)
+    {
+        if (inv?.Status == LightningInvoiceStatus.Paid)
+        {
+            // Keep it retrievable as Paid for a grace window (BTCPay's poll path evicts an invoice whose
+            // GetInvoice returns null) and publish for any live listener.
+            var pruneAfter = (t.ExpiresAt > DateTimeOffset.UtcNow ? t.ExpiresAt : DateTimeOffset.UtcNow)
+                             + TimeSpan.FromHours(1);
+            TrackedInvoiceRegistry.MarkSettled(t.PaymentHash, inv, pruneAfter);
+            TrackedInvoiceRegistry.PublishSettled(t, inv);
+        }
+        else if (inv?.Status == LightningInvoiceStatus.Expired)
+            TrackedInvoiceRegistry.Remove(t.PaymentHash);
+        else
+            TrackedInvoiceRegistry.RecordResult(t.PaymentHash, inv);
     }
 }
 

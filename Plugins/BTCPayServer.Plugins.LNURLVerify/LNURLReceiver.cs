@@ -133,7 +133,9 @@ public sealed class LNURLReceiver
         if (TrackedInvoiceRegistry.TryGetSettled(paymentHash, out var paid))
             return Task.FromResult<LightningInvoice?>(paid);
         if (TrackedInvoiceRegistry.TryGet(paymentHash, out var t))
-            return PollAndBuild(t, _http, ct);
+            return TrackedInvoiceRegistry.TryGetResult(paymentHash, out var last)
+                ? Task.FromResult(last)
+                : PollAndBuild(t, _http, ct);
         // MarkSettled writes _settled BEFORE removing from tracked, so a tracked-miss here means a
         // concurrent settle may have just completed — re-check settled to avoid returning null for a
         // just-settled invoice (which BTCPay would evict from monitoring).

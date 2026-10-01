@@ -74,4 +74,20 @@ public class TrackedInvoiceRegistryTests
         Assert.True(TrackedInvoiceRegistry.Version > before);
         TrackedInvoiceRegistry.Remove("reg_vb");
     }
+
+    [Fact]
+    public void Results_are_kept_only_for_tracked_invoices_and_cleared_on_remove()
+    {
+        TrackedInvoiceRegistry.RecordResult("reg_res", null); // untracked: ignored
+        Assert.False(TrackedInvoiceRegistry.TryGetResult("reg_res", out _));
+
+        TrackedInvoiceRegistry.Add(Mk("reg_res", "regres.example"));
+        var unpaid = new LightningInvoice { Id = "reg_res", PaymentHash = "reg_res", Status = LightningInvoiceStatus.Unpaid };
+        TrackedInvoiceRegistry.RecordResult("reg_res", unpaid);
+        Assert.True(TrackedInvoiceRegistry.TryGetResult("reg_res", out var got));
+        Assert.Same(unpaid, got);
+
+        TrackedInvoiceRegistry.Remove("reg_res");
+        Assert.False(TrackedInvoiceRegistry.TryGetResult("reg_res", out _));
+    }
 }

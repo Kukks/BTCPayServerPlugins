@@ -100,4 +100,31 @@ public class LNURLVerifyPollerTests
             // settled entries. This test's settled hashes are unique (conc*) and expire via their grace.
         }
     }
+
+    [Fact]
+    public async Task Poller_records_unpaid_results_for_GetInvoice()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var hash = "recd".PadRight(64, '0');
+        TrackedInvoiceRegistry.Add(new TrackedInvoice(hash, "lnbcrt1", $"https://recd.example/verify/{hash}", "recd.example",
+            "https://recd.example/pay", DateTimeOffset.UtcNow.AddHours(1)));
+        LNURLVerifyPollerService.PollOverride = (t, _) => Task.FromResult<LightningInvoice?>(t.PaymentHash == hash
+            ? new LightningInvoice { Id = hash, PaymentHash = hash, Status = LightningInvoiceStatus.Unpaid }
+            : null);
+        var poller = new LNURLVerifyPollerService(
+            NullLogger<LNURLVerifyPollerService>.Instance, new SimpleHttpClientFactory(), TimeSpan.FromMilliseconds(20));
+        await poller.StartAsync(ct);
+        try
+        {
+            for (var i = 0; i < 500 && !TrackedInvoiceRegistry.TryGetResult(hash, out _); i++) await Task.Delay(10, ct);
+            Assert.True(TrackedInvoiceRegistry.TryGetResult(hash, out var got));
+            Assert.Equal(LightningInvoiceStatus.Unpaid, got!.Status);
+        }
+        finally
+        {
+            await poller.StopAsync(ct);
+            LNURLVerifyPollerService.PollOverride = null;
+            TrackedInvoiceRegistry.Remove(hash);
+        }
+    }
 }

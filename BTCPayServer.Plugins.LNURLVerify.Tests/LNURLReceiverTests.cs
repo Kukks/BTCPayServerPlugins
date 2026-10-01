@@ -212,6 +212,26 @@ public class LNURLReceiverTests
     }
 
     [Fact]
+    public async Task GetInvoice_answers_from_the_pollers_last_result_without_a_request()
+    {
+        var host = UniqueHost("cache");
+        var hash = NewHash();
+        TrackedInvoiceRegistry.Add(new TrackedInvoice(hash, SpecBolt11, $"https://{host}/verify/{hash}", host,
+            $"https://{host}/pay", DateTimeOffset.UtcNow.AddHours(1)));
+        var http = new FakeHttp();
+        var rx = Receiver(host, http, Network.Main);
+
+        TrackedInvoiceRegistry.RecordResult(hash, null);
+        Assert.Null(await rx.GetInvoice(hash, TestContext.Current.CancellationToken));
+        var unpaid = new LightningInvoice { Id = hash, PaymentHash = hash, Status = LightningInvoiceStatus.Unpaid };
+        TrackedInvoiceRegistry.RecordResult(hash, unpaid);
+        Assert.Same(unpaid, await rx.GetInvoice(hash, TestContext.Current.CancellationToken));
+
+        Assert.Empty(http.Requests);
+        TrackedInvoiceRegistry.Remove(hash);
+    }
+
+    [Fact]
     public async Task CheckVerifySupport_flags_missing_verify()
     {
         var host = "nv.example";
