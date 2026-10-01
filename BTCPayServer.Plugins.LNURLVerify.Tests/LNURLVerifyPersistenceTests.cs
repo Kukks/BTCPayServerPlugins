@@ -9,6 +9,7 @@ using Xunit;
 
 namespace BTCPayServer.Plugins.LNURLVerify.Tests;
 
+[Collection(RegistryCollection.Name)]
 public class LNURLVerifyPersistenceTests
 {
     static string Uniq(string p) => p + Guid.NewGuid().ToString("N").Substring(0, 8);

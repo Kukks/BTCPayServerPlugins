@@ -5,6 +5,7 @@ using Xunit;
 
 namespace BTCPayServer.Plugins.LNURLVerify.Tests;
 
+[Collection(RegistryCollection.Name)]
 public class TrackedInvoiceRegistryTests
 {
     static TrackedInvoice Mk(string hash, string host) =>

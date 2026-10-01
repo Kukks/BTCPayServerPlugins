@@ -1,5 +1,6 @@
 using System;
 using System.Net;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Lightning;
@@ -10,6 +11,7 @@ using Xunit;
 
 namespace BTCPayServer.Plugins.LNURLVerify.Tests;
 
+[Collection(RegistryCollection.Name)]
 public class LNURLReceiverTests
 {
     [Fact]
@@ -66,6 +68,95 @@ public class LNURLReceiverTests
     // Canonical BOLT#11 spec example (mainnet, 250,000,000 msat) — parses offline.
     const string SpecBolt11 =
         "lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5xysxxatsyp3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w3ls4evs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp";
+
+    const string SpecHash = "0001020304050607080900010203040506070809000102030405060708090102";
+
+    static string UniqueHost(string prefix) => prefix + Guid.NewGuid().ToString("N").Substring(0, 8) + ".example";
+    static string NewHash() => Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+
+    static LNURLReceiver Receiver(string host, FakeHttp http, Network network) =>
+        new(new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, null, host),
+            network, http.Client(), NullLogger.Instance);
+
+    static string PayJson(string cb, long maxSendable = 100_000_000, string? options = null) =>
+        "{\"tag\":\"payRequest\",\"callback\":\"" + cb + "\",\"minSendable\":1000,\"maxSendable\":" + maxSendable +
+        ",\"metadata\":\"[[\\\"text/plain\\\",\\\"x\\\"]]\"" + (options is null ? "" : ",\"paymentOptions\":" + options) + "}";
+
+    static string SpecCallback(string host, string extra = "") =>
+        $"{{\"pr\":\"{SpecBolt11}\",\"verify\":\"https://{host}/verify/{SpecHash}\"{extra}}}";
+
+    [Fact]
+    public async Task CreateInvoice_requests_the_lightning_option_within_its_own_bounds()
+    {
+        var host = UniqueHost("opt");
+        // The top-level max (100,000,000 msat) is below the spec invoice; only the option's own max admits it.
+        var options = "[{\"id\":\"ln-main\",\"type\":\"lightning\",\"maxSendable\":250000000},{\"id\":\"arkade\",\"type\":\"arkade\"}]";
+        var http = new FakeHttp()
+            .Map($"https://{host}/pay", PayJson($"https://{host}/cb", options: options))
+            .Map($"https://{host}/cb?amount=250000000&paymentOption=ln-main", SpecCallback(host));
+
+        var inv = await Receiver(host, http, Network.Main)
+            .CreateInvoice(LightMoney.MilliSatoshis(250_000_000), "x", null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SpecHash, inv.PaymentHash);
+        TrackedInvoiceRegistry.Remove(SpecHash);
+    }
+
+    [Fact]
+    public async Task CreateInvoice_refuses_while_the_lightning_option_is_unavailable()
+    {
+        var host = UniqueHost("optoff");
+        var http = new FakeHttp().Map($"https://{host}/pay",
+            PayJson($"https://{host}/cb", 250_000_000, "[{\"id\":\"lightning\",\"type\":\"lightning\",\"available\":false}]"));
+
+        var ex = await Assert.ThrowsAsync<NotSupportedException>(() => Receiver(host, http, Network.Main)
+            .CreateInvoice(LightMoney.MilliSatoshis(250_000_000), "x", null, TestContext.Current.CancellationToken));
+
+        Assert.Contains("unavailable", ex.Message);
+        Assert.Single(http.Requests);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("[{\"id\":\"arkade\",\"type\":\"arkade\"}]")]
+    public async Task CreateInvoice_without_a_lightning_option_sends_a_plain_LUD06_request(string options)
+    {
+        var host = UniqueHost("plain");
+        var http = new FakeHttp()
+            .Map($"https://{host}/pay", PayJson($"https://{host}/cb", 250_000_000, options == "" ? null : options))
+            .Map($"https://{host}/cb?amount=250000000", SpecCallback(host));
+
+        var inv = await Receiver(host, http, Network.Main)
+            .CreateInvoice(LightMoney.MilliSatoshis(250_000_000), "x", null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(SpecHash, inv.PaymentHash);
+        TrackedInvoiceRegistry.Remove(SpecHash);
+    }
+
+    [Fact]
+    public async Task CheckVerifySupport_probes_with_the_lightning_options_minimum()
+    {
+        var host = UniqueHost("probe");
+        var http = new FakeHttp()
+            .Map($"https://{host}/pay", PayJson($"https://{host}/cb",
+                options: "[{\"id\":\"lightning\",\"type\":\"lightning\",\"minSendable\":5000}]"))
+            .Map($"https://{host}/cb?amount=5000&paymentOption=lightning",
+                $"{{\"pr\":\"lnbc1\",\"verify\":\"https://{host}/verify/abc\"}}");
+
+        Assert.Null(await Receiver(host, http, Network.RegTest).CheckVerifySupport(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task CheckVerifySupport_reports_an_unavailable_lightning_option()
+    {
+        var host = UniqueHost("probeoff");
+        var http = new FakeHttp().Map($"https://{host}/pay",
+            PayJson($"https://{host}/cb", options: "[{\"id\":\"lightning\",\"type\":\"lightning\",\"available\":false}]"));
+
+        var err = await Receiver(host, http, Network.RegTest).CheckVerifySupport(TestContext.Current.CancellationToken);
+
+        Assert.Contains("unavailable", err);
+    }
 
     [Fact]
     public async Task CheckVerifySupport_flags_missing_verify()

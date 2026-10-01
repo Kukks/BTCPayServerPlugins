@@ -9,6 +9,7 @@ using Xunit;
 
 namespace BTCPayServer.Plugins.LNURLVerify.Tests;
 
+[Collection(RegistryCollection.Name)]
 public class LNURLVerifyPollerTests
 {
     [Fact]

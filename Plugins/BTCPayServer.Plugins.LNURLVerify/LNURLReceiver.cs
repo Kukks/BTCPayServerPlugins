@@ -46,16 +46,13 @@ public sealed class LNURLReceiver
 
         var callback = meta["callback"]?.Value<string>();
         if (string.IsNullOrEmpty(callback)) return "The LNURL-pay endpoint is missing a callback URL.";
-        var min = meta["minSendable"]?.Value<long>() ?? 1000;
-
-        var cb = new UriBuilder(callback);
-        var q = new StringBuilder(cb.Query.TrimStart('?'));
-        if (q.Length > 0) q.Append('&');
-        q.Append("amount=").Append(min);
-        cb.Query = q.ToString();
+        long min;
+        string? option;
+        try { (min, _, option) = PaymentOption.PlanLightning(meta, 1000, long.MaxValue); }
+        catch (NotSupportedException e) { return e.Message; }
 
         JObject json;
-        try { json = await LNURLResolver.GetJson(_http, cb.Uri, ct); }
+        try { json = await LNURLResolver.GetJson(_http, CallbackUri(callback, min, option, null), ct); }
         catch (Exception e) { return $"Could not request a probe invoice: {e.Message}"; }
 
         var verify = json["verify"]?.Value<string>();
@@ -74,25 +71,17 @@ public sealed class LNURLReceiver
         var meta = await LNURLResolver.GetJson(_http, _resolved.PayEndpoint, ct);
         var callback = meta["callback"]?.Value<string>()
                        ?? throw new Exception("LNURL-pay response is missing a callback URL.");
-        var min = meta["minSendable"]?.Value<long>() ?? 1;
-        var max = meta["maxSendable"]?.Value<long>() ?? long.MaxValue;
+        var (min, max, option) = PaymentOption.PlanLightning(meta, 1, long.MaxValue);
         var msat = amount.MilliSatoshi;
         if (msat < min) throw new Exception($"Amount {msat} msat is below the minimum ({min} msat).");
         if (msat > max) throw new Exception($"Amount {msat} msat is above the maximum ({max} msat).");
 
-        var cb = new UriBuilder(callback);
-        var q = new StringBuilder(cb.Query.TrimStart('?'));
-        if (q.Length > 0) q.Append('&');
-        q.Append("amount=").Append(msat);
+        string? comment = null;
         var commentAllowed = meta["commentAllowed"]?.Value<int>() ?? 0;
         if (commentAllowed > 0 && !string.IsNullOrEmpty(description))
-        {
-            var c = description!.Length > commentAllowed ? description.Substring(0, commentAllowed) : description;
-            q.Append("&comment=").Append(Uri.EscapeDataString(c));
-        }
-        cb.Query = q.ToString();
+            comment = description!.Length > commentAllowed ? description.Substring(0, commentAllowed) : description;
 
-        var json = await LNURLResolver.GetJson(_http, cb.Uri, ct);
+        var json = await LNURLResolver.GetJson(_http, CallbackUri(callback, msat, option, comment), ct);
         var pr = json["pr"]?.Value<string>() ?? throw new Exception("LNURL callback did not return an invoice.");
         var bolt11 = BOLT11PaymentRequest.Parse(pr, _network);
 
@@ -123,6 +112,18 @@ public sealed class LNURLReceiver
             Status = LightningInvoiceStatus.Unpaid,
             ExpiresAt = bolt11.ExpiryDate
         };
+    }
+
+    private static Uri CallbackUri(string callback, long msat, string? paymentOption, string? comment)
+    {
+        var cb = new UriBuilder(callback);
+        var q = new StringBuilder(cb.Query.TrimStart('?'));
+        if (q.Length > 0) q.Append('&');
+        q.Append("amount=").Append(msat);
+        if (paymentOption is not null) q.Append("&paymentOption=").Append(Uri.EscapeDataString(paymentOption));
+        if (comment is not null) q.Append("&comment=").Append(Uri.EscapeDataString(comment));
+        cb.Query = q.ToString();
+        return cb.Uri;
     }
 
     public Task<LightningInvoice?> GetInvoice(string paymentHash, CancellationToken ct)
