@@ -33,8 +33,8 @@ public static class LnurlRailRequester
             throw Unavailable($"the LNURL answered for '{echoed}' instead of '{option.Id}'");
         var destination = Str(json["paymentDestination"]) ?? throw Unavailable("the LNURL returned no destination");
         var verify = Str(json["verify"]);
-        if (verify is null || !Uri.TryCreate(verify, UriKind.Absolute, out _))
-            throw Unavailable("settlement cannot be detected: the LNURL returned no verify URL");
+        if (verify is null || !Uri.TryCreate(verify, UriKind.Absolute, out var verifyUri) || (verifyUri.Scheme != Uri.UriSchemeHttp && verifyUri.Scheme != Uri.UriSchemeHttps))
+            throw Unavailable("settlement cannot be detected: the LNURL returned no usable verify URL");
         if (json["expiresAt"]?.Type == JTokenType.Integer &&
             DateTimeOffset.FromUnixTimeSeconds(json["expiresAt"]!.Value<long>()) < invoiceExpiry)
             throw Unavailable("the destination expires before the invoice");

@@ -85,6 +85,10 @@ public class LnurlRailRequesterTests
         Assert.Contains("settlement cannot be detected", await Refusal(Server(PayRequest(), Destination(o => o.Remove("verify")))));
 
     [Fact]
+    public async Task A_verify_that_is_not_an_http_url_is_refused() =>
+        Assert.Contains("settlement cannot be detected", await Refusal(Server(PayRequest(), Destination(o => o["verify"] = "/lnurl/verify/00ff"))));
+
+    [Fact]
     public async Task An_answer_without_a_destination_is_refused() =>
         Assert.Contains("no destination", await Refusal(Server(PayRequest(), Destination(o => o.Remove("paymentDestination")))));
 
