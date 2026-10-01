@@ -19,19 +19,21 @@ public class LnurlRailCheckoutController : Controller
     private readonly StoreRepository _stores;
     private readonly InvoiceActivator _activator;
     private readonly RailActivationFailures _failures;
+    private readonly RailActivationGate _gate;
 
     public LnurlRailCheckoutController(InvoiceRepository invoices, StoreRepository stores, InvoiceActivator activator,
-        RailActivationFailures failures)
+        RailActivationFailures failures, RailActivationGate gate)
     {
         _invoices = invoices;
         _stores = stores;
         _activator = activator;
         _failures = failures;
+        _gate = gate;
     }
 
     [HttpPost("activate")]
     [IgnoreAntiforgeryToken]
-    [RateLimitsFilter(ZoneLimits.PublicInvoices, Scope = RateLimitsScope.RemoteAddress)]
+    [RateLimitsFilter(ZoneLimits.PublicInvoices, Scope = RateLimitsScope.RouteData, DataKey = "invoiceId")]
     public async Task<IActionResult> Activate(string invoiceId, string? rail = null)
     {
         var invoice = await _invoices.GetInvoice(invoiceId);
@@ -41,8 +43,16 @@ public class LnurlRailCheckoutController : Controller
         var now = DateTimeOffset.UtcNow;
         var (activate, skipped) = CheckoutRails.Plan(CheckoutRails.Rails(invoice), rail, activateAllOnOpen,
             p => _failures.Recent(invoiceId, p, now));
-        var results = await Task.WhenAll(activate.Select(async p => (Rail: p, Ok: await _activator.ActivateInvoicePaymentMethod(invoiceId, p))));
-        foreach (var r in results.Where(r => !r.Ok)) _failures.Record(invoiceId, r.Rail, now);
-        return Json(new { failed = skipped.Concat(results.Where(r => !r.Ok).Select(r => r.Rail)).Select(p => p.ToString()) });
+        var results = await Task.WhenAll(activate.Select(async p =>
+            (Rail: p, Ok: await _gate.Run(invoiceId, p, () => _activator.ActivateInvoicePaymentMethod(invoiceId, p)))));
+        var refused = results.Where(r => !r.Ok).Select(r => r.Rail).ToList();
+        if (refused.Count > 0 && await _invoices.GetInvoice(invoiceId) is { } fresh)
+        {
+            // false also means a concurrent request already activated it
+            var inactive = CheckoutRails.Rails(fresh).Where(p => !p.Activated).Select(p => p.PaymentMethodId).ToList();
+            refused = refused.Where(inactive.Contains).ToList();
+        }
+        foreach (var p in refused) _failures.Record(invoiceId, p, now);
+        return Json(new { failed = skipped.Concat(refused).Select(p => p.ToString()) });
     }
 }

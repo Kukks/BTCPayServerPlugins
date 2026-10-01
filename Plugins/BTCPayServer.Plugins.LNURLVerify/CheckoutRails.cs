@@ -3,6 +3,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using BTCPayServer.Payments;
 using BTCPayServer.Services.Invoices;
 
@@ -60,4 +61,22 @@ public class RailActivationFailures
 
     public bool Recent(string invoiceId, PaymentMethodId rail, DateTimeOffset now) =>
         _until.TryGetValue((invoiceId, rail), out var until) && until > now;
+}
+
+/// <summary>Joins concurrent activations of one invoice's rail, so overlapping checkout requests cost the LNURL one callback.</summary>
+public class RailActivationGate
+{
+    private readonly ConcurrentDictionary<(string InvoiceId, PaymentMethodId Rail), Lazy<Task<bool>>> _inFlight = new();
+
+    public async Task<bool> Run(string invoiceId, PaymentMethodId rail, Func<Task<bool>> activate)
+    {
+        var mine = new Lazy<Task<bool>>(activate);
+        var run = _inFlight.GetOrAdd((invoiceId, rail), mine);
+        try { return await run.Value; }
+        finally
+        {
+            if (ReferenceEquals(run, mine))
+                _inFlight.TryRemove(new KeyValuePair<(string, PaymentMethodId), Lazy<Task<bool>>>((invoiceId, rail), mine));
+        }
+    }
 }
