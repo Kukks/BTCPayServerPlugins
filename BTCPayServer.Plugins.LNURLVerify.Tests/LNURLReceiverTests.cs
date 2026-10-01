@@ -159,6 +159,59 @@ public class LNURLReceiverTests
     }
 
     [Fact]
+    public async Task CreateInvoice_tracks_the_advertised_verifyBatch_url()
+    {
+        var host = UniqueHost("vb");
+        var http = new FakeHttp()
+            .Map($"https://{host}/pay", PayJson($"https://{host}/cb", 250_000_000))
+            .Map($"https://{host}/cb?amount=250000000", SpecCallback(host, $",\"verifyBatch\":\"https://{host}/lnurl/verifyBatch\""));
+
+        await Receiver(host, http, Network.Main)
+            .CreateInvoice(LightMoney.MilliSatoshis(250_000_000), "x", null, TestContext.Current.CancellationToken);
+
+        Assert.True(TrackedInvoiceRegistry.TryGet(SpecHash, out var t));
+        Assert.Equal($"https://{host}/lnurl/verifyBatch", t.VerifyBatch);
+        TrackedInvoiceRegistry.Remove(SpecHash);
+    }
+
+    [Theory]
+    [InlineData("/lnurl/verifyBatch")]
+    [InlineData("ftp://h.example/lnurl/verifyBatch")]
+    [InlineData("not a url")]
+    public async Task CreateInvoice_ignores_a_verifyBatch_that_is_not_an_absolute_http_url(string verifyBatch)
+    {
+        var host = UniqueHost("vbbad");
+        var http = new FakeHttp()
+            .Map($"https://{host}/pay", PayJson($"https://{host}/cb", 250_000_000))
+            .Map($"https://{host}/cb?amount=250000000", SpecCallback(host, ",\"verifyBatch\":\"" + verifyBatch + "\""));
+
+        await Receiver(host, http, Network.Main)
+            .CreateInvoice(LightMoney.MilliSatoshis(250_000_000), "x", null, TestContext.Current.CancellationToken);
+
+        Assert.True(TrackedInvoiceRegistry.TryGet(SpecHash, out var t));
+        Assert.Null(t.VerifyBatch);
+        TrackedInvoiceRegistry.Remove(SpecHash);
+    }
+
+    [Fact]
+    public async Task A_verify_response_carrying_verifyBatch_moves_the_invoice_to_batch_polling()
+    {
+        var host = UniqueHost("retro");
+        var hash = NewHash();
+        TrackedInvoiceRegistry.Add(new TrackedInvoice(hash, SpecBolt11, $"https://{host}/verify/{hash}", host,
+            $"https://{host}/pay", DateTimeOffset.UtcNow.AddHours(1)));
+        var http = new FakeHttp().Map($"https://{host}/verify/{hash}",
+            $"{{\"status\":\"OK\",\"settled\":false,\"preimage\":null,\"pr\":\"x\",\"verifyBatch\":\"https://{host}/lnurl/verifyBatch\"}}");
+
+        var inv = await Receiver(host, http, Network.Main).GetInvoice(hash, TestContext.Current.CancellationToken);
+
+        Assert.Equal(LightningInvoiceStatus.Unpaid, inv!.Status);
+        Assert.True(TrackedInvoiceRegistry.TryGet(hash, out var t));
+        Assert.Equal($"https://{host}/lnurl/verifyBatch", t.VerifyBatch);
+        TrackedInvoiceRegistry.Remove(hash);
+    }
+
+    [Fact]
     public async Task CheckVerifySupport_flags_missing_verify()
     {
         var host = "nv.example";

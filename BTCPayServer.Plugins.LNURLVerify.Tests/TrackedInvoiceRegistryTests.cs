@@ -58,4 +58,20 @@ public class TrackedInvoiceRegistryTests
         Assert.False(TrackedInvoiceRegistry.TryGetSettled(hash, out _));
         TrackedInvoiceRegistry.PruneSettled(DateTimeOffset.UtcNow);
     }
+
+    [Fact]
+    public void SetVerifyBatch_fills_only_an_absent_value_on_a_tracked_invoice()
+    {
+        TrackedInvoiceRegistry.SetVerifyBatch("reg_vb", "https://regvb.example/b"); // untracked: no-op
+        TrackedInvoiceRegistry.Add(Mk("reg_vb", "regvb.example"));
+        var before = TrackedInvoiceRegistry.Version;
+
+        TrackedInvoiceRegistry.SetVerifyBatch("reg_vb", "https://regvb.example/lnurl/verifyBatch");
+        TrackedInvoiceRegistry.SetVerifyBatch("reg_vb", "https://other.example/lnurl/verifyBatch");
+
+        Assert.True(TrackedInvoiceRegistry.TryGet("reg_vb", out var got));
+        Assert.Equal("https://regvb.example/lnurl/verifyBatch", got.VerifyBatch);
+        Assert.True(TrackedInvoiceRegistry.Version > before);
+        TrackedInvoiceRegistry.Remove("reg_vb");
+    }
 }

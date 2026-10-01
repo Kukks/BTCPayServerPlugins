@@ -101,7 +101,8 @@ public sealed class LNURLReceiver
         var verifyHost = verifyUri.Host;
 
         TrackedInvoiceRegistry.Add(new TrackedInvoice(
-            paymentHash, pr, verifyUrl, verifyHost, _resolved.PayEndpoint.ToString(), bolt11.ExpiryDate));
+            paymentHash, pr, verifyUrl, verifyHost, _resolved.PayEndpoint.ToString(), bolt11.ExpiryDate,
+            HttpUrl(json["verifyBatch"])));
 
         return new LightningInvoice
         {
@@ -149,30 +150,35 @@ public sealed class LNURLReceiver
     public static async Task<LightningInvoice?> PollAndBuild(TrackedInvoice t, HttpClient http, CancellationToken ct)
     {
         JObject? json = null;
-        bool transportError = false;
         try
         {
             using var resp = await http.GetAsync(t.VerifyUrl, ct);
             var body = await resp.Content.ReadAsStringAsync(ct);
             if (resp.IsSuccessStatusCode) json = JObject.Parse(body);
-            else transportError = true;
         }
-        catch { transportError = true; }
-
-        if (json?["status"]?.Value<string>()?.Equals("ERROR", StringComparison.OrdinalIgnoreCase) == true)
-            return null; // genuine not-found
+        catch { /* transport error: answered below */ }
 
         if (json is null)
-        {
-            if (transportError)
-                return new LightningInvoice
-                { Id = t.PaymentHash, PaymentHash = t.PaymentHash, Status = LightningInvoiceStatus.Unpaid };
-            return null;
-        }
+            return new LightningInvoice { Id = t.PaymentHash, PaymentHash = t.PaymentHash, Status = LightningInvoiceStatus.Unpaid };
+        if (t.VerifyBatch is null && HttpUrl(json["verifyBatch"]) is { } batch)
+            TrackedInvoiceRegistry.SetVerifyBatch(t.PaymentHash, batch);
+        return FromVerifyJson(t, json);
+    }
 
-        var settled = json["settled"]?.Value<bool>() ?? false;
-        var preimage = json["preimage"]?.Value<string>();
-        return BuildInvoice(t, settled, preimage);
+    /// <summary>A LUD-21 verify body (single or verifyBatch item) as an invoice; null when the service doesn't know it.</summary>
+    internal static LightningInvoice? FromVerifyJson(TrackedInvoice t, JObject json)
+    {
+        if (json["status"]?.Value<string>()?.Equals("ERROR", StringComparison.OrdinalIgnoreCase) == true)
+            return null;
+        return BuildInvoice(t, json["settled"]?.Value<bool>() ?? false, json["preimage"]?.Value<string>());
+    }
+
+    internal static string? HttpUrl(JToken? token)
+    {
+        var s = token?.Type == JTokenType.String ? token.Value<string>() : null;
+        return Uri.TryCreate(s, UriKind.Absolute, out var u) && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps)
+            ? s
+            : null;
     }
 
     private static LightningInvoice BuildInvoice(TrackedInvoice t, bool settled, string? preimage)

@@ -10,13 +10,15 @@ namespace BTCPayServer.Plugins.LNURLVerify;
 
 /// <param name="PayEndpoint">The connection's LNURL-pay endpoint (its identity for Listen() filtering).</param>
 /// <param name="VerifyHost">The host of the verify URL — the registry's grouping key for batched polling.</param>
+/// <param name="VerifyBatch">The LUD-XX verifyBatch endpoint advertised with this invoice; null polls it alone.</param>
 public sealed record TrackedInvoice(
     string PaymentHash,
     string Bolt11,
     string VerifyUrl,
     string VerifyHost,
     string PayEndpoint,
-    DateTimeOffset ExpiresAt);
+    DateTimeOffset ExpiresAt,
+    string? VerifyBatch = null);
 
 /// <summary>
 /// Static, verify-host-keyed registry shared across every client instance BTCPay creates for a
@@ -54,6 +56,15 @@ public static class TrackedInvoiceRegistry
         return _hostOf.TryGetValue(paymentHash, out var host)
                && _byHost.TryGetValue(host, out var inner)
                && inner.TryGetValue(paymentHash, out t!);
+    }
+
+    /// <summary>Adopt a verifyBatch endpoint learnt mid-flight. Never re-adds an invoice settled meanwhile.</summary>
+    public static void SetVerifyBatch(string paymentHash, string verifyBatch)
+    {
+        if (!_hostOf.TryGetValue(paymentHash, out var host) || !_byHost.TryGetValue(host, out var inner)) return;
+        if (inner.TryGetValue(paymentHash, out var t) && t.VerifyBatch is null &&
+            inner.TryUpdate(paymentHash, t with { VerifyBatch = verifyBatch }, t))
+            Interlocked.Increment(ref _version);
     }
 
     public static void Remove(string paymentHash)
