@@ -1,0 +1,152 @@
+#nullable enable
+using System;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using BTCPayServer.Client.Models;
+using BTCPayServer.Data;
+using BTCPayServer.Events;
+using BTCPayServer.HostedServices;
+using BTCPayServer.Logging;
+using BTCPayServer.Payments;
+using BTCPayServer.Services;
+using BTCPayServer.Services.Invoices;
+using Microsoft.Extensions.Logging;
+
+namespace BTCPayServer.Plugins.LNURLVerify;
+
+/// <summary>Records settled rail destinations as BTCPay payments and keeps every invoice's destinations current.</summary>
+public class LnurlRailRecorder : EventHostedServiceBase
+{
+    private sealed class Rebuild { }
+    private sealed record RailSettled(TrackedDestination Destination, string Reference);
+    private sealed record RailForgotten(TrackedDestination Destination, string Reason);
+
+    private readonly InvoiceRepository _invoices;
+    private readonly PaymentService _payments;
+    private readonly InvoiceActivator _activator;
+    private readonly PaymentMethodHandlerDictionary _handlers;
+    private readonly ILogger _logger;
+    private readonly Action<TrackedDestination, string> _onSettled;
+    private readonly Action<TrackedDestination, string> _onForgotten;
+
+    public LnurlRailRecorder(EventAggregator eventAggregator, ILogger<LnurlRailRecorder> logger, InvoiceRepository invoices,
+        PaymentService payments, InvoiceActivator activator, PaymentMethodHandlerDictionary handlers)
+        : base(eventAggregator, logger)
+    {
+        _invoices = invoices;
+        _payments = payments;
+        _activator = activator;
+        _handlers = handlers;
+        _logger = logger;
+        _onSettled = (d, reference) => PushEvent(new RailSettled(d, reference));
+        _onForgotten = (d, reason) => PushEvent(new RailForgotten(d, reason));
+    }
+
+    protected override void SubscribeToEvents()
+    {
+        Subscribe<InvoiceEvent>();
+        Subscribe<InvoiceDataChangedEvent>();
+        TrackedDestinationRegistry.Settled += _onSettled;
+        TrackedDestinationRegistry.Forgotten += _onForgotten;
+    }
+
+    public override async Task StartAsync(CancellationToken cancellationToken)
+    {
+        await base.StartAsync(cancellationToken);
+        PushEvent(new Rebuild());
+    }
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        TrackedDestinationRegistry.Settled -= _onSettled;
+        TrackedDestinationRegistry.Forgotten -= _onForgotten;
+        await base.StopAsync(cancellationToken);
+    }
+
+    protected override async Task ProcessEvent(object evt, CancellationToken cancellationToken)
+    {
+        switch (evt)
+        {
+            case Rebuild:
+                foreach (var rail in LnurlRails.All)
+                foreach (var invoice in await _invoices.GetMonitoredInvoices(rail.PaymentMethodId, cancellationToken))
+                    Track(invoice, rail);
+                break;
+            case RailSettled s:
+                await Record(s.Destination, s.Reference);
+                break;
+            case RailForgotten f:
+                var logs = new InvoiceLogs();
+                logs.Write($"{f.Destination.PaymentMethodId}: the LNURL service no longer knows {f.Destination.Destination} ({f.Reason}); " +
+                           "a payment to it cannot be detected", InvoiceEventData.EventSeverity.Warning);
+                await _invoices.AddInvoiceLogs(f.Destination.InvoiceId, logs);
+                break;
+            case InvoiceEvent { Name: InvoiceEvent.ReceivedPayment } e when IsPartial(e.Invoice.GetInvoiceState()):
+                await Reissue(e.Invoice);
+                break;
+            case InvoiceDataChangedEvent c when IsPartial(c.State):
+                if (await _invoices.GetInvoice(c.InvoiceId) is { } changed) await Reissue(changed);
+                break;
+        }
+    }
+
+    private void Track(InvoiceEntity invoice, LnurlRail rail)
+    {
+        if (invoice.GetPaymentPrompt(rail.PaymentMethodId) is not { Activated: true, Details: { } json } prompt ||
+            _handlers.TryGet(rail.PaymentMethodId) is not LnurlRailPaymentHandler handler) return;
+        foreach (var d in LnurlRailPaymentHandler.Destinations(invoice, rail.PaymentMethodId, prompt.Destination,
+                     handler.ParsePaymentPromptDetails(json)))
+            TrackedDestinationRegistry.Add(d);
+    }
+
+    private async Task Record(TrackedDestination d, string reference)
+    {
+        try
+        {
+            var pmi = PaymentMethodId.Parse(d.PaymentMethodId);
+            var invoice = await _invoices.GetInvoice(d.InvoiceId);
+            if (invoice is null || !_handlers.TryGetValue(pmi, out var handler)) return;
+            var id = PaymentId(reference, d.VerifyUrl);
+            if (invoice.GetPayments(false).Any(p => p.Id == id && p.PaymentMethodId == pmi)) return;
+            var data = new PaymentData
+            {
+                Id = id, Created = DateTimeOffset.UtcNow, Status = PaymentStatus.Settled, Currency = "BTC",
+                Amount = LnurlRailPaymentHandler.AmountBtc(d.AmountMsat)
+            }.Set(invoice, handler, new LnurlRailPaymentData { PaymentReference = reference, VerifyUrl = d.VerifyUrl, Destination = d.Destination });
+            if (await _payments.AddPayment(data) is { } payment)
+                EventAggregator.Publish(new InvoiceEvent(invoice, InvoiceEvent.ReceivedPayment) { Payment = payment });
+            EventAggregator.Publish(new InvoiceNeedUpdateEvent(invoice.Id));
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e, "Could not record the LNURL rail payment {Reference} for invoice {InvoiceId}; retrying on the next poll",
+                reference, d.InvoiceId);
+            TrackedDestinationRegistry.Add(d);
+        }
+    }
+
+    private async Task Reissue(InvoiceEntity invoice)
+    {
+        foreach (var rail in LnurlRails.All)
+        {
+            if (invoice.GetPaymentPrompt(rail.PaymentMethodId) is not { Activated: true, Details: { } json } prompt ||
+                _handlers.TryGet(rail.PaymentMethodId) is not LnurlRailPaymentHandler handler) continue;
+            if (NeedsReissue(prompt.Calculate().Due, handler.ParsePaymentPromptDetails(json).AmountMsat))
+                await _activator.ActivateInvoicePaymentMethod(invoice.Id, rail.PaymentMethodId, forceNew: true);
+        }
+    }
+
+    private static bool IsPartial(InvoiceState state) =>
+        state.Status == InvoiceStatus.New && state.ExceptionStatus == InvoiceExceptionStatus.PaidPartial;
+
+    /// <summary>Payments are keyed (Id, PaymentMethodId) across every invoice, and one Ark transaction can pay two destinations.</summary>
+    public static string PaymentId(string reference, string verifyUrl) =>
+        $"{reference}:{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(verifyUrl)))[..16].ToLowerInvariant()}";
+
+    /// <summary>Both partial-payment signals can fire for one payment; a destination already agreed for the due needs nothing.</summary>
+    public static bool NeedsReissue(decimal dueBtc, long agreedMsat) =>
+        dueBtc > 0m && LnurlRailPaymentHandler.MsatOf(dueBtc) != agreedMsat;
+}
