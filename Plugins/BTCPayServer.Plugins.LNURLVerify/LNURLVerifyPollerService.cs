@@ -15,11 +15,10 @@ using Microsoft.Extensions.Logging;
 namespace BTCPayServer.Plugins.LNURLVerify;
 
 /// <summary>
-/// The single shared verify poller for every LNURL connection. One loop iterates all tracked
-/// invoices grouped by verify-host, polls each host's invoices with bounded concurrency and
-/// per-invoice capped backoff, and on settlement publishes to the registry's broadcast (which
-/// Listen() subscribers filter to their connection). This collapses the naive
-/// one-poll-loop-per-Listen() fan-out into a single host-batched workload.
+/// The single shared verify poller for every LNURL connection. Each cycle checks every tracked invoice:
+/// those whose service advertised a LUD-XX verifyBatch endpoint with one request per endpoint (chunked),
+/// the rest with one LUD-21 verify GET each under a global concurrency cap. Settlements are published to
+/// the registry's broadcast, which Listen() subscribers filter to their connection.
 /// </summary>
 public sealed class LNURLVerifyPollerService : IHostedService
 {
@@ -27,6 +26,9 @@ public sealed class LNURLVerifyPollerService : IHostedService
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(30);
     private const int MaxConcurrencyPerCycle = 16;
     private static readonly TimeSpan PersistThrottle = TimeSpan.FromSeconds(10);
+    // lnurl-server answers 414 above 250 verify URLs per one-shot request.
+    internal const int MaxBatchSize = 250;
+    private static readonly TimeSpan UnsupportedFor = TimeSpan.FromHours(1);
 
     private readonly ILogger<LNURLVerifyPollerService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
@@ -35,11 +37,14 @@ public sealed class LNURLVerifyPollerService : IHostedService
     private readonly CancellationTokenSource _cts = new();
     // Concurrent: PollOne runs for many invoices at once under the cycle's concurrency gate.
     private readonly ConcurrentDictionary<string, (int Errors, DateTimeOffset Next)> _backoff = new();
+    private readonly ConcurrentDictionary<string, (int Errors, DateTimeOffset Next)> _batchBackoff = new();
+    private readonly ConcurrentDictionary<string, int> _chunkSize = new();
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _unsupportedUntil = new();
     private Task? _loop;
     private int _lastPersistedVersion;
     private DateTimeOffset _lastPersist = DateTimeOffset.MinValue;
 
-    /// <summary>Test seam: when set, used instead of a real HTTP verify poll.</summary>
+    /// <summary>Test seam: when set, every invoice is polled through it (no HTTP, no batching).</summary>
     internal static Func<TrackedInvoice, CancellationToken, Task<LightningInvoice?>>? PollOverride;
 
     public LNURLVerifyPollerService(ILogger<LNURLVerifyPollerService> logger, IHttpClientFactory httpClientFactory,
@@ -81,26 +86,26 @@ public sealed class LNURLVerifyPollerService : IHostedService
             try
             {
                 TrackedInvoiceRegistry.PruneSettled(DateTimeOffset.UtcNow);
-                TrackedInvoiceRegistry.PruneResults();
                 SentPaymentRegistry.Prune(DateTimeOffset.UtcNow.AddHours(-24)); // keep the registry bounded
 
-                // Poll every tracked invoice across every host under one global concurrency cap, so a
-                // slow host interleaves with (rather than blocks) the others.
-                var invoices = TrackedInvoiceRegistry.Hosts()
-                    .SelectMany(TrackedInvoiceRegistry.SnapshotByHost)
-                    .ToArray();
+                var now = DateTimeOffset.UtcNow;
+                var invoices = TrackedInvoiceRegistry.All().ToArray();
+                foreach (var t in invoices.Where(t => t.ExpiresAt < now))
+                    TrackedInvoiceRegistry.Remove(t.PaymentHash);
+                var live = invoices.Where(t => t.ExpiresAt >= now).ToArray();
+                TrackedInvoiceRegistry.PruneResults();
 
                 // Drop backoff entries for invoices no longer tracked (e.g. cancelled between polls, which
                 // the poller never observes otherwise) so _backoff can't grow over the process lifetime.
                 if (!_backoff.IsEmpty)
                 {
-                    var live = new HashSet<string>(invoices.Select(i => i.PaymentHash));
+                    var tracked = new HashSet<string>(live.Select(i => i.PaymentHash));
                     foreach (var key in _backoff.Keys)
-                        if (!live.Contains(key))
+                        if (!tracked.Contains(key))
                             _backoff.TryRemove(key, out _);
                 }
 
-                if (invoices.Length > 0)
+                if (live.Length > 0)
                 {
                     HttpClient? http = null;
                     if (PollOverride is null)
@@ -110,24 +115,27 @@ public sealed class LNURLVerifyPollerService : IHostedService
                         http = _httpClientFactory.CreateClient(nameof(LNURLVerifyPollerService));
                         http.Timeout = TimeSpan.FromSeconds(30);
                     }
+                    var batches = http is null
+                        ? Array.Empty<IGrouping<string, TrackedInvoice>>()
+                        : live.Where(t => Batchable(t, now)).GroupBy(t => t.VerifyBatch!).ToArray();
                     using var gate = new SemaphoreSlim(MaxConcurrencyPerCycle);
-                    var tasks = invoices.Select(async t =>
+                    var singles = live.Where(t => http is null || !Batchable(t, now)).Select(async t =>
                     {
                         await gate.WaitAsync(ct);
                         try { await PollOne(t, http, ct); }
                         finally { gate.Release(); }
                     });
-                    await Task.WhenAll(tasks);
+                    await Task.WhenAll(singles.Concat(batches.Select(g => PollBatch(g.Key, g.ToArray(), http!, ct))));
                 }
 
                 // Persist the tracked set (throttled, only when it changed) so it survives a restart.
                 if (_persistence != null)
                 {
                     var version = TrackedInvoiceRegistry.Version;
-                    var now = DateTimeOffset.UtcNow;
-                    if (version != _lastPersistedVersion && now - _lastPersist > PersistThrottle)
+                    var persistAt = DateTimeOffset.UtcNow;
+                    if (version != _lastPersistedVersion && persistAt - _lastPersist > PersistThrottle)
                     {
-                        try { await _persistence.SaveAsync(); _lastPersistedVersion = version; _lastPersist = now; }
+                        try { await _persistence.SaveAsync(); _lastPersistedVersion = version; _lastPersist = persistAt; }
                         catch (Exception e) { _logger.LogDebug(e, "Failed to persist LNURL tracked invoices"); }
                     }
                 }
@@ -140,34 +148,71 @@ public sealed class LNURLVerifyPollerService : IHostedService
         }
     }
 
+    private bool Batchable(TrackedInvoice t, DateTimeOffset now) =>
+        t.VerifyBatch is { } endpoint && !(_unsupportedUntil.TryGetValue(endpoint, out var until) && now < until);
+
     private async Task PollOne(TrackedInvoice t, HttpClient? http, CancellationToken ct)
     {
-        var now = DateTimeOffset.UtcNow;
-        if (_backoff.TryGetValue(t.PaymentHash, out var b) && now < b.Next) return;
-        if (t.ExpiresAt < now)
-        {
-            TrackedInvoiceRegistry.Remove(t.PaymentHash);
-            _backoff.TryRemove(t.PaymentHash, out _);
-            return;
-        }
-
+        if (_backoff.TryGetValue(t.PaymentHash, out var b) && DateTimeOffset.UtcNow < b.Next) return;
         try
         {
             var inv = PollOverride is not null
                 ? await PollOverride(t, ct)
                 : await LNURLReceiver.PollAndBuild(t, http!, ct);
-
             _backoff.TryRemove(t.PaymentHash, out _); // success resets backoff
             Apply(t, inv);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception e)
         {
-            var errors = (_backoff.TryGetValue(t.PaymentHash, out var prev) ? prev.Errors : 0) + 1;
-            var delay = Math.Min(_interval.TotalMilliseconds * Math.Pow(2, errors), MaxBackoff.TotalMilliseconds);
-            _backoff[t.PaymentHash] = (errors, DateTimeOffset.UtcNow.AddMilliseconds(delay));
-            _logger.LogDebug(e, "Error polling LNURL verify for {Hash} (attempt {N})", t.PaymentHash, errors);
+            var next = NextBackoff(_backoff, t.PaymentHash);
+            _backoff[t.PaymentHash] = next;
+            _logger.LogDebug(e, "Error polling LNURL verify for {Hash} (attempt {N})", t.PaymentHash, next.Errors);
         }
+    }
+
+    private async Task PollBatch(string endpoint, TrackedInvoice[] items, HttpClient http, CancellationToken ct)
+    {
+        if (_batchBackoff.TryGetValue(endpoint, out var b) && DateTimeOffset.UtcNow < b.Next) return;
+        var size = _chunkSize.TryGetValue(endpoint, out var remembered) ? remembered : MaxBatchSize;
+        for (var i = 0; i < items.Length;)
+        {
+            var chunk = items.Skip(i).Take(size).ToArray();
+            var outcome = await VerifyBatchClient.Fetch(http, endpoint, chunk.Select(t => t.VerifyUrl).ToArray(), ct);
+            switch (outcome.Kind)
+            {
+                case BatchOutcomeKind.TooLong when chunk.Length > 1:
+                    size = _chunkSize[endpoint] = Math.Max(1, chunk.Length / 2);
+                    continue;
+                case BatchOutcomeKind.Unsupported:
+                    _unsupportedUntil[endpoint] = DateTimeOffset.UtcNow + UnsupportedFor;
+                    _logger.LogDebug("verifyBatch {Endpoint} is unusable; polling its invoices one by one for {Duration}",
+                        endpoint, UnsupportedFor);
+                    return;
+                case BatchOutcomeKind.Ok:
+                    _batchBackoff.TryRemove(endpoint, out _);
+                    foreach (var t in chunk)
+                    {
+                        if (!outcome.Results!.TryGetValue(t.VerifyUrl, out var item)) continue;
+                        try { Apply(t, LNURLReceiver.FromVerifyJson(t, item)); }
+                        catch (Exception e) { _logger.LogDebug(e, "Unreadable verifyBatch item for {Hash}", t.PaymentHash); }
+                    }
+                    i += chunk.Length;
+                    break;
+                default:
+                    _batchBackoff[endpoint] = NextBackoff(_batchBackoff, endpoint);
+                    _logger.LogDebug("verifyBatch {Endpoint} failed ({Kind}: {Error})", endpoint, outcome.Kind, outcome.Error);
+                    return;
+            }
+        }
+    }
+
+    private (int Errors, DateTimeOffset Next) NextBackoff(
+        ConcurrentDictionary<string, (int Errors, DateTimeOffset Next)> backoff, string key)
+    {
+        var errors = (backoff.TryGetValue(key, out var prev) ? prev.Errors : 0) + 1;
+        var delay = Math.Min(_interval.TotalMilliseconds * Math.Pow(2, errors), MaxBackoff.TotalMilliseconds);
+        return (errors, DateTimeOffset.UtcNow.AddMilliseconds(delay));
     }
 
     private static void Apply(TrackedInvoice t, LightningInvoice? inv)
