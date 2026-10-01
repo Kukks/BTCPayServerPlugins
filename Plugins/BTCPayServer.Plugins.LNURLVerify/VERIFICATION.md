@@ -1,6 +1,6 @@
 # LNURL Verify — verification runbook
 
-The plugin is unit-tested (38 tests) and reviewed, but three things can only be confirmed by running
+The plugin is unit-tested (83 tests) and reviewed, but three things can only be confirmed by running
 it. This is the concrete checklist to gain that confidence, ordered cheapest-first.
 
 ## 1. Unit tests (seconds, no infra)
@@ -8,10 +8,12 @@ it. This is the concrete checklist to gain that confidence, ordered cheapest-fir
 ```
 dotnet test BTCPayServer.Plugins.LNURLVerify.Tests
 ```
-Expected: 38 passed, 0 warnings. Covers capability decode, verify-support probe, receive guards +
+Expected: 83 passed, 0 warnings. Covers capability decode, verify-support probe, receive guards +
 settled-cache, the shared poller (incl. a 60-invoice concurrent settle/error stress), the full send
-chain (parse → k1-refresh → bounds/balance → submit), connection-scoped reconciliation, and persistence
-save/restore (against a fake settings store).
+chain (parse → k1-refresh → bounds/balance → submit), connection-scoped reconciliation, persistence
+save/restore (against a fake settings store), paymentOptions selection, verifyBatch batching (chunking,
+414 halving, unsupported fallback, backoff), the GetInvoice cache, and a self-signed BOLT11 pinning the
+payment-hash byte order.
 
 ## 2. Receive integration — real BTCPay LNURL + regtest LN (ServerTester)
 
@@ -26,6 +28,21 @@ dotnet test BTCPayServer.Plugins.Tests --filter "FullyQualifiedName~LNURLVerifyI
 Confirms: create invoice via the LN address → pay from the regtest node → the plugin reports `Paid` with
 a validated preimage. **This is the single highest-value check** — it exercises the receive + verify path
 end-to-end. The test compiles against the harness today but has not been executed.
+
+## 2b. Settlement against a real lnurl-server (no Lightning node)
+
+`BTCPayServer.Plugins.Tests/LNURLVerifyLnurlServerTests.cs` plays an lnurl-server wallet: it answers invoice
+requests with self-signed regtest invoices and reports their preimages, and asserts the plugin learns both
+settlements through `verifyBatch` with zero per-invoice verify requests. It needs an lnurl-server checkout at
+or after `a4150f7` (no released image has verifyBatch yet):
+
+```
+cd <lnurl-server>; pnpm build:server
+$env:PORT='3999'; $env:BASE_URL='http://127.0.0.1:3999'; pnpm start
+# second terminal, from this repo:
+$env:LNURL_SERVER_URL='http://127.0.0.1:3999'
+dotnet test BTCPayServer.Plugins.Tests -p:StaticWebAssetsEnabled=false --filter "FullyQualifiedName~LNURLVerifyLnurlServerTests"
+```
 
 ## 3. Send integration — needs LNbits (currently a `[Skip]` scaffold)
 

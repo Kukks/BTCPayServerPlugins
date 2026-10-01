@@ -22,9 +22,13 @@ invoices, so it is unusable as a store's Lightning backend.
 ## How it works
 
 - **Receive:** BTCPay asks the LNURL-pay callback for an invoice and detects settlement via the
-  LNURL **LUD-21 `verify`** endpoint. A single shared background poller watches every tracked invoice
-  across every connection (grouped by verify-host, bounded concurrency, capped back-off), so it scales
-  to many invoices and many addresses without a poll loop per connection.
+  LNURL **LUD-21 `verify`** endpoint. When the service also advertises **LUD-XX `verifyBatch`**, all
+  pending invoices at that endpoint are checked with one request per poll cycle (up to 250 per request);
+  services without it are polled per invoice. One shared background poller serves every connection, and
+  BTCPay's own status checks are answered from its last result rather than with more requests.
+- **Payment options:** when the payRequest advertises LUD-XX **`paymentOptions`**, the plugin requests
+  its `lightning` option explicitly and applies that option's own amount bounds. If the service reports
+  Lightning as unavailable, invoice creation fails with that reason.
 - **Send:** for an LNURL-withdraw, BTCPay pays an arbitrary invoice by submitting it to the withdraw
   callback (the linked wallet pays it), bounded by the withdraw's min/max and, when exposed, its
   balance.
