@@ -115,7 +115,7 @@ public sealed class LNURLReceiver
         };
     }
 
-    private static Uri CallbackUri(string callback, long msat, string? paymentOption, string? comment)
+    internal static Uri CallbackUri(string callback, long msat, string? paymentOption, string? comment)
     {
         var cb = new UriBuilder(callback);
         var q = new StringBuilder(cb.Query.TrimStart('?'));
