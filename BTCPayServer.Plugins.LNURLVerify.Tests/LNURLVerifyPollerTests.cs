@@ -59,6 +59,39 @@ public class LNURLVerifyPollerTests
         return (http, new FakeBatchServer(http, host, status, item), hashes);
     }
 
+    static TrackedDestination Destination(string host, bool batched = true, DateTimeOffset? expiresAt = null)
+    {
+        var id = Hex(RandomNumberGenerator.GetBytes(16));
+        return new TrackedDestination("inv-" + id, "LNURL-ARKADE", "tark1q" + id, $"https://{host}/lnurl/verify/{id}",
+            batched ? $"https://{host}/lnurl/verifyBatch" : null, 5_000_000, expiresAt ?? DateTimeOffset.UtcNow.AddHours(1));
+    }
+
+    static string DestinationState(bool settled, string? reference = null) =>
+        new JObject { ["status"] = "OK", ["settled"] = settled, ["paymentOption"] = "arkade", ["paymentReference"] = reference }.ToString();
+
+    static async Task Tracking(TrackedDestination[] destinations, Func<Task> body)
+    {
+        foreach (var d in destinations) TrackedDestinationRegistry.Add(d);
+        try { await body(); }
+        finally { foreach (var d in destinations) TrackedDestinationRegistry.Remove(d.VerifyUrl); }
+    }
+
+    static async Task<string> Observe(Action<Action<TrackedDestination, string>> subscribe,
+        Action<Action<TrackedDestination, string>> unsubscribe, TrackedDestination d, Func<Task> run)
+    {
+        var seen = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Action<TrackedDestination, string> handler = (x, value) => { if (x == d) seen.TrySetResult(value); };
+        subscribe(handler);
+        try
+        {
+            var running = run();
+            var value = await seen.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            await running;
+            return value;
+        }
+        finally { unsubscribe(handler); }
+    }
+
     [Fact]
     public async Task One_request_per_cycle_carries_every_pending_invoice_of_an_endpoint()
     {
@@ -379,6 +412,98 @@ public class LNURLVerifyPollerTests
             LNURLVerifyPollerService.PollOverride = null;
             TrackedInvoiceRegistry.Remove(hash);
         }
+    }
+
+    [Fact]
+    public async Task Invoices_and_destinations_at_one_endpoint_share_one_batch()
+    {
+        var host = NewHost("mixed");
+        var hash = NewHash();
+        var d = Destination(host);
+        TrackedInvoiceRegistry.Add(Batched(host, hash));
+        var http = new FakeHttp();
+        var server = new FakeBatchServer(http, host, _ => HttpStatusCode.OK, url => url == d.VerifyUrl ? DestinationState(false) : Pending);
+        var expected = new[] { d.VerifyUrl, $"https://{host}/lnurl/verify/{hash}" }.OrderBy(u => u, StringComparer.Ordinal).ToArray();
+
+        await Tracking(new[] { d }, () => Polling(NewPoller(http, 30), new[] { hash }, async () =>
+        {
+            await Until(() => server.Batches.Count >= 2);
+            Assert.All(server.Batches, b => Assert.Equal(expected, b.OrderBy(u => u, StringComparer.Ordinal)));
+            Assert.Empty(server.Singles);
+            Assert.True(TrackedDestinationRegistry.IsTracked(d.VerifyUrl));
+        }));
+    }
+
+    [Fact]
+    public async Task A_destination_settled_with_a_reference_is_reported_and_untracked()
+    {
+        var host = NewHost("paid");
+        var d = Destination(host);
+        var http = new FakeHttp();
+        _ = new FakeBatchServer(http, host, _ => HttpStatusCode.OK, _ => DestinationState(true, "arktxid"));
+
+        await Tracking(new[] { d }, async () => Assert.Equal("arktxid", await Observe(
+            h => TrackedDestinationRegistry.Settled += h, h => TrackedDestinationRegistry.Settled -= h, d,
+            () => Polling(NewPoller(http, 30), Array.Empty<string>(), () => Until(() => !TrackedDestinationRegistry.IsTracked(d.VerifyUrl))))));
+    }
+
+    [Fact]
+    public async Task A_destination_settled_without_a_reference_stays_tracked()
+    {
+        var host = NewHost("noref");
+        var d = Destination(host);
+        var http = new FakeHttp();
+        var server = new FakeBatchServer(http, host, _ => HttpStatusCode.OK, _ => DestinationState(true));
+
+        await Tracking(new[] { d }, () => Polling(NewPoller(http, 30), Array.Empty<string>(), async () =>
+        {
+            await Until(() => server.Batches.Count >= 3);
+            Assert.True(TrackedDestinationRegistry.IsTracked(d.VerifyUrl));
+        }));
+    }
+
+    [Fact]
+    public async Task A_destination_the_service_no_longer_knows_is_untracked_and_reported()
+    {
+        var host = NewHost("forgot");
+        var d = Destination(host);
+        var http = new FakeHttp();
+        _ = new FakeBatchServer(http, host, _ => HttpStatusCode.OK, _ => "{\"status\":\"ERROR\",\"reason\":\"Not found\"}");
+
+        await Tracking(new[] { d }, async () => Assert.Equal("Not found", await Observe(
+            h => TrackedDestinationRegistry.Forgotten += h, h => TrackedDestinationRegistry.Forgotten -= h, d,
+            () => Polling(NewPoller(http, 30), Array.Empty<string>(), () => Until(() => !TrackedDestinationRegistry.IsTracked(d.VerifyUrl))))));
+    }
+
+    [Fact]
+    public async Task A_destination_without_verifyBatch_is_polled_on_its_own()
+    {
+        var host = NewHost("single");
+        var d = Destination(host, batched: false);
+        var http = new FakeHttp();
+        var server = new FakeBatchServer(http, host, _ => HttpStatusCode.OK, _ => DestinationState(true, "arktxid"));
+
+        await Tracking(new[] { d }, async () => Assert.Equal("arktxid", await Observe(
+            h => TrackedDestinationRegistry.Settled += h, h => TrackedDestinationRegistry.Settled -= h, d,
+            () => Polling(NewPoller(http, 30), Array.Empty<string>(), () => Until(() => !TrackedDestinationRegistry.IsTracked(d.VerifyUrl))))));
+        Assert.Contains(d.VerifyUrl, server.Singles);
+        Assert.Empty(server.Batches);
+    }
+
+    [Fact]
+    public async Task Expired_destinations_are_dropped_before_polling()
+    {
+        var host = NewHost("expdest");
+        var (live, expired) = (Destination(host), Destination(host, expiresAt: DateTimeOffset.UtcNow.AddSeconds(-1)));
+        var http = new FakeHttp();
+        var server = new FakeBatchServer(http, host, _ => HttpStatusCode.OK, _ => DestinationState(false));
+
+        await Tracking(new[] { live, expired }, () => Polling(NewPoller(http, 30), Array.Empty<string>(), async () =>
+        {
+            await Until(() => server.Batches.Count >= 2);
+            Assert.All(server.Batches, b => Assert.DoesNotContain(expired.VerifyUrl, b));
+            Assert.False(TrackedDestinationRegistry.IsTracked(expired.VerifyUrl));
+        }));
     }
 }
 

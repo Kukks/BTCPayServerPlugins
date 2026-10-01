@@ -11,6 +11,7 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Lightning;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Linq;
 
 namespace BTCPayServer.Plugins.LNURLVerify;
 
@@ -95,14 +96,20 @@ public sealed class LNURLVerifyPollerService : IHostedService
                 var invoices = TrackedInvoiceRegistry.All().ToArray();
                 foreach (var t in invoices.Where(t => t.ExpiresAt < now))
                     TrackedInvoiceRegistry.Remove(t.PaymentHash);
-                var live = invoices.Where(t => t.ExpiresAt >= now).ToArray();
+                var destinations = TrackedDestinationRegistry.All();
+                foreach (var d in destinations.Where(d => d.ExpiresAt < now))
+                    TrackedDestinationRegistry.Remove(d.VerifyUrl);
+                // The test seam answers invoices without HTTP; destinations are only ever polled over HTTP.
+                var live = invoices.Where(t => t.ExpiresAt >= now).Cast<IVerifyTarget>()
+                    .Concat(PollOverride is null ? destinations.Where(d => d.ExpiresAt >= now) : Enumerable.Empty<TrackedDestination>())
+                    .ToArray();
                 TrackedInvoiceRegistry.PruneResults();
 
-                // Drop backoff entries for invoices no longer tracked (e.g. cancelled between polls, which
+                // Drop backoff entries for targets no longer tracked (e.g. cancelled between polls, which
                 // the poller never observes otherwise) so _backoff can't grow over the process lifetime.
                 if (!_backoff.IsEmpty)
                 {
-                    var tracked = new HashSet<string>(live.Select(i => i.PaymentHash));
+                    var tracked = new HashSet<string>(live.Select(t => t.VerifyUrl));
                     foreach (var key in _backoff.Keys)
                         if (!tracked.Contains(key))
                             _backoff.TryRemove(key, out _);
@@ -119,7 +126,7 @@ public sealed class LNURLVerifyPollerService : IHostedService
                         http.Timeout = TimeSpan.FromSeconds(30);
                     }
                     var batches = http is null
-                        ? Array.Empty<IGrouping<string, TrackedInvoice>>()
+                        ? Array.Empty<IGrouping<string, IVerifyTarget>>()
                         : live.Where(t => Batchable(t, now)).GroupBy(t => t.VerifyBatch!).ToArray();
                     using var gate = new SemaphoreSlim(MaxConcurrencyPerCycle);
                     var singles = live.Where(t => http is null || !Batchable(t, now)).Select(async t =>
@@ -151,30 +158,52 @@ public sealed class LNURLVerifyPollerService : IHostedService
         }
     }
 
-    private bool Batchable(TrackedInvoice t, DateTimeOffset now) =>
+    private bool Batchable(IVerifyTarget t, DateTimeOffset now) =>
         t.VerifyBatch is { } endpoint && !(_unsupportedUntil.TryGetValue(endpoint, out var until) && now < until);
 
-    private async Task PollOne(TrackedInvoice t, HttpClient? http, CancellationToken ct)
+    private async Task PollOne(IVerifyTarget t, HttpClient? http, CancellationToken ct)
     {
-        if (_backoff.TryGetValue(t.PaymentHash, out var b) && DateTimeOffset.UtcNow < b.Next) return;
+        if (_backoff.TryGetValue(t.VerifyUrl, out var b) && DateTimeOffset.UtcNow < b.Next) return;
         try
         {
-            var inv = PollOverride is not null
-                ? await PollOverride(t, ct)
-                : await LNURLReceiver.PollAndBuild(t, http!, ct);
-            _backoff.TryRemove(t.PaymentHash, out _); // success resets backoff
-            Apply(t, inv);
+            if (t is TrackedInvoice invoice)
+            {
+                var inv = PollOverride is not null
+                    ? await PollOverride(invoice, ct)
+                    : await LNURLReceiver.PollAndBuild(invoice, http!, ct);
+                _backoff.TryRemove(t.VerifyUrl, out _); // success resets backoff
+                Apply(invoice, inv);
+            }
+            else if (t is TrackedDestination destination)
+            {
+                var json = await GetVerify(http!, destination.VerifyUrl, ct);
+                _backoff.TryRemove(t.VerifyUrl, out _);
+                TrackedDestinationRegistry.Apply(destination, json);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception e)
         {
-            var next = NextBackoff(_backoff, t.PaymentHash);
-            _backoff[t.PaymentHash] = next;
-            _logger.LogDebug(e, "Error polling LNURL verify for {Hash} (attempt {N})", t.PaymentHash, next.Errors);
+            var next = NextBackoff(_backoff, t.VerifyUrl);
+            _backoff[t.VerifyUrl] = next;
+            _logger.LogDebug(e, "Error polling LNURL verify {Url} (attempt {N})", t.VerifyUrl, next.Errors);
         }
     }
 
-    private async Task PollBatch(string endpoint, TrackedInvoice[] items, HttpClient http, CancellationToken ct)
+    private static async Task<JObject> GetVerify(HttpClient http, string verifyUrl, CancellationToken ct)
+    {
+        using var resp = await http.GetAsync(verifyUrl, ct);
+        resp.EnsureSuccessStatusCode();
+        return JObject.Parse(await resp.Content.ReadAsStringAsync(ct));
+    }
+
+    private static void ApplyItem(IVerifyTarget t, JObject item)
+    {
+        if (t is TrackedInvoice invoice) Apply(invoice, LNURLReceiver.FromVerifyJson(invoice, item));
+        else if (t is TrackedDestination destination) TrackedDestinationRegistry.Apply(destination, item);
+    }
+
+    private async Task PollBatch(string endpoint, IVerifyTarget[] items, HttpClient http, CancellationToken ct)
     {
         if (_batchBackoff.TryGetValue(endpoint, out var b) && DateTimeOffset.UtcNow < b.Next) return;
         var size = _chunkSize.TryGetValue(endpoint, out var remembered) ? remembered : MaxBatchSize;
@@ -193,12 +222,12 @@ public sealed class LNURLVerifyPollerService : IHostedService
                 case BatchOutcomeKind.Ok:
                     _batchBackoff.TryRemove(endpoint, out _);
                     _batchFailures.TryRemove(endpoint, out _);
-                    var missing = new List<TrackedInvoice>();
+                    var missing = new List<IVerifyTarget>();
                     foreach (var t in chunk)
                     {
                         if (!outcome.Results!.TryGetValue(t.VerifyUrl, out var item)) { missing.Add(t); continue; }
-                        try { Apply(t, LNURLReceiver.FromVerifyJson(t, item)); }
-                        catch (Exception e) { _logger.LogDebug(e, "Unreadable verifyBatch item for {Hash}", t.PaymentHash); }
+                        try { ApplyItem(t, item); }
+                        catch (Exception e) { _logger.LogDebug(e, "Unreadable verifyBatch item for {Url}", t.VerifyUrl); }
                     }
                     // A batch that leaves an invoice out never answers for it; its own verify URL still can.
                     foreach (var t in missing) await PollOne(t, http, ct);

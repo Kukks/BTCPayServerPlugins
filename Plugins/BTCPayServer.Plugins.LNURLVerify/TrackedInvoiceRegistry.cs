@@ -18,7 +18,7 @@ public sealed record TrackedInvoice(
     string VerifyHost,
     string PayEndpoint,
     DateTimeOffset ExpiresAt,
-    string? VerifyBatch = null);
+    string? VerifyBatch = null) : IVerifyTarget;
 
 /// <summary>
 /// Static, verify-host-keyed registry shared across every client instance BTCPay creates for a
