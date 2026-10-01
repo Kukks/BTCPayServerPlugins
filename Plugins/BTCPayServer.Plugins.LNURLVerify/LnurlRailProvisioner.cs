@@ -9,6 +9,7 @@ using BTCPayServer.Events;
 using BTCPayServer.HostedServices;
 using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Linq;
 using Network = NBitcoin.Network;
 
 namespace BTCPayServer.Plugins.LNURLVerify;
@@ -69,10 +70,13 @@ public class LnurlRailProvisioner : EventHostedServiceBase
     {
         try
         {
-            var offered = LnurlRailProvisioning.LnurlValue(store) is { } lnurl ? await OfferedTypes(lnurl, ct) : Array.Empty<string>();
+            var lnurl = LnurlRailProvisioning.LnurlValue(store);
+            var offered = lnurl is null ? Array.Empty<string>() : await OfferedTypes(lnurl, ct);
             if (offered is null) return;
-            if (LnurlRailProvisioning.Reconcile(store, LnurlRailProvisioning.Desired(store, offered)))
-                await _stores.UpdateStore(store);
+            // Our copy may predate a merchant's save; writing it back would revert that save.
+            if (await _stores.FindStore(store.Id) is not { } fresh || LnurlRailProvisioning.LnurlValue(fresh) != lnurl) return;
+            if (LnurlRailProvisioning.Reconcile(fresh, LnurlRailProvisioning.Desired(fresh, offered)))
+                await _stores.UpdateStore(fresh);
         }
         // A malformed config JSON or a failed UpdateStore on one store must not stop every later store from being reconciled.
         catch (Exception e) when (!ct.IsCancellationRequested)
@@ -89,7 +93,9 @@ public class LnurlRailProvisioner : EventHostedServiceBase
             var http = _httpClientFactory.CreateClient(nameof(LnurlRailProvisioner));
             http.Timeout = TimeSpan.FromSeconds(15);
             var resolved = await LNURLVerifyConnectionStringHandler.ResolveCached(lnurl, _network, http, ct);
-            return PaymentOption.Parse(await LNURLResolver.GetJson(http, resolved.PayEndpoint, ct)).Select(o => o.Type).ToArray();
+            var pay = await LNURLResolver.GetJson(http, resolved.PayEndpoint, ct);
+            if (!string.Equals(pay["tag"]?.Value<string>(), "payRequest", StringComparison.Ordinal)) return null;
+            return PaymentOption.Parse(pay).Select(o => o.Type).ToArray();
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception e)
