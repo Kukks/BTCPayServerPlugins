@@ -33,6 +33,7 @@ public class LNURLVerifyPlugin : BaseBTCPayServerPlugin
             services.AddDefaultPrettyName(r.PaymentMethodId, r.PrettyName);
         }
         services.AddHostedService<LnurlRailRecorder>();
+        services.AddHostedService<LnurlRailProvisioner>();
         base.Execute(services);
     }
 }
