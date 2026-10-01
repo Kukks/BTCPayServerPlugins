@@ -36,6 +36,9 @@ public class LNURLVerifyPlugin : BaseBTCPayServerPlugin
         services.AddHostedService<LnurlRailProvisioner>();
         services.AddSingleton<RailActivationFailures>();
         services.AddSingleton<RailActivationGate>();
+        services.AddSingleton<IGlobalCheckoutModelExtension, LnurlRailCheckoutExtension>();
+        services.AddUIExtension("checkout-end", "LNURLVerify/LnurlRailsCheckout");
+        services.AddUIExtension("store-invoices-payments", "LNURLVerify/LnurlRailPayments");
         base.Execute(services);
     }
 }

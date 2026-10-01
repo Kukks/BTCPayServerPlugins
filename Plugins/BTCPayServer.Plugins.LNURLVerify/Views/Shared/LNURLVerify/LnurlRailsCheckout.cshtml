@@ -1,0 +1,71 @@
+@using BTCPayServer.Plugins.LNURLVerify
+@model BTCPayServer.Models.InvoicingModels.CheckoutModel
+
+<template id="@LnurlRailCheckoutExtension.ComponentName">
+    @await Component.InvokeAsync("UiExtensionPoint", new { location = "checkout-bitcoin-pre-content", model = Model })
+    <div class="payment-box">
+        <div v-if="rails.length > 1" class="btcpay-pills d-flex flex-wrap justify-content-center gap-2 mb-3" id="LnurlRails">
+            <button v-for="rail in rails" :key="rail.pmi" type="button" class="btcpay-pill" :class="{ active: selected === rail.pmi }"
+                    :disabled="busy === rail.pmi" :data-rail="rail.pmi" v-on:click="pick(rail)" v-text="rail.label"></button>
+        </div>
+        <div v-if="qr" class="qr-container clipboard-button" :data-qr-value="qr" :data-clipboard="uri">
+            <div>
+                <qrcode :value="qr" tag="div" :options="qrOptions" />
+            </div>
+            <img class="qr-icon" :src="model.cryptoImage" :alt="model.paymentMethodName"/>
+        </div>
+        <div v-else class="text-center my-4"><span class="spinner-border" role="status"></span></div>
+        <div v-for="rail in shown" :key="'destination-' + rail.pmi" class="input-group mt-3">
+            <div class="form-floating">
+                <vc:truncate-center text="rail.destination" is-vue="true" padding="15" elastic="true" classes="form-control-plaintext" />
+                <label v-text="rail.label"></label>
+            </div>
+        </div>
+        <a v-if="uri && model.showPayInWalletButton" class="btn btn-primary rounded-pill w-100 mt-4" id="PayInWallet" target="_blank"
+           :href="uri" v-t="'pay_in_wallet'"></a>
+        @await Component.InvokeAsync("UiExtensionPoint", new { location = "checkout-bitcoin-post-content", model = Model })
+    </div>
+</template>
+
+<script>
+    Vue.component(@Safe.Json(LnurlRailCheckoutExtension.ComponentName), {
+        props: ['model', 'nfcSupported', 'nfcScanning', 'nfcErrorMessage', 'nfcWarningMessage'],
+        template: @Safe.Json("#" + LnurlRailCheckoutExtension.ComponentName),
+        components: { qrcode: VueQrcode },
+        data () {
+            return {
+                selected: null, failed: [], busy: null,
+                activateUrl: @Safe.Json(Url.Action("Activate", "LnurlRailCheckout", new { invoiceId = Model.InvoiceId }))
+            };
+        },
+        computed: {
+            rails () { return (this.model.lnurlRails || []).filter(r => !this.failed.includes(r.pmi) || r.active); },
+            current () { return this.rails.find(r => r.pmi === this.selected && r.active) || null; },
+            uri () { return this.current ? this.current.uri : this.model.invoiceBitcoinUrl; },
+            qr () { return this.current ? this.current.qr : this.model.invoiceBitcoinUrlQR; },
+            shown () { return this.current ? [this.current] : this.rails.filter(r => r.active); }
+        },
+        mounted () { this.activate(null); },
+        methods: {
+            async activate (pmi) {
+                try {
+                    const res = await fetch(this.activateUrl + (pmi ? '?rail=' + encodeURIComponent(pmi) : ''), { method: 'POST' });
+                    if (res.ok) this.failed.push(...(await res.json()).failed);
+                    else if (pmi) this.failed.push(pmi);
+                } catch (e) {
+                    if (pmi) this.failed.push(pmi);
+                }
+                await this.$root.fetchData();
+            },
+            async pick (rail) {
+                if (this.selected === rail.pmi) { this.selected = null; return; }
+                if (!rail.active) {
+                    this.busy = rail.pmi;
+                    await this.activate(rail.pmi);
+                    this.busy = null;
+                }
+                this.selected = rail.pmi;
+            }
+        }
+    });
+</script>
