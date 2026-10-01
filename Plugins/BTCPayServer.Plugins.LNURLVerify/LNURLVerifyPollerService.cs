@@ -29,6 +29,8 @@ public sealed class LNURLVerifyPollerService : IHostedService
     // lnurl-server answers 414 above 250 verify URLs per one-shot request.
     internal const int MaxBatchSize = 250;
     private static readonly TimeSpan UnsupportedFor = TimeSpan.FromHours(1);
+    // Throttling never counts: falling back to per-invoice polling would multiply the requests being refused.
+    private const int FallbackAfterFailures = 3;
 
     private readonly ILogger<LNURLVerifyPollerService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
@@ -38,6 +40,7 @@ public sealed class LNURLVerifyPollerService : IHostedService
     // Concurrent: PollOne runs for many invoices at once under the cycle's concurrency gate.
     private readonly ConcurrentDictionary<string, (int Errors, DateTimeOffset Next)> _backoff = new();
     private readonly ConcurrentDictionary<string, (int Errors, DateTimeOffset Next)> _batchBackoff = new();
+    private readonly ConcurrentDictionary<string, int> _batchFailures = new();
     private readonly ConcurrentDictionary<string, int> _chunkSize = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _unsupportedUntil = new();
     private Task? _loop;
@@ -185,26 +188,40 @@ public sealed class LNURLVerifyPollerService : IHostedService
                     size = _chunkSize[endpoint] = Math.Max(1, chunk.Length / 2);
                     continue;
                 case BatchOutcomeKind.Unsupported:
-                    _unsupportedUntil[endpoint] = DateTimeOffset.UtcNow + UnsupportedFor;
-                    _logger.LogDebug("verifyBatch {Endpoint} is unusable; polling its invoices one by one for {Duration}",
-                        endpoint, UnsupportedFor);
+                    MarkUnsupported(endpoint, outcome.Error ?? "not a verifyBatch endpoint");
                     return;
                 case BatchOutcomeKind.Ok:
                     _batchBackoff.TryRemove(endpoint, out _);
+                    _batchFailures.TryRemove(endpoint, out _);
+                    var missing = new List<TrackedInvoice>();
                     foreach (var t in chunk)
                     {
-                        if (!outcome.Results!.TryGetValue(t.VerifyUrl, out var item)) continue;
+                        if (!outcome.Results!.TryGetValue(t.VerifyUrl, out var item)) { missing.Add(t); continue; }
                         try { Apply(t, LNURLReceiver.FromVerifyJson(t, item)); }
                         catch (Exception e) { _logger.LogDebug(e, "Unreadable verifyBatch item for {Hash}", t.PaymentHash); }
                     }
+                    // A batch that leaves an invoice out never answers for it; its own verify URL still can.
+                    foreach (var t in missing) await PollOne(t, http, ct);
                     i += chunk.Length;
                     break;
                 default:
                     _batchBackoff[endpoint] = NextBackoff(_batchBackoff, endpoint);
-                    _logger.LogDebug("verifyBatch {Endpoint} failed ({Kind}: {Error})", endpoint, outcome.Kind, outcome.Error);
+                    if (outcome.Kind != BatchOutcomeKind.Throttled &&
+                        _batchFailures.AddOrUpdate(endpoint, 1, (_, n) => n + 1) >= FallbackAfterFailures)
+                        MarkUnsupported(endpoint, $"{outcome.Kind}: {outcome.Error}");
+                    else
+                        _logger.LogDebug("verifyBatch {Endpoint} failed ({Kind}: {Error})", endpoint, outcome.Kind, outcome.Error);
                     return;
             }
         }
+    }
+
+    private void MarkUnsupported(string endpoint, string reason)
+    {
+        _unsupportedUntil[endpoint] = DateTimeOffset.UtcNow + UnsupportedFor;
+        _batchFailures.TryRemove(endpoint, out _);
+        _logger.LogWarning("verifyBatch {Endpoint} is unusable ({Reason}); polling its invoices one by one for {Duration}",
+            endpoint, reason, UnsupportedFor);
     }
 
     private (int Errors, DateTimeOffset Next) NextBackoff(

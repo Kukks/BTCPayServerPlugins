@@ -10,7 +10,7 @@ using Newtonsoft.Json.Linq;
 
 namespace BTCPayServer.Plugins.LNURLVerify;
 
-public enum BatchOutcomeKind { Ok, TooLong, Unsupported, Failed }
+public enum BatchOutcomeKind { Ok, TooLong, Unsupported, Throttled, Failed }
 
 /// <param name="Results">For <see cref="BatchOutcomeKind.Ok"/>: each item keyed by the exact verify URL it answers.</param>
 public sealed record BatchOutcome(BatchOutcomeKind Kind, IReadOnlyDictionary<string, JObject>? Results = null, string? Error = null);
@@ -53,6 +53,8 @@ public static class VerifyBatchClient
                 case 405:
                 case 501:
                     return new BatchOutcome(BatchOutcomeKind.Unsupported);
+                case 429:
+                    return new BatchOutcome(BatchOutcomeKind.Throttled);
             }
             if (!response.IsSuccessStatusCode)
                 return new BatchOutcome(BatchOutcomeKind.Failed, Error: $"HTTP {(int)response.StatusCode}");
@@ -60,6 +62,10 @@ public static class VerifyBatchClient
             JObject json;
             try { json = JObject.Parse(await response.Content.ReadAsStringAsync(ct)); }
             catch (Exception e) { return new BatchOutcome(BatchOutcomeKind.Failed, Error: e.Message); }
+            // verifyBatch reports a bad request with a 4xx; a 200 ERROR is some other LNURL route answering
+            // (lnurl-server before verifyBatch serves this path from its /lnurl/:id route).
+            if (string.Equals(json["status"]?.Value<string>(), "ERROR", StringComparison.OrdinalIgnoreCase))
+                return new BatchOutcome(BatchOutcomeKind.Unsupported, Error: json["reason"]?.Value<string>());
             if (!string.Equals(json["status"]?.Value<string>(), "OK", StringComparison.OrdinalIgnoreCase) ||
                 json["results"] is not JObject results)
                 return new BatchOutcome(BatchOutcomeKind.Failed, Error: json["reason"]?.Value<string>() ?? "malformed verifyBatch response");

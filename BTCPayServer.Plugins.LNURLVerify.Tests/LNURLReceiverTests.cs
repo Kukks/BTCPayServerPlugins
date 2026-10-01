@@ -194,6 +194,22 @@ public class LNURLReceiverTests
     }
 
     [Fact]
+    public async Task CreateInvoice_does_not_downgrade_an_https_verify_to_an_http_verifyBatch()
+    {
+        var host = UniqueHost("vbdown");
+        var http = new FakeHttp()
+            .Map($"https://{host}/pay", PayJson($"https://{host}/cb", 250_000_000))
+            .Map($"https://{host}/cb?amount=250000000", SpecCallback(host, $",\"verifyBatch\":\"http://{host}/lnurl/verifyBatch\""));
+
+        await Receiver(host, http, Network.Main)
+            .CreateInvoice(LightMoney.MilliSatoshis(250_000_000), "x", null, TestContext.Current.CancellationToken);
+
+        Assert.True(TrackedInvoiceRegistry.TryGet(SpecHash, out var t));
+        Assert.Null(t.VerifyBatch);
+        TrackedInvoiceRegistry.Remove(SpecHash);
+    }
+
+    [Fact]
     public async Task A_verify_response_carrying_verifyBatch_moves_the_invoice_to_batch_polling()
     {
         var host = UniqueHost("retro");

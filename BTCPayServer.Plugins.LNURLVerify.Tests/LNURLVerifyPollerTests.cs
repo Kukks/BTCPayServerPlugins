@@ -102,17 +102,26 @@ public class LNURLVerifyPollerTests
     }
 
     [Fact]
-    public async Task Request_too_long_even_for_one_url_backs_off_instead_of_looping()
+    public async Task Request_too_long_even_for_one_url_falls_back_instead_of_looping()
     {
         var (http, server, hashes) = Endpoint(NewHost("long1"), 3, _ => HttpStatusCode.RequestUriTooLong, _ => Pending);
 
         await Polling(NewPoller(http, 20), hashes, async () =>
         {
-            await Task.Delay(400, TestContext.Current.CancellationToken);
-            var sizes = server.Batches.Select(b => b.Length).ToArray();
-            Assert.Equal(new[] { 3, 1 }, sizes.Take(2));
-            Assert.InRange(sizes.Length, 2, 9);
-            Assert.Empty(server.Singles);
+            await Until(() => server.Singles.Count >= 3);
+            Assert.Equal(new[] { 3, 1, 1, 1 }, server.Batches.Select(b => b.Length));
+        });
+    }
+
+    [Fact]
+    public async Task An_endpoint_that_keeps_failing_falls_back_to_per_invoice_polling()
+    {
+        var (http, server, hashes) = Endpoint(NewHost("broken"), 2, _ => HttpStatusCode.InternalServerError, _ => Pending);
+
+        await Polling(NewPoller(http, 20), hashes, async () =>
+        {
+            await Until(() => server.Singles.Count >= 2);
+            Assert.Equal(3, server.Batches.Count);
         });
     }
 
@@ -142,26 +151,45 @@ public class LNURLVerifyPollerTests
     }
 
     [Fact]
-    public async Task Per_item_errors_mean_not_found_and_missing_items_change_nothing()
+    public async Task Per_item_errors_mean_not_found()
     {
         var host = NewHost("items");
-        var (known, unknown, missing) = (NewHash(), NewHash(), NewHash());
-        foreach (var h in new[] { known, unknown, missing }) TrackedInvoiceRegistry.Add(Batched(host, h));
+        var (known, unknown) = (NewHash(), NewHash());
+        foreach (var h in new[] { known, unknown }) TrackedInvoiceRegistry.Add(Batched(host, h));
         var http = new FakeHttp();
-        new FakeBatchServer(http, host, _ => HttpStatusCode.OK, url =>
-            url.EndsWith(known) ? Pending
-            : url.EndsWith(unknown) ? "{\"status\":\"ERROR\",\"reason\":\"unknown verify url\"}"
-            : null);
+        var server = new FakeBatchServer(http, host, _ => HttpStatusCode.OK, url =>
+            url.EndsWith(known) ? Pending : "{\"status\":\"ERROR\",\"reason\":\"unknown verify url\"}");
 
-        await Polling(NewPoller(http, 30), new[] { known, unknown, missing }, async () =>
+        await Polling(NewPoller(http, 30), new[] { known, unknown }, async () =>
         {
             await Until(() => TrackedInvoiceRegistry.TryGetResult(unknown, out _) && TrackedInvoiceRegistry.TryGetResult(known, out _));
             Assert.True(TrackedInvoiceRegistry.TryGetResult(unknown, out var notFound));
             Assert.Null(notFound);
             Assert.True(TrackedInvoiceRegistry.TryGetResult(known, out var pending));
             Assert.Equal(LightningInvoiceStatus.Unpaid, pending!.Status);
-            Assert.False(TrackedInvoiceRegistry.TryGetResult(missing, out _));
-            Assert.True(TrackedInvoiceRegistry.TryGet(missing, out _));
+            Assert.Empty(server.Singles);
+        });
+    }
+
+    [Fact]
+    public async Task A_url_missing_from_a_batch_answer_is_polled_on_its_own()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var host = NewHost("partial");
+        var preimage = RandomNumberGenerator.GetBytes(32);
+        var (answered, missing) = (NewHash(), Hex(SHA256.HashData(preimage)));
+        TrackedInvoiceRegistry.Add(Batched(host, answered));
+        TrackedInvoiceRegistry.Add(Batched(host, missing));
+        var http = new FakeHttp();
+        var server = new FakeBatchServer(http, host, _ => HttpStatusCode.OK,
+            url => url.EndsWith(answered) ? Pending : null, single: _ => Settled(Hex(preimage)));
+        using var listener = new LNURLVerifyListener(t => t.PaymentHash == missing);
+        var waiter = listener.WaitInvoice(ct);
+
+        await Polling(NewPoller(http, 30), new[] { answered, missing }, async () =>
+        {
+            Assert.Equal(missing, (await waiter.WaitAsync(TimeSpan.FromSeconds(5), ct)).PaymentHash);
+            Assert.All(server.Singles, u => Assert.EndsWith(missing, u));
         });
     }
 
@@ -360,8 +388,10 @@ sealed class FakeBatchServer
     public readonly ConcurrentQueue<string[]> Batches = new();
     public readonly ConcurrentQueue<string> Singles = new();
 
-    public FakeBatchServer(FakeHttp http, string host, Func<string[], HttpStatusCode> status, Func<string, string?> item)
+    public FakeBatchServer(FakeHttp http, string host, Func<string[], HttpStatusCode> status, Func<string, string?> item,
+        Func<string, string?>? single = null)
     {
+        single ??= item;
         http.When(r => r.RequestUri!.Host == host && r.RequestUri.AbsolutePath == "/lnurl/verifyBatch", r =>
         {
             var urls = FakeHttp.VerifyParams(r);
@@ -376,7 +406,7 @@ sealed class FakeBatchServer
         http.When(r => r.RequestUri!.Host == host && r.RequestUri.AbsolutePath.StartsWith("/lnurl/verify/"), r =>
         {
             Singles.Enqueue(r.RequestUri!.ToString());
-            return (HttpStatusCode.OK, item(r.RequestUri.ToString()) ?? "{\"status\":\"ERROR\",\"reason\":\"Not found\"}");
+            return (HttpStatusCode.OK, single(r.RequestUri.ToString()) ?? "{\"status\":\"ERROR\",\"reason\":\"Not found\"}");
         });
     }
 }

@@ -49,7 +49,7 @@ public class VerifyBatchClientTests
     [InlineData(HttpStatusCode.NotFound, BatchOutcomeKind.Unsupported)]
     [InlineData(HttpStatusCode.MethodNotAllowed, BatchOutcomeKind.Unsupported)]
     [InlineData(HttpStatusCode.NotImplemented, BatchOutcomeKind.Unsupported)]
-    [InlineData(HttpStatusCode.TooManyRequests, BatchOutcomeKind.Failed)]
+    [InlineData(HttpStatusCode.TooManyRequests, BatchOutcomeKind.Throttled)]
     [InlineData(HttpStatusCode.InternalServerError, BatchOutcomeKind.Failed)]
     public async Task Status_codes_are_classified(HttpStatusCode code, BatchOutcomeKind expected)
     {
@@ -60,13 +60,22 @@ public class VerifyBatchClientTests
 
     [Theory]
     [InlineData("not json")]
-    [InlineData("{\"status\":\"ERROR\",\"reason\":\"verify parameter required\"}")]
     [InlineData("{\"status\":\"OK\"}")]
     public async Task Unusable_bodies_fail(string body)
     {
         var http = new FakeHttp().When(_ => true, _ => (HttpStatusCode.OK, body));
 
         Assert.Equal(BatchOutcomeKind.Failed, (await Fetch(http, A)).Kind);
+    }
+
+    [Fact]
+    public async Task A_200_carrying_a_top_level_ERROR_is_not_a_verifyBatch_endpoint()
+    {
+        // What lnurl-server before verifyBatch answers on that path: its /lnurl/:id route, with HTTP 200.
+        var http = new FakeHttp().When(_ => true, _ => (HttpStatusCode.OK,
+            "{\"status\":\"ERROR\",\"reason\":\"This LNURL is no longer active\"}"));
+
+        Assert.Equal(BatchOutcomeKind.Unsupported, (await Fetch(http, A)).Kind);
     }
 
     [Fact]

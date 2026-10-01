@@ -102,7 +102,7 @@ public sealed class LNURLReceiver
 
         TrackedInvoiceRegistry.Add(new TrackedInvoice(
             paymentHash, pr, verifyUrl, verifyHost, _resolved.PayEndpoint.ToString(), bolt11.ExpiryDate,
-            HttpUrl(json["verifyBatch"])));
+            BatchUrl(json["verifyBatch"], verifyUrl)));
 
         return new LightningInvoice
         {
@@ -162,7 +162,7 @@ public sealed class LNURLReceiver
 
         if (json is null)
             return new LightningInvoice { Id = t.PaymentHash, PaymentHash = t.PaymentHash, Status = LightningInvoiceStatus.Unpaid };
-        if (t.VerifyBatch is null && HttpUrl(json["verifyBatch"]) is { } batch)
+        if (t.VerifyBatch is null && BatchUrl(json["verifyBatch"], t.VerifyUrl) is { } batch)
             TrackedInvoiceRegistry.SetVerifyBatch(t.PaymentHash, batch);
         return FromVerifyJson(t, json);
     }
@@ -175,12 +175,16 @@ public sealed class LNURLReceiver
         return BuildInvoice(t, json["settled"]?.Value<bool>() ?? false, json["preimage"]?.Value<string>());
     }
 
-    internal static string? HttpUrl(JToken? token)
+    /// <summary>
+    /// The advertised verifyBatch URL if usable: absolute http(s), and never plain http for an https verify URL,
+    /// where a forged batch answer could make BTCPay drop an invoice that was paid.
+    /// </summary>
+    internal static string? BatchUrl(JToken? token, string verifyUrl)
     {
         var s = token?.Type == JTokenType.String ? token.Value<string>() : null;
-        return Uri.TryCreate(s, UriKind.Absolute, out var u) && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps)
-            ? s
-            : null;
+        if (!Uri.TryCreate(s, UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps))
+            return null;
+        return u.Scheme == Uri.UriSchemeHttp && verifyUrl.StartsWith("https:", StringComparison.OrdinalIgnoreCase) ? null : s;
     }
 
     private static LightningInvoice BuildInvoice(TrackedInvoice t, bool settled, string? preimage)
