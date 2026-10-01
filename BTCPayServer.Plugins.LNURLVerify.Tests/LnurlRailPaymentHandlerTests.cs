@@ -1,7 +1,9 @@
+using System.Net;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Data;
 using BTCPayServer.Logging;
 using BTCPayServer.Payments;
+using BTCPayServer.Rating;
 using BTCPayServer.Services.Invoices;
 using NBitcoin;
 using Newtonsoft.Json.Linq;
@@ -46,6 +48,50 @@ public class LnurlRailPaymentHandlerTests
 
     static PaymentMethodContext Activation(StoreData store, InvoiceEntity invoice) =>
         new(store, store.GetStoreBlob(), new JObject(), Handler, invoice, new InvoiceLogs());
+
+    // A fresh host per call keeps the static ResolveCached cache from colliding across tests. The arkade
+    // callback answers tark1qdest1, tark1qdest2, ... on successive requests.
+    static (string Host, FakeHttp Http, LnurlRailPaymentHandler Handler, StoreData Store) Lnurl()
+    {
+        var host = "act" + Guid.NewGuid().ToString("N")[..8] + ".example";
+        var callback = $"https://{host}/cb";
+        var issued = 0;
+        var http = new FakeHttp()
+            .Map($"https://{host}/.well-known/lnurlp/alice",
+                "{\"tag\":\"payRequest\",\"callback\":\"" + callback + "\",\"minSendable\":1000,\"maxSendable\":100000000,\"metadata\":\"[]\",\"paymentOptions\":[{\"id\":\"arkade\",\"type\":\"arkade\"}]}")
+            .When(r => r.RequestUri!.ToString().StartsWith(callback + "?"), _ =>
+            {
+                var n = ++issued;
+                return (HttpStatusCode.OK, new JObject
+                {
+                    ["paymentOption"] = "arkade", ["paymentDestination"] = $"tark1qdest{n}", ["paymentURI"] = $"bitcoin:?ark=tark1qdest{n}",
+                    ["expiresAt"] = DateTimeOffset.UtcNow.AddDays(7).ToUnixTimeSeconds(),
+                    ["verify"] = $"https://{host}/lnurl/verify/{n}", ["verifyBatch"] = $"https://{host}/lnurl/verifyBatch"
+                }.ToString());
+            });
+        var store = Store();
+        store.SetPaymentMethodConfig(PaymentMethodId.Parse("BTC-LN"), new JObject { ["connectionString"] = $"type=lnurl;value=alice@{host}" });
+        return (host, http, new LnurlRailPaymentHandler(LnurlRails.Arkade, new FakeHttpClientFactory(http), Network.RegTest), store);
+    }
+
+    // 10 USD at 50,000 USD/BTC is 20,000 sat. The stored prompt defaults to the inactive one core leaves at creation.
+    static InvoiceEntity Priced(PaymentPrompt? stored = null)
+    {
+        var invoice = Invoice();
+        invoice.Price = 10m;
+        invoice.ExpirationTime = DateTimeOffset.UtcNow.AddMinutes(15);
+        invoice.AddRate(new CurrencyPair("BTC", "USD"), 50_000m);
+        invoice.SetPaymentPrompt(LnurlRails.Arkade.PaymentMethodId, stored ?? new PaymentPrompt { Currency = "BTC", Divisibility = 8, Inactive = true });
+        return invoice;
+    }
+
+    static async Task<PaymentMethodContext> Activate(LnurlRailPaymentHandler handler, StoreData store, InvoiceEntity invoice)
+    {
+        var ctx = new PaymentMethodContext(store, store.GetStoreBlob(), new JObject(), handler, invoice, new InvoiceLogs());
+        await ctx.BeforeFetchingRates();
+        await handler.ConfigurePrompt(ctx);
+        return ctx;
+    }
 
     [Fact]
     public async Task The_prompt_is_inactive_at_creation_on_a_store_without_lazy_payment_methods()
@@ -167,5 +213,64 @@ public class LnurlRailPaymentHandlerTests
         var second = await LNURLVerifyConnectionStringHandler.ResolveCached(url, Network.RegTest, http.Client(), ct);
         Assert.Same(first, second);
         Assert.Single(http.Requests);
+    }
+
+    [Fact]
+    public async Task Activation_requests_a_destination_and_records_it_on_the_prompt()
+    {
+        var (host, http, handler, store) = Lnurl();
+        var ctx = await Activate(handler, store, Priced());
+        var details = handler.ParsePaymentPromptDetails(ctx.Prompt.Details);
+        Assert.Equal("tark1qdest1", ctx.Prompt.Destination);
+        Assert.Equal(new[] { "tark1qdest1" }, ctx.TrackedDestinations);
+        Assert.Equal(("arkade", "bitcoin:?ark=tark1qdest1", $"https://{host}/lnurl/verify/1", $"https://{host}/lnurl/verifyBatch", 20_000_000L),
+            (details.OptionId, details.PaymentUri, details.Verify, details.VerifyBatch, details.AmountMsat));
+        Assert.Empty(details.Superseded);
+        Assert.Contains($"https://{host}/cb?amount=20000000&paymentOption=arkade", http.Requests);
+    }
+
+    [Fact]
+    public async Task A_reissue_supersedes_the_previous_destination()
+    {
+        var (host, _, handler, store) = Lnurl();
+        var stored = new PaymentPrompt
+        {
+            Currency = "BTC", Divisibility = 8, Destination = "tark1qfirst",
+            Details = JObject.FromObject(new LnurlRailPromptDetails
+            {
+                OptionId = "arkade", Verify = "https://lnurl.example/lnurl/verify/aa", AmountMsat = 20_000_000
+            }, handler.Serializer)
+        };
+        var ctx = await Activate(handler, store, Priced(stored));
+        var details = handler.ParsePaymentPromptDetails(ctx.Prompt.Details);
+        Assert.Equal("tark1qdest1", ctx.Prompt.Destination);
+        Assert.Equal($"https://{host}/lnurl/verify/1", details.Verify);
+        Assert.Equal(new[] { ("tark1qfirst", "https://lnurl.example/lnurl/verify/aa", 20_000_000L) },
+            details.Superseded.Select(s => (s.Destination, s.Verify, s.AmountMsat)));
+    }
+
+    [Fact]
+    public async Task Activation_after_a_partial_payment_requests_only_the_remainder()
+    {
+        var (host, http, handler, store) = Lnurl();
+        var invoice = Priced();
+#pragma warning disable CS0618
+        invoice.Payments = new List<PaymentEntity> { new() { Currency = "BTC", Value = 0.00008m, Status = PaymentStatus.Settled } };
+#pragma warning restore CS0618
+        invoice.UpdateTotals();
+        var ctx = await Activate(handler, store, invoice);
+        Assert.Equal(12_000_000L, handler.ParsePaymentPromptDetails(ctx.Prompt.Details).AmountMsat);
+        Assert.Contains($"https://{host}/cb?amount=12000000&paymentOption=arkade", http.Requests);
+    }
+
+    [Fact]
+    public async Task Successive_activations_resolve_the_lnurl_once()
+    {
+        var (host, http, handler, store) = Lnurl();
+        var invoice = Priced();
+        await Activate(handler, store, invoice);
+        await Activate(handler, store, invoice);
+        // One cached resolution, then one pay-endpoint read per request.
+        Assert.Equal(3, http.Requests.Count(u => u == $"https://{host}/.well-known/lnurlp/alice"));
     }
 }
