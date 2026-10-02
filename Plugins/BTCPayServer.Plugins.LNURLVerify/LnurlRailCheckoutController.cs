@@ -34,7 +34,7 @@ public class LnurlRailCheckoutController : Controller
     [HttpPost("activate")]
     [IgnoreAntiforgeryToken]
     [RateLimitsFilter(ZoneLimits.PublicInvoices, Scope = RateLimitsScope.RouteData, DataKey = "invoiceId")]
-    public async Task<IActionResult> Activate(string invoiceId, string? rail = null)
+    public async Task<IActionResult> Activate([FromRoute] string invoiceId, string? rail = null)
     {
         var invoice = await _invoices.GetInvoice(invoiceId);
         if (invoice is null || !CheckoutRails.Applies(invoice)) return NotFound();
