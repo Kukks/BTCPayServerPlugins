@@ -6,7 +6,8 @@ using Newtonsoft.Json.Linq;
 namespace BTCPayServer.Plugins.LNURLVerify;
 
 /// <summary>One LUD-XX <c>paymentOptions</c> entry advertised by a payRequest.</summary>
-public sealed record PaymentOption(string Id, string Type, bool Available, long? MinSendable, long? MaxSendable)
+/// <param name="Verifiable">Whether callback answers carry a LUD-21 verify URL; null when the service does not say.</param>
+public sealed record PaymentOption(string Id, string Type, bool Available, long? MinSendable, long? MaxSendable, bool? Verifiable = null)
 {
     public static IReadOnlyList<PaymentOption> Parse(JObject payRequest)
     {
@@ -18,7 +19,8 @@ public sealed record PaymentOption(string Id, string Type, bool Available, long?
                 continue;
             options.Add(new PaymentOption(id, type,
                 o["available"]?.Type != JTokenType.Boolean || o["available"]!.Value<bool>(),
-                Msat(o["minSendable"]), Msat(o["maxSendable"])));
+                Msat(o["minSendable"]), Msat(o["maxSendable"]),
+                o["verifiable"]?.Type == JTokenType.Boolean ? o["verifiable"]!.Value<bool>() : null));
         }
         return options;
     }

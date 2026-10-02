@@ -28,6 +28,21 @@ public class LnurlRailProvisioningTests
         LnurlRailProvisioning.Desired(store, offered).Select(r => r.PaymentMethodId.ToString()).ToArray();
 
     [Fact]
+    public void An_option_marked_unverifiable_is_never_provisioned()
+    {
+        var pay = JObject.Parse("{\"paymentOptions\":[{\"id\":\"lightning\",\"type\":\"lightning\",\"verifiable\":true}," +
+                                "{\"id\":\"arkade\",\"type\":\"arkade\",\"verifiable\":true},{\"id\":\"onchain\",\"type\":\"onchain\",\"verifiable\":false}]}");
+        Assert.Equal(new[] { "LNURL-ARKADE" }, Desired(Store(), LnurlRailProvisioning.OfferedTypes(pay)));
+    }
+
+    [Fact]
+    public void An_option_that_states_nothing_about_verify_is_still_provisioned()
+    {
+        var pay = JObject.Parse("{\"paymentOptions\":[{\"id\":\"arkade\",\"type\":\"arkade\"},{\"id\":\"onchain\",\"type\":\"onchain\"}]}");
+        Assert.Equal(new[] { "LNURL-ARKADE", "LNURL-ONCHAIN" }, Desired(Store(), LnurlRailProvisioning.OfferedTypes(pay)));
+    }
+
+    [Fact]
     public void The_lnurl_is_read_from_the_enabled_lightning_connection_string()
     {
         Assert.Equal("alice@lnurl.example", LnurlRailProvisioning.LnurlValue(Store()));

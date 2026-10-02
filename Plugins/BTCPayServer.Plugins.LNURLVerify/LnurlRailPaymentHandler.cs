@@ -70,6 +70,12 @@ public class LnurlRailPaymentHandler : IPaymentMethodHandler
         // Only creation lacks the prompt: InvoiceActivator re-runs this on the stored invoice, which holds it.
         if (context.InvoiceEntity.GetPaymentPrompt(PaymentMethodId) is null)
         {
+            // Core lets only ConfigurePrompt refuse a method cleanly, so a remembered rail is activated now to be refused there.
+            if (LnurlRailProvisioning.LnurlValue(context.Store) is { } lnurl && UnverifiableRails.Knows(lnurl, Rail.OptionType, DateTimeOffset.UtcNow))
+            {
+                context.Prompt.Inactive = false;
+                return Task.CompletedTask;
+            }
             context.Prompt.Inactive = true;
             if (context.Status != PaymentMethodContext.ContextStatus.Excluded)
                 PreferCoreDefault(context);
@@ -95,6 +101,8 @@ public class LnurlRailPaymentHandler : IPaymentMethodHandler
             throw new PaymentMethodUnavailableException("top-up invoices have no amount to request");
         var lnurl = LnurlRailProvisioning.LnurlValue(context.Store)
                     ?? throw new PaymentMethodUnavailableException("the store's Lightning backend is not an LNURL");
+        if (UnverifiableRails.Knows(lnurl, Rail.OptionType, DateTimeOffset.UtcNow))
+            throw new UnverifiableRailException("settlement cannot be detected: the LNURL refused this rail as unverifiable within the last day");
         var due = context.Prompt.Calculate().Due;
         if (due <= 0m) throw new PaymentMethodUnavailableException("nothing is due");
 
@@ -104,7 +112,13 @@ public class LnurlRailPaymentHandler : IPaymentMethodHandler
         ResolvedLnurl resolved;
         try { resolved = await LNURLVerifyConnectionStringHandler.ResolveCached(lnurl, _network, http, cts.Token); }
         catch (Exception e) { throw new PaymentMethodUnavailableException($"the LNURL could not be resolved ({e.Message})"); }
-        var d = await LnurlRailRequester.Request(http, resolved.PayEndpoint, Rail, MsatOf(due), invoice.ExpirationTime, _network, cts.Token);
+        RailDestination d;
+        try { d = await LnurlRailRequester.Request(http, resolved.PayEndpoint, Rail, MsatOf(due), invoice.ExpirationTime, _network, cts.Token); }
+        catch (UnverifiableRailException)
+        {
+            UnverifiableRails.Remember(lnurl, Rail.OptionType, DateTimeOffset.UtcNow);
+            throw;
+        }
 
         context.Prompt.Details = JObject.FromObject(new LnurlRailPromptDetails
         {

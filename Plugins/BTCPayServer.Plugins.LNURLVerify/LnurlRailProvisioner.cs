@@ -96,7 +96,7 @@ public class LnurlRailProvisioner : EventHostedServiceBase
             var resolved = await LNURLVerifyConnectionStringHandler.ResolveCached(lnurl, _network, http, ct);
             var pay = await LNURLResolver.GetJson(http, resolved.PayEndpoint, ct);
             if (!string.Equals(pay["tag"]?.Value<string>(), "payRequest", StringComparison.Ordinal)) return null;
-            return PaymentOption.Parse(pay).Select(o => o.Type).ToArray();
+            return LnurlRailProvisioning.OfferedTypes(pay);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception e)

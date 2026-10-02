@@ -28,6 +28,10 @@ public static class LnurlRailProvisioning
         catch (FormatException) { return null; }
     }
 
+    /// <summary>The option types a payRequest offers to a rail: one it marks unverifiable can never be recorded.</summary>
+    public static string[] OfferedTypes(JObject payRequest) =>
+        PaymentOption.Parse(payRequest).Where(o => o.Verifiable != false).Select(o => o.Type).ToArray();
+
     public static IReadOnlyCollection<LnurlRail> Desired(StoreData store, params string[] offeredTypes)
     {
         if (LnurlValue(store) is null || store.GetPaymentMethodConfig(NativeArkade) is not null)

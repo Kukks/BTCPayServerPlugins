@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -22,6 +23,8 @@ public static class LnurlRailRequester
         var option = PaymentOption.Parse(pay).FirstOrDefault(o => o.Type.Equals(rail.OptionType, StringComparison.OrdinalIgnoreCase))
                      ?? throw Unavailable($"the LNURL does not offer '{rail.OptionType}'");
         if (!option.Available) throw Unavailable($"the LNURL reports '{rail.OptionType}' as currently unavailable");
+        if (option.Verifiable == false)
+            throw new UnverifiableRailException($"settlement cannot be detected: the LNURL marks '{rail.OptionType}' as not verifiable");
         var min = option.MinSendable ?? pay["minSendable"]?.Value<long>() ?? 1;
         var max = option.MaxSendable ?? pay["maxSendable"]?.Value<long>() ?? long.MaxValue;
         if (amountMsat < min || amountMsat > max)
@@ -35,10 +38,10 @@ public static class LnurlRailRequester
         var destination = Str(json["paymentDestination"]) ?? throw Unavailable("the LNURL returned no destination");
         var verify = Str(json["verify"]);
         if (verify is null || !Uri.TryCreate(verify, UriKind.Absolute, out var verifyUri) || (verifyUri.Scheme != Uri.UriSchemeHttp && verifyUri.Scheme != Uri.UriSchemeHttps))
-            throw Unavailable("settlement cannot be detected: the LNURL returned no usable verify URL");
+            throw new UnverifiableRailException("settlement cannot be detected: the LNURL returned no usable verify URL");
         // Rail settlement rests on verify alone, so an on-path attacker answering it could forge a paid invoice.
         if (verifyUri.Scheme == Uri.UriSchemeHttp && callbackUri.Scheme == Uri.UriSchemeHttps)
-            throw Unavailable("settlement cannot be detected: the LNURL returned a plain-http verify URL for an https callback");
+            throw new UnverifiableRailException("settlement cannot be detected: the LNURL returned a plain-http verify URL for an https callback");
         if (json["expiresAt"]?.Type == JTokenType.Integer &&
             DateTimeOffset.FromUnixTimeSeconds(json["expiresAt"]!.Value<long>()) < invoiceExpiry)
             throw Unavailable("the destination expires before the invoice");
@@ -58,4 +61,27 @@ public static class LnurlRailRequester
     private static PaymentMethodUnavailableException Unavailable(string reason) => new(reason);
 
     private static string? Str(JToken? t) => t?.Type == JTokenType.String && t.Value<string>() is { Length: > 0 } s ? s : null;
+}
+
+/// <summary>A refusal that will repeat for this LNURL and rail, because its settlement cannot be learnt.</summary>
+public sealed class UnverifiableRailException : PaymentMethodUnavailableException
+{
+    public UnverifiableRailException(string message) : base(message) { }
+}
+
+/// <summary>LNURL rails refused as unverifiable, kept off new invoices for a day.</summary>
+public static class UnverifiableRails
+{
+    private static readonly TimeSpan Window = TimeSpan.FromDays(1);
+    private static readonly ConcurrentDictionary<(string Lnurl, string OptionType), DateTimeOffset> _until = new();
+
+    public static void Remember(string lnurl, string optionType, DateTimeOffset now)
+    {
+        foreach (var kv in _until)
+            if (kv.Value <= now) _until.TryRemove(kv.Key, out _);
+        _until[(lnurl, optionType)] = now + Window;
+    }
+
+    public static bool Knows(string lnurl, string optionType, DateTimeOffset now) =>
+        _until.TryGetValue((lnurl, optionType), out var until) && until > now;
 }

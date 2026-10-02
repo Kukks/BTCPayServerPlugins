@@ -50,6 +50,9 @@ A store that already has the Arkade plugin's own `ARKADE` payment method gets no
   amount agreed with the LNURL. An underpayment never settles there, so BTCPay never sees it; recovering those funds is the
   LNURL service's job. An overpayment is recorded at the agreed amount. Late payments are recorded until the invoice stops
   being monitored.
+- **Rails whose settlement cannot be detected:** an option the LNURL marks `verifiable: false` (proposed for LUD-XX in
+  lnurl/luds#303) is never provisioned. A rail whose LNURL answers without a usable `verify` URL is left off new invoices for
+  a day, so a checkout does not keep offering a payment method that cannot activate.
 - **Turning a rail off:** switch it off on Integrations → LNURL rails.
 - **Out of scope:** EVM and other non-BIP321 networks; they need a checkout of their own.
 - **Upgrading to 1.2.0:** stores whose LNURL advertises a rail switch to the single "Bitcoin" tab for invoices created after

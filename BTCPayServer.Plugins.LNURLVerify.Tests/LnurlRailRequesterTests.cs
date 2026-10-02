@@ -40,7 +40,19 @@ public class LnurlRailRequesterTests
             TestContext.Current.CancellationToken);
 
     static async Task<string> Refusal(FakeHttp http, LnurlRail? rail = null, long msat = 50_000_000) =>
-        (await Assert.ThrowsAsync<PaymentMethodUnavailableException>(() => Request(http, rail, msat))).Message;
+        (await Assert.ThrowsAnyAsync<PaymentMethodUnavailableException>(() => Request(http, rail, msat))).Message;
+
+    [Fact]
+    public async Task An_option_marked_unverifiable_is_refused_without_a_callback()
+    {
+        var http = Server(PayRequest("[{\"id\":\"arkade\",\"type\":\"arkade\",\"verifiable\":false}]"), Destination());
+        await Assert.ThrowsAsync<UnverifiableRailException>(() => Request(http));
+        Assert.Single(http.Requests);
+    }
+
+    [Fact]
+    public async Task An_answer_without_a_verify_url_is_an_unverifiable_rail() =>
+        await Assert.ThrowsAsync<UnverifiableRailException>(() => Request(Server(PayRequest(), Destination(o => o.Remove("verify")))));
 
     [Fact]
     public async Task Requests_the_option_by_id_and_returns_its_destination()

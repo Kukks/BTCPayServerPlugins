@@ -51,7 +51,7 @@ public class LnurlRailPaymentHandlerTests
 
     // A fresh host per call keeps the static ResolveCached cache from colliding across tests. The arkade
     // callback answers tark1qdestq, tark1qdestqq, ... on successive requests ('1' is not in the bech32 alphabet).
-    static (string Host, FakeHttp Http, LnurlRailPaymentHandler Handler, StoreData Store) Lnurl()
+    static (string Host, FakeHttp Http, LnurlRailPaymentHandler Handler, StoreData Store) Lnurl(bool verify = true)
     {
         var host = "act" + Guid.NewGuid().ToString("N")[..8] + ".example";
         var callback = $"https://{host}/cb";
@@ -63,12 +63,14 @@ public class LnurlRailPaymentHandlerTests
             {
                 var n = ++issued;
                 var dest = "tark1qdest" + new string('q', n);
-                return (HttpStatusCode.OK, new JObject
+                var answer = new JObject
                 {
                     ["paymentOption"] = "arkade", ["paymentDestination"] = dest, ["paymentURI"] = $"bitcoin:?ark={dest}",
                     ["expiresAt"] = DateTimeOffset.UtcNow.AddDays(7).ToUnixTimeSeconds(),
                     ["verify"] = $"https://{host}/lnurl/verify/{n}", ["verifyBatch"] = $"https://{host}/lnurl/verifyBatch"
-                }.ToString());
+                };
+                if (!verify) answer.Remove("verify");
+                return (HttpStatusCode.OK, answer.ToString());
             });
         var store = Store();
         store.SetPaymentMethodConfig(PaymentMethodId.Parse("BTC-LN"), new JObject { ["connectionString"] = $"type=lnurl;value=alice@{host}" });
@@ -214,6 +216,29 @@ public class LnurlRailPaymentHandlerTests
         var second = await LNURLVerifyConnectionStringHandler.ResolveCached(url, Network.RegTest, http.Client(), ct);
         Assert.Same(first, second);
         Assert.Single(http.Requests);
+    }
+
+    [Fact]
+    public async Task A_rail_its_lnurl_cannot_verify_is_left_off_new_invoices()
+    {
+        var (_, http, handler, store) = Lnurl(verify: false);
+        await Assert.ThrowsAsync<UnverifiableRailException>(() => Activate(handler, store, Priced()));
+        var requests = http.Requests.Count;
+
+        var (_, ctx) = await Create(store);
+        Assert.False(ctx.Prompt.Inactive);
+        await Assert.ThrowsAsync<UnverifiableRailException>(() => handler.ConfigurePrompt(ctx));
+        Assert.Equal(requests, http.Requests.Count);
+    }
+
+    [Fact]
+    public void A_rail_is_remembered_as_unverifiable_for_a_day()
+    {
+        var now = DateTimeOffset.UtcNow;
+        UnverifiableRails.Remember("ttl@lnurl.example", "onchain", now);
+        Assert.True(UnverifiableRails.Knows("ttl@lnurl.example", "onchain", now.AddHours(23)));
+        Assert.False(UnverifiableRails.Knows("ttl@lnurl.example", "onchain", now.AddHours(25)));
+        Assert.False(UnverifiableRails.Knows("ttl@lnurl.example", "arkade", now));
     }
 
     [Fact]
