@@ -42,7 +42,7 @@ for stores without their own on-chain wallet: a store with an enabled wallet nev
 A store that already has the Arkade plugin's own `ARKADE` payment method gets no LNURL rails.
 
 - **Checkout:** one "Bitcoin" tab replaces the Lightning and on-chain tabs. Its QR is one BIP321 URI carrying every active rail;
-  a chip per rail switches the QR to that rail alone.
+  a chip per rail switches the QR to that rail alone, and an "All" chip switches it back.
 - **No cost at invoice creation:** a rail is requested from the LNURL when the checkout opens, or, with the store setting
   "Request every rail when the checkout opens" turned off (Integrations → LNURL rails), only when the payer taps it. Reopening
   the checkout does not request a rail the LNURL refused within the last hour; a payer's tap does.
