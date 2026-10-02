@@ -42,22 +42,28 @@ public static class LnurlRailRequester
         if (Str(json["paymentOption"]) is { } echoed && echoed != option.Id)
             throw Unavailable($"the LNURL answered for '{echoed}' instead of '{option.Id}'");
         var destination = Str(json["paymentDestination"]) ?? throw Unavailable("the LNURL returned no destination");
-        var verify = Str(json["verify"]);
+        var (verify, batch) = Settlement(json, callbackUri, invoiceExpiry);
+        if (!rail.IsValidDestination(destination, network))
+            throw Unavailable($"'{destination}' is not a valid {rail.Label} destination for {network.ChainName}");
+        return new RailDestination(option.Id, destination, Str(json["paymentURI"]), verify, batch, amountMsat);
+    }
+
+    /// <summary>The verify and verifyBatch URLs of a callback answer, refusing one whose settlement could not be learnt.</summary>
+    internal static (string Verify, string? VerifyBatch) Settlement(JObject answer, Uri callbackUri, DateTimeOffset invoiceExpiry)
+    {
+        var verify = Str(answer["verify"]);
         if (verify is null || !Uri.TryCreate(verify, UriKind.Absolute, out var verifyUri) || (verifyUri.Scheme != Uri.UriSchemeHttp && verifyUri.Scheme != Uri.UriSchemeHttps))
             throw new UnverifiableRailException("settlement cannot be detected: the LNURL returned no usable verify URL");
         // Rail settlement rests on verify alone, so an on-path attacker answering it could forge a paid invoice.
         if (verifyUri.Scheme == Uri.UriSchemeHttp && callbackUri.Scheme == Uri.UriSchemeHttps)
             throw new UnverifiableRailException("settlement cannot be detected: the LNURL returned a plain-http verify URL for an https callback");
-        if (json["expiresAt"]?.Type == JTokenType.Integer &&
-            DateTimeOffset.FromUnixTimeSeconds(json["expiresAt"]!.Value<long>()) < invoiceExpiry)
+        if (answer["expiresAt"]?.Type == JTokenType.Integer &&
+            DateTimeOffset.FromUnixTimeSeconds(answer["expiresAt"]!.Value<long>()) < invoiceExpiry)
             throw Unavailable("the destination expires before the invoice");
-        if (!rail.IsValidDestination(destination, network))
-            throw Unavailable($"'{destination}' is not a valid {rail.Label} destination for {network.ChainName}");
-        return new RailDestination(option.Id, destination, Str(json["paymentURI"]), verify,
-            LNURLReceiver.BatchUrl(json["verifyBatch"], verify), amountMsat);
+        return (verify, LNURLReceiver.BatchUrl(answer["verifyBatch"], verify));
     }
 
-    private static async Task<JObject> Get(HttpClient http, Uri uri, string what, CancellationToken ct)
+    internal static async Task<JObject> Get(HttpClient http, Uri uri, string what, CancellationToken ct)
     {
         try { return await LNURLResolver.GetJson(http, uri, ct); }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -66,7 +72,7 @@ public static class LnurlRailRequester
 
     private static PaymentMethodUnavailableException Unavailable(string reason) => new(reason);
 
-    private static string? Str(JToken? t) => t?.Type == JTokenType.String && t.Value<string>() is { Length: > 0 } s ? s : null;
+    internal static string? Str(JToken? t) => t?.Type == JTokenType.String && t.Value<string>() is { Length: > 0 } s ? s : null;
 }
 
 /// <summary>A refusal that will repeat for this LNURL and rail, because its settlement cannot be learnt.</summary>
