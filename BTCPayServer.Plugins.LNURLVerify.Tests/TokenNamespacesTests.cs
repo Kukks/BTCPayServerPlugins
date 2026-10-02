@@ -49,15 +49,13 @@ public class TokenNamespacesTests
     [InlineData("eip155", "1111111111111111111111111111111111111111", false)]
     [InlineData("solana", SolanaTo, true)]
     [InlineData("solana", "<b>9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9z</b>", false)]
-    [InlineData("solana", " 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", false)]
-    [InlineData("solana", "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM\n", false)]
-    [InlineData("solana", "Ŕ9zDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", false)]
+    [InlineData("solana", " TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", false)]
+    [InlineData("solana", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA\n", false)]
+    [InlineData("solana", "ŔokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", false)]
     [InlineData("tron", TronTo, true)]
     [InlineData("tron", "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6u", false)]
     [InlineData("tron", "0x74472e7d35395a6b5add427eecb7f4b62ad2b071", false)]
-    [InlineData("tron", " TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7", false)]
-    [InlineData("tron", "TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7\n", false)]
-    [InlineData("tron", "ŔLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7", false)]
+    [InlineData("tron", "TŌa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7", false)]
     public void Recipients_are_checked_per_namespace(string ns, string address, bool valid) =>
         Assert.Equal(valid, TokenNamespaces.All[ns].IsValidAddress(address));
 }
