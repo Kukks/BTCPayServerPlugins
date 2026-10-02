@@ -247,6 +247,33 @@ public class LNURLReceiverTests
         TrackedInvoiceRegistry.Remove(hash);
     }
 
+    // A real payment on lnurl.mutinynet.arkade.sh, a signet: its invoice carries the lntbs prefix.
+    [Fact]
+    public async Task A_settled_signet_invoice_is_paid()
+    {
+        const string bolt11 = "lntbs578940n1p4tlqwspp5jd7c73dwwf9wh0ucq72n3pqwu8nasx7c45hg3uj9gasv6whkkkqqdqqcqzpkxqrpc8sp5mwwycj7ejsf205vk56p69nan0gmgh72da9pwm9x9pu68pzgytvss9qxpqysgqzrjznl05nyc8u0reg4uzvlhruac5y2cdmuxnakhf4hl3g3tkjwz5594rs3zw3gc4lyfdchd9pld2kwkvgcm8ptqp95meehfztry9n8qpu3kpz0";
+        const string hash = "937d8f45ae724aebbf98079538840ee1e7d81bd8ad2e88f2454760cd3af6b580";
+        const string preimage = "af96025cad3d29e62dd05073f4dc861053dca651e109c4f4d7329d917dd442f7";
+        var host = UniqueHost("signet");
+        var verify = $"https://{host}/lnurl/verify/{hash}";
+        var http = new FakeHttp().Map(verify, $"{{\"status\":\"OK\",\"settled\":true,\"preimage\":\"{preimage}\"}}");
+        var t = new TrackedInvoice(hash, bolt11, verify, host, $"https://{host}/pay", DateTimeOffset.UtcNow.AddHours(1));
+
+        var paid = await LNURLReceiver.PollAndBuild(t, http.Client(), TestContext.Current.CancellationToken);
+
+        Assert.Equal(LightningInvoiceStatus.Paid, paid!.Status);
+        Assert.Equal(preimage, paid.Preimage);
+        Assert.Equal(LightMoney.Satoshis(57894), paid.AmountReceived);
+    }
+
+    [Theory]
+    [InlineData("lnbc1", "Mainnet")]
+    [InlineData("lntb1", "Testnet")]
+    [InlineData("lntbs1", "Signet")]
+    [InlineData("lnbcrt1", "Regtest")]
+    public void An_invoice_prefix_names_its_chain(string bolt11, string chain) =>
+        Assert.Equal(chain, LNURLReceiver.InferNetwork(bolt11).ChainName.ToString());
+
     [Fact]
     public async Task CheckVerifySupport_flags_missing_verify()
     {

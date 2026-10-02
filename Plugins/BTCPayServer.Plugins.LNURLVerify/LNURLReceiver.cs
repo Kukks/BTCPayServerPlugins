@@ -227,6 +227,7 @@ public sealed class LNURLReceiver
 
     public static Network InferNetwork(string bolt11) =>
         bolt11.StartsWith("lnbcrt", StringComparison.OrdinalIgnoreCase) ? Network.RegTest
+        : bolt11.StartsWith("lntbs", StringComparison.OrdinalIgnoreCase) ? NBitcoin.Bitcoin.Instance.Signet
         : bolt11.StartsWith("lntb", StringComparison.OrdinalIgnoreCase) ? Network.TestNet
         : Network.Main;
 }
