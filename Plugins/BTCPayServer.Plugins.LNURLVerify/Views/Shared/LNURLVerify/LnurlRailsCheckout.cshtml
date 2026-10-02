@@ -5,6 +5,8 @@
     @await Component.InvokeAsync("UiExtensionPoint", new { location = "checkout-bitcoin-pre-content", model = Model })
     <div class="payment-box">
         <div v-if="rails.length > 1" class="btcpay-pills d-flex flex-wrap justify-content-center gap-2 mb-3" id="LnurlRails">
+            <button v-if="activeRails.length > 1" type="button" class="btcpay-pill" :class="{ active: !current }" id="LnurlRailsAll"
+                    v-on:click="selected = null">All</button>
             <button v-for="rail in rails" :key="rail.pmi" type="button" class="btcpay-pill" :class="{ active: selected === rail.pmi }"
                     :disabled="busy === rail.pmi" :data-rail="rail.pmi" v-on:click="pick(rail)" v-text="rail.label"></button>
         </div>
@@ -40,11 +42,12 @@
         },
         computed: {
             rails () { return (this.model.lnurlRails || []).filter(r => !this.failed.includes(r.pmi) || r.active); },
+            activeRails () { return this.rails.filter(r => r.active); },
             current () { return this.rails.find(r => r.pmi === this.selected && r.active) || null; },
             uri () { return this.current ? this.current.uri : this.model.invoiceBitcoinUrl; },
             qr () { return this.current ? this.current.qr : this.model.invoiceBitcoinUrlQR; },
             confirmTarget () { return this.shown.length ? '#LnurlRailDestination-' + this.shown[0].pmi + ' [data-clipboard]' : null; },
-            shown () { return this.current ? [this.current] : this.rails.filter(r => r.active); }
+            shown () { return this.current ? [this.current] : this.activeRails; }
         },
         mounted () { this.activate(null); },
         methods: {
