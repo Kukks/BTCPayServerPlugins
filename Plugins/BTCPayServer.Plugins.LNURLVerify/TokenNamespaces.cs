@@ -15,6 +15,8 @@ public static class TokenNamespaces
 {
     private static readonly Regex EvmAddress = new(@"\A0x[0-9a-fA-F]{40}\z", RegexOptions.CultureInvariant);
     private static readonly Regex ChainNumber = new(@"\A[1-9][0-9]{0,18}\z", RegexOptions.CultureInvariant);
+    private static readonly Regex SolanaAddressShape = new(@"\A[1-9A-HJ-NP-Za-km-z]{32,44}\z", RegexOptions.CultureInvariant);
+    private static readonly Regex TronAddressShape = new(@"\AT[1-9A-HJ-NP-Za-km-z]{33}\z", RegexOptions.CultureInvariant);
 
     public static readonly IReadOnlyDictionary<string, TokenNamespace> All = new Dictionary<string, TokenNamespace>
     {
@@ -32,14 +34,14 @@ public static class TokenNamespaces
 
     private static bool IsSolanaAddress(string value)
     {
-        if (value.Length is < 32 or > 44) return false;
+        if (!SolanaAddressShape.IsMatch(value)) return false;
         try { return Encoders.Base58.DecodeData(value).Length == 32; }
         catch (Exception e) when (e is FormatException or ArgumentException) { return false; }
     }
 
     private static bool IsTronAddress(string value)
     {
-        if (value.Length != 34 || value[0] != 'T') return false;
+        if (!TronAddressShape.IsMatch(value)) return false;
         try
         {
             var bytes = Encoders.Base58Check.DecodeData(value);
