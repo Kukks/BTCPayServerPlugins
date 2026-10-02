@@ -1,8 +1,9 @@
+@using BTCPayServer.Abstractions.Models
 @using BTCPayServer.Data
 @using BTCPayServer.Plugins.LNURLVerify
 @model BTCPayServer.Plugins.LNURLVerify.LnurlRailSettings
 @{
-    ViewData.SetActivePage(LnurlRailSettingsController.ActivePage, "LNURL rails", "LNURL rails");
+    ViewData.SetLayoutModel(new LayoutModel(LnurlRailSettingsController.ActivePage, "LNURL rails"));
     var store = Context.GetStoreData();
     var rails = LnurlRails.All.Where(r => store.GetPaymentMethodConfig(r.PaymentMethodId) is not null).ToList();
 }
@@ -11,6 +12,7 @@
         <h3 class="mb-0">@ViewData["Title"]</h3>
         <button type="submit" class="btn btn-primary" id="Save">Save</button>
     </div>
+    <partial name="_StatusMessage" />
     <p>
         Rails your LNURL advertises join Lightning in one "Bitcoin" checkout tab.
         @(rails.Any() ? $"This store has: {string.Join(", ", rails.Select(r => r.Label))}." : "Your LNURL advertises no extra rails right now.")

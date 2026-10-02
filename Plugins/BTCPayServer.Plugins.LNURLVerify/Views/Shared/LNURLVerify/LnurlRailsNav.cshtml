@@ -6,9 +6,9 @@
 }
 @if (store is not null && LnurlRails.All.Any(r => store.GetPaymentMethodConfig(r.PaymentMethodId) is not null))
 {
-    <li class="nav-item">
-        <a permission="@Policies.CanModifyStoreSettings" asp-controller="LnurlRailSettings" asp-action="Index" asp-route-storeId="@store.Id"
-           class="nav-link @ViewData.IsActivePage(LnurlRailSettingsController.ActivePage)" id="Nav-LnurlRails">
+    <li class="nav-item" permission="@Policies.CanModifyStoreSettings">
+        <a asp-controller="LnurlRailSettings" asp-action="Index" asp-route-storeId="@store.Id"
+           class="nav-link @(ViewData.IsPageActive(LnurlRailSettingsController.ActivePage, null) ? "active" : "")" id="Nav-LnurlRails">
             <span>LNURL rails</span>
         </a>
     </li>

@@ -18,11 +18,11 @@ public class LnurlRailSettingsController : Controller
     public LnurlRailSettingsController(StoreRepository stores) => _stores = stores;
 
     [HttpGet("")]
-    public async Task<IActionResult> Index(string storeId) =>
+    public async Task<IActionResult> Index([FromRoute] string storeId) =>
         View(await _stores.GetSettingAsync<LnurlRailSettings>(storeId, LnurlRailSettings.Key) ?? new LnurlRailSettings());
 
     [HttpPost("")]
-    public async Task<IActionResult> Index(string storeId, LnurlRailSettings settings)
+    public async Task<IActionResult> Index([FromRoute] string storeId, LnurlRailSettings settings)
     {
         await _stores.UpdateSetting(storeId, LnurlRailSettings.Key, settings);
         TempData[WellKnownTempData.SuccessMessage] = "LNURL rail settings saved";
