@@ -23,12 +23,13 @@ public class LnurlRailSettingsController : Controller
         View(await _stores.GetSettingAsync<LnurlRailSettings>(storeId, LnurlRailSettings.Key) ?? new LnurlRailSettings());
 
     [HttpPost("")]
-    public async Task<IActionResult> Index([FromRoute] string storeId, LnurlRailSettings settings, string[]? enabledRails)
+    public async Task<IActionResult> Index([FromRoute] string storeId, LnurlRailSettings settings,
+        string[]? shownRails, string[]? enabledRails)
     {
         await _stores.UpdateSetting(storeId, LnurlRailSettings.Key, settings);
         var store = HttpContext.GetStoreData();
-        if (LnurlRailSettings.ApplyEnabledRails(store, enabledRails ?? Array.Empty<string>()))
-            await _stores.UpdateStore(store);
+        if (LnurlRailSettings.ApplyEnabledRails(store, shownRails ?? Array.Empty<string>(), enabledRails ?? Array.Empty<string>()))
+            await _stores.UpdateStoreBlob(store);
         TempData[WellKnownTempData.SuccessMessage] = "LNURL rail settings saved";
         return RedirectToAction(nameof(Index), new { storeId });
     }

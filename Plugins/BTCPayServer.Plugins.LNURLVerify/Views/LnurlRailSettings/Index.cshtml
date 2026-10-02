@@ -23,6 +23,7 @@
         <div class="form-check form-switch">
             <input type="checkbox" class="form-check-input" name="enabledRails" value="@rail.PaymentMethodId" id="Rail-@rail.PaymentMethodId" checked="@(!blob.IsExcluded(rail.PaymentMethodId))" />
             <label class="form-check-label" for="Rail-@rail.PaymentMethodId">@rail.Label</label>
+            <input type="hidden" name="shownRails" value="@rail.PaymentMethodId" />
         </div>
     }
     <div class="form-check form-switch">

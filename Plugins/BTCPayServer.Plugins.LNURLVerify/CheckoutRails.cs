@@ -15,12 +15,16 @@ public class LnurlRailSettings
     public const string Key = "LNURLVerify.Rails";
     public bool ActivateAllRailsOnOpen { get; set; } = true;
 
-    public static bool ApplyEnabledRails(StoreData store, IReadOnlyCollection<string> enabled)
+    public static bool ApplyEnabledRails(StoreData store, IReadOnlyCollection<string> shown, IReadOnlyCollection<string> enabled)
     {
         var blob = store.GetStoreBlob();
-        // Only rails configured on this store are touched, so a posted id for any other method never changes its exclusion.
-        foreach (var rail in LnurlRails.All.Where(r => store.GetPaymentMethodConfig(r.PaymentMethodId) is not null))
-            blob.SetExcluded(rail.PaymentMethodId, !enabled.Contains(rail.PaymentMethodId.ToString()));
+        // Only configured rails the page showed are touched, so a posted id for another method or an unseen rail keeps its exclusion.
+        foreach (var rail in LnurlRails.All)
+        {
+            var id = rail.PaymentMethodId.ToString();
+            if (shown.Contains(id) && store.GetPaymentMethodConfig(rail.PaymentMethodId) is not null)
+                blob.SetExcluded(rail.PaymentMethodId, !enabled.Contains(id));
+        }
         return store.SetStoreBlob(blob);
     }
 }
