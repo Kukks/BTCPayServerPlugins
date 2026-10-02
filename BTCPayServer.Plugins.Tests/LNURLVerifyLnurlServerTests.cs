@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
@@ -74,6 +75,20 @@ public class LNURLVerifyLnurlServerTests
             foreach (var hash in hashes) TrackedInvoiceRegistry.Remove(hash);
         }
     }
+
+    // Not an assertion: holds alice@<server> open (Lightning answered, Arkade identity set) for VERIFICATION.md §5.
+    [Fact]
+    public async Task Serves_an_arkade_address_for_the_checkout_runbook()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var wallet = await LnurlServerWallet.Open(Required("LNURL_SERVER_URL").TrimEnd('/'), ct);
+        await wallet.RegisterAddress("alice", Required("LNURL_ARKADE_ADDRESS"), new Key().PubKey.ToHex(),
+            Environment.GetEnvironmentVariable("LNURL_BOARDING_ADDRESS"), ct);
+        await Task.Delay(TimeSpan.FromMinutes(double.Parse(Required("LNURL_RUNBOOK_MINUTES"), CultureInfo.InvariantCulture)), ct);
+    }
+
+    static string Required(string name) =>
+        Environment.GetEnvironmentVariable(name) ?? throw new InvalidOperationException($"Set {name} (see VERIFICATION.md).");
 }
 
 /// <summary>An lnurl-server wallet session that mints self-signed invoices and reports their preimages.</summary>
@@ -128,6 +143,15 @@ file sealed class LnurlServerWallet : IDisposable
         Post($"/lnurl/session/{SessionId}/settled", new JObject { ["preimage"] = _preimages[paymentHash] }, ct);
 
     public string PreimageOf(string paymentHash) => _preimages[paymentHash];
+
+    public async Task RegisterAddress(string username, string arkadeAddress, string claimPublicKey, string? boardingAddress,
+        CancellationToken ct)
+    {
+        await Post("/lnurl/address", new JObject { ["token"] = _token, ["username"] = username }, ct);
+        var identity = new JObject { ["arkadeAddress"] = arkadeAddress, ["claimPublicKey"] = claimPublicKey };
+        if (boardingAddress is not null) identity["boardingAddress"] = boardingAddress;
+        await Post($"/lnurl/address/{username}/arkade", identity, ct);
+    }
 
     private async Task Post(string path, JObject body, CancellationToken ct)
     {
