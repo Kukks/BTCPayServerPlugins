@@ -44,6 +44,9 @@ public class LnurlTokenRequesterTests
             case "quote not an object": answer["paymentQuote"] = "63360000"; break;
             case "expired quote": quote["expiresAt"] = 1_790_000_000; break;
             case "unreadable expiry": quote["expiresAt"] = "soon"; break;
+            case "millisecond expiry": quote["expiresAt"] = 1_790_000_600_000L; break;
+            case "expiry beyond Int64": quote["expiresAt"] = JToken.Parse("99999999999999999999"); break;
+            case "expiry before year 1": quote["expiresAt"] = "0001-01-01T00:00:00+05:00"; break;
             case "another option": answer["paymentOption"] = "usdt-tron"; break;
             case "no destination": answer.Remove("paymentDestination"); break;
             case "destination with markup": answer["paymentDestination"] = "0x1111<script>"; break;
@@ -104,6 +107,9 @@ public class LnurlTokenRequesterTests
     [InlineData("quote not an object")]
     [InlineData("expired quote")]
     [InlineData("unreadable expiry")]
+    [InlineData("millisecond expiry")]
+    [InlineData("expiry beyond Int64")]
+    [InlineData("expiry before year 1")]
     [InlineData("another option")]
     [InlineData("no destination")]
     [InlineData("destination with markup")]

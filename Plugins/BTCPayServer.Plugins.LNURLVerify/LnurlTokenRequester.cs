@@ -49,22 +49,31 @@ public static class LnurlTokenRequester
         return new TokenQuote(option.Id, destination, amount!, expiresAt, verify, batch, amountMsat);
     }
 
-    // A stated expiry that cannot be read refuses the network rather than show its quote forever.
+    private const long MaxUnixSeconds = 253_402_300_799;
+
+    // A stated expiry that cannot be read, or that DateTimeOffset cannot hold, refuses the network rather than show its quote forever.
     private static long? ExpiresAt(JToken? token)
     {
         if (token is null || token.Type == JTokenType.Null) return null;
-        if (token.Type == JTokenType.Integer) return token.Value<long>();
+        var seconds = UnixSeconds(token);
+        if (seconds is null or < 0 or > MaxUnixSeconds) throw Unavailable("the LNURL quoted an expiry that could not be read");
+        return seconds;
+    }
+
+    private static long? UnixSeconds(JToken token)
+    {
+        if (token is JValue { Type: JTokenType.Integer, Value: long n }) return n;
         // Json.NET has already read an ISO 8601 string as a date; one without a zone is UTC, as below.
         if (token.Type == JTokenType.Date)
         {
             var date = token.Value<DateTime>();
-            return new DateTimeOffset(date.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(date, DateTimeKind.Utc) : date).ToUnixTimeSeconds();
+            return new DateTimeOffset(date.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(date, DateTimeKind.Utc) : date.ToUniversalTime()).ToUnixTimeSeconds();
         }
         var s = token.Type == JTokenType.String ? token.Value<string>() : null;
         if (s is { Length: > 0 and <= 12 } && s.All(char.IsAsciiDigit)) return long.Parse(s, CultureInfo.InvariantCulture);
         if (s is not null && DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at))
             return at.ToUnixTimeSeconds();
-        throw Unavailable("the LNURL quoted an expiry that could not be read");
+        return null;
     }
 
     private static PaymentMethodUnavailableException Unavailable(string reason) => new(reason);
