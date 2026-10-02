@@ -33,6 +33,7 @@ public class LnurlTokenPaymentHandlerTests
         public readonly StoreData Store = new() { Id = "store" };
         public readonly long QuoteExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeSeconds();
         public string? WithoutVerify;
+        public string? Failing;
 
         public Lnurl(bool withBase = false, bool sameRecipient = false, bool usdt = true)
         {
@@ -57,6 +58,7 @@ public class LnurlTokenPaymentHandlerTests
                     var option = query["paymentOption"]!;
                     int n;
                     lock (Calls) n = Calls[option] = Calls.GetValueOrDefault(option) + 1;
+                    if (option == Failing) return (HttpStatusCode.InternalServerError, "{}");
                     var answer = new JObject
                     {
                         ["paymentOption"] = option, ["paymentDestination"] = Destination(option, sameRecipient ? 1 : n),
@@ -266,11 +268,49 @@ public class LnurlTokenPaymentHandlerTests
     }
 
     [Fact]
+    public async Task A_network_refused_by_a_failed_request_is_hidden_and_not_asked_again()
+    {
+        var lnurl = new Lnurl { Failing = "usdt-arbitrum" };
+        var invoice = lnurl.Invoice();
+        await lnurl.Activate(invoice, "usdt-arbitrum");
+        Assert.True(lnurl.Details(invoice).Networks[0].Refused);
+        Assert.Equal(1, lnurl.CallsTo("usdt-arbitrum"));
+
+        lnurl.Failing = null;
+        await lnurl.Activate(invoice, "usdt-arbitrum");
+        var arbitrum = lnurl.Details(invoice).Networks[0];
+        Assert.True(arbitrum.Refused);
+        Assert.Null(arbitrum.Quote);
+        Assert.Equal(1, lnurl.CallsTo("usdt-arbitrum"));
+    }
+
+    [Fact]
     public async Task An_lnurl_offering_no_network_for_the_asset_refuses_the_tab()
     {
         var lnurl = new Lnurl(usdt: false);
         var e = await Assert.ThrowsAsync<PaymentMethodUnavailableException>(() => lnurl.Activate(lnurl.Invoice()));
         Assert.Contains("no network for USDT", e.Message);
+    }
+
+    [Fact]
+    public async Task The_tab_lists_only_the_networks_of_its_own_asset()
+    {
+        var lnurl = new Lnurl();
+        var url = $"https://{lnurl.Host}/.well-known/lnurlp/alice";
+        var pay = JObject.Parse(lnurl.Http.Routes[url].Body);
+        ((JArray)pay["units"]!).Add(new JObject { ["code"] = "USDC", ["decimals"] = 6, ["name"] = "USD Coin" });
+        var usdc = (JObject)pay["paymentOptions"]![0]!.DeepClone();
+        usdc["id"] = "usdc-arbitrum";
+        usdc["asset"] = "eip155:421614/erc20:0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d";
+        usdc["unit"] = "USDC";
+        ((JArray)pay["paymentOptions"]!).Add(usdc);
+        lnurl.Http.Routes[url] = (HttpStatusCode.OK, pay.ToString());
+        // It parses, so only the handler's unit filter can keep it off the USDT tab.
+        Assert.Contains("usdc-arbitrum", TokenOption.Parse(pay).Select(o => o.Id));
+
+        var invoice = lnurl.Invoice();
+        await lnurl.Activate(invoice);
+        Assert.Equal(new[] { "usdt-arbitrum", "usdt-solana", "usdt-tron" }, lnurl.Details(invoice).Networks.Select(n => n.OptionId));
     }
 
     [Fact]
