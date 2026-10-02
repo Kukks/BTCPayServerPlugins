@@ -5,6 +5,7 @@
 @{
     ViewData.SetLayoutModel(new LayoutModel(LnurlRailSettingsController.ActivePage, "LNURL rails"));
     var store = Context.GetStoreData();
+    var blob = store.GetStoreBlob();
     var rails = LnurlRails.All.Where(r => store.GetPaymentMethodConfig(r.PaymentMethodId) is not null).ToList();
 }
 <form method="post">
@@ -15,9 +16,15 @@
     <partial name="_StatusMessage" />
     <p>
         Rails your LNURL advertises join Lightning in one "Bitcoin" checkout tab.
-        @(rails.Any() ? $"This store has: {string.Join(", ", rails.Select(r => r.Label))}." : "Your LNURL advertises no extra rails right now.")
-        To turn a rail off, exclude it in Checkout Appearance.
+        @(rails.Any() ? "" : "Your LNURL advertises no extra rails right now.")
     </p>
+    @foreach (var rail in rails)
+    {
+        <div class="form-check form-switch">
+            <input type="checkbox" class="form-check-input" name="enabledRails" value="@rail.PaymentMethodId" id="Rail-@rail.PaymentMethodId" checked="@(!blob.IsExcluded(rail.PaymentMethodId))" />
+            <label class="form-check-label" for="Rail-@rail.PaymentMethodId">@rail.Label</label>
+        </div>
+    }
     <div class="form-check form-switch">
         <input asp-for="ActivateAllRailsOnOpen" type="checkbox" class="form-check-input" />
         <label asp-for="ActivateAllRailsOnOpen" class="form-check-label">Request every rail when the checkout opens</label>

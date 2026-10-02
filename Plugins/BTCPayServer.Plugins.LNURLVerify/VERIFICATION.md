@@ -1,6 +1,6 @@
 # LNURL Verify — verification runbook
 
-The plugin is unit-tested (174 tests) and reviewed, but three things can only be confirmed by running
+The plugin is unit-tested (176 tests) and reviewed, but three things can only be confirmed by running
 it. This is the concrete checklist to gain that confidence, ordered cheapest-first.
 
 ## 1. Unit tests (seconds, no infra)
@@ -8,7 +8,7 @@ it. This is the concrete checklist to gain that confidence, ordered cheapest-fir
 ```
 dotnet test BTCPayServer.Plugins.LNURLVerify.Tests
 ```
-Expected: 174 passed, 0 warnings. Covers capability decode, verify-support probe, receive guards +
+Expected: 176 passed, and no warnings from plugin or test code. Covers capability decode, verify-support probe, receive guards +
 settled-cache, the shared poller (incl. a 60-invoice concurrent settle/error stress), the full send
 chain (parse → k1-refresh → bounds/balance → submit), connection-scoped reconciliation, persistence
 save/restore (against a fake settings store), paymentOptions selection, verifyBatch batching (chunking,
@@ -79,6 +79,8 @@ To enable:
 Proves what the unit tests cannot: the checkout in a browser, payments recorded in the database, and the provisioner,
 recorder and restart rebuild in a live host. Needs Docker, and an lnurl-server checkout with its `regtest` submodule.
 
+Steps 2-4 run in the lnurl-server checkout; steps 1 and 5 run in this repository.
+
 1. BTCPay: `docker compose -f submodules/btcpayserver/BTCPayServer.Tests/docker-compose.yml up -d dev`. Then write
    `submodules/btcpayserver/BTCPayServer/appsettings.dev.json` as `{"DEBUG_PLUGINS":"<built plugin dll path>"}` and run
    `dotnet run --project submodules/btcpayserver/BTCPayServer --launch-profile Bitcoin-HTTPS`.
@@ -104,8 +106,9 @@ Count lnurl-server's destination requests with
 | Scenario | Expected |
 |---|---|
 | Setup | Integrations → LNURL rails lists the provisioned rails. The store's Lightning setup page renders its LNURL section with no CSP error in the browser console: plugin views get their inline-script nonce only through `@addTagHelper *, BTCPayServer.Abstractions` in `_ViewImports.cshtml`. |
-| A. Setting on, no wallet | Chips Lightning and Arkade. On-chain is refused, since lnurl-server's on-chain rail has no `verify`, and reloading never repeats that request. The QR carries `lightning=` and `ark=`. `docker exec arkd ark send --to <ark destination> --amount <sats> --password secret` settles the invoice and adds an "LNURL rail payments" row. |
+| A. Setting on, no wallet | Chips Lightning and Arkade. On-chain is refused, since lnurl-server's on-chain rail has no `verify`, and reloading never repeats that request. The QR carries `lightning=` and `ark=`. `docker exec arkd ark send --to <ark destination> --amount <sats> --password secret` settles the invoice and adds a row under "LNURL rail payments". |
 | B. Setting off | Only Lightning is active on open; tapping Arkade costs exactly one destination request. |
 | C. Store with a wallet | The on-chain rail is dropped. The checkout opens on-chain, the QR's path is the store's address, and the LNURL's on-chain option is never requested. |
 | D. Partial payment | Pay part on-chain with cheat mode and mine a block. The Arkade chip is re-issued for the remainder with exactly one request, and paying it settles the invoice. |
 | E. Restart | Pay an activated Arkade destination while BTCPay is stopped; after the restart the invoice settles. |
+| F. Rail switched off | Switch Arkade off on Integrations → LNURL rails. The next invoice's checkout shows no Arkade chip, and lnurl-server sees no arkade request for it. |

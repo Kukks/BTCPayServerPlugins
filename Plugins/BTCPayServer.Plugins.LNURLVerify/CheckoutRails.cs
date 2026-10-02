@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using BTCPayServer.Data;
 using BTCPayServer.Payments;
 using BTCPayServer.Services.Invoices;
 
@@ -13,6 +14,15 @@ public class LnurlRailSettings
 {
     public const string Key = "LNURLVerify.Rails";
     public bool ActivateAllRailsOnOpen { get; set; } = true;
+
+    public static bool ApplyEnabledRails(StoreData store, IReadOnlyCollection<string> enabled)
+    {
+        var blob = store.GetStoreBlob();
+        // Only rails configured on this store are touched, so a posted id for any other method never changes its exclusion.
+        foreach (var rail in LnurlRails.All.Where(r => store.GetPaymentMethodConfig(r.PaymentMethodId) is not null))
+            blob.SetExcluded(rail.PaymentMethodId, !enabled.Contains(rail.PaymentMethodId.ToString()));
+        return store.SetStoreBlob(blob);
+    }
 }
 
 /// <summary>An invoice's Bitcoin rails, and which of them an activation request wakes.</summary>

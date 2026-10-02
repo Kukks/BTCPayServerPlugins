@@ -39,17 +39,18 @@ invoices, so it is unusable as a store's Lightning backend.
 When the LNURL advertises a rail in LUD-XX `paymentOptions` that a BIP321 URI can carry, the plugin adds it to the store as a
 payment method, automatically, and re-checks hourly. Today that is `arkade` (`LNURL-ARKADE`), and `onchain` (`LNURL-ONCHAIN`)
 for stores without their own on-chain wallet: a store with an enabled wallet never requests the LNURL's on-chain option.
+A store that already has the Arkade plugin's own `ARKADE` payment method gets no LNURL rails.
 
 - **Checkout:** one "Bitcoin" tab replaces the Lightning and on-chain tabs. Its QR is one BIP321 URI carrying every active rail;
   a chip per rail switches the QR to that rail alone.
 - **No cost at invoice creation:** a rail is requested from the LNURL when the checkout opens, or, with the store setting
-  "Request every rail when the checkout opens" turned off (Integrations → LNURL rails), only when the payer taps it. A rail the
-  LNURL refuses is not requested again for that invoice for an hour.
+  "Request every rail when the checkout opens" turned off (Integrations → LNURL rails), only when the payer taps it. Reopening
+  the checkout does not request a rail the LNURL refused within the last hour; a payer's tap does.
 - **Settlement:** a rail payment is recorded when the LNURL's `verify` reports it `settled` with a `paymentReference`, at the
   amount agreed with the LNURL. An underpayment never settles there, so BTCPay never sees it; recovering those funds is the
   LNURL service's job. An overpayment is recorded at the agreed amount. Late payments are recorded until the invoice stops
   being monitored.
-- **Turning a rail off:** exclude it in Checkout Appearance.
+- **Turning a rail off:** switch it off on Integrations → LNURL rails.
 - **Out of scope:** EVM and other non-BIP321 networks; they need a checkout of their own.
 - **Upgrading to 1.2.0:** stores whose LNURL advertises a rail switch to the single "Bitcoin" tab for invoices created after
   the upgrade. Nothing else changes for them.
@@ -82,7 +83,8 @@ for stores without their own on-chain wallet: a store with an enabled wallet nev
   payment-method handler for every rail on an invoice, so those invoices' checkouts fail until they expire.
 - **The merged QR's amount is the on-chain due** when on-chain is active, which can include a network-fee component; an Arkade
   payer scanning the merged QR may overpay by it. Each rail's own chip carries its exact amount.
-- If re-issuing a rail destination after a partial payment fails, the checkout keeps the previous destination and its amount.
+- If re-issuing a rail destination after a partial payment fails, that rail drops out of the checkout; a payment to its
+  previous destination is still recorded, at the amount agreed for it.
 
 ## Notes
 
