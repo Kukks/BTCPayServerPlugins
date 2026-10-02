@@ -8,7 +8,7 @@
             <button v-for="rail in rails" :key="rail.pmi" type="button" class="btcpay-pill" :class="{ active: selected === rail.pmi }"
                     :disabled="busy === rail.pmi" :data-rail="rail.pmi" v-on:click="pick(rail)" v-text="rail.label"></button>
         </div>
-        <div v-if="qr" class="qr-container clipboard-button" :data-qr-value="qr" :data-clipboard="uri">
+        <div v-if="qr" class="qr-container clipboard-button" :data-qr-value="qr" :data-clipboard="uri" :data-clipboard-confirm-element="confirmTarget">
             <div>
                 <qrcode :value="qr" tag="div" :options="qrOptions" />
             </div>
@@ -16,7 +16,7 @@
         </div>
         <div v-else class="text-center my-4"><span class="spinner-border" role="status"></span></div>
         <div v-for="rail in shown" :key="'destination-' + rail.pmi" class="input-group mt-3">
-            <div class="form-floating">
+            <div class="form-floating" :id="'LnurlRailDestination-' + rail.pmi">
                 <vc:truncate-center text="rail.destination" is-vue="true" padding="15" elastic="true" classes="form-control-plaintext" />
                 <label v-text="rail.label"></label>
             </div>
@@ -43,6 +43,7 @@
             current () { return this.rails.find(r => r.pmi === this.selected && r.active) || null; },
             uri () { return this.current ? this.current.uri : this.model.invoiceBitcoinUrl; },
             qr () { return this.current ? this.current.qr : this.model.invoiceBitcoinUrlQR; },
+            confirmTarget () { return this.shown.length ? '#LnurlRailDestination-' + this.shown[0].pmi + ' [data-clipboard]' : null; },
             shown () { return this.current ? [this.current] : this.rails.filter(r => r.active); }
         },
         mounted () { this.activate(null); },

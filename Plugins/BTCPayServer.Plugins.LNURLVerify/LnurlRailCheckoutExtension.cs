@@ -46,7 +46,7 @@ public class LnurlRailCheckoutExtension : IGlobalCheckoutModelExtension
         if (!IsBitcoinRail(selected)) return;
 
         var prompts = CheckoutRails.Rails(context.InvoiceEntity);
-        var rails = prompts.Select(p => State(p, context.UrlHelper)).ToList();
+        var rails = prompts.Select(p => State(p, context.UrlHelper)).OfType<RailState>().ToList();
         var lightningDue = prompts.FirstOrDefault(p => p.Activated && p.PaymentMethodId == LnurlRailProvisioning.Lightning)?.Calculate().Due;
         var merged = Bip321.Merge(rails, lightningDue);
         var json = new JArray(rails.Select(r => new JObject
@@ -63,6 +63,8 @@ public class LnurlRailCheckoutExtension : IGlobalCheckoutModelExtension
         model.PaymentMethodName = TabName;
         model.CheckoutBodyComponentName = ComponentName;
         model.AdditionalData["lnurlRails"] = json;
+        // NFC appears on a BTC-CHAIN tab only under this flag; the merged tab hides the BTC-LN tab it used.
+        model.OnChainWithLnInvoiceFallback |= rails.Any(r => r.PaymentMethodId == LnurlRailProvisioning.Lightning);
         if (merged is not null)
         {
             model.InvoiceBitcoinUrl = merged;
@@ -76,7 +78,7 @@ public class LnurlRailCheckoutExtension : IGlobalCheckoutModelExtension
     // The implicit string -> JToken conversion types a null as String; keep it a JSON null token.
     private static JToken JsonString(string? s) => s is null ? JValue.CreateNull() : new JValue(s);
 
-    private RailState State(PaymentPrompt p, IUrlHelper url)
+    private RailState? State(PaymentPrompt p, IUrlHelper url)
     {
         var pmi = p.PaymentMethodId;
         if (pmi == LnurlRailProvisioning.Lightning)
@@ -87,7 +89,10 @@ public class LnurlRailCheckoutExtension : IGlobalCheckoutModelExtension
         string? uri = null;
         if (p is { Activated: true, Details: { } details } && _handlers.TryGet(pmi) is LnurlRailPaymentHandler handler)
         {
-            var amount = LnurlRailPaymentHandler.AmountBtc(handler.ParsePaymentPromptDetails(details).AmountMsat);
+            var agreedMsat = handler.ParsePaymentPromptDetails(details).AmountMsat;
+            // Stale after a partial payment: the destination still asks the old amount until its re-issue lands.
+            if (LnurlRailRecorder.NeedsReissue(p.Calculate().Due, agreedMsat)) return null;
+            var amount = LnurlRailPaymentHandler.AmountBtc(agreedMsat);
             uri = rail.UriParam is null
                 ? Bip321.Build(p.Destination, amount, Array.Empty<KeyValuePair<string, string>>())
                 : Bip321.Build(null, amount, new[] { new KeyValuePair<string, string>(rail.UriParam, p.Destination) });

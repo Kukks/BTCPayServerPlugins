@@ -20,7 +20,7 @@ public class LnurlRailCheckoutExtensionTests
             NullLogger<LnurlRailCheckoutExtension>.Instance);
 
     // A 25 USD invoice at 50 000 USD/BTC: 0.0005 BTC due on Lightning.
-    static (CheckoutModelContext Context, CheckoutModel Model) Checkout(bool? arkadeActive = true, JToken? arkadeDetails = null)
+    static (CheckoutModelContext Context, CheckoutModel Model) Checkout(bool? arkadeActive = true, JToken? arkadeDetails = null, decimal paidBtc = 0m)
     {
         var invoice = new InvoiceEntity { Id = "inv", Currency = "USD", Price = 25m, StoreId = "store" };
         invoice.AddRate(new CurrencyPair("BTC", "USD"), 50_000m);
@@ -34,6 +34,10 @@ public class LnurlRailCheckoutExtensionTests
                         { Verify = "https://lnurl.example/lnurl/verify/aa", AmountMsat = 50_000_000 }, Arkade.Serializer)
                     : null!
             });
+#pragma warning disable CS0618
+        if (paidBtc > 0m)
+            invoice.Payments = new List<PaymentEntity> { new() { Currency = "BTC", Value = paidBtc, Status = PaymentStatus.Settled } };
+#pragma warning restore CS0618
         invoice.UpdateTotals();
         var model = new CheckoutModel
         {
@@ -90,5 +94,24 @@ public class LnurlRailCheckoutExtensionTests
         Assert.Null(model.CheckoutBodyComponentName);
         Assert.Equal("lightning:lnbcrt5u1test", model.InvoiceBitcoinUrl);
         Assert.Equal(new[] { ("BTC-LN", "BTC-LN") }, Pills(model));
+    }
+
+    [Fact]
+    public void A_rail_whose_agreed_amount_no_longer_matches_the_due_is_left_out()
+    {
+        var (context, model) = Checkout(paidBtc: 0.0002m);
+        Assert.Equal(0.0003m, context.Prompt.Calculate().Due);
+        Extension().ModifyCheckoutModel(context);
+        var rails = (JArray)model.AdditionalData["lnurlRails"];
+        Assert.Equal(new[] { "Lightning" }, rails.Select(r => r["label"]!.Value<string>()));
+        Assert.Equal("lightning:lnbcrt5u1test", model.InvoiceBitcoinUrl);
+    }
+
+    [Fact]
+    public void Re_skinning_keeps_pay_by_nfc_available()
+    {
+        var (context, model) = Checkout();
+        Extension().ModifyCheckoutModel(context);
+        Assert.True(model.OnChainWithLnInvoiceFallback);
     }
 }
