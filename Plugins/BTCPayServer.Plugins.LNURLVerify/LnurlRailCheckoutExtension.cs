@@ -63,8 +63,8 @@ public class LnurlRailCheckoutExtension : IGlobalCheckoutModelExtension
         model.PaymentMethodName = TabName;
         model.CheckoutBodyComponentName = ComponentName;
         model.AdditionalData["lnurlRails"] = json;
-        // NFC appears on a BTC-CHAIN tab only under this flag; the merged tab hides the BTC-LN tab it used.
-        model.OnChainWithLnInvoiceFallback |= rails.Any(r => r.PaymentMethodId == LnurlRailProvisioning.Lightning);
+        // NFC needs this on a BTC-CHAIN tab; readers assume the URI carries lightning, so only while that rail is live.
+        model.OnChainWithLnInvoiceFallback |= rails.Any(r => r.PaymentMethodId == LnurlRailProvisioning.Lightning && r.Active);
         if (merged is not null)
         {
             model.InvoiceBitcoinUrl = merged;

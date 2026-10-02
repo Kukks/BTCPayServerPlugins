@@ -20,11 +20,13 @@ public class LnurlRailCheckoutExtensionTests
             NullLogger<LnurlRailCheckoutExtension>.Instance);
 
     // A 25 USD invoice at 50 000 USD/BTC: 0.0005 BTC due on Lightning.
-    static (CheckoutModelContext Context, CheckoutModel Model) Checkout(bool? arkadeActive = true, JToken? arkadeDetails = null, decimal paidBtc = 0m)
+    static (CheckoutModelContext Context, CheckoutModel Model) Checkout(bool? arkadeActive = true, JToken? arkadeDetails = null, decimal paidBtc = 0m,
+        bool lightningActive = true)
     {
         var invoice = new InvoiceEntity { Id = "inv", Currency = "USD", Price = 25m, StoreId = "store" };
         invoice.AddRate(new CurrencyPair("BTC", "USD"), 50_000m);
-        invoice.SetPaymentPrompt(Ln, new PaymentPrompt { Currency = "BTC", Divisibility = 11, RateDivisibility = 8, Destination = "lnbcrt5u1test" });
+        invoice.SetPaymentPrompt(Ln, new PaymentPrompt
+            { Currency = "BTC", Divisibility = 11, RateDivisibility = 8, Inactive = !lightningActive, Destination = lightningActive ? "lnbcrt5u1test" : null! });
         if (arkadeActive is { } active)
             invoice.SetPaymentPrompt(LnurlRails.Arkade.PaymentMethodId, new PaymentPrompt
             {
@@ -113,5 +115,14 @@ public class LnurlRailCheckoutExtensionTests
         var (context, model) = Checkout();
         Extension().ModifyCheckoutModel(context);
         Assert.True(model.OnChainWithLnInvoiceFallback);
+    }
+
+    [Fact]
+    public void An_inactive_lightning_rail_does_not_claim_a_lightning_fallback()
+    {
+        var (context, model) = Checkout(lightningActive: false);
+        Extension().ModifyCheckoutModel(context);
+        Assert.Equal(LnurlRailCheckoutExtension.ComponentName, model.CheckoutBodyComponentName);
+        Assert.False(model.OnChainWithLnInvoiceFallback);
     }
 }
