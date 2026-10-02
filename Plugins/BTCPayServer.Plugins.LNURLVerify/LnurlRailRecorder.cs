@@ -39,18 +39,20 @@ public class LnurlRailRecorder : EventHostedServiceBase
     private readonly PaymentService _payments;
     private readonly InvoiceActivator _activator;
     private readonly PaymentMethodHandlerDictionary _handlers;
+    private readonly TokenActivations _tokenActivations;
     private readonly ILogger _logger;
     private readonly Action<TrackedDestination, string> _onSettled;
     private readonly Action<TrackedDestination, string> _onForgotten;
 
     public LnurlRailRecorder(EventAggregator eventAggregator, ILogger<LnurlRailRecorder> logger, InvoiceRepository invoices,
-        PaymentService payments, InvoiceActivator activator, PaymentMethodHandlerDictionary handlers)
+        PaymentService payments, InvoiceActivator activator, PaymentMethodHandlerDictionary handlers, TokenActivations tokenActivations)
         : base(eventAggregator, logger)
     {
         _invoices = invoices;
         _payments = payments;
         _activator = activator;
         _handlers = handlers;
+        _tokenActivations = tokenActivations;
         _logger = logger;
         _onSettled = (d, reference) => PushEvent(new RailSettled(d, reference));
         _onForgotten = (d, reason) => PushEvent(new RailForgotten(d, reason));
@@ -191,7 +193,11 @@ public class LnurlRailRecorder : EventHostedServiceBase
         {
             if (invoice.GetPaymentPrompt(handler.PaymentMethodId) is not { Activated: true, Details: not null } prompt ||
                 !handler.NeedsReissue(prompt)) continue;
-            await _activator.ActivateInvoicePaymentMethod(invoice.Id, handler.PaymentMethodId, forceNew: true);
+            if (handler is LnurlTokenPaymentHandler)
+                await _tokenActivations.Run(invoice.Id, handler.PaymentMethodId, Array.Empty<string>(),
+                    () => _activator.ActivateInvoicePaymentMethod(invoice.Id, handler.PaymentMethodId, forceNew: true));
+            else
+                await _activator.ActivateInvoicePaymentMethod(invoice.Id, handler.PaymentMethodId, forceNew: true);
         }
     }
 

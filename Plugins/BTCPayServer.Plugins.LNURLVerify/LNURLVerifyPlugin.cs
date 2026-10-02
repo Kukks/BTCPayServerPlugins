@@ -42,6 +42,14 @@ public class LNURLVerifyPlugin : BaseBTCPayServerPlugin
                 sp.GetRequiredService<IHttpClientFactory>(), sp.GetRequiredService<BTCPayNetworkProvider>().BTC.NBitcoinNetwork));
             services.AddDefaultPrettyName(r.PaymentMethodId, r.PrettyName);
         }
+        services.AddSingleton<TokenActivations>();
+        foreach (var code in assets.Codes)
+        {
+            var c = code;
+            services.AddSingleton<IPaymentMethodHandler>(sp => new LnurlTokenPaymentHandler(c, sp.GetRequiredService<IHttpClientFactory>(),
+                sp.GetRequiredService<BTCPayNetworkProvider>().BTC.NBitcoinNetwork, sp.GetRequiredService<TokenActivations>()));
+            services.AddDefaultPrettyName(TokenAssets.PaymentMethodIdOf(c), c);
+        }
         services.AddHostedService<LnurlRailRecorder>();
         services.AddHostedService<LnurlRailProvisioner>();
         services.AddSingleton<RailActivationFailures>();
