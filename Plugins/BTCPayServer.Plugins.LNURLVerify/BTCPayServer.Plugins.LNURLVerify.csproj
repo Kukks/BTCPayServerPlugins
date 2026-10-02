@@ -8,8 +8,8 @@
     <!-- Plugin specific properties -->
     <PropertyGroup>
         <Product>LNURL Verify</Product>
-        <Description>Use any LNURL or Lightning address as a BTCPay Lightning backend (receive via LUD-21 verify; send via LNURL-withdraw).</Description>
-        <Version>1.0.1</Version>
+        <Description>Use any LNURL or Lightning address as a BTCPay Lightning backend (receive via LUD-21 verify; send via LNURL-withdraw), with one BIP321 checkout over the LNURL's payment-option rails.</Description>
+        <Version>1.2.0</Version>
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
         <RootNamespace>BTCPayServer.Plugins.LNURLVerify</RootNamespace>
     </PropertyGroup>
@@ -37,6 +37,7 @@
 
     <ItemGroup>
         <InternalsVisibleTo Include="BTCPayServer.Plugins.LNURLVerify.Tests" />
+        <InternalsVisibleTo Include="BTCPayServer.Plugins.Tests" />
     </ItemGroup>
 
     <ItemGroup>

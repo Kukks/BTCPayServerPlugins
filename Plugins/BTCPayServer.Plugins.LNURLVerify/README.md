@@ -22,12 +22,41 @@ invoices, so it is unusable as a store's Lightning backend.
 ## How it works
 
 - **Receive:** BTCPay asks the LNURL-pay callback for an invoice and detects settlement via the
-  LNURL **LUD-21 `verify`** endpoint. A single shared background poller watches every tracked invoice
-  across every connection (grouped by verify-host, bounded concurrency, capped back-off), so it scales
-  to many invoices and many addresses without a poll loop per connection.
+  LNURL **LUD-21 `verify`** endpoint. When the service also advertises **LUD-XX `verifyBatch`**, all
+  pending invoices at that endpoint are checked with one request per poll cycle (up to 250 per request);
+  services without it, or whose batch endpoint stops answering, are polled per invoice. One shared
+  background poller serves every connection, and
+  BTCPay's own status checks are answered from its last result rather than with more requests.
+- **Payment options:** when the payRequest advertises LUD-XX **`paymentOptions`**, the plugin requests
+  its `lightning` option explicitly and applies that option's own amount bounds. If the service reports
+  Lightning as unavailable, invoice creation fails with that reason.
 - **Send:** for an LNURL-withdraw, BTCPay pays an arbitrary invoice by submitting it to the withdraw
   callback (the linked wallet pays it), bounded by the withdraw's min/max and, when exposed, its
   balance.
+
+## One Bitcoin checkout (LNURL payment options)
+
+When the LNURL advertises a rail in LUD-XX `paymentOptions` that a BIP321 URI can carry, the plugin adds it to the store as a
+payment method, automatically, and re-checks hourly. Today that is `arkade` (`LNURL-ARKADE`), and `onchain` (`LNURL-ONCHAIN`)
+for stores without their own on-chain wallet: a store with an enabled wallet never requests the LNURL's on-chain option.
+A store that already has the Arkade plugin's own `ARKADE` payment method gets no LNURL rails.
+
+- **Checkout:** one "Bitcoin" tab replaces the Lightning and on-chain tabs. Its QR is one BIP321 URI carrying every active rail;
+  a chip per rail switches the QR to that rail alone, and an "All" chip switches it back.
+- **No cost at invoice creation:** a rail is requested from the LNURL when the checkout opens, or, with the store setting
+  "Request every rail when the checkout opens" turned off (Integrations → LNURL rails), only when the payer taps it. Reopening
+  the checkout does not request a rail the LNURL refused within the last hour; a payer's tap does.
+- **Settlement:** a rail payment is recorded when the LNURL's `verify` reports it `settled` with a `paymentReference`, at the
+  amount agreed with the LNURL. An underpayment never settles there, so BTCPay never sees it; recovering those funds is the
+  LNURL service's job. An overpayment is recorded at the agreed amount. Late payments are recorded until the invoice stops
+  being monitored.
+- **Rails whose settlement cannot be detected:** an option the LNURL marks `verifiable: false` (proposed for LUD-XX in
+  lnurl/luds#303) is never provisioned. A rail whose LNURL answers without a usable `verify` URL is left off new invoices for
+  a day, so a checkout does not keep offering a payment method that cannot activate.
+- **Turning a rail off:** switch it off on Integrations → LNURL rails.
+- **Out of scope:** EVM and other non-BIP321 networks; they need a checkout of their own.
+- **Upgrading to 1.2.0:** stores whose LNURL advertises a rail switch to the single "Bitcoin" tab for invoices created after
+  the upgrade. Nothing else changes for them.
 
 ## Limitations
 
@@ -53,6 +82,13 @@ invoices, so it is unusable as a store's Lightning backend.
   LUD-21 verify support is checked (verify is only advertised in the callback response, not metadata).
 - Amountless / top-up invoices are not supported (LNURL-pay is amount-driven).
 - Node, channel and on-chain operations are not available — this client holds no Lightning node.
+- **Do not uninstall the plugin, or downgrade it below 1.2.0, once invoices with LNURL rails exist.** BTCPay's checkout page
+  needs the plugin's payment-method handler for every rail on an invoice, so without it the checkout page of every such
+  invoice fails, whether it is open, paid or expired.
+- **The merged QR's amount is the on-chain due** when on-chain is active, which can include a network-fee component; an Arkade
+  payer scanning the merged QR may overpay by it. Each rail's own chip carries its exact amount.
+- If re-issuing a rail destination after a partial payment fails, that rail drops out of the checkout; a payment to its
+  previous destination is still recorded, at the amount agreed for it.
 
 ## Notes
 

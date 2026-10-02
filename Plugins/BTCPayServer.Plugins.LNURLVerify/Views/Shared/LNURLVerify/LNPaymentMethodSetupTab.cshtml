@@ -25,13 +25,15 @@
         <div id="CustomLNURLVerifyContent" class="accordion-collapse collapse" aria-labelledby="CustomLNURLVerifyHeader" data-bs-parent="#CustomNodeSupport">
             <div class="accordion-body">
                 <p class="my-2">Use any LNURL or Lightning address as your Lightning backend — no node, no API key. Enter a custom connection string:</p>
+                <p class="mb-0"><b>Receive only</b> (a Lightning address or LNURL-pay):</p>
                 <ul class="pb-2">
                     <li>
-                        <b>Receive only</b> (a Lightning address or LNURL-pay):<br/>
                         <code><b>type=</b>lnurl;<b>value=</b>you@example.com</code>
                     </li>
-                    <li class="mt-2">
-                        <b>Send &amp; receive</b> (an LNURL-withdraw whose response includes a <code>payLink</code>):<br/>
+                </ul>
+                <p class="mb-0"><b>Send &amp; receive</b> (an LNURL-withdraw whose response includes a <code>payLink</code>):</p>
+                <ul class="pb-2">
+                    <li>
                         <code><b>type=</b>lnurl;<b>value=</b>LNURL1...</code>
                     </li>
                 </ul>

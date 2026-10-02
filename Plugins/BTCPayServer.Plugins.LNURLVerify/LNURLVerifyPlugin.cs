@@ -1,8 +1,10 @@
 #nullable enable
+using System.Net.Http;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
 using BTCPayServer.Lightning;
+using BTCPayServer.Payments;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -23,6 +25,21 @@ public class LNURLVerifyPlugin : BaseBTCPayServerPlugin
             sp.GetRequiredService<LNURLVerifyConnectionStringHandler>());
         services.AddSingleton<LNURLVerifyPollerService>();
         services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<LNURLVerifyPollerService>());
+        foreach (var rail in LnurlRails.All)
+        {
+            var r = rail;
+            services.AddSingleton<IPaymentMethodHandler>(sp => new LnurlRailPaymentHandler(r,
+                sp.GetRequiredService<IHttpClientFactory>(), sp.GetRequiredService<BTCPayNetworkProvider>().BTC.NBitcoinNetwork));
+            services.AddDefaultPrettyName(r.PaymentMethodId, r.PrettyName);
+        }
+        services.AddHostedService<LnurlRailRecorder>();
+        services.AddHostedService<LnurlRailProvisioner>();
+        services.AddSingleton<RailActivationFailures>();
+        services.AddSingleton<RailActivationGate>();
+        services.AddSingleton<IGlobalCheckoutModelExtension, LnurlRailCheckoutExtension>();
+        services.AddUIExtension("checkout-end", "LNURLVerify/LnurlRailsCheckout");
+        services.AddUIExtension("store-invoices-payments", "LNURLVerify/LnurlRailPayments");
+        services.AddUIExtension("store-integrations-nav", "LNURLVerify/LnurlRailsNav");
         base.Execute(services);
     }
 }

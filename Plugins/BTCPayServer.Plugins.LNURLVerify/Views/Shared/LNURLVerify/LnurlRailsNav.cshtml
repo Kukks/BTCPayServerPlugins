@@ -1,0 +1,15 @@
+@using BTCPayServer.Client
+@using BTCPayServer.Data
+@using BTCPayServer.Plugins.LNURLVerify
+@{
+    var store = Context.GetStoreDataOrNull();
+}
+@if (store is not null && LnurlRails.All.Any(r => store.GetPaymentMethodConfig(r.PaymentMethodId) is not null))
+{
+    <li class="nav-item" permission="@Policies.CanModifyStoreSettings">
+        <a asp-controller="LnurlRailSettings" asp-action="Index" asp-route-storeId="@store.Id"
+           class="nav-link @(ViewData.IsPageActive(LnurlRailSettingsController.ActivePage, null) ? "active" : "")" id="Nav-LnurlRails">
+            <span>LNURL rails</span>
+        </a>
+    </li>
+}
