@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -16,6 +17,14 @@ using BTCPayServer.Services.Invoices;
 using Microsoft.Extensions.Logging;
 
 namespace BTCPayServer.Plugins.LNURLVerify;
+
+/// <summary>An LNURL-supplied payment method whose destinations settle through LUD-21 verify.</summary>
+public interface ILnurlRailHandler : IPaymentMethodHandler
+{
+    string Label { get; }
+    IEnumerable<TrackedDestination> Tracked(InvoiceEntity invoice, PaymentPrompt prompt);
+    bool NeedsReissue(PaymentPrompt prompt);
+}
 
 /// <summary>Records settled rail destinations as BTCPay payments and keeps every invoice's destinations current.</summary>
 public class LnurlRailRecorder : EventHostedServiceBase
@@ -96,23 +105,23 @@ public class LnurlRailRecorder : EventHostedServiceBase
     private async Task RebuildTracking(CancellationToken cancellationToken)
     {
         var queryFailed = false;
-        foreach (var rail in LnurlRails.All)
+        foreach (var handler in _handlers.OfType<ILnurlRailHandler>())
         {
             InvoiceEntity[] monitored;
-            try { monitored = await _invoices.GetMonitoredInvoices(rail.PaymentMethodId, cancellationToken); }
+            try { monitored = await _invoices.GetMonitoredInvoices(handler.PaymentMethodId, cancellationToken); }
             catch (Exception e) when (!cancellationToken.IsCancellationRequested)
             {
                 _logger.LogWarning(e, "Could not list the invoices monitored for {PaymentMethodId}; retrying the rebuild in {Delay}",
-                    rail.PaymentMethodId, RebuildRetryDelay);
+                    handler.PaymentMethodId, RebuildRetryDelay);
                 queryFailed = true;
                 continue;
             }
             foreach (var invoice in monitored)
             {
-                try { Track(invoice, rail); }
+                try { Track(invoice, handler); }
                 catch (Exception e)
                 {
-                    _logger.LogWarning(e, "Could not track the {PaymentMethodId} destinations of invoice {InvoiceId}", rail.PaymentMethodId, invoice.Id);
+                    _logger.LogWarning(e, "Could not track the {PaymentMethodId} destinations of invoice {InvoiceId}", handler.PaymentMethodId, invoice.Id);
                 }
             }
         }
@@ -130,12 +139,10 @@ public class LnurlRailRecorder : EventHostedServiceBase
         catch (OperationCanceledException) { }
     }
 
-    private void Track(InvoiceEntity invoice, LnurlRail rail)
+    private static void Track(InvoiceEntity invoice, ILnurlRailHandler handler)
     {
-        if (invoice.GetPaymentPrompt(rail.PaymentMethodId) is not { Activated: true, Details: { } json } prompt ||
-            _handlers.TryGet(rail.PaymentMethodId) is not LnurlRailPaymentHandler handler) return;
-        foreach (var d in LnurlRailPaymentHandler.Destinations(invoice, rail.PaymentMethodId, prompt.Destination,
-                     handler.ParsePaymentPromptDetails(json)))
+        if (invoice.GetPaymentPrompt(handler.PaymentMethodId) is not { Activated: true, Details: not null } prompt) return;
+        foreach (var d in handler.Tracked(invoice, prompt))
             TrackedDestinationRegistry.Add(d);
     }
 
@@ -157,7 +164,7 @@ public class LnurlRailRecorder : EventHostedServiceBase
             {
                 Id = id, Created = DateTimeOffset.UtcNow, Status = PaymentStatus.Settled, Currency = "BTC",
                 Amount = LnurlRailPaymentHandler.AmountBtc(d.AmountMsat)
-            }.Set(invoice, handler, new LnurlRailPaymentData { PaymentReference = reference, VerifyUrl = d.VerifyUrl, Destination = d.Destination });
+            }.Set(invoice, handler, new LnurlRailPaymentData { PaymentReference = reference, VerifyUrl = d.VerifyUrl, Destination = d.Destination, Asset = d.Asset });
             if (await _payments.AddPayment(data) is not { } payment)
             {
                 // null is a duplicate or a failed insert, and Apply already untracked the destination; retrying is idempotent.
@@ -180,12 +187,11 @@ public class LnurlRailRecorder : EventHostedServiceBase
 
     private async Task Reissue(InvoiceEntity invoice)
     {
-        foreach (var rail in LnurlRails.All)
+        foreach (var handler in _handlers.OfType<ILnurlRailHandler>())
         {
-            if (invoice.GetPaymentPrompt(rail.PaymentMethodId) is not { Activated: true, Details: { } json } prompt ||
-                _handlers.TryGet(rail.PaymentMethodId) is not LnurlRailPaymentHandler handler) continue;
-            if (NeedsReissue(prompt.Calculate().Due, handler.ParsePaymentPromptDetails(json).AmountMsat))
-                await _activator.ActivateInvoicePaymentMethod(invoice.Id, rail.PaymentMethodId, forceNew: true);
+            if (invoice.GetPaymentPrompt(handler.PaymentMethodId) is not { Activated: true, Details: not null } prompt ||
+                !handler.NeedsReissue(prompt)) continue;
+            await _activator.ActivateInvoicePaymentMethod(invoice.Id, handler.PaymentMethodId, forceNew: true);
         }
     }
 
