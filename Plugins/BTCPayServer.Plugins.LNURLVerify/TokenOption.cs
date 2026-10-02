@@ -37,7 +37,7 @@ public sealed record TokenOption(string Id, CaipAsset Asset, TokenUnit Unit, boo
         foreach (var e in entries.OfType<JObject>())
         {
             var code = e["code"]?.Type == JTokenType.String ? e["code"]!.Value<string>() : null;
-            var decimals = e["decimals"]?.Type == JTokenType.Integer ? e["decimals"]!.Value<long>() : -1;
+            var decimals = e["decimals"] is JValue { Type: JTokenType.Integer, Value: long d } ? d : -1;
             if (code is null || !Code.IsMatch(code) || decimals is < 0 or > 36) continue;
             var name = e["name"]?.Type == JTokenType.String ? e["name"]!.Value<string>() : null;
             units.TryAdd(code, new TokenUnit(code.ToUpperInvariant(), (int)decimals, name is { Length: > 0 and <= 64 } ? name : null));

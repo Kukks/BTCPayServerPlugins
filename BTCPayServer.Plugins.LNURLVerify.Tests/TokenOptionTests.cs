@@ -31,7 +31,7 @@ public class TokenOptionTests
     public void Units_need_an_alphanumeric_code_and_integer_decimals()
     {
         var units = TokenOption.Units(Pay("", "[{\"code\":\"USDT\",\"decimals\":6},{\"code\":\"US-DT\",\"decimals\":6},{\"code\":\"EURC\",\"decimals\":\"6\"}," +
-                                             "{\"code\":\"DAI\",\"decimals\":37},{\"code\":\"usdc\",\"decimals\":6,\"name\":\"\"}]"));
+                                             "{\"code\":\"DAI\",\"decimals\":37},{\"code\":\"usdc\",\"decimals\":6,\"name\":\"\"},{\"code\":\"BIG\",\"decimals\":99999999999999999999}]"));
         Assert.Equal(new[] { "USDC", "USDT" }, units.Values.Select(u => u.Code).OrderBy(c => c));
         Assert.Null(units["USDC"].Name);
     }
