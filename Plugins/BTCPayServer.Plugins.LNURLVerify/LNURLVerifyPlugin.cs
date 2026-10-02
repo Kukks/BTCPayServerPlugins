@@ -4,9 +4,12 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Abstractions.Services;
 using BTCPayServer.Lightning;
+using BTCPayServer.Logging;
 using BTCPayServer.Payments;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace BTCPayServer.Plugins.LNURLVerify;
 
@@ -19,6 +22,13 @@ public class LNURLVerifyPlugin : BaseBTCPayServerPlugin
 
     public override void Execute(IServiceCollection services)
     {
+        var bootstrap = (services as PluginServiceCollection)?.BootstrapServices;
+        var (assets, rejected) = TokenAssets.Parse(bootstrap?.GetService<IConfiguration>()?[TokenAssets.ConfigKey]);
+        if (rejected.Count > 0)
+            bootstrap?.GetService<Logs>()?.Configuration.LogWarning(
+                "LNURL Verify ignores {Codes} in {Key}: a code is 1-16 letters or digits and cannot name an LNURL rail",
+                string.Join(", ", rejected), TokenAssets.ConfigKey);
+        services.AddSingleton(assets);
         services.AddUIExtension("ln-payment-method-setup-tab", "LNURLVerify/LNPaymentMethodSetupTab");
         services.AddSingleton<LNURLVerifyConnectionStringHandler>();
         services.AddSingleton<ILightningConnectionStringHandler>(sp =>
