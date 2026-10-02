@@ -57,8 +57,9 @@ public class LnurlRailProvisioner : EventHostedServiceBase
     {
         if (evt is Sweep)
         {
-            foreach (var store in await _stores.GetStores())
-                await Provision(store, cancellationToken);
+            await Parallel.ForEachAsync(await _stores.GetStores(),
+                new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = cancellationToken },
+                (store, ct) => new ValueTask(Provision(store, ct)));
         }
         else if (evt is StoreEvent e && await _stores.FindStore(e.StoreId) is { } store)
         {
