@@ -10,12 +10,12 @@ public class LnurlRailRequesterTests
 {
     static readonly Uri Pay = new("https://lnurl.example/.well-known/lnurlp/alice");
     const string Callback = "https://lnurl.example/.well-known/lnurlp/alice/callback";
-    const string Dest = "tark1qdestination";
+    const string Dest = "tark1qdest";
     const string Both = "[{\"id\":\"lightning\",\"type\":\"lightning\"},{\"id\":\"arkade\",\"type\":\"arkade\"}]";
     static readonly DateTimeOffset InvoiceExpiry = DateTimeOffset.UtcNow.AddMinutes(15);
 
-    static string PayRequest(string options = Both) =>
-        "{\"tag\":\"payRequest\",\"callback\":\"" + Callback + "\",\"minSendable\":1000,\"maxSendable\":100000000," +
+    static string PayRequest(string options = Both, string callback = Callback) =>
+        "{\"tag\":\"payRequest\",\"callback\":\"" + callback + "\",\"minSendable\":1000,\"maxSendable\":100000000," +
         "\"metadata\":\"[]\",\"paymentOptions\":" + options + "}";
 
     static JObject Destination(Action<JObject>? edit = null)
@@ -127,6 +127,25 @@ public class LnurlRailRequesterTests
     public async Task A_throttled_callback_is_a_refusal() =>
         Assert.Contains("HTTP 429", await Refusal(Server(PayRequest(),
             new JObject { ["status"] = "ERROR", ["reason"] = "Too many requests" }, HttpStatusCode.TooManyRequests)));
+
+    [Fact]
+    public async Task A_plain_http_verify_under_an_https_callback_is_refused() =>
+        Assert.Contains("plain-http verify", await Refusal(Server(PayRequest(),
+            Destination(o => o["verify"] = "http://lnurl.example/lnurl/verify/00ff"))));
+
+    [Fact]
+    public async Task Plain_http_end_to_end_is_accepted()
+    {
+        var pay = new Uri("http://lnurl.example/.well-known/lnurlp/alice");
+        const string callback = "http://lnurl.example/.well-known/lnurlp/alice/callback";
+        const string verify = "http://lnurl.example/lnurl/verify/00ff";
+        var http = new FakeHttp().Map(pay.ToString(), PayRequest(callback: callback))
+            .When(r => r.RequestUri!.ToString().StartsWith(callback + "?"),
+                _ => (HttpStatusCode.OK, Destination(o => o["verify"] = verify).ToString()));
+        var d = await LnurlRailRequester.Request(http.Client(), pay, LnurlRails.Arkade, 50_000_000, InvoiceExpiry,
+            Network.RegTest, TestContext.Current.CancellationToken);
+        Assert.Equal(verify, d.Verify);
+    }
 
     [Fact]
     public async Task A_plain_http_verifyBatch_for_an_https_verify_is_not_adopted() =>

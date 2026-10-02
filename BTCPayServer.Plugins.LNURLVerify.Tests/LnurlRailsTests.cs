@@ -22,6 +22,12 @@ public class LnurlRailsTests
     public void An_arkade_destination_must_carry_the_networks_prefix(string destination, bool mainnet, bool valid) =>
         Assert.Equal(valid, LnurlRails.Arkade.IsValidDestination(destination, mainnet ? Network.Main : Network.RegTest));
 
+    [Theory]
+    [InlineData("tark1qr340x\" onmouseover=x")]
+    [InlineData("tark1")]
+    public void An_arkade_destination_outside_the_bech32_alphabet_is_refused(string destination) =>
+        Assert.False(LnurlRails.Arkade.IsValidDestination(destination, Network.RegTest));
+
     [Fact]
     public void An_onchain_destination_must_be_an_address_of_the_network()
     {

@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using Newtonsoft.Json.Linq;
 using Xunit;
 
@@ -51,6 +52,35 @@ public class TrackedDestinationRegistryTests
             Assert.True(TrackedDestinationRegistry.IsTracked(d.VerifyUrl));
         }
         finally { TrackedDestinationRegistry.Remove(d.VerifyUrl); }
+    }
+
+    static string Reported(string paymentReference)
+    {
+        var d = NewDestination();
+        string? seen = null;
+        Action<TrackedDestination, string> handler = (x, reference) => { if (x == d) seen = reference; };
+        TrackedDestinationRegistry.Settled += handler;
+        try
+        {
+            TrackedDestinationRegistry.Add(d);
+            TrackedDestinationRegistry.Apply(d, new JObject
+                { ["status"] = "OK", ["settled"] = true, ["paymentReference"] = paymentReference });
+            return seen!;
+        }
+        finally
+        {
+            TrackedDestinationRegistry.Settled -= handler;
+            TrackedDestinationRegistry.Remove(d.VerifyUrl);
+        }
+    }
+
+    [Fact]
+    public void A_reference_core_would_render_unquoted_is_recorded_as_its_sha256()
+    {
+        const string hostile = "abc def\"><x";
+        var txid = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(hostile))).ToLowerInvariant(), Reported(hostile));
+        Assert.Equal(txid, Reported(txid));
     }
 
     [Fact]

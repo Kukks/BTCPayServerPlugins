@@ -43,7 +43,8 @@ public class LnurlRailCheckoutExtension : IGlobalCheckoutModelExtension
         foreach (var pm in model.AvailablePaymentMethods.Where(pm => LnurlRails.IsRail(pm.PaymentMethodId)))
             pm.Displayed = false;
         var selected = PaymentMethodId.Parse(model.PaymentMethodId);
-        if (!IsBitcoinRail(selected)) return;
+        // Core resolves to its own LNURL-pay method when BTC-LN fails; that tab must still reach the rails.
+        if (!IsBitcoinRail(selected) && selected != CoreLnurl) return;
 
         var prompts = CheckoutRails.Rails(context.InvoiceEntity);
         var rails = prompts.Select(p => State(p, context.UrlHelper)).OfType<RailState>().ToList();

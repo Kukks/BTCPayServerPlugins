@@ -28,13 +28,17 @@ public static class LnurlRailRequester
             throw Unavailable($"{amountMsat} msat is outside the '{option.Id}' bounds ({min}-{max} msat)");
         var callback = Str(pay["callback"]) ?? throw Unavailable("the LNURL has no callback");
 
-        var json = await Get(http, LNURLReceiver.CallbackUri(callback, amountMsat, option.Id, null), "the LNURL refused the request", ct);
+        var callbackUri = LNURLReceiver.CallbackUri(callback, amountMsat, option.Id, null);
+        var json = await Get(http, callbackUri, "the LNURL refused the request", ct);
         if (Str(json["paymentOption"]) is { } echoed && echoed != option.Id)
             throw Unavailable($"the LNURL answered for '{echoed}' instead of '{option.Id}'");
         var destination = Str(json["paymentDestination"]) ?? throw Unavailable("the LNURL returned no destination");
         var verify = Str(json["verify"]);
         if (verify is null || !Uri.TryCreate(verify, UriKind.Absolute, out var verifyUri) || (verifyUri.Scheme != Uri.UriSchemeHttp && verifyUri.Scheme != Uri.UriSchemeHttps))
             throw Unavailable("settlement cannot be detected: the LNURL returned no usable verify URL");
+        // Rail settlement rests on verify alone, so an on-path attacker answering it could forge a paid invoice.
+        if (verifyUri.Scheme == Uri.UriSchemeHttp && callbackUri.Scheme == Uri.UriSchemeHttps)
+            throw Unavailable("settlement cannot be detected: the LNURL returned a plain-http verify URL for an https callback");
         if (json["expiresAt"]?.Type == JTokenType.Integer &&
             DateTimeOffset.FromUnixTimeSeconds(json["expiresAt"]!.Value<long>()) < invoiceExpiry)
             throw Unavailable("the destination expires before the invoice");

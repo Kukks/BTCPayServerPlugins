@@ -10,6 +10,8 @@ namespace BTCPayServer.Plugins.LNURLVerify;
 /// <param name="UriParam">The BIP321 key carrying this rail's destination; null when it is the URI path (on-chain).</param>
 public sealed record LnurlRail(string OptionType, PaymentMethodId PaymentMethodId, string Label, string PrettyName, string? UriParam)
 {
+    private const string Bech32 = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+
     public bool OnChain => UriParam is null;
 
     public bool IsValidDestination(string destination, Network network)
@@ -20,7 +22,13 @@ public sealed record LnurlRail(string OptionType, PaymentMethodId PaymentMethodI
                 try { BitcoinAddress.Create(destination, network); return true; }
                 catch (FormatException) { return false; }
             case "ark":
-                return destination.StartsWith(network.ChainName == ChainName.Mainnet ? "ark1" : "tark1", StringComparison.OrdinalIgnoreCase);
+            {
+                var prefix = network.ChainName == ChainName.Mainnet ? "ark1" : "tark1";
+                if (!destination.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return false;
+                // Core renders a destination into an unquoted title=, so the data part may hold nothing but bech32.
+                var data = destination.Substring(prefix.Length);
+                return data.Length > 0 && data.All(c => Bech32.Contains(char.ToLowerInvariant(c)));
+            }
             default:
                 return true;
         }

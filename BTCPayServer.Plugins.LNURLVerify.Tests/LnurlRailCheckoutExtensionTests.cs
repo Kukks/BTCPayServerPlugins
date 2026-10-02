@@ -14,6 +14,7 @@ public class LnurlRailCheckoutExtensionTests
 {
     static readonly LnurlRailPaymentHandler Arkade = new(LnurlRails.Arkade, new FakeHttpClientFactory(new FakeHttp()), Network.RegTest);
     static readonly PaymentMethodId Ln = PaymentMethodId.Parse("BTC-LN");
+    static readonly PaymentMethodId CoreLnurl = PaymentMethodId.Parse("BTC-LNURL");
 
     static LnurlRailCheckoutExtension Extension() =>
         new(Array.Empty<IPaymentLinkExtension>(), new PaymentMethodHandlerDictionary(new IPaymentMethodHandler[] { Arkade }),
@@ -50,6 +51,26 @@ public class LnurlRailCheckoutExtensionTests
         };
         var store = new StoreData { Id = "store" };
         return (new CheckoutModelContext(model, store, store.GetStoreBlob(), invoice, null!, invoice.GetPaymentPrompt(Ln)!, Arkade), model);
+    }
+
+    // BTC-LN failed at invoice creation, so core resolved the invoice to its own LNURL-pay method: no BTC-LN prompt exists.
+    static (CheckoutModelContext Context, CheckoutModel Model) CoreLnurlCheckout()
+    {
+        var invoice = new InvoiceEntity { Id = "inv", Currency = "USD", Price = 25m, StoreId = "store" };
+        invoice.AddRate(new CurrencyPair("BTC", "USD"), 50_000m);
+        invoice.SetPaymentPrompt(CoreLnurl, new PaymentPrompt
+            { Currency = "BTC", Divisibility = 11, RateDivisibility = 8, Destination = "lnurl1test" });
+        invoice.SetPaymentPrompt(LnurlRails.Arkade.PaymentMethodId, new PaymentPrompt
+            { Currency = "BTC", Divisibility = 8, Inactive = true, Destination = null! });
+        invoice.UpdateTotals();
+        var model = new CheckoutModel
+        {
+            PaymentMethodId = CoreLnurl.ToString(), PaymentMethodName = "Lightning (LNURL)",
+            AvailablePaymentMethods = invoice.GetPaymentPrompts().Select(p => new CheckoutModel.AvailablePaymentMethod
+                { PaymentMethodId = p.PaymentMethodId, PaymentMethodName = p.PaymentMethodId.ToString(), Displayed = true }).ToList()
+        };
+        var store = new StoreData { Id = "store" };
+        return (new CheckoutModelContext(model, store, store.GetStoreBlob(), invoice, null!, invoice.GetPaymentPrompt(CoreLnurl)!, Arkade), model);
     }
 
     static (string Pmi, string Name)[] Pills(CheckoutModel model) =>
@@ -115,6 +136,18 @@ public class LnurlRailCheckoutExtensionTests
         var (context, model) = Checkout();
         Extension().ModifyCheckoutModel(context);
         Assert.True(model.OnChainWithLnInvoiceFallback);
+    }
+
+    [Fact]
+    public void A_checkout_left_on_LNURL_pay_becomes_the_bitcoin_tab()
+    {
+        var (context, model) = CoreLnurlCheckout();
+        Extension().ModifyCheckoutModel(context);
+        Assert.Equal(LnurlRailCheckoutExtension.ComponentName, model.CheckoutBodyComponentName);
+        Assert.Equal(new[] { ("BTC-LNURL", "Bitcoin") }, Pills(model));
+        var arkade = ((JArray)model.AdditionalData["lnurlRails"]).Single();
+        Assert.Equal("LNURL-ARKADE", arkade["pmi"]!.Value<string>());
+        Assert.False(arkade["active"]!.Value<bool>());
     }
 
     [Fact]

@@ -79,8 +79,9 @@ A store that already has the Arkade plugin's own `ARKADE` payment method gets no
   LUD-21 verify support is checked (verify is only advertised in the callback response, not metadata).
 - Amountless / top-up invoices are not supported (LNURL-pay is amount-driven).
 - Node, channel and on-chain operations are not available — this client holds no Lightning node.
-- **Do not uninstall or downgrade below 1.2.0 while invoices with LNURL rails are open.** BTCPay's checkout needs the plugin's
-  payment-method handler for every rail on an invoice, so those invoices' checkouts fail until they expire.
+- **Do not uninstall the plugin, or downgrade it below 1.2.0, once invoices with LNURL rails exist.** BTCPay's checkout page
+  needs the plugin's payment-method handler for every rail on an invoice, so without it the checkout page of every such
+  invoice fails, whether it is open, paid or expired.
 - **The merged QR's amount is the on-chain due** when on-chain is active, which can include a network-fee component; an Arkade
   payer scanning the merged QR may overpay by it. Each rail's own chip carries its exact amount.
 - If re-issuing a rail destination after a partial payment fails, that rail drops out of the checkout; a payment to its

@@ -3,6 +3,8 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using Newtonsoft.Json.Linq;
 
 namespace BTCPayServer.Plugins.LNURLVerify;
@@ -46,6 +48,15 @@ public static class TrackedDestinationRegistry
         if (verify["paymentReference"]?.Type != JTokenType.String ||
             verify["paymentReference"]!.Value<string>() is not { Length: > 0 } reference)
             return;
-        if (Remove(d.VerifyUrl)) Settled?.Invoke(d, reference);
+        if (Remove(d.VerifyUrl)) Settled?.Invoke(d, Safe(reference));
     }
+
+    // Core renders the reference into an unquoted title=; hashing keeps the payment recordable and deduplicated.
+    private static string Safe(string reference) =>
+        reference.Length is > 0 and <= 128 && reference.All(IsReferenceChar)
+            ? reference
+            : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(reference))).ToLowerInvariant();
+
+    private static bool IsReferenceChar(char c) =>
+        c is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or ':' or '.' or '_' or '-';
 }

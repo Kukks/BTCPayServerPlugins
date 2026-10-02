@@ -50,7 +50,7 @@ public class LnurlRailPaymentHandlerTests
         new(store, store.GetStoreBlob(), new JObject(), Handler, invoice, new InvoiceLogs());
 
     // A fresh host per call keeps the static ResolveCached cache from colliding across tests. The arkade
-    // callback answers tark1qdest1, tark1qdest2, ... on successive requests.
+    // callback answers tark1qdestq, tark1qdestqq, ... on successive requests ('1' is not in the bech32 alphabet).
     static (string Host, FakeHttp Http, LnurlRailPaymentHandler Handler, StoreData Store) Lnurl()
     {
         var host = "act" + Guid.NewGuid().ToString("N")[..8] + ".example";
@@ -62,9 +62,10 @@ public class LnurlRailPaymentHandlerTests
             .When(r => r.RequestUri!.ToString().StartsWith(callback + "?"), _ =>
             {
                 var n = ++issued;
+                var dest = "tark1qdest" + new string('q', n);
                 return (HttpStatusCode.OK, new JObject
                 {
-                    ["paymentOption"] = "arkade", ["paymentDestination"] = $"tark1qdest{n}", ["paymentURI"] = $"bitcoin:?ark=tark1qdest{n}",
+                    ["paymentOption"] = "arkade", ["paymentDestination"] = dest, ["paymentURI"] = $"bitcoin:?ark={dest}",
                     ["expiresAt"] = DateTimeOffset.UtcNow.AddDays(7).ToUnixTimeSeconds(),
                     ["verify"] = $"https://{host}/lnurl/verify/{n}", ["verifyBatch"] = $"https://{host}/lnurl/verifyBatch"
                 }.ToString());
@@ -221,9 +222,9 @@ public class LnurlRailPaymentHandlerTests
         var (host, http, handler, store) = Lnurl();
         var ctx = await Activate(handler, store, Priced());
         var details = handler.ParsePaymentPromptDetails(ctx.Prompt.Details);
-        Assert.Equal("tark1qdest1", ctx.Prompt.Destination);
-        Assert.Equal(new[] { "tark1qdest1" }, ctx.TrackedDestinations);
-        Assert.Equal(("arkade", "bitcoin:?ark=tark1qdest1", $"https://{host}/lnurl/verify/1", $"https://{host}/lnurl/verifyBatch", 20_000_000L),
+        Assert.Equal("tark1qdestq", ctx.Prompt.Destination);
+        Assert.Equal(new[] { "tark1qdestq" }, ctx.TrackedDestinations);
+        Assert.Equal(("arkade", "bitcoin:?ark=tark1qdestq", $"https://{host}/lnurl/verify/1", $"https://{host}/lnurl/verifyBatch", 20_000_000L),
             (details.OptionId, details.PaymentUri, details.Verify, details.VerifyBatch, details.AmountMsat));
         Assert.Empty(details.Superseded);
         Assert.Contains($"https://{host}/cb?amount=20000000&paymentOption=arkade", http.Requests);
@@ -243,7 +244,7 @@ public class LnurlRailPaymentHandlerTests
         };
         var ctx = await Activate(handler, store, Priced(stored));
         var details = handler.ParsePaymentPromptDetails(ctx.Prompt.Details);
-        Assert.Equal("tark1qdest1", ctx.Prompt.Destination);
+        Assert.Equal("tark1qdestq", ctx.Prompt.Destination);
         Assert.Equal($"https://{host}/lnurl/verify/1", details.Verify);
         Assert.Equal(new[] { ("tark1qfirst", "https://lnurl.example/lnurl/verify/aa", 20_000_000L) },
             details.Superseded.Select(s => (s.Destination, s.Verify, s.AmountMsat)));
