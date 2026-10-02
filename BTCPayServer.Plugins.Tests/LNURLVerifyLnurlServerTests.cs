@@ -81,7 +81,8 @@ public class LNURLVerifyLnurlServerTests
     public async Task Serves_an_arkade_address_for_the_checkout_runbook()
     {
         var ct = TestContext.Current.CancellationToken;
-        using var wallet = await LnurlServerWallet.Open(Required("LNURL_SERVER_URL").TrimEnd('/'), ct);
+        using var wallet = await LnurlServerWallet.Open(Required("LNURL_SERVER_URL").TrimEnd('/'), ct,
+            Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant());
         await wallet.RegisterAddress("alice", Required("LNURL_ARKADE_ADDRESS"), new Key().PubKey.ToHex(),
             Environment.GetEnvironmentVariable("LNURL_BOARDING_ADDRESS"), ct);
         await Task.Delay(TimeSpan.FromMinutes(double.Parse(Required("LNURL_RUNBOOK_MINUTES"), CultureInfo.InvariantCulture)), ct);
@@ -105,11 +106,13 @@ file sealed class LnurlServerWallet : IDisposable
 
     public string SessionId { get; private set; } = "";
 
-    public static async Task<LnurlServerWallet> Open(string baseUrl, CancellationToken ct)
+    // An address binds to the session derived from its token; a server-minted token gets an unrelated random id.
+    public static async Task<LnurlServerWallet> Open(string baseUrl, CancellationToken ct, string? token = null)
     {
         var wallet = new LnurlServerWallet(baseUrl);
+        var body = token is null ? new JObject() : new JObject { ["token"] = token };
         var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/lnurl/session")
-        { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
+        { Content = new StringContent(body.ToString(), Encoding.UTF8, "application/json") };
         var response = await wallet._http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         response.EnsureSuccessStatusCode();
         var events = new StreamReader(await response.Content.ReadAsStreamAsync(ct));
