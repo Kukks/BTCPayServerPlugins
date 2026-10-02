@@ -1,0 +1,24 @@
+@using BTCPayServer.Data
+@using BTCPayServer.Plugins.LNURLVerify
+@model BTCPayServer.Plugins.LNURLVerify.LnurlRailSettings
+@{
+    ViewData.SetActivePage(LnurlRailSettingsController.ActivePage, "LNURL rails", "LNURL rails");
+    var store = Context.GetStoreData();
+    var rails = LnurlRails.All.Where(r => store.GetPaymentMethodConfig(r.PaymentMethodId) is not null).ToList();
+}
+<form method="post">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h3 class="mb-0">@ViewData["Title"]</h3>
+        <button type="submit" class="btn btn-primary" id="Save">Save</button>
+    </div>
+    <p>
+        Rails your LNURL advertises join Lightning in one "Bitcoin" checkout tab.
+        @(rails.Any() ? $"This store has: {string.Join(", ", rails.Select(r => r.Label))}." : "Your LNURL advertises no extra rails right now.")
+        To turn a rail off, exclude it in Checkout Appearance.
+    </p>
+    <div class="form-check form-switch">
+        <input asp-for="ActivateAllRailsOnOpen" type="checkbox" class="form-check-input" />
+        <label asp-for="ActivateAllRailsOnOpen" class="form-check-label">Request every rail when the checkout opens</label>
+    </div>
+    <p class="form-text">When off, a rail is requested from your LNURL only when the payer taps it.</p>
+</form>
