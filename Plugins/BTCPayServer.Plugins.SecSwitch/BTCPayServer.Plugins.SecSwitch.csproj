@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <LangVersion>12</LangVersion>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+    <PropertyGroup>
+        <Product>SecSwitch</Product>
+        <Description>Subscribe to GPG-signed security advisories and automatically disable or update vulnerable plugins.</Description>
+        <Version>1.0.0</Version>
+        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    </PropertyGroup>
+    <PropertyGroup>
+        <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+        <PreserveCompilationContext>false</PreserveCompilationContext>
+        <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    </PropertyGroup>
+    <ItemDefinitionGroup>
+        <ProjectReference>
+            <Properties>StaticWebAssetsEnabled=false</Properties>
+            <Private>false</Private>
+            <ExcludeAssets>runtime;native;build;buildTransitive;contentFiles</ExcludeAssets>
+        </ProjectReference>
+    </ItemDefinitionGroup>
+    <ItemGroup>
+        <!-- Explicit, not transitive: BouncyCastle currently reaches us only via MimeKit/ExchangeSharp,
+             which is incidental. This reference pins the version we build against. It does NOT by itself
+             make the scaffold test fail if it were ever deleted - a transitive path still supplies the
+             same types at compile time - so the test instead guards against a major-version drift; see
+             Bouncycastle_assembly_major_version_is_2 in ScaffoldTests.cs. -->
+        <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
+        <EmbeddedResource Include="Resources\**" />
+        <ProjectReference Include="..\..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
+    </ItemGroup>
+</Project>

@@ -1,0 +1,13 @@
+{
+  "id": "EXAMPLE-2026-01-01-sample",
+  "identifier": "BTCPayServer.Plugins.Example",
+  "affectedVersions": ">=1.0.0 && <1.2.3",
+  "fixedVersion": "1.2.3",
+  "severity": "high",
+  "title": "Example advisory - not a real vulnerability",
+  "description": "Template showing the required shape. Delete before publishing real advisories.",
+  "references": ["https://example.com/advisory"],
+  "publishedAt": "2026-01-01T00:00:00Z",
+  "supersedes": null,
+  "revoked": false
+}

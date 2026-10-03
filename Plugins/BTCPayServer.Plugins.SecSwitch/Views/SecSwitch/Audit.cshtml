@@ -1,0 +1,79 @@
+@using BTCPayServer.Plugins.SecSwitch.Models
+@model List<BTCPayServer.Plugins.SecSwitch.Controllers.SecSwitchController.AuditEntryRow>
+@{
+    ViewData["Title"] = "SecSwitch audit log";
+
+    // Maps every LedgerStatus constant to an admin-facing label/badge/explanation, so the page
+    // surfaces WHY a status is or isn't final rather than a bare string - see LedgerStatus's own
+    // doc comments (Models/SecSwitchLedger.cs) for the authoritative reasoning this mirrors.
+    (string Badge, string Label, string Explanation) Describe(string status) => status switch
+    {
+        LedgerStatus.Rejected => ("bg-danger", "Rejected",
+            "The advisory payload could not be parsed at all. Not final — SecSwitch retries this on the next poll."),
+        LedgerStatus.Unverified => ("bg-danger", "Unverified",
+            "Parsed, but the signatures presented did not meet GPG quorum. Not final — retried on the next poll in case more co-signers or an honest mirror appear."),
+        LedgerStatus.NotApplicable => ("bg-secondary", "Not applicable",
+            "Quorum met; this advisory does not apply to this instance. Final — cached, and will not be re-checked."),
+        LedgerStatus.NeedsAttention => ("bg-warning text-dark", "Needs attention",
+            "Quorum met, but SecSwitch did not apply an action. Either it could not resolve the advisory on its own — the installed version is indeterminate, or (for a core advisory) SSH connectivity has not finished verifying yet — or it tried to act and the action FAILED (for example the plugin could not be resolved to an installed directory, or the update could not be queued). Not final — retried on the next poll, which can mean indefinitely if the underlying cause persists. See the Reason column for which case this is."),
+        LedgerStatus.NeedsDecision => ("bg-warning text-dark", "Needs decision",
+            "Quorum met and an action was computed, but policy is holding it open for a manual decision."),
+        LedgerStatus.Acted => ("bg-success", "Acted",
+            "Quorum met; SecSwitch applied the resulting action automatically, and the action reported success. An action that failed is recorded as Needs attention instead, never here."),
+        LedgerStatus.Suppressed => ("bg-dark", "Suppressed",
+            "An admin suppressed this advisory on this instance; it will not be acted on again."),
+        LedgerStatus.Unsuppressed => ("bg-info text-dark", "Un-suppressed",
+            "An admin un-suppressed this advisory. Not final — it will be re-evaluated on the next poll."),
+        _ => ("bg-secondary", string.IsNullOrEmpty(status) ? "(none)" : status, "")
+    };
+}
+
+<div class="sticky-header"><h2>SecSwitch audit log</h2></div>
+<partial name="_StatusMessage" />
+
+<table class="table">
+    <thead>
+    <tr>
+        <th>Recorded</th><th>Advisory</th><th>Target</th><th>Severity</th>
+        <th>Status</th><th>Action</th><th>Reason</th><th></th>
+    </tr>
+    </thead>
+    <tbody>
+    @foreach (var row in Model)
+    {
+        var (badge, label, explanation) = Describe(row.Entry.Status);
+        <tr>
+            <td>@row.Entry.RecordedAt.ToString("u")</td>
+            <td><code>@row.AdvisoryId</code><br />@row.Entry.Title</td>
+            <td>@row.Entry.Identifier</td>
+            <td>@row.Entry.Severity</td>
+            <td>
+                <span class="badge @badge">@label</span>
+                @if (!string.IsNullOrEmpty(explanation))
+                {
+                    <div class="text-muted small">@explanation</div>
+                }
+            </td>
+            <td>@row.Entry.Action</td>
+            <td>@row.Entry.Reason</td>
+            <td>
+                @if (!row.Entry.Suppressed)
+                {
+                    <a asp-action="SuppressConfirm" asp-route-advisoryId="@row.AdvisoryId"
+                       class="btn btn-sm btn-outline-secondary">Suppress</a>
+                }
+                else
+                {
+                    <span class="text-muted d-block">Suppressed</span>
+                    <a asp-action="UnsuppressConfirm" asp-route-advisoryId="@row.AdvisoryId"
+                       class="btn btn-sm btn-outline-secondary">Un-suppress</a>
+                }
+            </td>
+        </tr>
+    }
+    @if (Model.Count == 0)
+    {
+        <tr><td colspan="8" class="text-muted">No advisories seen yet.</td></tr>
+    }
+    </tbody>
+</table>
