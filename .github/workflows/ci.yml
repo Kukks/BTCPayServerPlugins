@@ -82,6 +82,8 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npm test
+          npm run build
+          git diff --exit-code -- ../Resources/lnurlverify/wallet.js
 
   resolve-plugins:
     name: Resolve active plugins
