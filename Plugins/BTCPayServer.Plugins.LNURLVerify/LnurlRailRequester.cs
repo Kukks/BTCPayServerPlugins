@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -57,10 +58,36 @@ public static class LnurlRailRequester
         // Rail settlement rests on verify alone, so an on-path attacker answering it could forge a paid invoice.
         if (verifyUri.Scheme == Uri.UriSchemeHttp && callbackUri.Scheme == Uri.UriSchemeHttps)
             throw new UnverifiableRailException("settlement cannot be detected: the LNURL returned a plain-http verify URL for an https callback");
-        if (answer["expiresAt"]?.Type == JTokenType.Integer &&
-            DateTimeOffset.FromUnixTimeSeconds(answer["expiresAt"]!.Value<long>()) < invoiceExpiry)
+        if (ExpiresAt(answer["expiresAt"]) is { } at && DateTimeOffset.FromUnixTimeSeconds(at) < invoiceExpiry)
             throw Unavailable("the destination expires before the invoice");
         return (verify, LNURLReceiver.BatchUrl(answer["verifyBatch"], verify));
+    }
+
+    private const long MaxUnixSeconds = 253_402_300_799;
+
+    // A stated expiry that cannot be read, or that DateTimeOffset cannot hold, refuses the rail rather than go unchecked.
+    internal static long? ExpiresAt(JToken? token)
+    {
+        if (token is null || token.Type == JTokenType.Null) return null;
+        var seconds = UnixSeconds(token);
+        if (seconds is null or < 0 or > MaxUnixSeconds) throw Unavailable("the LNURL returned an expiry that could not be read");
+        return seconds;
+    }
+
+    private static long? UnixSeconds(JToken token)
+    {
+        if (token is JValue { Type: JTokenType.Integer, Value: long n }) return n;
+        // Json.NET has already read an ISO 8601 string as a date; one without a zone is UTC, as below.
+        if (token.Type == JTokenType.Date)
+        {
+            var date = token.Value<DateTime>();
+            return new DateTimeOffset(date.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(date, DateTimeKind.Utc) : date.ToUniversalTime()).ToUnixTimeSeconds();
+        }
+        var s = token.Type == JTokenType.String ? token.Value<string>() : null;
+        if (s is { Length: > 0 and <= 12 } && s.All(char.IsAsciiDigit)) return long.Parse(s, CultureInfo.InvariantCulture);
+        if (s is not null && DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at))
+            return at.ToUnixTimeSeconds();
+        return null;
     }
 
     internal static async Task<JObject> Get(HttpClient http, Uri uri, string what, CancellationToken ct)

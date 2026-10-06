@@ -34,6 +34,7 @@ public class LnurlTokenPaymentHandlerTests
         public readonly long QuoteExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeSeconds();
         public string? WithoutVerify;
         public string? Failing;
+        public string? BadExpiry;
         // A callback answers after its option's delay if the request is still alive; Timeout.InfiniteTimeSpan never answers.
         public readonly Dictionary<string, TimeSpan> Delays = new();
 
@@ -73,6 +74,7 @@ public class LnurlTokenPaymentHandlerTests
                         ["verify"] = $"https://{Host}/lnurl/verify/{option}/{n}", ["expiresAt"] = DateTimeOffset.UtcNow.AddDays(7).ToUnixTimeSeconds()
                     };
                     if (option == WithoutVerify) answer.Remove("verify");
+                    if (option == BadExpiry) answer["expiresAt"] = 1_790_000_600_000L;
                     return (HttpStatusCode.OK, answer.ToString());
                 });
             Handler = new LnurlTokenPaymentHandler("USDT", new FakeHttpClientFactory(Http), Network.RegTest, Activations)
@@ -306,6 +308,22 @@ public class LnurlTokenPaymentHandlerTests
         Assert.True(networks[2].Refused);
         Assert.Contains(ctx.Logs.InvoiceLogs.ToList(),
             l => l.Severity == InvoiceEventData.EventSeverity.Warning && l.Log.Contains("usdt-tron: the LNURL did not answer in time"));
+    }
+
+    [Fact]
+    public async Task A_network_whose_destination_expiry_cannot_be_read_is_refused_alone()
+    {
+        var lnurl = new Lnurl { BadExpiry = "usdt-solana" };
+        var invoice = lnurl.Invoice();
+
+        var ctx = await lnurl.Activate(invoice, "usdt-arbitrum", "usdt-solana", "usdt-tron");
+
+        var networks = lnurl.Details(invoice).Networks;
+        Assert.Equal(new[] { "0x0000000000000000000000000000000000000001", null, Tron[0] }, networks.Select(n => n.Quote?.Destination));
+        Assert.True(networks[1].Refused);
+        Assert.Equal(new[] { "0x0000000000000000000000000000000000000001", Tron[0] }, ctx.TrackedDestinations);
+        Assert.Contains(ctx.Logs.InvoiceLogs.ToList(),
+            l => l.Severity == InvoiceEventData.EventSeverity.Warning && l.Log.Contains("usdt-solana: the LNURL returned an expiry that could not be read"));
     }
 
     [Fact]

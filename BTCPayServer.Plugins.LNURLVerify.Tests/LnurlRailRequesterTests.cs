@@ -149,6 +149,18 @@ public class LnurlRailRequesterTests
         Assert.Contains("expires before the invoice", await Refusal(Server(PayRequest(),
             Destination(o => o["expiresAt"] = DateTimeOffset.UtcNow.AddMinutes(1).ToUnixTimeSeconds()))));
 
+    [Theory]
+    [InlineData("1793000000000")]
+    [InlineData("99999999999999999999")]
+    public async Task A_destination_expiry_that_cannot_be_read_is_refused(string expiresAt) =>
+        Assert.Contains("expiry that could not be read", await Refusal(Server(PayRequest(),
+            Destination(o => o["expiresAt"] = JToken.Parse(expiresAt)))));
+
+    [Fact]
+    public async Task An_iso_destination_expiry_before_the_invoice_is_refused() =>
+        Assert.Contains("expires before the invoice", await Refusal(Server(PayRequest(),
+            Destination(o => o["expiresAt"] = DateTimeOffset.UtcNow.AddMinutes(1).ToString("o")))));
+
     [Fact]
     public async Task A_destination_on_another_network_is_refused() =>
         Assert.Contains("not a valid Arkade destination", await Refusal(Server(PayRequest(),
