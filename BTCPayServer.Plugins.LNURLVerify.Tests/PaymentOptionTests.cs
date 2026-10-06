@@ -21,6 +21,21 @@ public class PaymentOptionTests
         Assert.Equal(10_000_000L, options[1].MinSendable);
     }
 
+    [Theory]
+    [InlineData("100000000000000000000")]
+    [InlineData("1e300")]
+    [InlineData("-5")]
+    public void A_bound_no_msat_amount_can_hold_is_ignored_rather_than_breaking_lightning(string bound)
+    {
+        var pay = JObject.Parse("{\"minSendable\":2000,\"maxSendable\":9000,\"paymentOptions\":[" +
+                                "{\"id\":\"usdt-eth\",\"type\":\"eip155\",\"minSendable\":" + bound + ",\"maxSendable\":" + bound + "}," +
+                                "{\"id\":\"ln\",\"type\":\"lightning\"}]}");
+
+        var token = PaymentOption.Parse(pay)[0];
+        Assert.Equal(((long?)null, (long?)null), (token.MinSendable, token.MaxSendable));
+        Assert.Equal((2000L, 9000L, (string?)"ln"), PaymentOption.PlanLightning(pay, 1, long.MaxValue));
+    }
+
     [Fact]
     public void PlanLightning_without_options_keeps_the_top_level_bounds()
     {

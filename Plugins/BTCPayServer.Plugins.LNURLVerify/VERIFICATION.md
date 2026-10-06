@@ -1,6 +1,6 @@
 # LNURL Verify — verification runbook
 
-The plugin is unit-tested (199 tests) and reviewed, but three things can only be confirmed by running
+The plugin is unit-tested (202 tests) and reviewed, but three things can only be confirmed by running
 it. This is the concrete checklist to gain that confidence, ordered cheapest-first.
 
 ## 1. Unit tests (seconds, no infra)
@@ -8,7 +8,7 @@ it. This is the concrete checklist to gain that confidence, ordered cheapest-fir
 ```
 dotnet test BTCPayServer.Plugins.LNURLVerify.Tests
 ```
-Expected: 199 passed, and no warnings from plugin or test code. Covers capability decode, verify-support probe, receive guards +
+Expected: 202 passed, and no warnings from plugin or test code. Covers capability decode, verify-support probe, receive guards +
 settled-cache, the shared poller (incl. a 60-invoice concurrent settle/error stress), the full send
 chain (parse → k1-refresh → bounds/balance → submit), connection-scoped reconciliation, persistence
 save/restore (against a fake settings store), paymentOptions selection, verifyBatch batching (chunking,

@@ -45,6 +45,11 @@ public sealed record PaymentOption(string Id, string Type, bool Available, long?
 
     private static string? Str(JToken? t) => t?.Type == JTokenType.String ? t.Value<string>() : null;
 
-    private static long? Msat(JToken? t) =>
-        t?.Type is JTokenType.Integer or JTokenType.Float ? t.Value<long>() : null;
+    // Every option is parsed to plan Lightning, so a bound no msat amount can hold is ignored rather than thrown on.
+    private static long? Msat(JToken? t) => t switch
+    {
+        JValue { Type: JTokenType.Integer, Value: long v } when v >= 0 => v,
+        JValue { Type: JTokenType.Float } f when f.Value<double>() is >= 0 and < 9.2e18 => (long)f.Value<double>(),
+        _ => null
+    };
 }
