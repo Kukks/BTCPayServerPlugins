@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using BTCPayServer.Payments;
+using Newtonsoft.Json.Linq;
 
 namespace BTCPayServer.Plugins.LNURLVerify;
 
@@ -36,4 +37,9 @@ public sealed class TokenAssets
         }
         return (new TokenAssets(codes), rejected);
     }
+
+    /// <summary>Units the payRequest offers on a supported network that this server does not show.</summary>
+    public IReadOnlyList<string> Unconfigured(JObject payRequest) =>
+        TokenOption.Parse(payRequest).Where(o => o.Verifiable != false).Select(o => o.Unit.Code)
+            .Distinct().Where(c => !Codes.Contains(c)).ToArray();
 }
