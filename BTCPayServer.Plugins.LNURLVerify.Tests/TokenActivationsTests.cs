@@ -24,6 +24,27 @@ public class TokenActivationsTests
     }
 
     [Fact]
+    public async Task A_run_plans_under_the_lock_so_an_overlapping_one_asks_for_nothing_already_quoted()
+    {
+        var activations = new TokenActivations();
+        var quoted = new HashSet<string>();
+        var activated = 0;
+        Task<IReadOnlyCollection<string>> Plan() =>
+            Task.FromResult<IReadOnlyCollection<string>>(new[] { "a", "b" }.Where(n => !quoted.Contains(n)).ToArray());
+        async Task<bool> Activate()
+        {
+            Interlocked.Increment(ref activated);
+            await Task.Delay(50);
+            foreach (var n in activations.Take("inv", Usdt)) quoted.Add(n);
+            return true;
+        }
+        var ran = await Task.WhenAll(activations.Run("inv", Usdt, Plan, Activate), activations.Run("inv", Usdt, Plan, Activate));
+        Assert.Equal(new[] { true, false }, ran);
+        Assert.Equal(1, activated);
+        Assert.Equal(new[] { "a", "b" }, quoted.OrderBy(n => n));
+    }
+
+    [Fact]
     public async Task A_run_hands_its_networks_to_the_activation_it_starts()
     {
         var activations = new TokenActivations();

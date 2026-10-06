@@ -19,12 +19,23 @@ public class TokenActivations
     private readonly SemaphoreSlim[] _stripes = Enumerable.Range(0, 64).Select(_ => new SemaphoreSlim(1, 1)).ToArray();
     private readonly ConcurrentDictionary<(string InvoiceId, PaymentMethodId Pmi), string[]> _pending = new();
 
-    public async Task<bool> Run(string invoiceId, PaymentMethodId pmi, IReadOnlyCollection<string> networks, Func<Task<bool>> activate)
+    // The reissue path names no network and still has to activate, so only the planning overload reads an empty plan as nothing to do.
+    public Task<bool> Run(string invoiceId, PaymentMethodId pmi, IReadOnlyCollection<string> networks, Func<Task<bool>> activate) =>
+        Locked(invoiceId, pmi, () => Task.FromResult(networks), activate, skipWhenEmpty: false);
+
+    /// <summary>Plans under the lock, so an activation overlapping another asks only for what that one has not quoted.</summary>
+    public Task<bool> Run(string invoiceId, PaymentMethodId pmi, Func<Task<IReadOnlyCollection<string>>> plan, Func<Task<bool>> activate) =>
+        Locked(invoiceId, pmi, plan, activate, skipWhenEmpty: true);
+
+    private async Task<bool> Locked(string invoiceId, PaymentMethodId pmi, Func<Task<IReadOnlyCollection<string>>> plan,
+        Func<Task<bool>> activate, bool skipWhenEmpty)
     {
         var stripe = _stripes[(uint)HashCode.Combine(invoiceId, pmi) % (uint)_stripes.Length];
         await stripe.WaitAsync();
         try
         {
+            var networks = await plan();
+            if (skipWhenEmpty && networks.Count == 0) return false;
             _pending[(invoiceId, pmi)] = networks.ToArray();
             return await activate();
         }

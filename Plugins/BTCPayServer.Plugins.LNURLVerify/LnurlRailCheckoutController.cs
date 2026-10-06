@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using BTCPayServer.Payments;
@@ -71,12 +72,14 @@ public class LnurlRailCheckoutController : Controller
         if (invoice?.GetPaymentPrompt(id) is not { } prompt) return NotFound();
         var activateAllOnOpen =
             (await _stores.GetSettingAsync<LnurlRailSettings>(invoice.StoreId, LnurlRailSettings.Key) ?? new LnurlRailSettings()).ActivateAllRailsOnOpen;
-        var networks = CheckoutRails.PlanTokens(Details(handler, prompt), network, activateAllOnOpen);
-        if (networks.Count > 0)
+        // Planned under the activation lock, on a fresh read: an open overlapping another open must not ask again for what it just quoted.
+        async Task<IReadOnlyCollection<string>> Plan()
         {
-            await _tokenActivations.Run(invoiceId, id, networks, () => _activator.ActivateInvoicePaymentMethod(invoiceId, id, forceNew: true));
-            prompt = (await _invoices.GetInvoice(invoiceId))?.GetPaymentPrompt(id) ?? prompt;
+            var fresh = (await _invoices.GetInvoice(invoiceId))?.GetPaymentPrompt(id);
+            return CheckoutRails.PlanTokens(fresh is null ? null : Details(handler, fresh), network, activateAllOnOpen);
         }
+        if (await _tokenActivations.Run(invoiceId, id, Plan, () => _activator.ActivateInvoicePaymentMethod(invoiceId, id, forceNew: true)))
+            prompt = (await _invoices.GetInvoice(invoiceId))?.GetPaymentPrompt(id) ?? prompt;
         var refused = Details(handler, prompt)?.Networks.Where(n => n.Refused).Select(n => n.OptionId).ToArray() ?? Array.Empty<string>();
         return Json(new { refused });
     }
