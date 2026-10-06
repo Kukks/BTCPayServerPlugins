@@ -28,7 +28,7 @@
                 </div>
             </div>
             <a v-if="current.uri" class="btn btn-primary rounded-pill w-100 mt-4" id="LnurlTokenOpenWallet" target="_blank" :href="current.uri">Open in wallet</a>
-            <button v-if="walletConnect && !sent" type="button" class="btn btn-secondary rounded-pill w-100 mt-2" id="LnurlTokenConnect"
+            <button v-if="walletConnect && !sentHere" type="button" class="btn btn-secondary rounded-pill w-100 mt-2" id="LnurlTokenConnect"
                     :disabled="sending" v-on:click="payWithWallet">Connect wallet</button>
         </template>
         <div v-else-if="renewable" class="text-center my-4">
@@ -37,7 +37,7 @@
         </div>
         <div v-else-if="current && pending" class="text-center my-4"><span class="spinner-border" role="status"></span></div>
         <p v-else-if="networks.length" class="text-center my-4" id="LnurlTokenChoose">Choose a network</p>
-        <p v-if="sent" class="text-center mt-3" id="LnurlTokenSent">Sent, waiting for confirmation: <code v-text="sent"></code></p>
+        <p v-if="sentHere" class="text-center mt-3" id="LnurlTokenSent">Sent, waiting for confirmation: <code v-text="sent.ref"></code></p>
         <p v-if="walletError" class="text-center text-danger mt-3" id="LnurlTokenWalletError" v-text="walletError"></p>
     </div>
 </template>
@@ -65,10 +65,11 @@
             renewable () { return this.expired || (!!this.current && this.current.state === 'stale'); },
             countdown () { return Math.floor(this.secondsLeft / 60) + ':' + String(this.secondsLeft % 60).padStart(2, '0'); },
             walletConnect () { return !!this.projectId && this.walletNamespaces.includes(this.current.namespace); },
+            sentHere () { return !!this.sent && !!this.current && this.sent.key === this.token.pmi + '/' + this.current.id; },
             summary () { return this.current.amount + ' ' + this.token.code + ' on ' + this.current.label; }
         },
         watch: {
-            'token.pmi' () { this.selected = null; this.sent = null; this.walletError = null; this.request(null); }
+            'token.pmi' () { this.selected = null; this.walletError = null; this.request(null); }
         },
         mounted () {
             this.timer = setInterval(() => { this.now = Math.floor(Date.now() / 1000); }, 1000);
@@ -105,10 +106,11 @@
                 const withDecimals = n => Object.assign({}, n, { decimals: this.token.decimals });
                 const network = withDecimals(this.current);
                 const networks = this.networks.filter(n => this.walletNamespaces.includes(n.namespace)).map(withDecimals);
+                const key = pmi + '/' + network.id;
                 try {
                     await this.loadWallet();
-                    const sent = (await window.LnurlVerifyWallet.pay({ projectId: this.projectId, network, networks })) || 'the wallet reported no reference';
-                    if (this.token.pmi === pmi) this.sent = sent;
+                    const ref = (await window.LnurlVerifyWallet.pay({ projectId: this.projectId, network, networks })) || 'the wallet reported no reference';
+                    this.sent = { key, ref };
                 } catch (e) {
                     if (this.token.pmi === pmi) this.walletError = e && e.message ? e.message : String(e);
                 } finally {
@@ -116,7 +118,7 @@
                 }
             },
             async pick (n) {
-                this.sent = null; this.walletError = null;
+                this.walletError = null;
                 this.selected = n.id;
                 if (n.state === 'unrequested') await this.request(n.id);
             }
