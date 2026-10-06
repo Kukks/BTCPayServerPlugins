@@ -22,14 +22,17 @@ public static class LnurlRailRequester
         var pay = await Get(http, payEndpoint, "the LNURL could not be read", ct);
         var offered = PaymentOption.Parse(pay).Where(o => o.Type.Equals(rail.OptionType, StringComparison.OrdinalIgnoreCase)).ToList();
         if (offered.Count == 0) throw Unavailable($"the LNURL does not offer '{rail.OptionType}'");
-        // Ids are unique but types are not: try options declared verifiable, then ones that do not say, so no sibling gets the rail refused for a day.
+        long Min(PaymentOption o) => o.MinSendable ?? pay["minSendable"]?.Value<long>() ?? 1;
+        long Max(PaymentOption o) => o.MaxSendable ?? pay["maxSendable"]?.Value<long>() ?? long.MaxValue;
+        // Ids are unique but types are not: of the options declared verifiable, then those that do not say, take one that can
+        // be paid this amount now, so no sibling gets the rail refused (or remembered as unverifiable) in its place.
         var verifiable = offered.Where(o => o.Verifiable == true).Concat(offered.Where(o => o.Verifiable is null)).ToList();
-        var option = (verifiable.Count > 0 ? verifiable : offered).FirstOrDefault(o => o.Available)
+        var pool = verifiable.Count > 0 ? verifiable : offered;
+        var option = pool.FirstOrDefault(o => o.Available && amountMsat >= Min(o) && amountMsat <= Max(o)) ?? pool.FirstOrDefault(o => o.Available)
                      ?? throw Unavailable($"the LNURL reports '{rail.OptionType}' as currently unavailable");
         if (option.Verifiable == false)
             throw new UnverifiableRailException($"settlement cannot be detected: the LNURL marks '{rail.OptionType}' as not verifiable");
-        var min = option.MinSendable ?? pay["minSendable"]?.Value<long>() ?? 1;
-        var max = option.MaxSendable ?? pay["maxSendable"]?.Value<long>() ?? long.MaxValue;
+        var (min, max) = (Min(option), Max(option));
         if (amountMsat < min || amountMsat > max)
             throw Unavailable($"{amountMsat} msat is outside the '{option.Id}' bounds ({min}-{max} msat)");
         var callback = Str(pay["callback"]) ?? throw Unavailable("the LNURL has no callback");

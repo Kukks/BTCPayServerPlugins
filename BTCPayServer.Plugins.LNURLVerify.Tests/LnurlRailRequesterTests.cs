@@ -69,6 +69,14 @@ public class LnurlRailRequesterTests
     }
 
     [Fact]
+    public async Task An_option_that_takes_the_amount_wins_over_a_preferred_one_that_does_not()
+    {
+        var http = Server(PayRequest("[{\"id\":\"arkade-large\",\"type\":\"arkade\",\"verifiable\":true,\"minSendable\":100000000}," +
+                                     "{\"id\":\"arkade\",\"type\":\"arkade\"}]"), Destination());
+        Assert.Equal("arkade", (await Request(http)).OptionId);
+    }
+
+    [Fact]
     public async Task A_type_whose_verifiable_option_is_unavailable_is_refused_for_now_not_as_unverifiable()
     {
         var http = Server(PayRequest("[{\"id\":\"arkade-static\",\"type\":\"arkade\",\"verifiable\":false}," +
