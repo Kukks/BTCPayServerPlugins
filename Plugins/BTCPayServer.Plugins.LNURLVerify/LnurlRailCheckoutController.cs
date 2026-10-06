@@ -72,7 +72,7 @@ public class LnurlRailCheckoutController : Controller
         if (invoice?.GetPaymentPrompt(id) is not { } prompt) return NotFound();
         var activateAllOnOpen =
             (await _stores.GetSettingAsync<LnurlRailSettings>(invoice.StoreId, LnurlRailSettings.Key) ?? new LnurlRailSettings()).ActivateAllRailsOnOpen;
-        // Planned under the activation lock, on a fresh read: an open overlapping another open must not ask again for what it just quoted.
+        // Re-reads the invoice: the prompt above was read before the activation lock.
         async Task<IReadOnlyCollection<string>> Plan()
         {
             var fresh = (await _invoices.GetInvoice(invoiceId))?.GetPaymentPrompt(id);

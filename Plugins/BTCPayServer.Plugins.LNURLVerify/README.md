@@ -77,12 +77,13 @@ LNURL quotes the token amount and settles it through `verify`, as for the Bitcoi
   - for Tron, the QR is the recipient, with the amount below it.
 
   With a WalletConnect project ID set in Server settings → LNURL Verify, "Connect wallet" pays from a wallet over WalletConnect.
-  "Connect wallet" contacts Reown (its relay and API, plus a few mandatory telemetry events; AppKit's optional
-  analytics are off) only after the payer presses it.
+  "Connect wallet" contacts Reown only once the payer presses it: its relay and API, plus some telemetry that carries the
+  checkout URL (and with it the invoice id). AppKit's optional analytics are off.
 - **Quotes:** a network is requested from the LNURL when the tab opens, or on a tap when "Request every rail when the
   checkout opens" is off. An expired quote hides its QR until the payer asks for a new one. A partial payment re-issues
-  every quoted network for the remainder. A network the LNURL refuses stays hidden for the rest of that invoice; one whose
-  request fails, or that does not answer in time, stays offered and can be tried again.
+  every quoted network for the remainder. A network the LNURL refuses outright stays hidden for the rest of that invoice;
+  one whose request fails, that the LNURL marks unavailable, or that does not answer in time, stays offered and can be
+  tried again.
 - **Settlement:** recorded from `verify` at the BTC amount agreed for the destination. The payments list shows the network and
   links the transaction.
 

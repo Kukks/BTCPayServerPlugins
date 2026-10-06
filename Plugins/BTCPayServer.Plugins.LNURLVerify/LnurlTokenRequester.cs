@@ -18,7 +18,8 @@ public static class LnurlTokenRequester
     public static async Task<TokenQuote> Request(HttpClient http, JObject payRequest, TokenOption option, long amountMsat,
         DateTimeOffset invoiceExpiry, DateTimeOffset now, CancellationToken ct)
     {
-        if (!option.Available) throw Unavailable($"the LNURL reports '{option.Id}' as currently unavailable");
+        // available:false means down right now, not withdrawn, so the network stays on offer instead of being refused for the invoice.
+        if (!option.Available) throw new TransientRailException($"the LNURL reports '{option.Id}' as currently unavailable");
         if (option.Verifiable == false)
             throw new UnverifiableRailException($"settlement cannot be detected: the LNURL marks '{option.Id}' as not verifiable");
         var min = option.MinSendable ?? payRequest["minSendable"]?.Value<long>() ?? 1;
@@ -28,7 +29,7 @@ public static class LnurlTokenRequester
         var callback = LnurlRailRequester.Str(payRequest["callback"]) ?? throw Unavailable("the LNURL has no callback");
 
         var callbackUri = LNURLReceiver.CallbackUri(callback, amountMsat, option.Id, null);
-        var answer = await LnurlRailRequester.Get(http, callbackUri, "the LNURL refused the request", ct);
+        var answer = await LnurlRailRequester.Get(http, callbackUri, "the LNURL request failed", ct);
         if (LnurlRailRequester.Str(answer["paymentOption"]) is { } echoed && echoed != option.Id)
             throw Unavailable($"the LNURL answered for '{echoed}' instead of '{option.Id}'");
         var destination = LnurlRailRequester.Str(answer["paymentDestination"]) ?? throw Unavailable("the LNURL returned no destination");

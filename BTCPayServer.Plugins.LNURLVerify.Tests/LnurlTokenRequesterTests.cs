@@ -156,10 +156,10 @@ public class LnurlTokenRequesterTests
     }
 
     [Fact]
-    public async Task An_unavailable_network_is_refused_without_a_callback()
+    public async Task An_unavailable_network_fails_without_a_callback()
     {
         var http = Serving(Answer());
-        await Assert.ThrowsAsync<PaymentMethodUnavailableException>(() => Request(Answer(), Pay(",\"available\":false"), http: http));
+        await Assert.ThrowsAsync<TransientRailException>(() => Request(Answer(), Pay(",\"available\":false"), http: http));
         Assert.Empty(http.Requests);
     }
 }

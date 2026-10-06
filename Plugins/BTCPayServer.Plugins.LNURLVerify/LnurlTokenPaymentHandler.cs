@@ -66,7 +66,7 @@ public class LnurlTokenPaymentHandler : ILnurlRailHandler
     public PaymentMethodId PaymentMethodId { get; }
     public string Label => Code;
     public JsonSerializer Serializer { get; } = BlobSerializer.CreateSerializer().Serializer;
-    // Per network request: a slow network is refused alone instead of costing the others their quotes.
+    // Per network request: a slow network fails alone instead of costing the others their quotes.
     internal TimeSpan RequestTimeout { get; init; } = TimeSpan.FromSeconds(20);
 
     public Task BeforeFetchingRates(PaymentMethodContext context)

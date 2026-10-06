@@ -241,6 +241,58 @@ public class LnurlTokenPaymentHandlerTests
     }
 
     [Fact]
+    public async Task A_held_quote_survives_a_failed_reissue_and_is_superseded_by_the_next_one()
+    {
+        var lnurl = new Lnurl();
+        var invoice = lnurl.Invoice();
+        await lnurl.Activate(invoice, "usdt-arbitrum");
+#pragma warning disable CS0618
+        invoice.Payments = new List<PaymentEntity> { new() { Currency = "BTC", Value = 0.00008m, Status = PaymentStatus.Settled } };
+#pragma warning restore CS0618
+        invoice.UpdateTotals();
+
+        lnurl.Failing = "usdt-arbitrum";
+        var ctx = await lnurl.Activate(invoice);
+        const string held = "0x0000000000000000000000000000000000000001";
+        var details = lnurl.Details(invoice);
+        Assert.Equal((held, 20_000_000L), (details.Networks[0].Quote!.Destination, details.Networks[0].Quote!.AmountMsat));
+        Assert.NotNull(details.Networks[0].FailedAt);
+        Assert.False(details.Networks[0].Refused);
+        Assert.Empty(details.Superseded);
+        Assert.Equal(held, ctx.Prompt.Destination);
+        Assert.Contains(lnurl.Handler.Tracked(invoice, invoice.GetPaymentPrompt(Usdt)!), d => d.Destination == held);
+        Assert.True(lnurl.Handler.NeedsReissue(invoice.GetPaymentPrompt(Usdt)!));
+
+        lnurl.Failing = null;
+        await lnurl.Activate(invoice);
+        var after = lnurl.Details(invoice);
+        Assert.Equal(("7603200", 12_000_000L), (after.Networks[0].Quote!.Amount, after.Networks[0].Quote!.AmountMsat));
+        Assert.Equal((held, 20_000_000L), (Assert.Single(after.Superseded).Destination, after.Superseded[0].AmountMsat));
+        Assert.Null(after.Networks[0].FailedAt);
+        Assert.False(lnurl.Handler.NeedsReissue(invoice.GetPaymentPrompt(Usdt)!));
+    }
+
+    [Fact]
+    public async Task A_network_marked_unavailable_stays_offered_and_is_not_asked_for_a_quote()
+    {
+        var lnurl = new Lnurl();
+        var url = $"https://{lnurl.Host}/.well-known/lnurlp/alice";
+        var pay = JObject.Parse(lnurl.Http.Routes[url].Body);
+        pay["paymentOptions"]![0]!["available"] = false;
+        lnurl.Http.Routes[url] = (HttpStatusCode.OK, pay.ToString());
+        var invoice = lnurl.Invoice();
+
+        await lnurl.Activate(invoice, "usdt-arbitrum", "usdt-solana");
+
+        var networks = lnurl.Details(invoice).Networks;
+        Assert.False(networks[0].Refused);
+        Assert.NotNull(networks[0].FailedAt);
+        Assert.Null(networks[0].Quote);
+        Assert.Equal(Solana[0], networks[1].Quote!.Destination);
+        Assert.Equal(0, lnurl.CallsTo("usdt-arbitrum"));
+    }
+
+    [Fact]
     public async Task A_network_the_lnurl_stops_offering_stays_tracked()
     {
         var lnurl = new Lnurl();
