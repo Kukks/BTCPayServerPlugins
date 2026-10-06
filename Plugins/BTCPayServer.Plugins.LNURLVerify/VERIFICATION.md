@@ -15,7 +15,7 @@ save/restore (against a fake settings store), paymentOptions selection, verifyBa
 414 halving, unsupported fallback, backoff), the GetInvoice cache, a self-signed BOLT11 pinning the
 payment-hash byte order, the rail table and BIP321 merging, rail destination requests and their refusals,
 destination polling through verifyBatch, provisioning rules, the rail payment-method handler, activation
-planning, and the checkout re-skin, CAIP-19 parsing and the per-namespace URIs, token options and their provisioning, token quotes and their refusals, the token payment method (per-network quotes, expiry, re-issue), token activation planning and the asset tab's model.
+planning, the checkout re-skin, CAIP-19 parsing and the per-namespace URIs, token options and their provisioning, token quotes and their refusals, the token payment method (per-network quotes, expiry, re-issue), token activation planning, and the asset tab's model.
 
 ## 2. Receive integration — real BTCPay LNURL + regtest LN (ServerTester)
 

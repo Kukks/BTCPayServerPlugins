@@ -68,17 +68,18 @@ LNURL quotes the token amount and settles it through `verify`, as for the Bitcoi
   setting `LNURLVERIFY_ASSETS` (environment `BTCPAY_LNURLVERIFY_ASSETS`), default `USDT,USDC`. A change takes effect after
   a restart, because BTCPay registers payment methods at startup. Integrations → LNURL rails lists any unit the LNURL offers
   that is not configured.
-- **Networks:** one chip per advertised network. Any EVM chain works, as do Solana and Tron; network names and explorer links
-  are resolved locally from the CAIP-2 id.
-- **Checkout:** each network has a QR and an "Open in wallet" link:
+- **Networks:** one chip per advertised network. Any EVM chain works, as do Solana and Tron. Network names and explorer links
+  come from a built-in list of chains; an unlisted chain shows its CAIP-2 id and no explorer link.
+- **Checkout:** each network has a QR; EVM and Solana networks also have an "Open in wallet" link:
   - EIP-681 for EVM;
   - Solana Pay for Solana;
-  - for Tron, the QR is the recipient, with the amount beside it.
+  - for Tron, the QR is the recipient, with the amount below it.
 
   With a WalletConnect project ID set in Server settings → LNURL Verify, "Connect wallet" pays from a wallet over WalletConnect.
 - **Quotes:** a network is requested from the LNURL when the tab opens, or on a tap when "Request every rail when the
-  checkout opens" is off. An expired quote hides its QR until the payer asks for a new one. A partial payment re-issues every
-  quoted network for the remainder. A network the LNURL refuses, or that does not answer in time, stays hidden for the rest of that invoice.
+  checkout opens" is off. An expired quote hides its QR until the payer asks for a new one. A partial payment re-issues
+  every quoted network for the remainder. A network the LNURL refuses, or that does not answer in time,
+  stays hidden for the rest of that invoice.
 - **Settlement:** recorded from `verify` at the BTC amount agreed for the destination. The payments list shows the network and
   links the transaction.
 
@@ -109,8 +110,8 @@ LNURL quotes the token amount and settles it through `verify`, as for the Bitcoi
 - **Do not uninstall the plugin, or downgrade it below 1.2.0, once invoices with LNURL rails exist.** BTCPay's checkout page
   needs the plugin's payment-method handler for every rail on an invoice, so without it the checkout page of every such
   invoice fails, whether it is open, paid or expired.
-- **Do not remove a code from `LNURLVERIFY_ASSETS`, or uninstall the plugin, while invoices with that token's prompt are open.**
-  As with rails, their checkout pages need the payment method's handler.
+- **Do not remove a code from `LNURLVERIFY_ASSETS`, or uninstall the plugin, once invoices with that token's prompt exist.**
+  As with rails, the checkout page of every such invoice, open, paid or expired, needs the payment method's handler.
 - **Connect wallet on Solana sends classic SPL Token transfers,** so it does not pay Token-2022 mints.
 - **The merged QR's amount is the on-chain due** when on-chain is active, which can include a network-fee component; an Arkade
   payer scanning the merged QR may overpay by it. Each rail's own chip carries its exact amount.
