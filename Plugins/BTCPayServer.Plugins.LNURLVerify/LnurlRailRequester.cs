@@ -22,8 +22,8 @@ public static class LnurlRailRequester
         var pay = await Get(http, payEndpoint, "the LNURL could not be read", ct);
         var offered = PaymentOption.Parse(pay).Where(o => o.Type.Equals(rail.OptionType, StringComparison.OrdinalIgnoreCase)).ToList();
         if (offered.Count == 0) throw Unavailable($"the LNURL does not offer '{rail.OptionType}'");
-        // Ids are unique but types are not: an unverifiable sibling must not get a verifiable option's rail refused for a day.
-        var verifiable = offered.Where(o => o.Verifiable != false).ToList();
+        // Ids are unique but types are not: try options declared verifiable, then ones that do not say, so no sibling gets the rail refused for a day.
+        var verifiable = offered.Where(o => o.Verifiable == true).Concat(offered.Where(o => o.Verifiable is null)).ToList();
         var option = (verifiable.Count > 0 ? verifiable : offered).FirstOrDefault(o => o.Available)
                      ?? throw Unavailable($"the LNURL reports '{rail.OptionType}' as currently unavailable");
         if (option.Verifiable == false)

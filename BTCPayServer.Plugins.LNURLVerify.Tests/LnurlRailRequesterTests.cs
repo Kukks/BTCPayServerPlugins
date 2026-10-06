@@ -61,6 +61,14 @@ public class LnurlRailRequesterTests
     }
 
     [Fact]
+    public async Task An_option_declared_verifiable_is_preferred_over_one_that_does_not_say()
+    {
+        var http = Server(PayRequest("[{\"id\":\"arkade-static\",\"type\":\"arkade\"}," +
+                                     "{\"id\":\"arkade\",\"type\":\"arkade\",\"verifiable\":true}]"), Destination());
+        Assert.Equal("arkade", (await Request(http)).OptionId);
+    }
+
+    [Fact]
     public async Task A_type_whose_verifiable_option_is_unavailable_is_refused_for_now_not_as_unverifiable()
     {
         var http = Server(PayRequest("[{\"id\":\"arkade-static\",\"type\":\"arkade\",\"verifiable\":false}," +
