@@ -68,6 +68,8 @@
             sentRef () {
                 if (!this.current) return null;
                 const key = this.token.pmi + '/' + this.current.id;
+                // sessionStorage is not reactive: re-read each tick, so a transfer an earlier mount was still awaiting shows up.
+                void this.now;
                 return this.sent && this.sent.key === key ? this.sent.ref : this.storedRef(key);
             },
             sentHere () { return !!this.sentRef; },
