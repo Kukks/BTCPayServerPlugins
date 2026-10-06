@@ -6,6 +6,7 @@ using BTCPayServer.Abstractions.Services;
 using BTCPayServer.Lightning;
 using BTCPayServer.Logging;
 using BTCPayServer.Payments;
+using BTCPayServer.Services.Invoices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -49,7 +50,10 @@ public class LNURLVerifyPlugin : BaseBTCPayServerPlugin
             services.AddSingleton<IPaymentMethodHandler>(sp => new LnurlTokenPaymentHandler(c, sp.GetRequiredService<IHttpClientFactory>(),
                 sp.GetRequiredService<BTCPayNetworkProvider>().BTC.NBitcoinNetwork, sp.GetRequiredService<TokenActivations>()));
             services.AddDefaultPrettyName(TokenAssets.PaymentMethodIdOf(c), c);
+            services.AddSingleton<ICheckoutModelExtension>(sp => new LnurlTokenCheckoutExtension(TokenAssets.PaymentMethodIdOf(c),
+                sp.GetRequiredService<PaymentMethodHandlerDictionary>(), sp.GetRequiredService<ILogger<LnurlTokenCheckoutExtension>>()));
         }
+        services.AddUIExtension("checkout-end", "LNURLVerify/LnurlTokenCheckout");
         services.AddHostedService<LnurlRailRecorder>();
         services.AddHostedService<LnurlRailProvisioner>();
         services.AddSingleton<RailActivationFailures>();

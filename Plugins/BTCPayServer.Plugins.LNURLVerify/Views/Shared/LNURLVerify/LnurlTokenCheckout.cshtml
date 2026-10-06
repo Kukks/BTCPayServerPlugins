@@ -1,0 +1,82 @@
+@using BTCPayServer.Plugins.LNURLVerify
+@model BTCPayServer.Models.InvoicingModels.CheckoutModel
+
+<template id="@LnurlTokenCheckoutExtension.ComponentName">
+    <div class="payment-box">
+        <div v-if="networks.length" class="btcpay-pills d-flex flex-wrap justify-content-center gap-2 mb-3" id="LnurlTokenNetworks">
+            <button v-for="n in networks" :key="n.id" type="button" class="btcpay-pill" :class="{ active: current && current.id === n.id }"
+                    :disabled="busy === n.id" :data-network="n.id" v-on:click="pick(n)" v-text="n.label"></button>
+        </div>
+        <p v-else class="text-center my-4" id="LnurlTokenNone">No network is available for this payment right now.</p>
+        <template v-if="live">
+            <div class="qr-container" :data-qr-value="current.qr" :data-clipboard="current.qr">
+                <div>
+                    <qrcode :value="current.qr" tag="div" :options="qrOptions" />
+                </div>
+            </div>
+            <p class="text-center mt-3 mb-0" id="LnurlTokenAmount" v-text="summary"></p>
+            <p v-if="secondsLeft !== null" class="text-center text-muted small" id="LnurlTokenExpiry" v-text="'Quote valid for ' + countdown"></p>
+            <div class="input-group mt-3">
+                <div class="form-floating" id="LnurlTokenRecipient">
+                    <vc:truncate-center text="current.destination" is-vue="true" padding="15" elastic="true" classes="form-control-plaintext" />
+                    <label>Recipient</label>
+                </div>
+            </div>
+            <a v-if="current.uri" class="btn btn-primary rounded-pill w-100 mt-4" id="LnurlTokenOpenWallet" target="_blank" :href="current.uri">Open in wallet</a>
+        </template>
+        <div v-else-if="expired" class="text-center my-4">
+            <button type="button" class="btn btn-secondary" id="LnurlTokenRefresh" :disabled="busy === current.id"
+                    v-on:click="request(current.id)">Quote expired: get a new one</button>
+        </div>
+        <div v-else-if="current" class="text-center my-4"><span class="spinner-border" role="status"></span></div>
+        <p v-else-if="networks.length" class="text-center my-4" id="LnurlTokenChoose">Choose a network</p>
+    </div>
+</template>
+
+<script>
+    Vue.component(@Safe.Json(LnurlTokenCheckoutExtension.ComponentName), {
+        props: ['model'],
+        template: @Safe.Json("#" + LnurlTokenCheckoutExtension.ComponentName),
+        components: { qrcode: VueQrcode },
+        data () {
+            return {
+                selected: null, busy: null, now: Math.floor(Date.now() / 1000), timer: null,
+                activateUrl: @Safe.Json(Url.Action("ActivateToken", "LnurlRailCheckout", new { invoiceId = Model.InvoiceId }))
+            };
+        },
+        computed: {
+            token () { return this.model.lnurlToken || { networks: [] }; },
+            networks () { return this.token.networks; },
+            current () { return this.networks.find(n => n.id === this.selected) || (this.networks.length === 1 ? this.networks[0] : null); },
+            secondsLeft () { return this.current && this.current.expiresAt ? Math.max(0, this.current.expiresAt - this.now) : null; },
+            live () { return !!this.current && this.current.state === 'live' && this.secondsLeft !== 0; },
+            expired () { return !!this.current && (this.current.state === 'expired' || (this.current.state === 'live' && this.secondsLeft === 0)); },
+            countdown () { return Math.floor(this.secondsLeft / 60) + ':' + String(this.secondsLeft % 60).padStart(2, '0'); },
+            summary () { return this.current.amount + ' ' + this.token.code + ' on ' + this.current.label; }
+        },
+        watch: {
+            'token.pmi' () { this.selected = null; this.request(null); }
+        },
+        mounted () {
+            this.timer = setInterval(() => { this.now = Math.floor(Date.now() / 1000); }, 1000);
+            this.request(null);
+        },
+        beforeDestroy () { clearInterval(this.timer); },
+        methods: {
+            async request (network) {
+                if (!this.token.pmi) return;
+                this.busy = network;
+                try {
+                    const query = '?pmi=' + encodeURIComponent(this.token.pmi) + (network ? '&network=' + encodeURIComponent(network) : '');
+                    await fetch(this.activateUrl + query, { method: 'POST' });
+                } catch (e) { }
+                await this.$root.fetchData();
+                this.busy = null;
+            },
+            async pick (n) {
+                this.selected = n.id;
+                if (n.state === 'unrequested') await this.request(n.id);
+            }
+        }
+    });
+</script>
