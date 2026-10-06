@@ -162,11 +162,7 @@ public class LnurlRailRecorder : EventHostedServiceBase
                 EventAggregator.Publish(new InvoiceNeedUpdateEvent(invoice.Id));
                 return;
             }
-            var data = new PaymentData
-            {
-                Id = id, Created = DateTimeOffset.UtcNow, Status = PaymentStatus.Settled, Currency = "BTC",
-                Amount = LnurlRailPaymentHandler.AmountBtc(d.AmountMsat)
-            }.Set(invoice, handler, new LnurlRailPaymentData { PaymentReference = reference, VerifyUrl = d.VerifyUrl, Destination = d.Destination, Asset = d.Asset });
+            var data = Payment(invoice, handler, d, reference);
             if (await _payments.AddPayment(data) is not { } payment)
             {
                 // null is a duplicate or a failed insert, and Apply already untracked the destination; retrying is idempotent.
@@ -203,6 +199,21 @@ public class LnurlRailRecorder : EventHostedServiceBase
 
     private static bool IsPartial(InvoiceState state) =>
         state.Status == InvoiceStatus.New && state.ExceptionStatus == InvoiceExceptionStatus.PaidPartial;
+
+    internal static PaymentData Payment(InvoiceEntity invoice, IPaymentMethodHandler handler, TrackedDestination d, string reference)
+    {
+        var data = new PaymentData
+        {
+            Id = PaymentId(reference, d.VerifyUrl), Created = DateTimeOffset.UtcNow, Status = PaymentStatus.Settled, Currency = "BTC",
+            Amount = LnurlRailPaymentHandler.AmountBtc(d.AmountMsat)
+        }.Set(invoice, handler, new LnurlRailPaymentData { PaymentReference = reference, VerifyUrl = d.VerifyUrl, Destination = d.Destination, Asset = d.Asset });
+        // Set stamps the prompt's destination, which on a token prompt is the last network requested; Greenfield,
+        // the payment webhooks and the receipt all report this blob.
+        var blob = data.GetBlob();
+        blob.Destination = d.Destination;
+        data.SetBlob(blob);
+        return data;
+    }
 
     /// <summary>Payments are keyed (Id, PaymentMethodId) across every invoice, and one Ark transaction can pay two destinations.</summary>
     public static string PaymentId(string reference, string verifyUrl) =>

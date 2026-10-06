@@ -52,6 +52,9 @@ public class TokenCheckoutBrowserTests : UnitTestBase
         var client = await user.CreateClient();
         await TestUtils.EventuallyAsync(async () =>
             Assert.Equal(InvoiceStatus.Settled, (await client.GetInvoice(invoiceId)).Status), 60_000);
+        // The prompt's destination is Tron here, the last network the payer opened.
+        var paid = Assert.Single((await client.GetInvoicePaymentMethods(invoiceId)).SelectMany(m => m.Payments));
+        Assert.Equal(StubLnurl.EvmRecipient, paid.Destination);
 
         await page.GotoAsync(new Uri(tester.PayTester.ServerUri, "login").AbsoluteUri);
         await page.FillAsync("#Email", user.RegisterDetails.Email);
