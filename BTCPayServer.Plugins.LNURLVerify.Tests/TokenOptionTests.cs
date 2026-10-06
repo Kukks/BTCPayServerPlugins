@@ -6,6 +6,8 @@ namespace BTCPayServer.Plugins.LNURLVerify.Tests;
 public class TokenOptionTests
 {
     const string Arbitrum = "{\"id\":\"usdt-arbitrum\",\"type\":\"eip155\",\"asset\":\"eip155:42161/erc20:0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9\",\"unit\":\"USDT\"}";
+    const string SameId = "{\"id\":\"usdt-arbitrum\",\"type\":\"eip155\",\"asset\":\"eip155:8453/erc20:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913\",\"unit\":\"USDT\"}";
+    const string UpperId = "{\"id\":\"USDT-ARBITRUM\",\"type\":\"eip155\",\"asset\":\"eip155:42161/erc20:0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9\",\"unit\":\"USDT\"}";
 
     static JObject Pay(string options, string units = "[{\"code\":\"USDT\",\"decimals\":6,\"name\":\"Tether USD\"}]") =>
         JObject.Parse("{\"units\":" + units + ",\"paymentOptions\":[" + options + "]}");
@@ -34,6 +36,14 @@ public class TokenOptionTests
                                              "{\"code\":\"DAI\",\"decimals\":37},{\"code\":\"usdc\",\"decimals\":6,\"name\":\"\"},{\"code\":\"BIG\",\"decimals\":99999999999999999999}]"));
         Assert.Equal(new[] { "USDC", "USDT" }, units.Values.Select(u => u.Code).OrderBy(c => c));
         Assert.Null(units["USDC"].Name);
+    }
+
+    [Fact]
+    public void Every_option_sharing_an_id_is_dropped()
+    {
+        Assert.Empty(TokenOption.Parse(Pay(Arbitrum + "," + SameId)));
+        Assert.Empty(TokenOption.Parse(Pay(Arbitrum + ",{\"id\":\"usdt-arbitrum\",\"type\":\"lightning\"}")));
+        Assert.Equal(new[] { "USDT-ARBITRUM" }, TokenOption.Parse(Pay(Arbitrum + "," + SameId + "," + UpperId)).Select(o => o.Id));
     }
 
     [Fact]

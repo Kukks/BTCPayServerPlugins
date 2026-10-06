@@ -19,11 +19,16 @@ public sealed record TokenOption(string Id, CaipAsset Asset, TokenUnit Unit, boo
     public static IReadOnlyList<TokenOption> Parse(JObject payRequest)
     {
         var units = Units(payRequest);
+        var offered = PaymentOption.Parse(payRequest);
+        // The handler keys its state by id and the callback asks by id, so two options under one id would pair
+        // one network's token with the other's quote and verify URL.
+        var shared = offered.GroupBy(o => o.Id, StringComparer.Ordinal).Where(g => g.Count() > 1).Select(g => g.Key)
+            .ToHashSet(StringComparer.Ordinal);
         var options = new List<TokenOption>();
-        foreach (var o in PaymentOption.Parse(payRequest))
+        foreach (var o in offered)
         {
-            if (CaipAsset.Parse(o.Asset) is not { } asset || asset.Namespace != o.Type || TokenNamespaces.For(asset) is null ||
-                o.Unit is null || !units.TryGetValue(o.Unit, out var unit))
+            if (shared.Contains(o.Id) || CaipAsset.Parse(o.Asset) is not { } asset || asset.Namespace != o.Type ||
+                TokenNamespaces.For(asset) is null || o.Unit is null || !units.TryGetValue(o.Unit, out var unit))
                 continue;
             options.Add(new TokenOption(o.Id, asset, unit, o.Available, o.MinSendable, o.MaxSendable, o.Verifiable));
         }
