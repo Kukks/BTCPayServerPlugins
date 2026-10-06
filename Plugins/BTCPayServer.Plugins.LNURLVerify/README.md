@@ -70,7 +70,8 @@ LNURL quotes the token amount and settles it through `verify`, as for the Bitcoi
   that is not configured.
 - **Networks:** one chip per advertised network. Any EVM chain works, as do Solana and Tron. Network names and explorer links
   come from a built-in list of chains; an unlisted chain shows its CAIP-2 id and no explorer link.
-- **Checkout:** each network has a QR; EVM and Solana networks also have an "Open in wallet" link:
+- **Checkout:** each network has a QR; EVM and Solana networks also have an "Open in wallet" link, which follows the store's
+  "Pay in wallet" button setting (Checkout Appearance):
   - EIP-681 for EVM;
   - Solana Pay for Solana;
   - for Tron, the QR is the recipient, with the amount below it.
