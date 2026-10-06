@@ -34,8 +34,10 @@ public class LnurlTokenPaymentHandlerTests
         public readonly long QuoteExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeSeconds();
         public string? WithoutVerify;
         public string? Failing;
+        // A callback answers after its option's delay if the request is still alive; Timeout.InfiniteTimeSpan never answers.
+        public readonly Dictionary<string, TimeSpan> Delays = new();
 
-        public Lnurl(bool withBase = false, bool sameRecipient = false, bool usdt = true)
+        public Lnurl(bool withBase = false, bool sameRecipient = false, bool usdt = true, TimeSpan? requestTimeout = null)
         {
             var callback = $"https://{Host}/cb";
             var options = new JArray
@@ -52,12 +54,13 @@ public class LnurlTokenPaymentHandlerTests
                 ["paymentOptions"] = options
             };
             Http.Map($"https://{Host}/.well-known/lnurlp/alice", pay.ToString())
-                .When(r => r.RequestUri!.ToString().StartsWith(callback + "?"), r =>
+                .WhenAsync(r => r.RequestUri!.ToString().StartsWith(callback + "?"), async (r, ct) =>
                 {
                     var query = HttpUtility.ParseQueryString(r.RequestUri!.Query);
                     var option = query["paymentOption"]!;
                     int n;
                     lock (Calls) n = Calls[option] = Calls.GetValueOrDefault(option) + 1;
+                    if (Delays.TryGetValue(option, out var delay)) await Task.Delay(delay, ct);
                     if (option == Failing) return (HttpStatusCode.InternalServerError, "{}");
                     var answer = new JObject
                     {
@@ -72,7 +75,8 @@ public class LnurlTokenPaymentHandlerTests
                     if (option == WithoutVerify) answer.Remove("verify");
                     return (HttpStatusCode.OK, answer.ToString());
                 });
-            Handler = new LnurlTokenPaymentHandler("USDT", new FakeHttpClientFactory(Http), Network.RegTest, Activations);
+            Handler = new LnurlTokenPaymentHandler("USDT", new FakeHttpClientFactory(Http), Network.RegTest, Activations)
+                { RequestTimeout = requestTimeout ?? TimeSpan.FromSeconds(20) };
             Store.SetPaymentMethodConfig(PaymentMethodId.Parse("BTC-LN"), new JObject { ["connectionString"] = $"type=lnurl;value=alice@{Host}" });
             Store.SetPaymentMethodConfig(Usdt, new JObject());
         }
@@ -282,6 +286,26 @@ public class LnurlTokenPaymentHandlerTests
         Assert.True(arbitrum.Refused);
         Assert.Null(arbitrum.Quote);
         Assert.Equal(1, lnurl.CallsTo("usdt-arbitrum"));
+    }
+
+    [Fact]
+    public async Task A_network_that_does_not_answer_in_time_is_refused_alone()
+    {
+        var budget = TimeSpan.FromSeconds(2);
+        var lnurl = new Lnurl(requestTimeout: budget);
+        lnurl.Delays["usdt-arbitrum"] = budget * 0.6;
+        lnurl.Delays["usdt-solana"] = budget * 0.6;
+        lnurl.Delays["usdt-tron"] = Timeout.InfiniteTimeSpan;
+        var invoice = lnurl.Invoice();
+
+        var ctx = await lnurl.Activate(invoice, "usdt-arbitrum", "usdt-solana", "usdt-tron");
+
+        var networks = lnurl.Details(invoice).Networks;
+        Assert.Equal(new[] { "0x0000000000000000000000000000000000000001", Solana[0], null }, networks.Select(n => n.Quote?.Destination));
+        Assert.Equal(new[] { "0x0000000000000000000000000000000000000001", Solana[0] }, ctx.TrackedDestinations);
+        Assert.True(networks[2].Refused);
+        Assert.Contains(ctx.Logs.InvoiceLogs.ToList(),
+            l => l.Severity == InvoiceEventData.EventSeverity.Warning && l.Log.Contains("usdt-tron: the LNURL did not answer in time"));
     }
 
     [Fact]

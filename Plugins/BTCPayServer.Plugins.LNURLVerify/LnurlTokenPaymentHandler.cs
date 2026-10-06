@@ -65,6 +65,8 @@ public class LnurlTokenPaymentHandler : ILnurlRailHandler
     public PaymentMethodId PaymentMethodId { get; }
     public string Label => Code;
     public JsonSerializer Serializer { get; } = BlobSerializer.CreateSerializer().Serializer;
+    // Per network request: a slow network is refused alone instead of costing the others their quotes.
+    internal TimeSpan RequestTimeout { get; init; } = TimeSpan.FromSeconds(20);
 
     public Task BeforeFetchingRates(PaymentMethodContext context)
     {
@@ -122,7 +124,7 @@ public class LnurlTokenPaymentHandler : ILnurlRailHandler
             if (network.Refused || !(reissue || requested.Contains(option.Id))) continue;
             try
             {
-                var quote = await Request(http, pay, option, msat, lnurl, invoice.ExpirationTime, now, cts.Token);
+                var quote = await Request(http, pay, option, msat, lnurl, invoice.ExpirationTime, now);
                 if (network.Quote is { } replaced) Retire(details, replaced, network.Asset);
                 network.Quote = new TokenQuoteState
                 {
@@ -153,16 +155,21 @@ public class LnurlTokenPaymentHandler : ILnurlRailHandler
         });
 
     private async Task<TokenQuote> Request(HttpClient http, JObject pay, TokenOption option, long msat, string lnurl,
-        DateTimeOffset invoiceExpiry, DateTimeOffset now, CancellationToken ct)
+        DateTimeOffset invoiceExpiry, DateTimeOffset now)
     {
         var key = PaymentMethodId + "/" + option.Id;
         if (UnverifiableRails.Knows(lnurl, key, now))
             throw new UnverifiableRailException("settlement cannot be detected: the LNURL refused this network as unverifiable within the last day");
-        try { return await LnurlTokenRequester.Request(http, pay, option, msat, invoiceExpiry, now, ct); }
+        using var cts = new CancellationTokenSource(RequestTimeout);
+        try { return await LnurlTokenRequester.Request(http, pay, option, msat, invoiceExpiry, now, cts.Token); }
         catch (UnverifiableRailException)
         {
             UnverifiableRails.Remember(lnurl, key, now);
             throw;
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            throw new PaymentMethodUnavailableException("the LNURL did not answer in time");
         }
     }
 

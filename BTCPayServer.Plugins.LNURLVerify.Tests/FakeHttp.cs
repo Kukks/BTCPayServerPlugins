@@ -15,6 +15,7 @@ public sealed class FakeHttp : HttpMessageHandler
     public readonly ConcurrentQueue<string> Requests = new();
     public readonly ConcurrentQueue<string> AcceptHeaders = new();
     private readonly List<(Func<HttpRequestMessage, bool> Match, Func<HttpRequestMessage, (HttpStatusCode Code, string Body)> Respond)> _handlers = new();
+    private readonly List<(Func<HttpRequestMessage, bool> Match, Func<HttpRequestMessage, CancellationToken, Task<(HttpStatusCode Code, string Body)>> Respond)> _late = new();
 
     public FakeHttp Map(string url, string body, HttpStatusCode code = HttpStatusCode.OK)
     { Routes[url] = (code, body); return this; }
@@ -22,12 +23,19 @@ public sealed class FakeHttp : HttpMessageHandler
     public FakeHttp When(Func<HttpRequestMessage, bool> match, Func<HttpRequestMessage, (HttpStatusCode Code, string Body)> respond)
     { lock (_handlers) _handlers.Add((match, respond)); return this; }
 
+    /// <summary>Like <see cref="When"/>, but may answer late. A delay must honour the token, which the HttpClient cancels on its timeout.</summary>
+    public FakeHttp WhenAsync(Func<HttpRequestMessage, bool> match, Func<HttpRequestMessage, CancellationToken, Task<(HttpStatusCode Code, string Body)>> respond)
+    { lock (_late) _late.Add((match, respond)); return this; }
+
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         var url = request.RequestUri!.ToString();
         Requests.Enqueue(url);
         AcceptHeaders.Enqueue(request.Headers.Accept.ToString());
         if (Routes.TryGetValue(url, out var r)) return Respond(r);
+        lock (_late)
+            foreach (var h in _late)
+                if (h.Match(request)) return RespondLate(h.Respond(request, ct));
         lock (_handlers)
             foreach (var h in _handlers)
                 if (h.Match(request)) return Respond(h.Respond(request));
@@ -36,6 +44,8 @@ public sealed class FakeHttp : HttpMessageHandler
 
     private static Task<HttpResponseMessage> Respond((HttpStatusCode Code, string Body) r) =>
         Task.FromResult(new HttpResponseMessage(r.Code) { Content = new StringContent(r.Body) });
+
+    private static async Task<HttpResponseMessage> RespondLate(Task<(HttpStatusCode Code, string Body)> answer) => await Respond(await answer);
 
     public HttpClient Client() => new(this);
 
