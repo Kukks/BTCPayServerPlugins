@@ -53,8 +53,8 @@ public class LnurlTokenCheckoutExtension : ICheckoutModelExtension
             var state = n.Quote switch
             {
                 null => "unrequested",
-                { } q when q.AmountMsat != dueMsat => "stale",
                 { ExpiresAt: { } at } when at <= now.ToUnixTimeSeconds() => "expired",
+                { } q when q.AmountMsat != dueMsat => "stale",
                 _ => "live"
             };
             var json = new JObject

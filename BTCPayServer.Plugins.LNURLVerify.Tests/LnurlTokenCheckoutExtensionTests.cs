@@ -84,6 +84,15 @@ public class LnurlTokenCheckoutExtensionTests
     }
 
     [Fact]
+    public void A_quote_that_is_both_expired_and_for_an_amount_no_longer_due_reads_as_expired()
+    {
+        var n = OnlyNetwork(Prompt(Quoted("usdt-arbitrum", Arbitrum, EvmTo, amountMsat: 30_000_000,
+            expiresAt: DateTimeOffset.UtcNow.AddSeconds(-1).ToUnixTimeSeconds())));
+        Assert.Equal("expired", (string)n["state"]!);
+        Assert.Null(n["destination"]);
+    }
+
+    [Fact]
     public void Refused_networks_get_no_chip_and_unrequested_ones_do()
     {
         var n = OnlyNetwork(Prompt(new TokenNetworkState { OptionId = "usdt-arbitrum", Asset = Arbitrum },

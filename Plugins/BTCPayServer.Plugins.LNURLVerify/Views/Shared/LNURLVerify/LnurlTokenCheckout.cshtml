@@ -24,11 +24,11 @@
             </div>
             <a v-if="current.uri" class="btn btn-primary rounded-pill w-100 mt-4" id="LnurlTokenOpenWallet" target="_blank" :href="current.uri">Open in wallet</a>
         </template>
-        <div v-else-if="expired" class="text-center my-4">
-            <button type="button" class="btn btn-secondary" id="LnurlTokenRefresh" :disabled="busy === current.id"
-                    v-on:click="request(current.id)">Quote expired: get a new one</button>
+        <div v-else-if="renewable" class="text-center my-4">
+            <button type="button" class="btn btn-secondary" id="LnurlTokenRefresh" :disabled="busy === current.id" v-on:click="request(current.id)"
+                    v-text="current.state === 'stale' ? 'The amount due changed: get a new quote' : 'Quote expired: get a new one'"></button>
         </div>
-        <div v-else-if="current" class="text-center my-4"><span class="spinner-border" role="status"></span></div>
+        <div v-else-if="current && pending" class="text-center my-4"><span class="spinner-border" role="status"></span></div>
         <p v-else-if="networks.length" class="text-center my-4" id="LnurlTokenChoose">Choose a network</p>
     </div>
 </template>
@@ -40,7 +40,7 @@
         components: { qrcode: VueQrcode },
         data () {
             return {
-                selected: null, busy: null, now: Math.floor(Date.now() / 1000), timer: null,
+                selected: null, busy: null, pending: false, now: Math.floor(Date.now() / 1000), timer: null,
                 activateUrl: @Safe.Json(Url.Action("ActivateToken", "LnurlRailCheckout", new { invoiceId = Model.InvoiceId }))
             };
         },
@@ -51,6 +51,7 @@
             secondsLeft () { return this.current && this.current.expiresAt ? Math.max(0, this.current.expiresAt - this.now) : null; },
             live () { return !!this.current && this.current.state === 'live' && this.secondsLeft !== 0; },
             expired () { return !!this.current && (this.current.state === 'expired' || (this.current.state === 'live' && this.secondsLeft === 0)); },
+            renewable () { return this.expired || (!!this.current && this.current.state === 'stale'); },
             countdown () { return Math.floor(this.secondsLeft / 60) + ':' + String(this.secondsLeft % 60).padStart(2, '0'); },
             summary () { return this.current.amount + ' ' + this.token.code + ' on ' + this.current.label; }
         },
@@ -66,12 +67,13 @@
             async request (network) {
                 if (!this.token.pmi) return;
                 this.busy = network;
+                this.pending = true;
                 try {
                     const query = '?pmi=' + encodeURIComponent(this.token.pmi) + (network ? '&network=' + encodeURIComponent(network) : '');
                     await fetch(this.activateUrl + query, { method: 'POST' });
                 } catch (e) { }
-                await this.$root.fetchData();
-                this.busy = null;
+                try { await this.$root.fetchData(); }
+                finally { this.busy = null; this.pending = false; }
             },
             async pick (n) {
                 this.selected = n.id;
