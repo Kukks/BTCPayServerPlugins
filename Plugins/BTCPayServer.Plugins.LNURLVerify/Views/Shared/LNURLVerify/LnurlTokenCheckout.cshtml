@@ -1,5 +1,10 @@
 @using BTCPayServer.Plugins.LNURLVerify
 @model BTCPayServer.Models.InvoicingModels.CheckoutModel
+@inject BTCPayServer.Abstractions.Contracts.ISettingsRepository Settings
+@{
+    var projectId = (await Settings.GetSettingAsync<LnurlTokenServerSettings>())?.WalletConnectProjectId;
+    var walletUrl = Url.Content("~/Resources/lnurlverify/wallet.js") + "?v=" + typeof(LNURLVerifyPlugin).Assembly.GetName().Version;
+}
 
 <template id="@LnurlTokenCheckoutExtension.ComponentName">
     <div class="payment-box">
@@ -23,6 +28,10 @@
                 </div>
             </div>
             <a v-if="current.uri" class="btn btn-primary rounded-pill w-100 mt-4" id="LnurlTokenOpenWallet" target="_blank" :href="current.uri">Open in wallet</a>
+            <button v-if="walletConnect && !sent" type="button" class="btn btn-secondary rounded-pill w-100 mt-2" id="LnurlTokenConnect"
+                    :disabled="sending" v-on:click="payWithWallet">Connect wallet</button>
+            <p v-if="sent" class="text-center mt-3" id="LnurlTokenSent">Sent, waiting for confirmation: <code v-text="sent"></code></p>
+            <p v-if="walletError" class="text-center text-danger mt-3" id="LnurlTokenWalletError" v-text="walletError"></p>
         </template>
         <div v-else-if="renewable" class="text-center my-4">
             <button type="button" class="btn btn-secondary" id="LnurlTokenRefresh" :disabled="busy === current.id" v-on:click="request(current.id)"
@@ -41,6 +50,8 @@
         data () {
             return {
                 selected: null, busy: null, pending: false, now: Math.floor(Date.now() / 1000), timer: null,
+                projectId: @Safe.Json(projectId), walletUrl: @Safe.Json(walletUrl), walletNamespaces: ['eip155', 'solana', 'tron'],
+                sending: false, sent: null, walletError: null,
                 activateUrl: @Safe.Json(Url.Action("ActivateToken", "LnurlRailCheckout", new { invoiceId = Model.InvoiceId }))
             };
         },
@@ -53,10 +64,11 @@
             expired () { return !!this.current && (this.current.state === 'expired' || (this.current.state === 'live' && this.secondsLeft === 0)); },
             renewable () { return this.expired || (!!this.current && this.current.state === 'stale'); },
             countdown () { return Math.floor(this.secondsLeft / 60) + ':' + String(this.secondsLeft % 60).padStart(2, '0'); },
+            walletConnect () { return !!this.projectId && this.walletNamespaces.includes(this.current.namespace); },
             summary () { return this.current.amount + ' ' + this.token.code + ' on ' + this.current.label; }
         },
         watch: {
-            'token.pmi' () { this.selected = null; this.request(null); }
+            'token.pmi' () { this.selected = null; this.sent = null; this.walletError = null; this.request(null); }
         },
         mounted () {
             this.timer = setInterval(() => { this.now = Math.floor(Date.now() / 1000); }, 1000);
@@ -75,7 +87,35 @@
                 try { await this.$root.fetchData(); }
                 finally { this.busy = null; this.pending = false; }
             },
+            loadWallet () {
+                if (window.LnurlVerifyWallet) return Promise.resolve();
+                return new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = this.walletUrl;
+                    script.onload = resolve;
+                    script.onerror = () => reject(new Error('The wallet module could not be loaded'));
+                    document.head.appendChild(script);
+                });
+            },
+            async payWithWallet () {
+                this.sending = true;
+                this.walletError = null;
+                try {
+                    await this.loadWallet();
+                    const withDecimals = n => Object.assign({}, n, { decimals: this.token.decimals });
+                    this.sent = await window.LnurlVerifyWallet.pay({
+                        projectId: this.projectId,
+                        network: withDecimals(this.current),
+                        networks: this.networks.filter(n => this.walletNamespaces.includes(n.namespace)).map(withDecimals)
+                    });
+                } catch (e) {
+                    this.walletError = e && e.message ? e.message : String(e);
+                } finally {
+                    this.sending = false;
+                }
+            },
             async pick (n) {
+                this.sent = null; this.walletError = null;
                 this.selected = n.id;
                 if (n.state === 'unrequested') await this.request(n.id);
             }
