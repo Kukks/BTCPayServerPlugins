@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Newtonsoft.Json.Linq;
 
 namespace BTCPayServer.Plugins.LNURLVerify;
@@ -33,14 +34,11 @@ public sealed record PaymentOption(string Id, string Type, bool Available, long?
     {
         var min = payRequest["minSendable"]?.Value<long>() ?? defaultMin;
         var max = payRequest["maxSendable"]?.Value<long>() ?? defaultMax;
-        foreach (var o in Parse(payRequest))
-        {
-            if (!o.Type.Equals("lightning", StringComparison.OrdinalIgnoreCase)) continue;
-            if (!o.Available)
-                throw new NotSupportedException("The LNURL service reports Lightning as currently unavailable.");
-            return (o.MinSendable ?? min, o.MaxSendable ?? max, o.Id);
-        }
-        return (min, max, null);
+        var lightning = Parse(payRequest).Where(o => o.Type.Equals("lightning", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (lightning.Count == 0) return (min, max, null);
+        var option = lightning.FirstOrDefault(o => o.Available)
+                     ?? throw new NotSupportedException("The LNURL service reports Lightning as currently unavailable.");
+        return (option.MinSendable ?? min, option.MaxSendable ?? max, option.Id);
     }
 
     private static string? Str(JToken? t) => t?.Type == JTokenType.String ? t.Value<string>() : null;

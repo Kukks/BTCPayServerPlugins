@@ -53,4 +53,20 @@ public class PaymentOptionTests
 
         Assert.Equal((3000L, 9000L, (string?)"ln"), plan);
     }
+
+    [Fact]
+    public void PlanLightning_skips_an_unavailable_lightning_option_for_an_available_one()
+    {
+        var plan = PaymentOption.PlanLightning(JObject.Parse(
+            "{\"paymentOptions\":[{\"id\":\"ln-down\",\"type\":\"lightning\",\"available\":false},{\"id\":\"ln\",\"type\":\"lightning\",\"minSendable\":3000}]}"),
+            1, long.MaxValue);
+
+        Assert.Equal((3000L, long.MaxValue, (string?)"ln"), plan);
+    }
+
+    [Fact]
+    public void PlanLightning_refuses_when_every_lightning_option_is_unavailable() =>
+        Assert.Throws<System.NotSupportedException>(() => PaymentOption.PlanLightning(JObject.Parse(
+            "{\"paymentOptions\":[{\"id\":\"ln\",\"type\":\"lightning\",\"available\":false},{\"id\":\"arkade\",\"type\":\"arkade\"}]}"),
+            1, long.MaxValue));
 }
