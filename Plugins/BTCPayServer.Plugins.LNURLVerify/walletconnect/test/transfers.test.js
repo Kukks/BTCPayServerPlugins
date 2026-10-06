@@ -1,5 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { PublicKey } from '@solana/web3.js'
+import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { erc20TransferData, evmTransfer, trc20Trigger, splTransfer } from '../src/transfers.js'
 
 const evmTo = '0x1111111111111111111111111111111111111111'
@@ -35,13 +37,21 @@ test('a TRC-20 trigger encodes the recipient account and the amount', () => {
   })
 })
 
+const solana = (recipient) => ({
+  owner: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
+  recipient,
+  mint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+  baseUnits: '63360000',
+  decimals: 6,
+  blockhash: 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG'
+})
+
 test('an SPL transfer creates the recipient token account if needed and moves the exact amount', () => {
-  assert.equal(splTransfer({
-    owner: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
-    recipient: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-    mint: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
-    baseUnits: '63360000',
-    decimals: 6,
-    blockhash: 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG'
-  }), 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAUIfowIh2C/3h3dzzLBfyCbgkLuUqrxMfrNiNDqLG0LBvK/kLNe/ZX4HpvidTZF/XlYgzH2h4C0f7K4JjqNwRK7dPvFs4UzCvglBFoa4kBrLcyYykeFARISclrXoGeXesFvAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAup4yXJY9OJInxuz0QKRSODYMLWhOZ2v8QhASOe9jb6fhZxvp6877brTo9ZfNqq8l0MbG75MLS9uDkfKYCA0UvXWEG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8Aqc5Z21CA/CxtO898qQcS08Ll5sKPJ/Dfu5lTvbCJTAOrAgUGAAEGBAMHAQEHBAIEAQAKDADMxgMAAAAABg==')
+  assert.equal(splTransfer(solana('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')), 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAUIfowIh2C/3h3dzzLBfyCbgkLuUqrxMfrNiNDqLG0LBvK/kLNe/ZX4HpvidTZF/XlYgzH2h4C0f7K4JjqNwRK7dPvFs4UzCvglBFoa4kBrLcyYykeFARISclrXoGeXesFvAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAup4yXJY9OJInxuz0QKRSODYMLWhOZ2v8QhASOe9jb6fhZxvp6877brTo9ZfNqq8l0MbG75MLS9uDkfKYCA0UvXWEG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8Aqc5Z21CA/CxtO898qQcS08Ll5sKPJ/Dfu5lTvbCJTAOrAgUGAAEGBAMHAQEHBAIEAQAKDADMxgMAAAAABg==')
+})
+
+test('an off-curve recipient is refused instead of nesting a token account', () => {
+  const tokenAccount = getAssociatedTokenAddressSync(new PublicKey('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU'),
+    new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')).toBase58()
+  assert.throws(() => splTransfer(solana(tokenAccount)), { name: 'TokenOwnerOffCurveError' })
 })

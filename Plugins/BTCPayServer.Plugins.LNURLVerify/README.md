@@ -113,6 +113,8 @@ LNURL quotes the token amount and settles it through `verify`, as for the Bitcoi
 - **Do not remove a code from `LNURLVERIFY_ASSETS`, or uninstall the plugin, once invoices with that token's prompt exist.**
   As with rails, the checkout page of every such invoice, open, paid or expired, needs the payment method's handler.
 - **Connect wallet on Solana sends classic SPL Token transfers,** so it does not pay Token-2022 mints.
+- **A Solana destination must be a wallet (system account) address** — Connect wallet refuses a token account, or any other
+  off-curve address, instead of paying it through a nested token account the LNURL would never watch. Its QR stays offered.
 - **The merged QR's amount is the on-chain due** when on-chain is active, which can include a network-fee component; an Arkade
   payer scanning the merged QR may overpay by it. Each rail's own chip carries its exact amount.
 - If re-issuing a rail destination after a partial payment fails, that rail drops out of the checkout; a payment to its

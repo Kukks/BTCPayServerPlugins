@@ -34,7 +34,8 @@ export function splTransfer ({ owner, recipient, mint, baseUnits, decimals, bloc
   const payer = new PublicKey(owner)
   const to = new PublicKey(recipient)
   const token = new PublicKey(mint)
-  const destination = getAssociatedTokenAddressSync(token, to, true)
+  // false for the recipient: an off-curve destination fails here instead of funding a nested account the LNURL never watches
+  const destination = getAssociatedTokenAddressSync(token, to, false)
   const tx = new Transaction({ feePayer: payer, recentBlockhash: blockhash })
   tx.add(createAssociatedTokenAccountIdempotentInstruction(payer, destination, to, token))
   tx.add(createTransferCheckedInstruction(getAssociatedTokenAddressSync(token, payer, true), token, destination, payer, BigInt(baseUnits), decimals))
