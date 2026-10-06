@@ -28,7 +28,8 @@ async function connect (projectId, networks) {
     connector = await UniversalConnector.init({
       projectId,
       metadata: { name: document.title, description: 'Invoice checkout', url: location.origin, icons: [] },
-      networks: proposed
+      networks: proposed,
+      modalConfig: { features: { analytics: false } }
     })
   }
   connector.config.networks = proposed
@@ -79,7 +80,8 @@ export async function pay ({ projectId, network, networks }) {
   if (network.namespace === 'solana') {
     const latest = await post(rpc(network.chain, projectId), { jsonrpc: '2.0', id: 1, method: 'getLatestBlockhash', params: [{ commitment: 'finalized' }] })
     const transaction = splTransfer({ ...transfer, mint: network.token, decimals: network.decimals, blockhash: latest.result.value.blockhash })
-    return (await wallet.request({ method: 'solana_signAndSendTransaction', params: { transaction } }, network.chain)).signature
+    const answer = await wallet.request({ method: 'solana_signAndSendTransaction', params: { transaction, pubkey: from } }, network.chain)
+    return typeof answer === 'string' ? answer : answer?.signature
   }
   const api = tronApis[network.chain]
   if (!api) throw new Error('No Tron node is known for ' + network.label)
