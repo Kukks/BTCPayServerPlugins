@@ -21,15 +21,17 @@ function caipNetwork (network, projectId) {
 }
 
 async function connect (projectId, networks) {
+  const byNamespace = {}
+  for (const n of networks) (byNamespace[n.namespace] ??= []).push(caipNetwork(n, projectId))
+  const proposed = Object.entries(byNamespace).map(([namespace, chains]) => ({ namespace, chains, methods: [methods[namespace]], events: [] }))
   if (!connector) {
-    const byNamespace = {}
-    for (const n of networks) (byNamespace[n.namespace] ??= []).push(caipNetwork(n, projectId))
     connector = await UniversalConnector.init({
       projectId,
       metadata: { name: document.title, description: 'Invoice checkout', url: location.origin, icons: [] },
-      networks: Object.entries(byNamespace).map(([namespace, chains]) => ({ namespace, chains, methods: [methods[namespace]], events: [] }))
+      networks: proposed
     })
   }
+  connector.config.networks = proposed
   return connector
 }
 
@@ -37,6 +39,23 @@ function account (chain) {
   const accounts = connector.provider.session?.namespaces[chain.split(':')[0]]?.accounts ?? []
   const match = accounts.find((a) => a.startsWith(chain + ':'))
   return match ? match.slice(chain.length + 1) : null
+}
+
+function requestSession (wallet) {
+  let unsubscribe
+  let timer
+  const dismissed = new Promise((_, reject) => {
+    let wasOpen = false
+    unsubscribe = wallet.appKit.subscribeState(({ open }) => {
+      // UniversalConnector closes the modal itself: with a session on success, or just before it throws; the 0ms hop lets that error win.
+      if (wasOpen && !open && !wallet.provider.session) timer = setTimeout(() => reject(new Error('The wallet connection was closed')), 0)
+      wasOpen = open
+    })
+  })
+  return Promise.race([wallet.connect(), dismissed]).finally(() => {
+    unsubscribe()
+    clearTimeout(timer)
+  })
 }
 
 async function post (url, body) {
@@ -50,7 +69,7 @@ export async function pay ({ projectId, network, networks }) {
   let from = account(network.chain)
   if (!from) {
     if (wallet.provider.session) await wallet.disconnect()
-    await wallet.connect()
+    await requestSession(wallet)
     from = account(network.chain)
   }
   if (!from) throw new Error('The connected wallet has no account on ' + network.label)
@@ -69,6 +88,7 @@ export async function pay ({ projectId, network, networks }) {
   const signed = await wallet.request({ method: 'tron_signTransaction', params: { address: from, transaction: { transaction: built.transaction } } }, network.chain)
   const tx = signed.result ?? signed
   const sent = await post(api + '/wallet/broadcasttransaction', tx)
-  if (!sent.result) throw new Error('Tron refused the transfer: ' + (sent.message ?? sent.code))
+  // A wallet that also broadcasts makes ours a duplicate of a transfer that already landed.
+  if (!sent.result && sent.code !== 'DUP_TRANSACTION_ERROR') throw new Error('Tron refused the transfer: ' + (sent.message ?? sent.code))
   return tx.txID
 }
