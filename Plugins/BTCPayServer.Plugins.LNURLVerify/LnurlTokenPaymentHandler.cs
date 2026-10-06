@@ -30,6 +30,7 @@ public class TokenNetworkState
     public string OptionId { get; set; } = "";
     public string Asset { get; set; } = "";
     public bool Refused { get; set; }
+    public long? FailedAt { get; set; }
     public TokenQuoteState? Quote { get; set; }
 }
 
@@ -118,7 +119,10 @@ public class LnurlTokenPaymentHandler : ILnurlRailHandler
         foreach (var option in offered)
         {
             var old = previous?.Networks.FirstOrDefault(n => n.OptionId == option.Id);
-            var network = new TokenNetworkState { OptionId = option.Id, Asset = option.Asset.ToString(), Refused = old?.Refused ?? false, Quote = old?.Quote };
+            var network = new TokenNetworkState
+            {
+                OptionId = option.Id, Asset = option.Asset.ToString(), Refused = old?.Refused ?? false, FailedAt = old?.FailedAt, Quote = old?.Quote
+            };
             details.Networks.Add(network);
             var reissue = network.Quote is { } held && held.AmountMsat != msat;
             if (network.Refused || !(reissue || requested.Contains(option.Id))) continue;
@@ -131,8 +135,15 @@ public class LnurlTokenPaymentHandler : ILnurlRailHandler
                     Destination = quote.Destination, Amount = quote.Amount, ExpiresAt = quote.ExpiresAt,
                     Verify = quote.Verify, VerifyBatch = quote.VerifyBatch, AmountMsat = quote.AmountMsat
                 };
+                network.FailedAt = null;
                 newest = quote.Destination;
                 context.TrackedDestinations.Add(quote.Destination);
+            }
+            // A failure that may not repeat keeps the network on offer, with whatever quote it still holds; only a refusal hides it.
+            catch (TransientRailException e)
+            {
+                network.FailedAt = now.ToUnixTimeSeconds();
+                context.Logs.Write($"{option.Id}: {e.Message}", InvoiceEventData.EventSeverity.Warning);
             }
             catch (PaymentMethodUnavailableException e)
             {
@@ -169,7 +180,7 @@ public class LnurlTokenPaymentHandler : ILnurlRailHandler
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
-            throw new PaymentMethodUnavailableException("the LNURL did not answer in time");
+            throw new TransientRailException("the LNURL did not answer in time");
         }
     }
 

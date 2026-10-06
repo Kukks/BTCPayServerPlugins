@@ -101,6 +101,14 @@ public class LnurlTokenCheckoutExtensionTests
     }
 
     [Fact]
+    public void A_network_whose_last_request_failed_reads_as_failed()
+    {
+        var n = OnlyNetwork(Prompt(new TokenNetworkState { OptionId = "usdt-arbitrum", Asset = Arbitrum, FailedAt = 1 }));
+        Assert.Equal(("usdt-arbitrum", "failed"), ((string)n["id"]!, (string)n["state"]!));
+        Assert.Null(n["destination"]);
+    }
+
+    [Fact]
     public void The_asset_tab_renders_with_the_token_component()
     {
         var prompt = Prompt(Quoted("usdt-arbitrum", Arbitrum, EvmTo));

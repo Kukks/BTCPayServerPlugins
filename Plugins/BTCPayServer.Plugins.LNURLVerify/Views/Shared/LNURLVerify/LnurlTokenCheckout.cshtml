@@ -33,7 +33,8 @@
         </template>
         <div v-else-if="renewable" class="text-center my-4">
             <button type="button" class="btn btn-secondary" id="LnurlTokenRefresh" :disabled="busy === current.id" v-on:click="request(current.id)"
-                    v-text="current.state === 'stale' ? 'The amount due changed: get a new quote' : 'Quote expired: get a new one'"></button>
+                    v-text="current.state === 'stale' ? 'The amount due changed: get a new quote'
+                           : current.state === 'failed' ? 'No quote for this network yet: try again' : 'Quote expired: get a new one'"></button>
         </div>
         <div v-else-if="current && pending" class="text-center my-4"><span class="spinner-border" role="status"></span></div>
         <p v-else-if="networks.length" class="text-center my-4" id="LnurlTokenChoose">Choose a network</p>
@@ -62,7 +63,7 @@
             secondsLeft () { return this.current && this.current.expiresAt ? Math.max(0, this.current.expiresAt - this.now) : null; },
             live () { return !!this.current && this.current.state === 'live' && this.secondsLeft !== 0; },
             expired () { return !!this.current && (this.current.state === 'expired' || (this.current.state === 'live' && this.secondsLeft === 0)); },
-            renewable () { return this.expired || (!!this.current && this.current.state === 'stale'); },
+            renewable () { return this.expired || (!!this.current && (this.current.state === 'stale' || this.current.state === 'failed')); },
             countdown () { return Math.floor(this.secondsLeft / 60) + ':' + String(this.secondsLeft % 60).padStart(2, '0'); },
             walletConnect () { return !!this.projectId && this.walletNamespaces.includes(this.current.namespace); },
             sentRef () {

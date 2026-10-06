@@ -34,6 +34,7 @@ public class LnurlTokenPaymentHandlerTests
         public readonly long QuoteExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeSeconds();
         public string? WithoutVerify;
         public string? Failing;
+        public string? WrongEcho;
         public string? BadExpiry;
         // A callback answers after its option's delay if the request is still alive; Timeout.InfiniteTimeSpan never answers.
         public readonly Dictionary<string, TimeSpan> Delays = new();
@@ -74,6 +75,7 @@ public class LnurlTokenPaymentHandlerTests
                         ["verify"] = $"https://{Host}/lnurl/verify/{option}/{n}", ["expiresAt"] = DateTimeOffset.UtcNow.AddDays(7).ToUnixTimeSeconds()
                     };
                     if (option == WithoutVerify) answer.Remove("verify");
+                    if (option == WrongEcho) answer["paymentOption"] = option + "-other";
                     if (option == BadExpiry) answer["expiresAt"] = 1_790_000_600_000L;
                     return (HttpStatusCode.OK, answer.ToString());
                 });
@@ -274,15 +276,15 @@ public class LnurlTokenPaymentHandlerTests
     }
 
     [Fact]
-    public async Task A_network_refused_by_a_failed_request_is_hidden_and_not_asked_again()
+    public async Task A_network_refused_by_a_bad_answer_is_hidden_and_not_asked_again()
     {
-        var lnurl = new Lnurl { Failing = "usdt-arbitrum" };
+        var lnurl = new Lnurl { WrongEcho = "usdt-arbitrum" };
         var invoice = lnurl.Invoice();
         await lnurl.Activate(invoice, "usdt-arbitrum");
         Assert.True(lnurl.Details(invoice).Networks[0].Refused);
         Assert.Equal(1, lnurl.CallsTo("usdt-arbitrum"));
 
-        lnurl.Failing = null;
+        lnurl.WrongEcho = null;
         await lnurl.Activate(invoice, "usdt-arbitrum");
         var arbitrum = lnurl.Details(invoice).Networks[0];
         Assert.True(arbitrum.Refused);
@@ -291,7 +293,26 @@ public class LnurlTokenPaymentHandlerTests
     }
 
     [Fact]
-    public async Task A_network_that_does_not_answer_in_time_is_refused_alone()
+    public async Task A_network_whose_request_fails_is_offered_again_and_quotes_on_a_retry()
+    {
+        var lnurl = new Lnurl { Failing = "usdt-arbitrum" };
+        var invoice = lnurl.Invoice();
+        await lnurl.Activate(invoice, "usdt-arbitrum", "usdt-solana", "usdt-tron");
+        var networks = lnurl.Details(invoice).Networks;
+        Assert.False(networks[0].Refused);
+        Assert.NotNull(networks[0].FailedAt);
+        Assert.Equal(new[] { Solana[0], Tron[0] }, networks.Skip(1).Select(n => n.Quote!.Destination));
+
+        lnurl.Failing = null;
+        await lnurl.Activate(invoice, "usdt-arbitrum");
+        var arbitrum = lnurl.Details(invoice).Networks[0];
+        Assert.Equal("0x0000000000000000000000000000000000000002", arbitrum.Quote!.Destination);
+        Assert.Null(arbitrum.FailedAt);
+        Assert.Equal(2, lnurl.CallsTo("usdt-arbitrum"));
+    }
+
+    [Fact]
+    public async Task A_network_that_does_not_answer_in_time_fails_alone_and_stays_offered()
     {
         var budget = TimeSpan.FromSeconds(2);
         var lnurl = new Lnurl(requestTimeout: budget);
@@ -305,7 +326,8 @@ public class LnurlTokenPaymentHandlerTests
         var networks = lnurl.Details(invoice).Networks;
         Assert.Equal(new[] { "0x0000000000000000000000000000000000000001", Solana[0], null }, networks.Select(n => n.Quote?.Destination));
         Assert.Equal(new[] { "0x0000000000000000000000000000000000000001", Solana[0] }, ctx.TrackedDestinations);
-        Assert.True(networks[2].Refused);
+        Assert.False(networks[2].Refused);
+        Assert.NotNull(networks[2].FailedAt);
         Assert.Contains(ctx.Logs.InvoiceLogs.ToList(),
             l => l.Severity == InvoiceEventData.EventSeverity.Warning && l.Log.Contains("usdt-tron: the LNURL did not answer in time"));
     }

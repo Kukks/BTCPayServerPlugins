@@ -94,7 +94,7 @@ public static class LnurlRailRequester
     {
         try { return await LNURLResolver.GetJson(http, uri, ct); }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch (Exception e) { throw Unavailable($"{what} ({e.Message})"); }
+        catch (Exception e) { throw new TransientRailException($"{what} ({e.Message})"); }
     }
 
     private static PaymentMethodUnavailableException Unavailable(string reason) => new(reason);
@@ -106,6 +106,12 @@ public static class LnurlRailRequester
 public sealed class UnverifiableRailException : PaymentMethodUnavailableException
 {
     public UnverifiableRailException(string message) : base(message) { }
+}
+
+/// <summary>A refusal that may not repeat: the LNURL could not be reached, answered an error, or did not answer in time.</summary>
+public sealed class TransientRailException : PaymentMethodUnavailableException
+{
+    public TransientRailException(string message) : base(message) { }
 }
 
 /// <summary>LNURL rails refused as unverifiable, kept off new invoices for a day.</summary>

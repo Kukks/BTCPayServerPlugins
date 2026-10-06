@@ -78,8 +78,8 @@ LNURL quotes the token amount and settles it through `verify`, as for the Bitcoi
   With a WalletConnect project ID set in Server settings → LNURL Verify, "Connect wallet" pays from a wallet over WalletConnect.
 - **Quotes:** a network is requested from the LNURL when the tab opens, or on a tap when "Request every rail when the
   checkout opens" is off. An expired quote hides its QR until the payer asks for a new one. A partial payment re-issues
-  every quoted network for the remainder. A network the LNURL refuses, or that does not answer in time,
-  stays hidden for the rest of that invoice.
+  every quoted network for the remainder. A network the LNURL refuses stays hidden for the rest of that invoice; one whose
+  request fails, or that does not answer in time, stays offered and can be tried again.
 - **Settlement:** recorded from `verify` at the BTC amount agreed for the destination. The payments list shows the network and
   links the transaction.
 

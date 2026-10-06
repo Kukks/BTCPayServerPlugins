@@ -65,7 +65,7 @@ public static class CheckoutRails
     {
         var open = details?.Networks.Where(n => !n.Refused).ToList() ?? new List<TokenNetworkState>();
         if (network is not null) return open.Any(n => n.OptionId == network) ? new[] { network } : Array.Empty<string>();
-        return activateAllOnOpen ? open.Where(n => n.Quote is null).Select(n => n.OptionId).ToArray() : Array.Empty<string>();
+        return activateAllOnOpen ? open.Where(n => n.Quote is null && n.FailedAt is null).Select(n => n.OptionId).ToArray() : Array.Empty<string>();
     }
 }
 

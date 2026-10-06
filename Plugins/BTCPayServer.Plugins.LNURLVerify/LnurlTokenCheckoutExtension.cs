@@ -52,6 +52,7 @@ public class LnurlTokenCheckoutExtension : ICheckoutModelExtension
             if (CaipAsset.Parse(n.Asset) is not { } asset || TokenNamespaces.For(asset) is not { } ns) continue;
             var state = n.Quote switch
             {
+                null when n.FailedAt is not null => "failed",
                 null => "unrequested",
                 { ExpiresAt: { } at } when at <= now.ToUnixTimeSeconds() => "expired",
                 { } q when q.AmountMsat != dueMsat => "stale",

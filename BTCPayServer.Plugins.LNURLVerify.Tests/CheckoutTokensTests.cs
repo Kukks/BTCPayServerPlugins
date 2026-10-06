@@ -27,6 +27,15 @@ public class CheckoutTokensTests
         Assert.Equal(new[] { "usdt-solana" }, CheckoutRails.PlanTokens(Details(), "usdt-solana", activateAllOnOpen: false));
 
     [Fact]
+    public void Opening_the_tab_skips_a_network_whose_last_request_failed_and_a_tap_retries_it()
+    {
+        var details = Details();
+        details.Networks.Add(new TokenNetworkState { OptionId = "usdt-base", FailedAt = 1 });
+        Assert.Equal(new[] { "usdt-arbitrum" }, CheckoutRails.PlanTokens(details, null, activateAllOnOpen: true));
+        Assert.Equal(new[] { "usdt-base" }, CheckoutRails.PlanTokens(details, "usdt-base", activateAllOnOpen: true));
+    }
+
+    [Fact]
     public void A_tap_on_a_refused_or_unknown_network_requests_nothing()
     {
         Assert.Empty(CheckoutRails.PlanTokens(Details(), "usdt-tron", activateAllOnOpen: true));
