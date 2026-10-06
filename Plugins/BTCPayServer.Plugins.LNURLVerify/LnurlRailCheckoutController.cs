@@ -2,6 +2,7 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using BTCPayServer.Payments;
 using BTCPayServer.Services;
 using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
@@ -20,15 +21,19 @@ public class LnurlRailCheckoutController : Controller
     private readonly InvoiceActivator _activator;
     private readonly RailActivationFailures _failures;
     private readonly RailActivationGate _gate;
+    private readonly PaymentMethodHandlerDictionary _handlers;
+    private readonly TokenActivations _tokenActivations;
 
     public LnurlRailCheckoutController(InvoiceRepository invoices, StoreRepository stores, InvoiceActivator activator,
-        RailActivationFailures failures, RailActivationGate gate)
+        RailActivationFailures failures, RailActivationGate gate, PaymentMethodHandlerDictionary handlers, TokenActivations tokenActivations)
     {
         _invoices = invoices;
         _stores = stores;
         _activator = activator;
         _failures = failures;
         _gate = gate;
+        _handlers = handlers;
+        _tokenActivations = tokenActivations;
     }
 
     [HttpPost("activate")]
@@ -55,4 +60,27 @@ public class LnurlRailCheckoutController : Controller
         foreach (var p in refused) _failures.Record(invoiceId, p, now);
         return Json(new { failed = skipped.Concat(refused).Select(p => p.ToString()) });
     }
+
+    [HttpPost("token")]
+    [IgnoreAntiforgeryToken]
+    [RateLimitsFilter(ZoneLimits.PublicInvoices, Scope = RateLimitsScope.RouteData, DataKey = "invoiceId")]
+    public async Task<IActionResult> ActivateToken([FromRoute] string invoiceId, string? pmi = null, string? network = null)
+    {
+        if (!PaymentMethodId.TryParse(pmi, out var id) || _handlers.TryGet(id) is not LnurlTokenPaymentHandler handler) return NotFound();
+        var invoice = await _invoices.GetInvoice(invoiceId);
+        if (invoice?.GetPaymentPrompt(id) is not { } prompt) return NotFound();
+        var activateAllOnOpen =
+            (await _stores.GetSettingAsync<LnurlRailSettings>(invoice.StoreId, LnurlRailSettings.Key) ?? new LnurlRailSettings()).ActivateAllRailsOnOpen;
+        var networks = CheckoutRails.PlanTokens(Details(handler, prompt), network, activateAllOnOpen);
+        if (networks.Count > 0)
+        {
+            await _tokenActivations.Run(invoiceId, id, networks, () => _activator.ActivateInvoicePaymentMethod(invoiceId, id, forceNew: true));
+            prompt = (await _invoices.GetInvoice(invoiceId))?.GetPaymentPrompt(id) ?? prompt;
+        }
+        var refused = Details(handler, prompt)?.Networks.Where(n => n.Refused).Select(n => n.OptionId).ToArray() ?? Array.Empty<string>();
+        return Json(new { refused });
+    }
+
+    private static LnurlTokenPromptDetails? Details(LnurlTokenPaymentHandler handler, PaymentPrompt prompt) =>
+        prompt is { Activated: true, Details: not null } ? handler.ParsePaymentPromptDetails(prompt.Details) : null;
 }

@@ -58,6 +58,14 @@ public static class CheckoutRails
             return (Array.Empty<PaymentMethodId>(), Array.Empty<PaymentMethodId>());
         return (inactive.Where(p => !failedRecently(p)).ToList(), inactive.Where(failedRecently).ToList());
     }
+
+    /// <summary>The networks a token activation asks the LNURL for: the tapped one, or on open each one not yet quoted.</summary>
+    public static IReadOnlyCollection<string> PlanTokens(LnurlTokenPromptDetails? details, string? network, bool activateAllOnOpen)
+    {
+        var open = details?.Networks.Where(n => !n.Refused).ToList() ?? new List<TokenNetworkState>();
+        if (network is not null) return open.Any(n => n.OptionId == network) ? new[] { network } : Array.Empty<string>();
+        return activateAllOnOpen ? open.Where(n => n.Quote is null).Select(n => n.OptionId).ToArray() : Array.Empty<string>();
+    }
 }
 
 /// <summary>Activations the LNURL refused, so reopening a checkout within the hour does not repeat the callback.</summary>
