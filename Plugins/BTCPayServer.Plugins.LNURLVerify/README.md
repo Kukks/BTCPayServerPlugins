@@ -54,9 +54,33 @@ A store that already has the Arkade plugin's own `ARKADE` payment method gets no
   lnurl/luds#303) is never provisioned. A rail whose LNURL answers without a usable `verify` URL is left off new invoices for
   a day, so a checkout does not keep offering a payment method that cannot activate.
 - **Turning a rail off:** switch it off on Integrations → LNURL rails.
-- **Out of scope:** EVM and other non-BIP321 networks; they need a checkout of their own.
+- **Tokens on other networks:** see "Token rails" below.
 - **Upgrading to 1.2.0:** stores whose LNURL advertises a rail switch to the single "Bitcoin" tab for invoices created after
   the upgrade. Nothing else changes for them.
+
+## Token rails (EVM, Solana, Tron)
+
+When the LNURL advertises a token on another network as a payment option, with a CAIP-19 `asset` and a `unit` from its
+`units`, the payer can pay in that token. For example, USDT on Arbitrum, Solana or Tron. The invoice stays priced in BTC; the
+LNURL quotes the token amount and settles it through `verify`, as for the Bitcoin rails.
+
+- **Assets:** one checkout tab per configured unit code, as payment method `LNURL-<CODE>`. The codes come from the server
+  setting `LNURLVERIFY_ASSETS` (environment `BTCPAY_LNURLVERIFY_ASSETS`), default `USDT,USDC`. A change takes effect after
+  a restart, because BTCPay registers payment methods at startup. Integrations → LNURL rails lists any unit the LNURL offers
+  that is not configured.
+- **Networks:** one chip per advertised network. Any EVM chain works, as do Solana and Tron; network names and explorer links
+  are resolved locally from the CAIP-2 id.
+- **Checkout:** each network has a QR and an "Open in wallet" link:
+  - EIP-681 for EVM;
+  - Solana Pay for Solana;
+  - for Tron, the QR is the recipient, with the amount beside it.
+
+  With a WalletConnect project ID set in Server settings → LNURL Verify, "Connect wallet" pays from a wallet over WalletConnect.
+- **Quotes:** a network is requested from the LNURL when the tab opens, or on a tap when "Request every rail when the
+  checkout opens" is off. An expired quote hides its QR until the payer asks for a new one. A partial payment re-issues every
+  quoted network for the remainder. A network the LNURL refuses, or that does not answer in time, stays hidden for the rest of that invoice.
+- **Settlement:** recorded from `verify` at the BTC amount agreed for the destination. The payments list shows the network and
+  links the transaction.
 
 ## Limitations
 
@@ -85,6 +109,9 @@ A store that already has the Arkade plugin's own `ARKADE` payment method gets no
 - **Do not uninstall the plugin, or downgrade it below 1.2.0, once invoices with LNURL rails exist.** BTCPay's checkout page
   needs the plugin's payment-method handler for every rail on an invoice, so without it the checkout page of every such
   invoice fails, whether it is open, paid or expired.
+- **Do not remove a code from `LNURLVERIFY_ASSETS`, or uninstall the plugin, while invoices with that token's prompt are open.**
+  As with rails, their checkout pages need the payment method's handler.
+- **Connect wallet on Solana sends classic SPL Token transfers,** so it does not pay Token-2022 mints.
 - **The merged QR's amount is the on-chain due** when on-chain is active, which can include a network-fee component; an Arkade
   payer scanning the merged QR may overpay by it. Each rail's own chip carries its exact amount.
 - If re-issuing a rail destination after a partial payment fails, that rail drops out of the checkout; a payment to its
