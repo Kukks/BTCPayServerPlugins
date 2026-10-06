@@ -50,6 +50,26 @@ public class LnurlRailRequesterTests
         Assert.Single(http.Requests);
     }
 
+    [Theory]
+    [InlineData("{\"id\":\"arkade-static\",\"type\":\"arkade\",\"verifiable\":false}")]
+    [InlineData("{\"id\":\"arkade-static\",\"type\":\"arkade\",\"available\":false}")]
+    public async Task A_usable_option_is_requested_when_an_earlier_one_of_its_type_is_not(string earlier)
+    {
+        var http = Server(PayRequest("[" + earlier + ",{\"id\":\"arkade\",\"type\":\"arkade\"}]"), Destination());
+        Assert.Equal("arkade", (await Request(http)).OptionId);
+        Assert.Contains(Callback + "?amount=50000000&paymentOption=arkade", http.Requests);
+    }
+
+    [Fact]
+    public async Task A_type_whose_verifiable_option_is_unavailable_is_refused_for_now_not_as_unverifiable()
+    {
+        var http = Server(PayRequest("[{\"id\":\"arkade-static\",\"type\":\"arkade\",\"verifiable\":false}," +
+                                     "{\"id\":\"arkade\",\"type\":\"arkade\",\"available\":false}]"), Destination());
+        var refusal = await Assert.ThrowsAnyAsync<PaymentMethodUnavailableException>(() => Request(http));
+        Assert.IsNotType<UnverifiableRailException>(refusal);
+        Assert.Contains("currently unavailable", refusal.Message);
+    }
+
     [Fact]
     public async Task An_answer_without_a_verify_url_is_an_unverifiable_rail() =>
         await Assert.ThrowsAsync<UnverifiableRailException>(() => Request(Server(PayRequest(), Destination(o => o.Remove("verify")))));

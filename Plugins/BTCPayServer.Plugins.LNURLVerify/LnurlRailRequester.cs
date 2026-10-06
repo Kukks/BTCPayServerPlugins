@@ -20,9 +20,12 @@ public static class LnurlRailRequester
         DateTimeOffset invoiceExpiry, Network network, CancellationToken ct)
     {
         var pay = await Get(http, payEndpoint, "the LNURL could not be read", ct);
-        var option = PaymentOption.Parse(pay).FirstOrDefault(o => o.Type.Equals(rail.OptionType, StringComparison.OrdinalIgnoreCase))
-                     ?? throw Unavailable($"the LNURL does not offer '{rail.OptionType}'");
-        if (!option.Available) throw Unavailable($"the LNURL reports '{rail.OptionType}' as currently unavailable");
+        var offered = PaymentOption.Parse(pay).Where(o => o.Type.Equals(rail.OptionType, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (offered.Count == 0) throw Unavailable($"the LNURL does not offer '{rail.OptionType}'");
+        // Ids are unique but types are not: an unverifiable sibling must not get a verifiable option's rail refused for a day.
+        var verifiable = offered.Where(o => o.Verifiable != false).ToList();
+        var option = (verifiable.Count > 0 ? verifiable : offered).FirstOrDefault(o => o.Available)
+                     ?? throw Unavailable($"the LNURL reports '{rail.OptionType}' as currently unavailable");
         if (option.Verifiable == false)
             throw new UnverifiableRailException($"settlement cannot be detected: the LNURL marks '{rail.OptionType}' as not verifiable");
         var min = option.MinSendable ?? pay["minSendable"]?.Value<long>() ?? 1;
