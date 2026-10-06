@@ -37,7 +37,7 @@
         </div>
         <div v-else-if="current && pending" class="text-center my-4"><span class="spinner-border" role="status"></span></div>
         <p v-else-if="networks.length" class="text-center my-4" id="LnurlTokenChoose">Choose a network</p>
-        <p v-if="sentHere" class="text-center mt-3" id="LnurlTokenSent">Sent, waiting for confirmation: <code v-text="sent.ref"></code></p>
+        <p v-if="sentHere" class="text-center mt-3" id="LnurlTokenSent">Sent, waiting for confirmation: <code v-text="sentRef"></code></p>
         <p v-if="walletError" class="text-center text-danger mt-3" id="LnurlTokenWalletError" v-text="walletError"></p>
     </div>
 </template>
@@ -65,7 +65,12 @@
             renewable () { return this.expired || (!!this.current && this.current.state === 'stale'); },
             countdown () { return Math.floor(this.secondsLeft / 60) + ':' + String(this.secondsLeft % 60).padStart(2, '0'); },
             walletConnect () { return !!this.projectId && this.walletNamespaces.includes(this.current.namespace); },
-            sentHere () { return !!this.sent && !!this.current && this.sent.key === this.token.pmi + '/' + this.current.id; },
+            sentRef () {
+                if (!this.current) return null;
+                const key = this.token.pmi + '/' + this.current.id;
+                return this.sent && this.sent.key === key ? this.sent.ref : this.storedRef(key);
+            },
+            sentHere () { return !!this.sentRef; },
             summary () { return this.current.amount + ' ' + this.token.code + ' on ' + this.current.label; }
         },
         watch: {
@@ -107,16 +112,21 @@
                 const network = withDecimals(this.current);
                 const networks = this.networks.filter(n => this.walletNamespaces.includes(n.namespace)).map(withDecimals);
                 const key = pmi + '/' + network.id;
+                const store = this.storageKey(key);
                 try {
                     await this.loadWallet();
                     const ref = (await window.LnurlVerifyWallet.pay({ projectId: this.projectId, network, networks })) || 'the wallet reported no reference';
                     this.sent = { key, ref };
+                    try { sessionStorage.setItem(store, ref); } catch (e) { }
                 } catch (e) {
                     if (this.token.pmi === pmi) this.walletError = e && e.message ? e.message : String(e);
                 } finally {
                     this.sending = false;
                 }
             },
+            // the record must outlive the component: core mounts the checkout body without keep-alive, and a wallet app round trip can reload the page
+            storageKey (key) { return 'lnurlverify.sent/' + this.model.invoiceId + '/' + key; },
+            storedRef (key) { try { return sessionStorage.getItem(this.storageKey(key)); } catch (e) { return null; } },
             async pick (n) {
                 this.walletError = null;
                 this.selected = n.id;
