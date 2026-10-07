@@ -31,6 +31,7 @@ public sealed class StubLnurl : IAsyncDisposable
     private readonly IHost _host;
     private readonly Key _node = new();
     private readonly ConcurrentDictionary<string, string> _settled = new();
+    private int _callbacks;
 
     private StubLnurl(IHost host, Uri root)
     {
@@ -40,6 +41,8 @@ public sealed class StubLnurl : IAsyncDisposable
 
     public Uri Root { get; }
     public string PayUrl => new Uri(Root, ".well-known/lnurlp/merchant").AbsoluteUri;
+    public int Callbacks => _callbacks;
+    public string InvoicePrefix { get; set; } = "lnbcrt";
 
     public static async Task<StubLnurl> Start()
     {
@@ -87,12 +90,13 @@ public sealed class StubLnurl : IAsyncDisposable
 
     private JObject Callback(string option, long msat)
     {
+        Interlocked.Increment(ref _callbacks);
         if (option is "" or "lightning")
         {
             var preimage = RandomNumberGenerator.GetBytes(32);
             return new JObject
             {
-                ["pr"] = TestBolt11.Create(_node, msat, SHA256.HashData(preimage)), ["routes"] = new JArray(),
+                ["pr"] = TestBolt11.Create(_node, msat, SHA256.HashData(preimage), prefix: InvoicePrefix), ["routes"] = new JArray(),
                 ["verify"] = new Uri(Root, "verify/ln-" + Convert.ToHexString(preimage)).AbsoluteUri
             };
         }

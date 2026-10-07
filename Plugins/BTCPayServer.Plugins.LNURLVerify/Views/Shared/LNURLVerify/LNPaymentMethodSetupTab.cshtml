@@ -16,7 +16,6 @@
         <input id="LNURLVerifyAddress" class="form-control" value="@current" placeholder="you@example.com" autocomplete="off" spellcheck="false" />
         <div class="form-text">
             No node or API key: a Lightning address or LNURL-pay receives, and an LNURL-withdraw with a <code>payLink</code> also sends.
-            Each lookup, like saving, asks the LNURL for one small invoice, since that is the only way to learn its LUD-21 <code>verify</code> support.
         </div>
         <span asp-validation-for="ConnectionString" class="text-danger"></span>
     </div>
@@ -41,6 +40,8 @@
         };
         const sats = msat => msat == null ? '?' : (msat / 1000).toLocaleString();
         const range = o => sats(o.minSendable) + ' – ' + sats(o.maxSendable) + ' sats';
+        const flags = o => [range(o), o.verifiable === true ? 'verifiable' : o.verifiable === false ? 'not verifiable' : null,
+            o.available ? null : 'unavailable'].filter(Boolean).join(' · ');
 
         async function resolve () {
             clearTimeout(timer);
@@ -76,15 +77,13 @@
             const head = el('div', 'd-flex flex-wrap justify-content-between gap-2');
             head.append(el('strong', null, s.domain), el('span', 'text-muted', (s.sends ? 'Sends and receives' : 'Receives only') + ', ' + range(s)));
             card.append(head);
-            if (s.saveError) card.append(el('p', 'text-danger mt-2 mb-0', s.saveError));
-            card.append(el('p', 'mt-2 mb-0 ' + (s.verify ? 'text-success' : 'text-muted'), s.verify
-                ? 'Settlement is detected through LUD-21 verify' + (s.verifyBatch ? ', many payments per request (verifyBatch).' : '.')
-                : 'LUD-21 verify support could not be confirmed.'));
+            card.append(el('p', 'text-muted mt-2 mb-0', 'LUD-21 verify support, which payment detection needs, and the invoice network are '
+                + 'checked when you save: BTCPay then requests one small invoice.'));
             const table = el('table', 'table table-sm mt-3 mb-2');
             for (const o of s.options) {
                 const row = table.insertRow();
                 row.dataset.option = o.id || '';
-                row.insertCell().append(el('div', null, o.label), el('div', 'text-muted small text-nowrap', range(o)));
+                row.insertCell().append(el('div', null, o.label), el('div', 'text-muted small text-nowrap', flags(o)));
                 row.insertCell().append(o.offered ? el('span', 'text-success', 'Offered') : el('span', 'text-muted', 'Not offered: ' + o.reason));
             }
             card.append(table);

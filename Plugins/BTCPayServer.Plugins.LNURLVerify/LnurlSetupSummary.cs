@@ -20,30 +20,26 @@ public sealed record LnurlSetupOption(string? Id, string Type, string Label, lon
 }
 
 /// <summary>An LNURL as the Lightning setup page shows it: what it is, and what checkout would do with each of its options.</summary>
-/// <param name="SaveError">Why BTCPay's own validation would refuse to save this LNURL; null when it would save it.</param>
 public sealed record LnurlSetupSummary(string Target, string Domain, bool Sends, long? MinSendable, long? MaxSendable,
-    string? SaveError, bool Verify, bool VerifyBatch, IReadOnlyList<LnurlSetupOption> Options)
+    IReadOnlyList<LnurlSetupOption> Options)
 {
     private const string Unavailable = "the LNURL reports it unavailable right now";
     private const string Unverifiable = "the LNURL marks it not verifiable, so its settlement could not be detected";
 
-    /// <summary>Costs the LNURL one probe invoice, as saving does: verify is only learnt from a callback answer.</summary>
+    /// <summary>Reads the payRequest alone: a callback costs the LNURL an invoice (on lnurl-server, a swap), so verify and the network are left to Save's probe.</summary>
     public static async Task<LnurlSetupSummary> Read(string lnurl, StoreData store, TokenAssets assets, Network network, HttpClient http,
         CancellationToken ct)
     {
         var resolved = await LNURLVerifyConnectionStringHandler.ResolveCached(lnurl, network, http, ct);
-        var pay = await LNURLResolver.GetJson(http, resolved.PayEndpoint, ct);
-        return Build(lnurl, resolved, pay, await LNURLReceiver.Probe(http, pay, network, ct), store, assets);
+        return Build(lnurl, resolved, await LNURLResolver.GetJson(http, resolved.PayEndpoint, ct), store, assets);
     }
 
-    public static LnurlSetupSummary Build(string lnurl, ResolvedLnurl resolved, JObject pay,
-        (string? Error, bool Verify, string? VerifyBatch) probe, StoreData store, TokenAssets assets)
+    public static LnurlSetupSummary Build(string lnurl, ResolvedLnurl resolved, JObject pay, StoreData store, TokenAssets assets)
     {
         // The store as Save leaves it: its own configs and exclusions, with this LNURL as its Lightning.
         var saved = new StoreData { Id = store.Id, DerivationStrategies = store.DerivationStrategies, StoreBlob = store.StoreBlob };
         saved.SetPaymentMethodConfig(LnurlRailProvisioning.Lightning, new JObject { ["connectionString"] = "type=lnurl;value=" + lnurl });
-        var blocked = probe.Error is not null ? "BTCPay will not save this LNURL"
-            : LnurlRailProvisioning.LnurlValue(saved) is null ? "Lightning is disabled for this store" : null;
+        var blocked = LnurlRailProvisioning.LnurlValue(saved) is null ? "Lightning is disabled for this store" : null;
         var tokens = TokenOption.Parse(pay).ToDictionary(t => t.Id);
         var desiredTokens = LnurlRailProvisioning.DesiredTokens(saved, pay, assets);
         string? lightningId = null, lightningRefusal = null;
@@ -79,6 +75,6 @@ public sealed record LnurlSetupSummary(string Target, string Domain, bool Sends,
         var rows = options.Select(o => Row(o, o.MinSendable ?? topMin, o.MaxSendable ?? topMax)).ToList();
         if (!options.Any(o => o.IsLightning)) rows.Insert(0, Row(null, topMin, topMax));
         return new LnurlSetupSummary(resolved.PayEndpoint.AbsoluteUri, resolved.DisplayHost,
-            resolved.Capability == LnurlCapability.SendAndReceive, topMin, topMax, probe.Error, probe.Verify, probe.VerifyBatch is not null, rows);
+            resolved.Capability == LnurlCapability.SendAndReceive, topMin, topMax, rows);
     }
 }

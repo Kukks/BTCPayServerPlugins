@@ -1,3 +1,4 @@
+using System.Net;
 using BTCPayServer.Data;
 using BTCPayServer.Payments;
 using NBitcoin;
@@ -28,10 +29,10 @@ public class LnurlSetupSummaryTests
         return store;
     }
 
-    static LnurlSetupSummary Summary(string pay, StoreData? store = null, string? saveError = null) =>
+    static LnurlSetupSummary Summary(string pay, StoreData? store = null) =>
         LnurlSetupSummary.Build("alice@h.example",
             new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri("https://h.example/.well-known/lnurlp/alice"), null, null, "h.example"),
-            JObject.Parse(pay), (saveError, true, null), store ?? Store(), Assets);
+            JObject.Parse(pay), store ?? Store(), Assets);
 
     static string[] Offered(LnurlSetupSummary summary) => summary.Options.Where(o => o.Offered).Select(o => o.Id!).ToArray();
 
@@ -91,16 +92,6 @@ public class LnurlSetupSummaryTests
     }
 
     [Fact]
-    public void Nothing_is_offered_when_btcpay_would_refuse_to_save_the_lnurl()
-    {
-        var summary = Summary(PayJson("https://h.example/cb", Lightning, Arkade, ArbitrumUsdt), saveError: "no verify here");
-
-        Assert.Equal("no verify here", summary.SaveError);
-        Assert.Empty(Offered(summary));
-        Assert.All(summary.Options, o => Assert.Contains("will not save", o.Reason));
-    }
-
-    [Fact]
     public void Nothing_is_offered_while_the_stores_lightning_is_disabled()
     {
         var store = Store();
@@ -115,53 +106,17 @@ public class LnurlSetupSummaryTests
     }
 
     [Fact]
-    public async Task Read_probes_lightning_once_and_never_asks_a_rail_for_a_destination()
+    public async Task A_lookup_requests_no_invoice()
     {
         var host = NewHost();
         var http = new FakeHttp()
             .Map($"https://{host}/.well-known/lnurlp/alice", PayJson($"https://{host}/cb", Lightning, Arkade))
-            .Map($"https://{host}/cb?amount=5000&paymentOption=lightning",
-                $"{{\"pr\":\"lnbcrt1\",\"verify\":\"https://{host}/verify/1\",\"verifyBatch\":\"https://{host}/verifyBatch\"}}");
+            .When(r => r.RequestUri!.AbsolutePath == "/cb", _ => (HttpStatusCode.OK, $"{{\"pr\":\"lnbcrt1\",\"verify\":\"https://{host}/verify/1\"}}"));
 
         var summary = await LnurlSetupSummary.Read($"alice@{host}", Store(), Assets, Network.RegTest, http.Client(),
             TestContext.Current.CancellationToken);
 
-        Assert.Equal((host, null, true, true), (summary.Domain, summary.SaveError, summary.Verify, summary.VerifyBatch));
+        Assert.Equal(0, http.Requests.Count(r => new Uri(r).AbsolutePath == "/cb"));
         Assert.Equal(new[] { "lightning", "arkade" }, Offered(summary));
-        Assert.Single(http.Requests, r => r.Contains("/cb?"));
-    }
-
-    [Fact]
-    public async Task Read_reports_an_lnurl_whose_invoices_carry_no_verify()
-    {
-        var host = NewHost();
-        var http = new FakeHttp()
-            .Map($"https://{host}/.well-known/lnurlp/alice", PayJson($"https://{host}/cb"))
-            .Map($"https://{host}/cb?amount=1000", "{\"pr\":\"lnbcrt1\",\"verifyBatch\":\"https://" + host + "/verifyBatch\"}");
-
-        var summary = await LnurlSetupSummary.Read($"alice@{host}", Store(), Assets, Network.RegTest, http.Client(),
-            TestContext.Current.CancellationToken);
-
-        Assert.Contains("LUD-21", summary.SaveError);
-        Assert.Equal((false, false), (summary.Verify, summary.VerifyBatch));
-        Assert.Empty(Offered(summary));
-    }
-
-    [Fact]
-    public async Task Read_names_both_networks_when_the_lnurl_issues_another_networks_invoices()
-    {
-        var host = NewHost();
-        var mutinynet = TestBolt11.Create(new Key(), 1000, new byte[32], prefix: "lntbs");
-        var http = new FakeHttp()
-            .Map($"https://{host}/.well-known/lnurlp/alice", PayJson($"https://{host}/cb", Arkade))
-            .Map($"https://{host}/cb?amount=1000", $"{{\"pr\":\"{mutinynet}\",\"verify\":\"https://{host}/verify/1\"}}");
-
-        var summary = await LnurlSetupSummary.Read($"alice@{host}", Store(), Assets, Network.RegTest, http.Client(),
-            TestContext.Current.CancellationToken);
-
-        Assert.True(summary.Verify);
-        Assert.Contains("Signet", summary.SaveError);
-        Assert.Contains("Regtest", summary.SaveError);
-        Assert.Empty(Offered(summary));
     }
 }

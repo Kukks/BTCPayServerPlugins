@@ -38,30 +38,41 @@ public class LightningSetupBrowserTests : UnitTestBase
         await page.GotoAsync(setup);
         await Expect(page.Locator("#CustomLNURLVerifyHeader")).ToHaveCountAsync(0);
         await page.ClickAsync("label[for='LightningNodeType-LNURLVerify']");
-        await page.FillAsync("#LNURLVerifyAddress", "nobody@does-not-exist.invalid");
-        await page.ClickAsync("#page-primary");
-        await Expect(page.Locator("#LNURLVerifySetup [data-valmsg-for='ConnectionString']")).Not.ToBeEmptyAsync();
-        await Expect(page.Locator("#LightningNodeType-LNURLVerify")).ToBeCheckedAsync();
-        await Expect(page.Locator("#LNURLVerifyAddress")).ToHaveValueAsync("nobody@does-not-exist.invalid");
+        stub.InvoicePrefix = "lntbs";
         await page.FillAsync("#LNURLVerifyAddress", stub.PayUrl);
 
         await Expect(summary.Locator("tr[data-option='lightning']")).ToContainTextAsync("Offered", new() { Timeout = 30_000 });
         await Expect(summary.Locator("tr[data-option='usdt-arbitrum']")).ToContainTextAsync("USDT on Arbitrum Sepolia");
         await Expect(summary.Locator("tr[data-option='usdt-tron']")).ToContainTextAsync("Offered");
-        await Expect(summary).ToContainTextAsync("Settlement is detected through LUD-21 verify");
+        await Expect(summary).ToContainTextAsync("checked when you save");
+        Assert.Equal(0, stub.Callbacks);
 
+        // Mutinynet-style invoices: only saving's probe can tell, and the refusal shows in the tab.
+        await page.ClickAsync("#page-primary");
+        var error = page.Locator("#LNURLVerifySetup [data-valmsg-for='ConnectionString']");
+        await Expect(error).ToContainTextAsync("Signet", new() { Timeout = 30_000 });
+        await Expect(error).ToContainTextAsync("Regtest");
+        await Expect(page.Locator("#LightningNodeType-LNURLVerify")).ToBeCheckedAsync();
+        await Expect(page.Locator("#LNURLVerifyAddress")).ToHaveValueAsync(stub.PayUrl);
+        await Expect(summary.Locator("tr[data-option='lightning']")).ToContainTextAsync("Offered", new() { Timeout = 30_000 });
+        Assert.Equal(1, stub.Callbacks);
+
+        stub.InvoicePrefix = "lnbcrt";
         await page.ClickAsync("#page-primary");
         await Expect(page).ToHaveURLAsync(new Regex("/lightning/BTC/settings"), new() { Timeout = 30_000 });
+        Assert.Equal(2, stub.Callbacks);
         var store = await tester.PayTester.GetService<StoreRepository>().FindStore(user.StoreId);
         Assert.Equal($"type=lnurl;value={stub.PayUrl}", store!.GetPaymentMethodConfig(PaymentMethodId.Parse("BTC-LN"))?["connectionString"]?.ToString());
         var client = await user.CreateClient();
         var invoice = await client.CreateInvoice(user.StoreId, new CreateInvoiceRequest { Amount = 0.001m, Currency = "BTC" });
         Assert.StartsWith("lnbcrt", (await client.GetInvoicePaymentMethods(invoice.Id)).Single(m => m.PaymentMethodId == "BTC-LN").Destination);
 
+        var beforeReopen = stub.Callbacks;
         await page.GotoAsync(setup);
         await Expect(page.Locator("#LightningNodeType-LNURLVerify")).ToBeCheckedAsync();
         await Expect(page.Locator("#LNURLVerifyAddress")).ToHaveValueAsync(stub.PayUrl);
         await Expect(summary.Locator("tr[data-option='usdt-solana']")).ToContainTextAsync("Offered", new() { Timeout = 30_000 });
+        Assert.Equal(beforeReopen, stub.Callbacks);
         Assert.Empty(refused);
     }
 }

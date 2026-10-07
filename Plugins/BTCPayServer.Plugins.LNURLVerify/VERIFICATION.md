@@ -1,6 +1,6 @@
 # LNURL Verify — verification runbook
 
-The plugin is unit-tested (360 tests) and reviewed, but three things can only be confirmed by running
+The plugin is unit-tested (357 tests) and reviewed, but three things can only be confirmed by running
 it. This is the concrete checklist to gain that confidence, ordered cheapest-first.
 
 ## 1. Unit tests (seconds, no infra)
@@ -8,7 +8,7 @@ it. This is the concrete checklist to gain that confidence, ordered cheapest-fir
 ```
 dotnet test BTCPayServer.Plugins.LNURLVerify.Tests
 ```
-Expected: 360 passed, and no warnings from plugin or test code. Covers capability decode, verify-support probe (and its network check), receive guards +
+Expected: 357 passed, and no warnings from plugin or test code. Covers capability decode, verify-support probe (and its network check), receive guards +
 settled-cache, the shared poller (incl. a 60-invoice concurrent settle/error stress), the full send
 chain (parse → k1-refresh → bounds/balance → submit), connection-scoped reconciliation, persistence
 save/restore (against a fake settings store), paymentOptions selection, verifyBatch batching (chunking,
@@ -127,7 +127,8 @@ WALLETCONNECT_PROJECT_ID=<Reown project id> dotnet test BTCPayServer.Plugins.Tes
 ```
 
 Point the `TESTS_*` variables at the stack's real ports (`TESTS_POSTGRES`, `TESTS_EXPLORER_POSTGRES`, `TESTS_BTCNBXPLORERURL`).
-Each test uses a fresh database. The same setup runs the Lightning setup page's Lightning address tab (look-up, save, reopen):
+Each test uses a fresh database. The same setup runs the Lightning setup page's Lightning address tab (a look-up that requests
+no invoice, a save refused for the network, a save, a reopen):
 `--filter "FullyQualifiedName~LightningSetupBrowserTests"`.
 
 **Wallet module:** `cd Plugins/BTCPayServer.Plugins.LNURLVerify/walletconnect && npm ci && npm test`, then
