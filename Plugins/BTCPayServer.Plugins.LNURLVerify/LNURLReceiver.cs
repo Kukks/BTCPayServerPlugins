@@ -35,7 +35,8 @@ public sealed class LNURLReceiver
 
     /// <summary>
     /// Config-time probe: requests a minimal invoice from the pay callback and checks that the LUD-21
-    /// verify field is present. Returns null when verify is supported, or a user-facing error message.
+    /// verify field is present and the invoice is on this store's network. Returns null when both hold,
+    /// or a user-facing error message.
     /// (LUD-21 exposes verify only in the callback response, so this can't be checked from metadata alone.)
     /// </summary>
     public async Task<string?> CheckVerifySupport(CancellationToken ct)
@@ -43,22 +44,29 @@ public sealed class LNURLReceiver
         JObject meta;
         try { meta = await LNURLResolver.GetJson(_http, _resolved.PayEndpoint, ct); }
         catch (Exception e) { return e.Message; }
+        return (await Probe(_http, meta, _network, ct)).Error;
+    }
 
+    /// <summary>The probe behind <see cref="CheckVerifySupport"/>, also reporting what its one invoice request learnt.</summary>
+    internal static async Task<(string? Error, bool Verify, string? VerifyBatch)> Probe(HttpClient http, JObject meta, Network network,
+        CancellationToken ct)
+    {
         var callback = meta["callback"]?.Value<string>();
-        if (string.IsNullOrEmpty(callback)) return "The LNURL-pay endpoint is missing a callback URL.";
+        if (string.IsNullOrEmpty(callback)) return ("The LNURL-pay endpoint is missing a callback URL.", false, null);
         long min;
         string? option;
         try { (min, _, option) = PaymentOption.PlanLightning(meta, 1000, long.MaxValue); }
-        catch (NotSupportedException e) { return e.Message; }
+        catch (NotSupportedException e) { return (e.Message, false, null); }
 
         JObject json;
-        try { json = await LNURLResolver.GetJson(_http, CallbackUri(callback, min, option, null), ct); }
-        catch (Exception e) { return $"Could not request a probe invoice: {e.Message}"; }
+        try { json = await LNURLResolver.GetJson(http, CallbackUri(callback, min, option, null), ct); }
+        catch (Exception e) { return ($"Could not request a probe invoice: {e.Message}", false, null); }
 
         var verify = json["verify"]?.Value<string>();
-        if (string.IsNullOrEmpty(verify) || !Uri.TryCreate(verify, UriKind.Absolute, out _))
-            return VerifyUnsupportedMessage;
-        return null;
+        var verifiable = !string.IsNullOrEmpty(verify) && Uri.TryCreate(verify, UriKind.Absolute, out _);
+        var mismatch = json["pr"]?.Type == JTokenType.String ? NetworkMismatch(json["pr"]!.Value<string>()!, network) : null;
+        return (mismatch ?? (verifiable ? null : VerifyUnsupportedMessage), verifiable,
+            verifiable ? BatchUrl(json["verifyBatch"], verify!) : null);
     }
 
     public async Task<LightningInvoice> CreateInvoice(LightMoney? amount, string? description,
@@ -83,6 +91,7 @@ public sealed class LNURLReceiver
 
         var json = await LNURLResolver.GetJson(_http, CallbackUri(callback, msat, option, comment), ct);
         var pr = json["pr"]?.Value<string>() ?? throw new Exception("LNURL callback did not return an invoice.");
+        if (NetworkMismatch(pr, _network) is { } mismatch) throw new Exception(mismatch);
         var bolt11 = BOLT11PaymentRequest.Parse(pr, _network);
 
         // Security guards against a malicious/broken LNURL server.
@@ -223,6 +232,17 @@ public sealed class LNURLReceiver
             return computed.Equals(paymentHash, StringComparison.OrdinalIgnoreCase);
         }
         catch { return false; }
+    }
+
+    /// <summary>Names both networks when an invoice belongs to another one, where the parser would say only "Invalid prefix".</summary>
+    internal static string? NetworkMismatch(string bolt11, Network network)
+    {
+        // Every prefix InferNetwork knows starts with one of these; anything else is left for the parser to reject.
+        if (!bolt11.StartsWith("lnbc", StringComparison.OrdinalIgnoreCase) && !bolt11.StartsWith("lntb", StringComparison.OrdinalIgnoreCase))
+            return null;
+        var issued = InferNetwork(bolt11).ChainName;
+        return issued == network.ChainName ? null
+            : $"The LNURL issues {issued} Lightning invoices, but this store runs on {network.ChainName}. Use an LNURL on the store's network.";
     }
 
     public static Network InferNetwork(string bolt11) =>

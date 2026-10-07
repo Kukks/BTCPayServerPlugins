@@ -82,6 +82,9 @@ public class LNURLReceiverTests
         "{\"tag\":\"payRequest\",\"callback\":\"" + cb + "\",\"minSendable\":1000,\"maxSendable\":" + maxSendable +
         ",\"metadata\":\"[[\\\"text/plain\\\",\\\"x\\\"]]\"" + (options is null ? "" : ",\"paymentOptions\":" + options) + "}";
 
+    // mutinynet is a signet, so its invoices carry lntbs.
+    static string SignetInvoice() => TestBolt11.Create(new Key(), 1000, RandomNumberGenerator.GetBytes(32), prefix: "lntbs");
+
     static string SpecCallback(string host, string extra = "") =>
         $"{{\"pr\":\"{SpecBolt11}\",\"verify\":\"https://{host}/verify/{SpecHash}\"{extra}}}";
 
@@ -141,9 +144,46 @@ public class LNURLReceiverTests
             .Map($"https://{host}/pay", PayJson($"https://{host}/cb",
                 options: "[{\"id\":\"lightning\",\"type\":\"lightning\",\"minSendable\":5000}]"))
             .Map($"https://{host}/cb?amount=5000&paymentOption=lightning",
-                $"{{\"pr\":\"lnbc1\",\"verify\":\"https://{host}/verify/abc\"}}");
+                $"{{\"pr\":\"lnbcrt1\",\"verify\":\"https://{host}/verify/abc\"}}");
 
         Assert.Null(await Receiver(host, http, Network.RegTest).CheckVerifySupport(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task CheckVerifySupport_names_both_networks_when_the_probe_invoice_is_another_networks()
+    {
+        var host = UniqueHost("probenet");
+        var http = new FakeHttp()
+            .Map($"https://{host}/pay", PayJson($"https://{host}/cb"))
+            .Map($"https://{host}/cb?amount=1000", $"{{\"pr\":\"{SignetInvoice()}\",\"verify\":\"https://{host}/verify/abc\"}}");
+
+        var err = await Receiver(host, http, Network.RegTest).CheckVerifySupport(TestContext.Current.CancellationToken);
+
+        Assert.Contains("Signet", err);
+        Assert.Contains("Regtest", err);
+        Assert.Null(await Receiver(host, http, NBitcoin.Bitcoin.Instance.Signet).CheckVerifySupport(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task CreateInvoice_names_both_networks_instead_of_an_invalid_prefix()
+    {
+        var host = UniqueHost("invnet");
+        var http = new FakeHttp()
+            .Map($"https://{host}/pay", PayJson($"https://{host}/cb"))
+            .Map($"https://{host}/cb?amount=1000", $"{{\"pr\":\"{SignetInvoice()}\",\"verify\":\"https://{host}/verify/abc\"}}");
+
+        var ex = await Assert.ThrowsAnyAsync<Exception>(() => Receiver(host, http, Network.RegTest)
+            .CreateInvoice(LightMoney.MilliSatoshis(1000), "x", null, TestContext.Current.CancellationToken));
+
+        Assert.Contains("Signet", ex.Message);
+        Assert.Contains("Regtest", ex.Message);
+    }
+
+    [Fact]
+    public void Only_a_known_invoice_prefix_is_named_as_another_network()
+    {
+        Assert.Contains("Signet", LNURLReceiver.NetworkMismatch("lntbs10n1x", Network.TestNet));
+        Assert.Null(LNURLReceiver.NetworkMismatch("not-an-invoice", Network.RegTest));
     }
 
     [Fact]
@@ -280,7 +320,7 @@ public class LNURLReceiverTests
         var host = "nv.example";
         var http = new FakeHttp()
             .Map($"https://{host}/pay", PayMeta.Replace("{CB}", $"https://{host}/cb"))
-            .Map($"https://{host}/cb?amount=1000", "{\"pr\":\"lnbc1\"}"); // invoice returned, but no verify field
+            .Map($"https://{host}/cb?amount=1000", "{\"pr\":\"lnbcrt1\"}"); // invoice returned, but no verify field
         var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, null, host);
         var rx = new LNURLReceiver(resolved, Network.RegTest, http.Client(), NullLogger.Instance);
 
@@ -296,7 +336,7 @@ public class LNURLReceiverTests
         var host = "yv.example";
         var http = new FakeHttp()
             .Map($"https://{host}/pay", PayMeta.Replace("{CB}", $"https://{host}/cb"))
-            .Map($"https://{host}/cb?amount=1000", $"{{\"pr\":\"lnbc1\",\"verify\":\"https://{host}/lnurlp/verify/abc\"}}");
+            .Map($"https://{host}/cb?amount=1000", $"{{\"pr\":\"lnbcrt1\",\"verify\":\"https://{host}/lnurlp/verify/abc\"}}");
         var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, null, host);
         var rx = new LNURLReceiver(resolved, Network.RegTest, http.Client(), NullLogger.Instance);
 
