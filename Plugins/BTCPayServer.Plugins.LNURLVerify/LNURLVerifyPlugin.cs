@@ -30,6 +30,7 @@ public class LNURLVerifyPlugin : BaseBTCPayServerPlugin
                 "LNURL Verify ignores {Codes} in {Key}: a code is 1-16 letters or digits and cannot name an LNURL rail",
                 string.Join(", ", rejected), TokenAssets.ConfigKey);
         services.AddSingleton(assets);
+        services.AddUIExtension("ln-payment-method-setup-tabhead", "LNURLVerify/LNPaymentMethodSetupTabhead");
         services.AddUIExtension("ln-payment-method-setup-tab", "LNURLVerify/LNPaymentMethodSetupTab");
         services.AddSingleton<LNURLVerifyConnectionStringHandler>();
         services.AddSingleton<ILightningConnectionStringHandler>(sp =>

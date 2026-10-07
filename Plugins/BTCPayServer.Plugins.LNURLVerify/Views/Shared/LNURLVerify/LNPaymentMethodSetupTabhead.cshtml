@@ -1,0 +1,8 @@
+@using BTCPayServer.Models.StoreViewModels
+@model BTCPayServer.Models.StoreViewModels.LightningNodeViewModel
+@if (Model.CryptoCode == "BTC")
+{
+    <input type="radio" name="@nameof(Model.LightningNodeType)" value="@LightningNodeType.Custom" id="LightningNodeType-LNURLVerify"
+           data-bs-toggle="pill" data-bs-target="#LNURLVerifySetup" role="tab" aria-controls="LNURLVerifySetup" aria-selected="false">
+    <label for="LightningNodeType-LNURLVerify">Lightning address</label>
+}

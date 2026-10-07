@@ -16,13 +16,15 @@ public static class LnurlRailProvisioning
     private static readonly PaymentMethodId NativeArkade = new("ARKADE");
 
     /// <summary>The LNURL behind the store's enabled BTC-LN; null when its backend is not this plugin's.</summary>
-    public static string? LnurlValue(StoreData store)
+    public static string? LnurlValue(StoreData store) =>
+        LnurlValue(store.GetPaymentMethodConfig(Lightning, onlyEnabled: true)?["connectionString"]?.Value<string>());
+
+    public static string? LnurlValue(string? connectionString)
     {
-        var cs = store.GetPaymentMethodConfig(Lightning, onlyEnabled: true)?["connectionString"]?.Value<string>();
-        if (string.IsNullOrEmpty(cs)) return null;
+        if (string.IsNullOrEmpty(connectionString)) return null;
         try
         {
-            var kv = LightningConnectionStringHelper.ExtractValues(cs, out var type);
+            var kv = LightningConnectionStringHelper.ExtractValues(connectionString, out var type);
             return type == "lnurl" && kv.TryGetValue("value", out var v) && !string.IsNullOrWhiteSpace(v) ? v : null;
         }
         catch (FormatException) { return null; }
@@ -34,12 +36,16 @@ public static class LnurlRailProvisioning
 
     public static IReadOnlyCollection<LnurlRail> Desired(StoreData store, params string[] offeredTypes)
     {
-        if (LnurlValue(store) is null || store.GetPaymentMethodConfig(NativeArkade) is not null)
-            return Array.Empty<LnurlRail>();
-        var chainUsable = store.GetPaymentMethodConfig(OnChain, onlyEnabled: true) is not null;
         var offered = new HashSet<string>(offeredTypes, StringComparer.OrdinalIgnoreCase);
-        return LnurlRails.All.Where(r => offered.Contains(r.OptionType) && !(r.OnChain && chainUsable)).ToArray();
+        return LnurlRails.All.Where(r => offered.Contains(r.OptionType) && Refusal(store, r) is null).ToArray();
     }
+
+    /// <summary>Why the store gets no rail even when its LNURL offers it; null when it does.</summary>
+    public static string? Refusal(StoreData store, LnurlRail rail) =>
+        LnurlValue(store) is null ? "the store's Lightning is not an enabled LNURL"
+        : store.GetPaymentMethodConfig(NativeArkade) is not null ? "the store takes Arkade through the Arkade plugin, which replaces every LNURL rail"
+        : rail.OnChain && store.GetPaymentMethodConfig(OnChain, onlyEnabled: true) is not null ? "the store's own on-chain wallet takes on-chain payments"
+        : null;
 
     /// <summary>The configured assets the payRequest offers on a supported network not marked unverifiable.</summary>
     public static IReadOnlyCollection<PaymentMethodId> DesiredTokens(StoreData store, JObject payRequest, TokenAssets assets)

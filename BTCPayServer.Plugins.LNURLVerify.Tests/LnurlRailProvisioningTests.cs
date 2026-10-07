@@ -52,6 +52,15 @@ public class LnurlRailProvisioningTests
     }
 
     [Fact]
+    public void A_connection_string_names_an_lnurl_only_when_its_type_is_lnurl()
+    {
+        Assert.Equal("bob@lnurl.example", LnurlRailProvisioning.LnurlValue("type=lnurl;value=bob@lnurl.example"));
+        Assert.Null(LnurlRailProvisioning.LnurlValue(LndRest));
+        Assert.Null(LnurlRailProvisioning.LnurlValue("type=lnurl;value="));
+        Assert.Null(LnurlRailProvisioning.LnurlValue((string?)null));
+    }
+
+    [Fact]
     public void A_store_without_a_wallet_gets_every_advertised_rail() =>
         Assert.Equal(new[] { "LNURL-ARKADE", "LNURL-ONCHAIN" }, Desired(Store(), Everything));
 

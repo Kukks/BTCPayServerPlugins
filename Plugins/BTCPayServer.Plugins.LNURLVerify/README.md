@@ -4,6 +4,9 @@ Use any **LNURL** or **Lightning address** as a BTCPay Server Lightning backend 
 
 ## Connection strings
 
+The store's Lightning setup page has a **Lightning address** tab: enter an address or LNURL and it shows what the LNURL offers
+and what checkout would do with each option, before you save. Saving there stores the connection string below.
+
 The capability is decided by decoding the value you provide:
 
 - **Receive only** — a Lightning address or an LNURL-pay:
@@ -109,6 +112,8 @@ LNURL quotes the token amount and settles it through `verify`, as for the Bitcoi
   manual review. (Reporting unknown rather than failed is deliberate — a blind retry could double-pay.)
 - **Validating the connection creates one throwaway probe invoice** on the receiver — this is how
   LUD-21 verify support is checked (verify is only advertised in the callback response, not metadata).
+  Each lookup on the setup page's Lightning address tab creates one too. An LNURL whose invoices are for
+  another network, such as a mutinynet (signet) address on a regtest store, is refused there, naming both.
 - Amountless / top-up invoices are not supported (LNURL-pay is amount-driven).
 - Node, channel and on-chain operations are not available — this client holds no Lightning node.
 - **Do not uninstall the plugin, or downgrade it below 1.2.0, once invoices with LNURL rails exist.** BTCPay's checkout page

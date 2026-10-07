@@ -1,6 +1,6 @@
 # LNURL Verify — verification runbook
 
-The plugin is unit-tested (347 tests) and reviewed, but three things can only be confirmed by running
+The plugin is unit-tested (360 tests) and reviewed, but three things can only be confirmed by running
 it. This is the concrete checklist to gain that confidence, ordered cheapest-first.
 
 ## 1. Unit tests (seconds, no infra)
@@ -8,14 +8,14 @@ it. This is the concrete checklist to gain that confidence, ordered cheapest-fir
 ```
 dotnet test BTCPayServer.Plugins.LNURLVerify.Tests
 ```
-Expected: 347 passed, and no warnings from plugin or test code. Covers capability decode, verify-support probe, receive guards +
+Expected: 360 passed, and no warnings from plugin or test code. Covers capability decode, verify-support probe (and its network check), receive guards +
 settled-cache, the shared poller (incl. a 60-invoice concurrent settle/error stress), the full send
 chain (parse → k1-refresh → bounds/balance → submit), connection-scoped reconciliation, persistence
 save/restore (against a fake settings store), paymentOptions selection, verifyBatch batching (chunking,
 414 halving, unsupported fallback, backoff), the GetInvoice cache, a self-signed BOLT11 pinning the
 payment-hash byte order, the rail table and BIP321 merging, rail destination requests and their refusals,
 destination polling through verifyBatch, provisioning rules, the rail payment-method handler, activation
-planning, the checkout re-skin, CAIP-19 parsing and the per-namespace URIs, token options and their provisioning, token quotes and their refusals, the token payment method (per-network quotes, expiry, re-issue), token activation planning, and the asset tab's model.
+planning, the checkout re-skin, CAIP-19 parsing and the per-namespace URIs, token options and their provisioning, token quotes and their refusals, the token payment method (per-network quotes, expiry, re-issue), token activation planning, the asset tab's model, and the setup page's LNURL summary.
 
 ## 2. Receive integration — real BTCPay LNURL + regtest LN (ServerTester)
 
@@ -105,7 +105,7 @@ Count lnurl-server's destination requests with
 
 | Scenario | Expected |
 |---|---|
-| Setup | Integrations → LNURL rails lists the provisioned rails. The store's Lightning setup page renders its LNURL section with no CSP error in the browser console: plugin views get their inline-script nonce only through `@addTagHelper *, BTCPayServer.Abstractions` in `_ViewImports.cshtml`. |
+| Setup | Integrations → LNURL rails lists the provisioned rails. The store's Lightning setup page renders its Lightning address tab with no CSP error in the browser console: plugin views get their inline-script nonce only through `@addTagHelper *, BTCPayServer.Abstractions` in `_ViewImports.cshtml`. |
 | A. Setting on, no wallet | Chips Lightning and Arkade. On-chain is refused, since lnurl-server's on-chain rail has no `verify`, and reloading never repeats that request. The QR carries `lightning=` and `ark=`. `docker exec arkd ark send --to <ark destination> --amount <sats> --password secret` settles the invoice and adds a row under "LNURL rail payments". |
 | B. Setting off | Only Lightning is active on open; tapping Arkade costs exactly one destination request. |
 | C. Store with a wallet | The on-chain rail is dropped. The checkout opens on-chain, the QR's path is the store's address, and the LNURL's on-chain option is never requested. |
@@ -127,7 +127,8 @@ WALLETCONNECT_PROJECT_ID=<Reown project id> dotnet test BTCPayServer.Plugins.Tes
 ```
 
 Point the `TESTS_*` variables at the stack's real ports (`TESTS_POSTGRES`, `TESTS_EXPLORER_POSTGRES`, `TESTS_BTCNBXPLORERURL`).
-Each test uses a fresh database.
+Each test uses a fresh database. The same setup runs the Lightning setup page's Lightning address tab (look-up, save, reopen):
+`--filter "FullyQualifiedName~LightningSetupBrowserTests"`.
 
 **Wallet module:** `cd Plugins/BTCPayServer.Plugins.LNURLVerify/walletconnect && npm ci && npm test`, then
 `npm run build` to rebuild `Resources/lnurlverify/wallet.js` after changing `src/`.
