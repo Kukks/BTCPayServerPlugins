@@ -66,6 +66,15 @@ public class LnurlTokenCheckoutExtensionTests
     }
 
     [Fact]
+    public void A_network_names_its_provider_on_its_chip_and_one_without_a_provider_names_none()
+    {
+        var viaFixedFloat = new TokenNetworkState { OptionId = "ff-usdtarbitrum", Asset = Arbitrum, Provider = "FixedFloat" };
+        var networks = LnurlTokenCheckoutExtension.Model(Handler, Prompt(viaFixedFloat, Quoted("usdt-tron", Nile, "TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7")),
+            DateTimeOffset.UtcNow)["networks"]!;
+        Assert.Equal(new[] { ("unrequested", "FixedFloat"), ("live", null) }, networks.Select(n => ((string)n["state"]!, (string?)n["provider"])));
+    }
+
+    [Fact]
     public void An_expired_quote_shows_no_destination()
     {
         var n = OnlyNetwork(Prompt(Quoted("usdt-arbitrum", Arbitrum, EvmTo, expiresAt: DateTimeOffset.UtcNow.AddSeconds(-1).ToUnixTimeSeconds())));

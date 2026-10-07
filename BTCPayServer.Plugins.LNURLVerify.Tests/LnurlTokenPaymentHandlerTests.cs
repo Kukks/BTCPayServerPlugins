@@ -39,7 +39,7 @@ public class LnurlTokenPaymentHandlerTests
         // A callback answers after its option's delay if the request is still alive; Timeout.InfiniteTimeSpan never answers.
         public readonly Dictionary<string, TimeSpan> Delays = new();
 
-        public Lnurl(bool withBase = false, bool sameRecipient = false, bool usdt = true, TimeSpan? requestTimeout = null)
+        public Lnurl(bool withBase = false, bool sameRecipient = false, bool usdt = true, TimeSpan? requestTimeout = null, string? provider = null)
         {
             var callback = $"https://{Host}/cb";
             var options = new JArray
@@ -49,6 +49,7 @@ public class LnurlTokenPaymentHandlerTests
                 Option("usdt-tron", "tron:0xcd8690dc/trc20:TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf")
             };
             if (withBase) options.Add(Option("usdt-base", "eip155:84532/erc20:0x30fA2FbE15c1EaDfbEF28C188b7B8dbd3c1Ff2eB"));
+            if (provider is not null) options[0]["provider"] = provider;
             var pay = new JObject
             {
                 ["tag"] = "payRequest", ["callback"] = callback, ["minSendable"] = 1000, ["maxSendable"] = 100_000_000_000, ["metadata"] = "[]",
@@ -153,6 +154,15 @@ public class LnurlTokenPaymentHandlerTests
         Assert.Equal(new[] { "usdt-arbitrum", "usdt-solana", "usdt-tron" }, details.Networks.Select(n => n.OptionId));
         Assert.All(details.Networks, n => Assert.Null(n.Quote));
         Assert.Empty(lnurl.Calls);
+    }
+
+    [Fact]
+    public async Task A_network_names_the_provider_its_option_names_before_it_is_requested()
+    {
+        var lnurl = new Lnurl(provider: "FixedFloat");
+        var invoice = lnurl.Invoice();
+        await lnurl.Activate(invoice);
+        Assert.Equal(new[] { "FixedFloat", null, null }, lnurl.Details(invoice).Networks.Select(n => n.Provider));
     }
 
     [Fact]

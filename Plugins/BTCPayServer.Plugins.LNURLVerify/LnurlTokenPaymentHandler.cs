@@ -29,6 +29,7 @@ public class TokenNetworkState
 {
     public string OptionId { get; set; } = "";
     public string Asset { get; set; } = "";
+    public string? Provider { get; set; }
     public bool Refused { get; set; }
     public long? FailedAt { get; set; }
     public TokenQuoteState? Quote { get; set; }
@@ -121,7 +122,8 @@ public class LnurlTokenPaymentHandler : ILnurlRailHandler
             var old = previous?.Networks.FirstOrDefault(n => n.OptionId == option.Id);
             var network = new TokenNetworkState
             {
-                OptionId = option.Id, Asset = option.Asset.ToString(), Refused = old?.Refused ?? false, FailedAt = old?.FailedAt, Quote = old?.Quote
+                OptionId = option.Id, Asset = option.Asset.ToString(), Provider = option.Provider, Refused = old?.Refused ?? false, FailedAt = old?.FailedAt,
+                Quote = old?.Quote
             };
             details.Networks.Add(network);
             var reissue = network.Quote is { } held && held.AmountMsat != msat;

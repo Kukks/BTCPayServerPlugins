@@ -10,7 +10,7 @@
     <div class="payment-box">
         <div v-if="networks.length" class="btcpay-pills d-flex flex-wrap justify-content-center gap-2 mb-3" id="LnurlTokenNetworks">
             <button v-for="n in networks" :key="n.id" type="button" class="btcpay-pill" :class="{ active: current && current.id === n.id }"
-                    :disabled="busy === n.id" :data-network="n.id" v-on:click="pick(n)" v-text="n.label"></button>
+                    :disabled="busy === n.id" :data-network="n.id" v-on:click="pick(n)" v-text="named(n)"></button>
         </div>
         <p v-else class="text-center my-4" id="LnurlTokenNone">No network is available for this payment right now.</p>
         <template v-if="live">
@@ -74,7 +74,7 @@
                 return this.sent && this.sent.key === key ? this.sent.ref : this.storedRef(key);
             },
             sentHere () { return !!this.sentRef; },
-            summary () { return this.current.amount + ' ' + this.token.code + ' on ' + this.current.label; }
+            summary () { return this.current.amount + ' ' + this.token.code + ' on ' + this.named(this.current); }
         },
         watch: {
             'token.pmi' () { this.selected = null; this.walletError = null; this.request(null); }
@@ -85,6 +85,7 @@
         },
         beforeDestroy () { clearInterval(this.timer); },
         methods: {
+            named (n) { return n.provider ? n.label + ' via ' + n.provider : n.label; },
             async request (network) {
                 if (!this.token.pmi) return;
                 this.busy = network;

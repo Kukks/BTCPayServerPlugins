@@ -12,7 +12,7 @@ public sealed record TokenUnit(string Code, int Decimals, string? Name);
 
 /// <summary>A payment option for a token on a non-Bitcoin network; its <c>type</c> is its asset's CAIP-2 namespace.</summary>
 public sealed record TokenOption(string Id, CaipAsset Asset, TokenUnit Unit, bool Available, long? MinSendable, long? MaxSendable,
-    bool? Verifiable)
+    bool? Verifiable, string? Provider = null)
 {
     private static readonly Regex Code = new(@"\A[A-Za-z0-9]{1,16}\z", RegexOptions.CultureInvariant);
 
@@ -30,7 +30,7 @@ public sealed record TokenOption(string Id, CaipAsset Asset, TokenUnit Unit, boo
             if (shared.Contains(o.Id) || CaipAsset.Parse(o.Asset) is not { } asset || asset.Namespace != o.Type ||
                 TokenNamespaces.For(asset) is null || o.Unit is null || !units.TryGetValue(o.Unit, out var unit))
                 continue;
-            options.Add(new TokenOption(o.Id, asset, unit, o.Available, o.MinSendable, o.MaxSendable, o.Verifiable));
+            options.Add(new TokenOption(o.Id, asset, unit, o.Available, o.MinSendable, o.MaxSendable, o.Verifiable, o.Provider));
         }
         return options;
     }

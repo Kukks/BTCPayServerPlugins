@@ -61,7 +61,7 @@ public class LnurlTokenCheckoutExtension : ICheckoutModelExtension
             var json = new JObject
             {
                 ["id"] = n.OptionId, ["chain"] = asset.ChainId, ["namespace"] = asset.Namespace, ["label"] = ChainDirectory.Label(asset.ChainId),
-                ["token"] = asset.AssetReference, ["state"] = state
+                ["token"] = asset.AssetReference, ["state"] = state, ["provider"] = n.Provider is null ? JValue.CreateNull() : new JValue(n.Provider)
             };
             if (state == "live")
             {
