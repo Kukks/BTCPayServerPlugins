@@ -45,6 +45,7 @@ public sealed class StubLnurl : IAsyncDisposable
     private readonly ConcurrentDictionary<string, string> _settled = new();
     private readonly ConcurrentDictionary<string, int> _orders = new();
     private readonly ConcurrentDictionary<string, (string Option, string Deposit)> _deposits = new();
+    private readonly ConcurrentDictionary<string, int> _orderOf = new();
     private int _batchVerifies, _fixedFloatSingleVerifies;
 
     private StubLnurl(IHost host, Uri root)
@@ -56,10 +57,12 @@ public sealed class StubLnurl : IAsyncDisposable
     public Uri Root { get; }
     public string PayUrl => new Uri(Root, ".well-known/lnurlp/merchant").AbsoluteUri;
     public string FixedFloatPayUrl => new Uri(Root, ".well-known/lnurlp/fixedfloat").AbsoluteUri;
-    /// <summary>How long the nth FixedFloat quote for an option stays valid.</summary>
-    public Func<string, int, TimeSpan> QuoteLifetime { get; set; } = (_, _) => TimeSpan.FromMinutes(10);
+    /// <summary>Per-option FixedFloat quote lifetimes, read as each order is made; ten minutes for an option with none.</summary>
+    public ConcurrentDictionary<string, TimeSpan> QuoteLifetimes { get; } = new();
     public int BatchVerifies => _batchVerifies;
     public int FixedFloatSingleVerifies => _fixedFloatSingleVerifies;
+    public int Orders(string option) => _orders.GetValueOrDefault(option);
+    public int OrderOf(string deposit) => _orderOf[deposit];
 
     public static string DepositAddress(string option, int n)
     {
@@ -130,6 +133,7 @@ public sealed class StubLnurl : IAsyncDisposable
         var n = _orders.AddOrUpdate(option, 1, (_, c) => c + 1);
         var deposit = DepositAddress(option, n);
         _deposits[$"{option}/{n}"] = (option, deposit);
+        _orderOf[deposit] = n;
         var rail = FixedFloatRails[option];
         var baseUnits = (new BigInteger(msat) * 63_360 / 100_000).ToString();
         var answer = new JObject
@@ -137,7 +141,8 @@ public sealed class StubLnurl : IAsyncDisposable
             ["status"] = "OK", ["paymentOption"] = option, ["paymentDestination"] = deposit,
             ["paymentQuote"] = new JObject
             {
-                ["id"] = $"FF{n:D4}", ["expiresAt"] = DateTimeOffset.UtcNow.Add(QuoteLifetime(option, n)).ToUnixTimeSeconds(),
+                ["id"] = $"FF{n:D4}",
+                ["expiresAt"] = DateTimeOffset.UtcNow.Add(QuoteLifetimes.TryGetValue(option, out var lifetime) ? lifetime : TimeSpan.FromMinutes(10)).ToUnixTimeSeconds(),
                 ["requested"] = Msat(msat), ["payment"] = new JObject { ["amount"] = baseUnits, ["unit"] = rail.Unit }, ["receive"] = Msat(msat - 20_000),
                 ["fees"] = new JArray(new JObject { ["name"] = "provider", ["amount"] = Msat(230_000) }, new JObject { ["name"] = "solver", ["amount"] = Msat(20_000) })
             },

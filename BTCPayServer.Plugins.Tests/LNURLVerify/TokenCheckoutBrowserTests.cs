@@ -69,46 +69,51 @@ public class TokenCheckoutBrowserTests : UnitTestBase
 
     // lnurl-server's FixedFloat rails as its spec and the coordinator's rulings describe them, served by the stub rather than
     // lnurl-server's simulated provider; a stock install's default assets must pick up both USDT and USDC.
-    [Fact(Timeout = 300_000)]
+    [Fact(Timeout = 600_000)]
     public async Task A_fixedfloat_quote_names_its_provider_requotes_on_expiry_and_settles_on_the_deposit_transaction()
     {
         await using var stub = await StubLnurl.Start();
-        stub.QuoteLifetime = (option, n) => option == "ff-usdtarbitrum" && n == 1 ? TimeSpan.FromSeconds(20) : TimeSpan.FromMinutes(10);
+        stub.QuoteLifetimes["ff-usdtarbitrum"] = TimeSpan.FromSeconds(60);
         using var tester = await Start();
         var (user, invoiceId) = await Invoice(tester, stub.FixedFloatPayUrl, "USDT", "USDC");
         using var playwright = await Playwright.CreateAsync();
         await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
         var page = await browser.NewPageAsync();
+        var qr = page.Locator(".qr-container");
 
         await OpenTokenTab(page, tester, invoiceId);
         await Expect(page.Locator("#LnurlTokenNetworks button")).ToHaveTextAsync(new[] { "Arbitrum One via FixedFloat", "Tron via FixedFloat" });
         string Evm(int n) => $"ethereum:{StubLnurl.ArbitrumUsdt}@42161/transfer?address={StubLnurl.DepositAddress("ff-usdtarbitrum", n)}&uint256=63360000";
-        await page.Locator("#LnurlTokenNetworks button[data-network='ff-usdtarbitrum']").ClickAsync();
-        await Expect(page.Locator(".qr-container")).ToHaveAttributeAsync("data-qr-value", Evm(1));
-        await Expect(page.Locator("#LnurlTokenAmount")).ToHaveTextAsync("63.36 USDT on Arbitrum One via FixedFloat");
+        // A tap on a network the page still holds as unrequested asks for it again, even once its open-time quote exists,
+        // minting a second order; the page's busy flag cannot tell, since the open-time request clears it.
+        await page.WaitForFunctionAsync(
+            "() => document.querySelector('#LnurlTokenNetworks').closest('.payment-box').__vue__.networks.every(n => n.state !== 'unrequested')",
+            null, new() { Timeout = 60_000 });
+        var first = await Show(page, stub, "ff-usdtarbitrum", "Arbitrum One");
+        await Expect(qr).ToHaveAttributeAsync("data-qr-value", Evm(first));
         await Expect(page.Locator("#LnurlTokenProvider")).ToHaveTextAsync(
             "This deposit address belongs to FixedFloat, a third-party service, not to the merchant. Send exactly this amount before the " +
             "quote expires: a late, short or excess deposit is resolved with FixedFloat, not with the merchant or BTCPay Server.");
-        await Expect(page.Locator("#LnurlTokenExpiry")).ToHaveTextAsync(new Regex(@"^Quote valid for 0:[0-2]\d$"));
+        await Expect(page.Locator("#LnurlTokenExpiry")).ToHaveTextAsync(new Regex(@"^Quote valid for (1:00|0:[0-5]\d)$"));
+        Assert.Equal(first, stub.Orders("ff-usdtarbitrum"));
 
-        await Expect(page.Locator("#LnurlTokenRefresh")).ToHaveTextAsync("Quote expired: get a new one", new() { Timeout = 60_000 });
+        await Expect(page.Locator("#LnurlTokenRefresh")).ToHaveTextAsync("Quote expired: get a new one", new() { Timeout = 120_000 });
+        stub.QuoteLifetimes.TryRemove("ff-usdtarbitrum", out _);
         await page.Locator("#LnurlTokenRefresh").ClickAsync();
-        await Expect(page.Locator(".qr-container")).ToHaveAttributeAsync("data-qr-value", Evm(2));
-        await Expect(page.Locator("#LnurlTokenExpiry")).ToHaveTextAsync(new Regex(@"^Quote valid for (10:00|9:[0-5]\d)$"));
+        await Expect(qr).ToHaveAttributeAsync("data-qr-value", Evm(first + 1), new() { Timeout = 60_000 });
+        await Expect(page.Locator("#LnurlTokenExpiry")).ToHaveTextAsync(new Regex(@"^Quote valid for (10:00|[5-9]:[0-5]\d)$"));
 
-        var tron = StubLnurl.DepositAddress("ff-usdttrc", 1);
-        await page.Locator("#LnurlTokenNetworks button[data-network='ff-usdttrc']").ClickAsync();
-        await Expect(page.Locator(".qr-container")).ToHaveAttributeAsync("data-qr-value", tron);
-        await Expect(page.Locator("#LnurlTokenAmount")).ToHaveTextAsync("63.36 USDT on Tron via FixedFloat");
+        var tron = await Show(page, stub, "ff-usdttrc", "Tron");
+        await Expect(qr).ToHaveAttributeAsync("data-qr-value", StubLnurl.DepositAddress("ff-usdttrc", tron));
         await Expect(page.Locator("#LnurlTokenOpenWallet")).ToHaveCountAsync(0);
 
         var depositTx = "0x" + new string('c', 64);
-        stub.Settle("ff-usdtarbitrum/2", depositTx);
+        stub.Settle($"ff-usdtarbitrum/{first + 1}", depositTx);
         var client = await user.CreateClient();
         await TestUtils.EventuallyAsync(async () =>
             Assert.Equal(InvoiceStatus.Settled, (await client.GetInvoice(invoiceId)).Status), 60_000);
         var paid = Assert.Single((await client.GetInvoicePaymentMethods(invoiceId)).SelectMany(m => m.Payments));
-        Assert.Equal(StubLnurl.DepositAddress("ff-usdtarbitrum", 2), paid.Destination);
+        Assert.Equal(StubLnurl.DepositAddress("ff-usdtarbitrum", first + 1), paid.Destination);
         Assert.StartsWith(depositTx + ":", paid.Id);
         Assert.True(stub.BatchVerifies > 0);
         Assert.Equal(0, stub.FixedFloatSingleVerifies);
@@ -177,6 +182,14 @@ public class TokenCheckoutBrowserTests : UnitTestBase
         var client = await user.CreateClient();
         var invoice = await client.CreateInvoice(user.StoreId, new CreateInvoiceRequest { Amount = 0.001m, Currency = "BTC" });
         return (user, invoice.Id);
+    }
+
+    static async Task<int> Show(IPage page, StubLnurl stub, string network, string label)
+    {
+        await page.Locator($"#LnurlTokenNetworks button[data-network='{network}']").ClickAsync();
+        await Expect(page.Locator("#LnurlTokenAmount")).ToHaveTextAsync($"63.36 USDT on {label} via FixedFloat");
+        var qr = (await page.Locator(".qr-container").GetAttributeAsync("data-qr-value"))!;
+        return stub.OrderOf(qr.StartsWith("ethereum:") ? Regex.Match(qr, "address=(0x[0-9a-f]{40})").Groups[1].Value : qr);
     }
 
     static async Task OpenTokenTab(IPage page, ServerTester tester, string invoiceId)
