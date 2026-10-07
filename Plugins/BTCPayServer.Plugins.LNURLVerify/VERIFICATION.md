@@ -125,10 +125,21 @@ dotnet build BTCPayServer.Plugins.Tests -p:StaticWebAssetsEnabled=false
 pwsh BTCPayServer.Plugins.Tests/bin/Debug/net10.0/playwright.ps1 install chromium
 dotnet test BTCPayServer.Plugins.Tests --no-build -p:StaticWebAssetsEnabled=false --filter "FullyQualifiedName~TokenCheckoutBrowserTests.A_payer_sees_each_network"
 WALLETCONNECT_PROJECT_ID=<Reown project id> dotnet test BTCPayServer.Plugins.Tests --no-build -p:StaticWebAssetsEnabled=false --filter "FullyQualifiedName~TokenCheckoutBrowserTests.Connect_wallet"
+dotnet test BTCPayServer.Plugins.Tests --no-build -p:StaticWebAssetsEnabled=false --filter "FullyQualifiedName~TokenCheckoutBrowserTests.A_fixedfloat"
 ```
 
 Point the `TESTS_*` variables at the stack's real ports (`TESTS_POSTGRES`, `TESTS_EXPLORER_POSTGRES`, `TESTS_BTCNBXPLORERURL`).
 Each test uses a fresh database.
+
+The FixedFloat test has the stub answer in lnurl-server's FixedFloat shape. Its options name a `provider`, each callback is
+a new order with only a short `paymentQuote.expiresAt`, and `verify` reports the payer's deposit transaction as the
+`paymentReference`. The test checks four things:
+- the default assets provision USDT and USDC;
+- the chips and amount read "via FixedFloat", next to the provider notice;
+- an expired quote is re-quoted at a new deposit address;
+- the invoice settles through `verifyBatch` with the deposit transaction linked.
+
+It does not run against lnurl-server's simulated provider; that run still needs its regtest stack.
 
 **Wallet module:** `cd Plugins/BTCPayServer.Plugins.LNURLVerify/walletconnect && npm ci && npm test`, then
 `npm run build` to rebuild `Resources/lnurlverify/wallet.js` after changing `src/`.
