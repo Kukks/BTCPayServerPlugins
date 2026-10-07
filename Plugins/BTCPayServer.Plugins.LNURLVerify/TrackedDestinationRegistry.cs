@@ -18,9 +18,10 @@ public interface IVerifyTarget
 }
 
 /// <param name="ExpiresAt">The invoice's monitoring expiration, so a late payment is still recorded as core does on-chain.</param>
+/// <param name="Asset">The CAIP-19 asset of a token destination; null for a Bitcoin rail.</param>
 public sealed record TrackedDestination(
     string InvoiceId, string PaymentMethodId, string Destination, string VerifyUrl, string? VerifyBatch,
-    long AmountMsat, DateTimeOffset ExpiresAt) : IVerifyTarget;
+    long AmountMsat, DateTimeOffset ExpiresAt, string? Asset = null) : IVerifyTarget;
 
 public static class TrackedDestinationRegistry
 {

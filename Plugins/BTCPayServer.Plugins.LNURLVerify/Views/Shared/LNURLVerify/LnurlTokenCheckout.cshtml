@@ -1,0 +1,140 @@
+@using BTCPayServer.Plugins.LNURLVerify
+@model BTCPayServer.Models.InvoicingModels.CheckoutModel
+@inject BTCPayServer.Abstractions.Contracts.ISettingsRepository Settings
+@{
+    var projectId = (await Settings.GetSettingAsync<LnurlTokenServerSettings>())?.WalletConnectProjectId;
+    var walletUrl = Url.Content("~/Resources/lnurlverify/wallet.js") + "?v=" + typeof(LNURLVerifyPlugin).Assembly.GetName().Version;
+}
+
+<template id="@LnurlTokenCheckoutExtension.ComponentName">
+    <div class="payment-box">
+        <div v-if="networks.length" class="btcpay-pills d-flex flex-wrap justify-content-center gap-2 mb-3" id="LnurlTokenNetworks">
+            <button v-for="n in networks" :key="n.id" type="button" class="btcpay-pill" :class="{ active: current && current.id === n.id }"
+                    :disabled="busy === n.id" :data-network="n.id" v-on:click="pick(n)" v-text="n.label"></button>
+        </div>
+        <p v-else class="text-center my-4" id="LnurlTokenNone">No network is available for this payment right now.</p>
+        <template v-if="live">
+            <div class="qr-container" :data-qr-value="current.qr" :data-clipboard="current.qr">
+                <div>
+                    <qrcode :value="current.qr" tag="div" :options="qrOptions" />
+                </div>
+            </div>
+            <p class="text-center mt-3 mb-0" id="LnurlTokenAmount" v-text="summary"></p>
+            <p v-if="secondsLeft !== null" class="text-center text-muted small" id="LnurlTokenExpiry" v-text="'Quote valid for ' + countdown"></p>
+            <div class="input-group mt-3">
+                <div class="form-floating" id="LnurlTokenRecipient">
+                    <vc:truncate-center text="current.destination" is-vue="true" padding="15" elastic="true" classes="form-control-plaintext" />
+                    <label>Recipient</label>
+                </div>
+            </div>
+            <a v-if="current.uri && model.showPayInWalletButton" class="btn btn-primary rounded-pill w-100 mt-4" id="LnurlTokenOpenWallet" target="_blank" :href="current.uri">Open in wallet</a>
+            <button v-if="walletConnect && !sentHere" type="button" class="btn btn-secondary rounded-pill w-100 mt-2" id="LnurlTokenConnect"
+                    :disabled="sending" v-on:click="payWithWallet">Connect wallet</button>
+        </template>
+        <div v-else-if="renewable" class="text-center my-4">
+            <button type="button" class="btn btn-secondary" id="LnurlTokenRefresh" :disabled="busy === current.id" v-on:click="request(current.id)"
+                    v-text="current.state === 'stale' ? 'The amount due changed: get a new quote'
+                           : current.state === 'failed' ? 'No quote for this network yet: try again' : 'Quote expired: get a new one'"></button>
+        </div>
+        <div v-else-if="current && pending" class="text-center my-4"><span class="spinner-border" role="status"></span></div>
+        <p v-else-if="networks.length" class="text-center my-4" id="LnurlTokenChoose">Choose a network</p>
+        <p v-if="sentHere" class="text-center mt-3" id="LnurlTokenSent">Sent, waiting for confirmation: <code v-text="sentRef"></code></p>
+        <p v-if="walletError" class="text-center text-danger mt-3" id="LnurlTokenWalletError" v-text="walletError"></p>
+    </div>
+</template>
+
+<script>
+    Vue.component(@Safe.Json(LnurlTokenCheckoutExtension.ComponentName), {
+        props: ['model'],
+        template: @Safe.Json("#" + LnurlTokenCheckoutExtension.ComponentName),
+        components: { qrcode: VueQrcode },
+        data () {
+            return {
+                selected: null, busy: null, pending: false, now: Math.floor(Date.now() / 1000), timer: null,
+                projectId: @Safe.Json(projectId), walletUrl: @Safe.Json(walletUrl), walletNamespaces: ['eip155', 'solana', 'tron'],
+                sending: false, sent: null, walletError: null,
+                activateUrl: @Safe.Json(Url.Action("ActivateToken", "LnurlRailCheckout", new { invoiceId = Model.InvoiceId }))
+            };
+        },
+        computed: {
+            token () { return this.model.lnurlToken || { networks: [] }; },
+            networks () { return this.token.networks; },
+            current () { return this.networks.find(n => n.id === this.selected) || (this.networks.length === 1 ? this.networks[0] : null); },
+            secondsLeft () { return this.current && this.current.expiresAt ? Math.max(0, this.current.expiresAt - this.now) : null; },
+            live () { return !!this.current && this.current.state === 'live' && this.secondsLeft !== 0; },
+            expired () { return !!this.current && (this.current.state === 'expired' || (this.current.state === 'live' && this.secondsLeft === 0)); },
+            renewable () { return this.expired || (!!this.current && (this.current.state === 'stale' || this.current.state === 'failed')); },
+            countdown () { return Math.floor(this.secondsLeft / 60) + ':' + String(this.secondsLeft % 60).padStart(2, '0'); },
+            walletConnect () { return !!this.projectId && this.walletNamespaces.includes(this.current.namespace); },
+            sentRef () {
+                if (!this.current) return null;
+                const key = this.token.pmi + '/' + this.current.id;
+                // sessionStorage is not reactive: re-read each tick, so a transfer an earlier mount was still awaiting shows up.
+                void this.now;
+                return this.sent && this.sent.key === key ? this.sent.ref : this.storedRef(key);
+            },
+            sentHere () { return !!this.sentRef; },
+            summary () { return this.current.amount + ' ' + this.token.code + ' on ' + this.current.label; }
+        },
+        watch: {
+            'token.pmi' () { this.selected = null; this.walletError = null; this.request(null); }
+        },
+        mounted () {
+            this.timer = setInterval(() => { this.now = Math.floor(Date.now() / 1000); }, 1000);
+            this.request(null);
+        },
+        beforeDestroy () { clearInterval(this.timer); },
+        methods: {
+            async request (network) {
+                if (!this.token.pmi) return;
+                this.busy = network;
+                this.pending = true;
+                try {
+                    const query = '?pmi=' + encodeURIComponent(this.token.pmi) + (network ? '&network=' + encodeURIComponent(network) : '');
+                    await fetch(this.activateUrl + query, { method: 'POST' });
+                } catch (e) { }
+                try { await this.$root.fetchData(); }
+                finally { this.busy = null; this.pending = false; }
+            },
+            loadWallet () {
+                if (window.LnurlVerifyWallet) return Promise.resolve();
+                return new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = this.walletUrl;
+                    script.onload = resolve;
+                    script.onerror = () => reject(new Error('The wallet module could not be loaded'));
+                    document.head.appendChild(script);
+                });
+            },
+            async payWithWallet () {
+                this.sending = true;
+                this.walletError = null;
+                // read before the first await: a tab switch meanwhile must change neither what is paid nor where the result lands
+                const pmi = this.token.pmi;
+                const withDecimals = n => Object.assign({}, n, { decimals: this.token.decimals });
+                const network = withDecimals(this.current);
+                const networks = this.networks.filter(n => this.walletNamespaces.includes(n.namespace)).map(withDecimals);
+                const key = pmi + '/' + network.id;
+                const store = this.storageKey(key);
+                try {
+                    await this.loadWallet();
+                    const ref = (await window.LnurlVerifyWallet.pay({ projectId: this.projectId, network, networks })) || 'the wallet reported no reference';
+                    this.sent = { key, ref };
+                    try { sessionStorage.setItem(store, ref); } catch (e) { }
+                } catch (e) {
+                    if (this.token.pmi === pmi) this.walletError = e && e.message ? e.message : String(e);
+                } finally {
+                    this.sending = false;
+                }
+            },
+            // the record must outlive the component: core mounts the checkout body without keep-alive, and a wallet app round trip can reload the page
+            storageKey (key) { return 'lnurlverify.sent/' + this.model.invoiceId + '/' + key; },
+            storedRef (key) { try { return sessionStorage.getItem(this.storageKey(key)); } catch (e) { return null; } },
+            async pick (n) {
+                this.walletError = null;
+                this.selected = n.id;
+                if (n.state === 'unrequested') await this.request(n.id);
+            }
+        }
+    });
+</script>

@@ -11,3 +11,4 @@ docs/plans
 .playwright-mcp
 docs/superpowers
 .mcp.json
+node_modules/

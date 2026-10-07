@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using BTCPayServer.Models.InvoicingModels;
 using BTCPayServer.Payments;
 using BTCPayServer.Services.Invoices;
 using Microsoft.AspNetCore.Mvc;
@@ -44,7 +45,13 @@ public class LnurlRailCheckoutExtension : IGlobalCheckoutModelExtension
             pm.Displayed = false;
         var selected = PaymentMethodId.Parse(model.PaymentMethodId);
         // Core resolves to its own LNURL-pay method when BTC-LN fails; that tab must still reach the rails.
-        if (!IsBitcoinRail(selected) && selected != CoreLnurl) return;
+        if (!IsBitcoinRail(selected) && selected != CoreLnurl)
+        {
+            // Another tab, such as a token asset's, is open: the Bitcoin methods still read as the one tab they become.
+            ShowOneBitcoinTab(model, model.AvailablePaymentMethods
+                .FirstOrDefault(pm => pm.Displayed && (IsBitcoinRail(pm.PaymentMethodId) || pm.PaymentMethodId == CoreLnurl))?.PaymentMethodId);
+            return;
+        }
 
         var prompts = CheckoutRails.Rails(context.InvoiceEntity);
         var rails = prompts.Select(p => State(p, context.UrlHelper)).OfType<RailState>().ToList();
@@ -56,11 +63,7 @@ public class LnurlRailCheckoutExtension : IGlobalCheckoutModelExtension
             ["destination"] = JsonString(r.Destination), ["uri"] = JsonString(r.Uri), ["qr"] = JsonString(r.Uri is null ? null : Bip321.Qr(r.Uri))
         }));
 
-        foreach (var pm in model.AvailablePaymentMethods)
-        {
-            if (pm.PaymentMethodId == selected) { pm.Displayed = true; pm.PaymentMethodName = TabName; }
-            else if (IsBitcoinRail(pm.PaymentMethodId) || pm.PaymentMethodId == CoreLnurl) pm.Displayed = false;
-        }
+        ShowOneBitcoinTab(model, selected);
         model.PaymentMethodName = TabName;
         model.CheckoutBodyComponentName = ComponentName;
         model.AdditionalData["lnurlRails"] = json;
@@ -70,6 +73,15 @@ public class LnurlRailCheckoutExtension : IGlobalCheckoutModelExtension
         {
             model.InvoiceBitcoinUrl = merged;
             model.InvoiceBitcoinUrlQR = Bip321.Qr(merged);
+        }
+    }
+
+    private static void ShowOneBitcoinTab(CheckoutModel model, PaymentMethodId? bitcoin)
+    {
+        foreach (var pm in model.AvailablePaymentMethods)
+        {
+            if (pm.PaymentMethodId == bitcoin) { pm.Displayed = true; pm.PaymentMethodName = TabName; }
+            else if (IsBitcoinRail(pm.PaymentMethodId) || pm.PaymentMethodId == CoreLnurl) pm.Displayed = false;
         }
     }
 

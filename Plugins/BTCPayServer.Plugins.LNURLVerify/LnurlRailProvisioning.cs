@@ -41,14 +41,26 @@ public static class LnurlRailProvisioning
         return LnurlRails.All.Where(r => offered.Contains(r.OptionType) && !(r.OnChain && chainUsable)).ToArray();
     }
 
-    public static bool Reconcile(StoreData store, IReadOnlyCollection<LnurlRail> desired)
+    /// <summary>The configured assets the payRequest offers on a supported network not marked unverifiable.</summary>
+    public static IReadOnlyCollection<PaymentMethodId> DesiredTokens(StoreData store, JObject payRequest, TokenAssets assets)
+    {
+        if (LnurlValue(store) is null) return Array.Empty<PaymentMethodId>();
+        var offered = TokenOption.Parse(payRequest).Where(o => o.Verifiable != false).Select(o => o.Unit.Code)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return assets.Codes.Where(offered.Contains).Select(TokenAssets.PaymentMethodIdOf).ToArray();
+    }
+
+    public static bool Reconcile(StoreData store, IReadOnlyCollection<LnurlRail> desired) =>
+        Reconcile(store, LnurlRails.All.Select(r => r.PaymentMethodId), desired.Select(r => r.PaymentMethodId).ToArray());
+
+    public static bool Reconcile(StoreData store, IEnumerable<PaymentMethodId> managed, IReadOnlyCollection<PaymentMethodId> desired)
     {
         var changed = false;
-        foreach (var rail in LnurlRails.All)
+        foreach (var pmi in managed)
         {
-            var want = desired.Contains(rail);
-            if ((store.GetPaymentMethodConfig(rail.PaymentMethodId) is not null) == want) continue;
-            store.SetPaymentMethodConfig(rail.PaymentMethodId, want ? new JObject() : null);
+            var want = desired.Contains(pmi);
+            if ((store.GetPaymentMethodConfig(pmi) is not null) == want) continue;
+            store.SetPaymentMethodConfig(pmi, want ? new JObject() : null);
             changed = true;
         }
         return changed;

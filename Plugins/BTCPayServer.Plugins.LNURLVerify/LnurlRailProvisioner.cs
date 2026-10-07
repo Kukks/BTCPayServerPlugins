@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -7,6 +8,7 @@ using System.Threading.Tasks;
 using BTCPayServer.Data;
 using BTCPayServer.Events;
 using BTCPayServer.HostedServices;
+using BTCPayServer.Payments;
 using BTCPayServer.Services.Stores;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;
@@ -23,15 +25,17 @@ public class LnurlRailProvisioner : EventHostedServiceBase
     private readonly StoreRepository _stores;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly Network _network;
+    private readonly TokenAssets _assets;
     private readonly ILogger _logger;
     private Timer? _timer;
 
     public LnurlRailProvisioner(EventAggregator eventAggregator, ILogger<LnurlRailProvisioner> logger, StoreRepository stores,
-        IHttpClientFactory httpClientFactory, BTCPayNetworkProvider networks) : base(eventAggregator, logger)
+        IHttpClientFactory httpClientFactory, BTCPayNetworkProvider networks, TokenAssets assets) : base(eventAggregator, logger)
     {
         _stores = stores;
         _httpClientFactory = httpClientFactory;
         _network = networks.BTC.NBitcoinNetwork;
+        _assets = assets;
         _logger = logger;
     }
 
@@ -72,12 +76,15 @@ public class LnurlRailProvisioner : EventHostedServiceBase
         try
         {
             var lnurl = LnurlRailProvisioning.LnurlValue(store);
-            var offered = lnurl is null ? Array.Empty<string>() : await OfferedTypes(lnurl, ct);
-            if (offered is null) return;
+            JObject? pay = null;
+            if (lnurl is not null && (pay = await ReadPayRequest(lnurl, ct)) is null) return;
             // Our copy may predate a merchant's save; writing it back would revert that save.
             if (await _stores.FindStore(store.Id) is not { } fresh || LnurlRailProvisioning.LnurlValue(fresh) != lnurl) return;
-            if (LnurlRailProvisioning.Reconcile(fresh, LnurlRailProvisioning.Desired(fresh, offered)))
-                await _stores.UpdateStore(fresh);
+            var offered = pay is null ? Array.Empty<string>() : LnurlRailProvisioning.OfferedTypes(pay);
+            IReadOnlyCollection<PaymentMethodId> tokens = pay is null ? Array.Empty<PaymentMethodId>() : LnurlRailProvisioning.DesiredTokens(fresh, pay, _assets);
+            var changed = LnurlRailProvisioning.Reconcile(fresh, LnurlRailProvisioning.Desired(fresh, offered));
+            changed |= LnurlRailProvisioning.Reconcile(fresh, _assets.PaymentMethodIds, tokens);
+            if (changed) await _stores.UpdateStore(fresh);
         }
         // A malformed config JSON or a failed UpdateStore on one store must not stop every later store from being reconciled.
         catch (Exception e) when (!ct.IsCancellationRequested)
@@ -87,7 +94,7 @@ public class LnurlRailProvisioner : EventHostedServiceBase
     }
 
     // Null when the LNURL cannot be read: a transient outage must not strip a store's rails.
-    private async Task<string[]?> OfferedTypes(string lnurl, CancellationToken ct)
+    private async Task<JObject?> ReadPayRequest(string lnurl, CancellationToken ct)
     {
         try
         {
@@ -95,8 +102,7 @@ public class LnurlRailProvisioner : EventHostedServiceBase
             http.Timeout = TimeSpan.FromSeconds(15);
             var resolved = await LNURLVerifyConnectionStringHandler.ResolveCached(lnurl, _network, http, ct);
             var pay = await LNURLResolver.GetJson(http, resolved.PayEndpoint, ct);
-            if (!string.Equals(pay["tag"]?.Value<string>(), "payRequest", StringComparison.Ordinal)) return null;
-            return LnurlRailProvisioning.OfferedTypes(pay);
+            return string.Equals(pay["tag"]?.Value<string>(), "payRequest", StringComparison.Ordinal) ? pay : null;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception e)

@@ -2,11 +2,16 @@
 @using BTCPayServer.Data
 @using BTCPayServer.Plugins.LNURLVerify
 @model BTCPayServer.Plugins.LNURLVerify.LnurlRailSettings
+@inject TokenAssets Assets
 @{
     ViewData.SetLayoutModel(new LayoutModel(LnurlRailSettingsController.ActivePage, "LNURL rails"));
     var store = Context.GetStoreData();
     var blob = store.GetStoreBlob();
-    var rails = LnurlRails.All.Where(r => store.GetPaymentMethodConfig(r.PaymentMethodId) is not null).ToList();
+    var managed = LnurlRails.All.Select(r => (Pmi: r.PaymentMethodId, Label: r.Label))
+        .Concat(Assets.Codes.Select(c => (Pmi: TokenAssets.PaymentMethodIdOf(c), Label: c)))
+        .Where(m => store.GetPaymentMethodConfig(m.Pmi) is not null)
+        .ToList();
+    var unconfigured = ViewData["UnconfiguredUnits"] as IReadOnlyList<string> ?? Array.Empty<string>();
 }
 <form method="post">
     <div class="d-flex align-items-center justify-content-between mb-3">
@@ -15,20 +20,27 @@
     </div>
     <partial name="_StatusMessage" />
     <p>
-        Rails your LNURL advertises join Lightning in one "Bitcoin" checkout tab.
-        @(rails.Any() ? "" : "Your LNURL advertises no extra rails right now.")
+        Rails your LNURL advertises join Lightning in one "Bitcoin" checkout tab, and each token asset gets a tab of its own.
+        @(managed.Any() ? "" : "Your LNURL advertises nothing extra right now.")
     </p>
-    @foreach (var rail in rails)
+    @foreach (var (pmi, label) in managed)
     {
         <div class="form-check form-switch">
-            <input type="checkbox" class="form-check-input" name="enabledRails" value="@rail.PaymentMethodId" id="Rail-@rail.PaymentMethodId" checked="@(!blob.IsExcluded(rail.PaymentMethodId))" />
-            <label class="form-check-label" for="Rail-@rail.PaymentMethodId">@rail.Label</label>
-            <input type="hidden" name="shownRails" value="@rail.PaymentMethodId" />
+            <input type="checkbox" class="form-check-input" name="enabledRails" value="@pmi" id="Rail-@pmi" checked="@(!blob.IsExcluded(pmi))" />
+            <label class="form-check-label" for="Rail-@pmi">@label</label>
+            <input type="hidden" name="shownRails" value="@pmi" />
         </div>
+    }
+    @if (unconfigured.Any())
+    {
+        <p class="form-text" id="UnconfiguredUnits">
+            Your LNURL also offers @string.Join(", ", unconfigured), which this server does not show. A server admin can add them to
+            the <code>@TokenAssets.ConfigKey</code> setting and restart BTCPay.
+        </p>
     }
     <div class="form-check form-switch">
         <input asp-for="ActivateAllRailsOnOpen" type="checkbox" class="form-check-input" />
         <label asp-for="ActivateAllRailsOnOpen" class="form-check-label">Request every rail when the checkout opens</label>
     </div>
-    <p class="form-text">When off, a rail is requested from your LNURL only when the payer taps it.</p>
+    <p class="form-text">When off, a rail or network is requested from your LNURL only when the payer taps it.</p>
 </form>

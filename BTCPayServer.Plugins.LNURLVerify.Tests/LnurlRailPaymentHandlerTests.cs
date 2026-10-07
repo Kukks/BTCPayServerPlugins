@@ -299,4 +299,23 @@ public class LnurlRailPaymentHandlerTests
         // One cached resolution, then one pay-endpoint read per request.
         Assert.Equal(3, http.Requests.Count(u => u == $"https://{host}/.well-known/lnurlp/alice"));
     }
+
+    [Fact]
+    public void A_rail_prompt_reports_its_destinations_and_whether_its_agreed_amount_is_stale()
+    {
+        var stored = new PaymentPrompt
+        {
+            Currency = "BTC", Divisibility = 8, Destination = "tark1qcurrent",
+            Details = JObject.FromObject(new LnurlRailPromptDetails
+            {
+                Verify = "https://lnurl.example/lnurl/verify/aa", AmountMsat = 20_000_000,
+                Superseded = { new SupersededRailDestination { Destination = "tark1qold", Verify = "https://lnurl.example/lnurl/verify/bb", AmountMsat = 9_000_000 } }
+            }, Handler.Serializer)
+        };
+        var invoice = Priced(stored);
+        var prompt = invoice.GetPaymentPrompt(LnurlRails.Arkade.PaymentMethodId)!;
+        Assert.False(Handler.NeedsReissue(prompt));
+        Assert.Equal(new[] { "tark1qcurrent", "tark1qold" }, Handler.Tracked(invoice, prompt).Select(d => d.Destination));
+        Assert.All(Handler.Tracked(invoice, prompt), d => Assert.Null(d.Asset));
+    }
 }

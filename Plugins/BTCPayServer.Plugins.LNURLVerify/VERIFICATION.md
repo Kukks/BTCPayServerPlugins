@@ -1,6 +1,6 @@
 # LNURL Verify — verification runbook
 
-The plugin is unit-tested (204 tests) and reviewed, but three things can only be confirmed by running
+The plugin is unit-tested (347 tests) and reviewed, but three things can only be confirmed by running
 it. This is the concrete checklist to gain that confidence, ordered cheapest-first.
 
 ## 1. Unit tests (seconds, no infra)
@@ -8,14 +8,14 @@ it. This is the concrete checklist to gain that confidence, ordered cheapest-fir
 ```
 dotnet test BTCPayServer.Plugins.LNURLVerify.Tests
 ```
-Expected: 204 passed, and no warnings from plugin or test code. Covers capability decode, verify-support probe, receive guards +
+Expected: 347 passed, and no warnings from plugin or test code. Covers capability decode, verify-support probe, receive guards +
 settled-cache, the shared poller (incl. a 60-invoice concurrent settle/error stress), the full send
 chain (parse → k1-refresh → bounds/balance → submit), connection-scoped reconciliation, persistence
 save/restore (against a fake settings store), paymentOptions selection, verifyBatch batching (chunking,
 414 halving, unsupported fallback, backoff), the GetInvoice cache, a self-signed BOLT11 pinning the
 payment-hash byte order, the rail table and BIP321 merging, rail destination requests and their refusals,
 destination polling through verifyBatch, provisioning rules, the rail payment-method handler, activation
-planning, and the checkout re-skin.
+planning, the checkout re-skin, CAIP-19 parsing and the per-namespace URIs, token options and their provisioning, token quotes and their refusals, the token payment method (per-network quotes, expiry, re-issue), token activation planning, and the asset tab's model.
 
 ## 2. Receive integration — real BTCPay LNURL + regtest LN (ServerTester)
 
@@ -112,3 +112,31 @@ Count lnurl-server's destination requests with
 | D. Partial payment | Pay part on-chain with cheat mode and mine a block. The Arkade chip is re-issued for the remainder with exactly one request, and paying it settles the invoice. |
 | E. Restart | Pay an activated Arkade destination while BTCPay is stopped; after the restart the invoice settles. |
 | F. Rail switched off | Switch Arkade off on Integrations → LNURL rails. The next invoice's checkout shows no Arkade chip, and lnurl-server sees no arkade request for it. |
+
+## 6. Token rails — acceptance
+
+**Automated:** the asset tab in Chromium against a stub LNURL, on a `ServerTester` host with the plugin loaded. It needs the
+BTCPay test stack (postgres, nbxplorer, bitcoind) and runs alone:
+
+```
+export TESTS_POSTGRES="User ID=postgres;Include Error Detail=true;Host=127.0.0.1;Port=39372;Database=btcpayserver"
+dotnet build BTCPayServer.Plugins.Tests -p:StaticWebAssetsEnabled=false
+pwsh BTCPayServer.Plugins.Tests/bin/Debug/net10.0/playwright.ps1 install chromium
+dotnet test BTCPayServer.Plugins.Tests --no-build -p:StaticWebAssetsEnabled=false --filter "FullyQualifiedName~TokenCheckoutBrowserTests.A_payer_sees_each_network"
+WALLETCONNECT_PROJECT_ID=<Reown project id> dotnet test BTCPayServer.Plugins.Tests --no-build -p:StaticWebAssetsEnabled=false --filter "FullyQualifiedName~TokenCheckoutBrowserTests.Connect_wallet"
+```
+
+Point the `TESTS_*` variables at the stack's real ports (`TESTS_POSTGRES`, `TESTS_EXPLORER_POSTGRES`, `TESTS_BTCNBXPLORERURL`).
+Each test uses a fresh database.
+
+**Wallet module:** `cd Plugins/BTCPayServer.Plugins.LNURLVerify/walletconnect && npm ci && npm test`, then
+`npm run build` to rebuild `Resources/lnurlverify/wallet.js` after changing `src/`.
+
+**Manual, on testnets** (a wallet must approve). Use an LNURL that issues token destinations, with BTCPay set to it and a
+project ID set. Confirm each once, and that the invoice settles with the network and transaction in the payments list:
+
+| Network | By QR | By deeplink (phone) | By WalletConnect (desktop) |
+|---|---|---|---|
+| Arbitrum Sepolia | MetaMask scans the EIP-681 QR | "Open in wallet" opens MetaMask | Connect wallet, scan with MetaMask |
+| Solana devnet | Phantom scans the Solana Pay QR | "Open in wallet" opens Phantom | Connect wallet, scan with a WalletConnect Solana wallet |
+| Tron Nile | TronLink scans the recipient; enter the amount shown | none | Connect wallet, scan with TronLink |

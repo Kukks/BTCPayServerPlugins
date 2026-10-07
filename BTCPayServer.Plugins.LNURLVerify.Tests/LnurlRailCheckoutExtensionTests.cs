@@ -158,4 +158,16 @@ public class LnurlRailCheckoutExtensionTests
         Assert.Equal(LnurlRailCheckoutExtension.ComponentName, model.CheckoutBodyComponentName);
         Assert.False(model.OnChainWithLnInvoiceFallback);
     }
+
+    [Fact]
+    public void With_another_tab_open_the_bitcoin_methods_still_show_as_one_bitcoin_tab()
+    {
+        var (context, model) = Checkout();
+        model.PaymentMethodId = "LNURL-USDT";
+        model.AvailablePaymentMethods.Add(new CheckoutModel.AvailablePaymentMethod
+            { PaymentMethodId = PaymentMethodId.Parse("LNURL-USDT"), PaymentMethodName = "USDT", Displayed = true });
+        Extension().ModifyCheckoutModel(context);
+        Assert.Equal(new[] { ("BTC-LN", "Bitcoin"), ("LNURL-USDT", "USDT") }, Pills(model));
+        Assert.Null(model.CheckoutBodyComponentName);
+    }
 }

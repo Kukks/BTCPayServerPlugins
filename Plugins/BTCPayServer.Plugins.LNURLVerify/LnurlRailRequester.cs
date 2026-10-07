@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -42,37 +43,75 @@ public static class LnurlRailRequester
         if (Str(json["paymentOption"]) is { } echoed && echoed != option.Id)
             throw Unavailable($"the LNURL answered for '{echoed}' instead of '{option.Id}'");
         var destination = Str(json["paymentDestination"]) ?? throw Unavailable("the LNURL returned no destination");
-        var verify = Str(json["verify"]);
+        var (verify, batch) = Settlement(json, callbackUri, invoiceExpiry);
+        if (!rail.IsValidDestination(destination, network))
+            throw Unavailable($"'{destination}' is not a valid {rail.Label} destination for {network.ChainName}");
+        return new RailDestination(option.Id, destination, Str(json["paymentURI"]), verify, batch, amountMsat);
+    }
+
+    /// <summary>The verify and verifyBatch URLs of a callback answer, refusing one whose settlement could not be learnt.</summary>
+    internal static (string Verify, string? VerifyBatch) Settlement(JObject answer, Uri callbackUri, DateTimeOffset invoiceExpiry)
+    {
+        var verify = Str(answer["verify"]);
         if (verify is null || !Uri.TryCreate(verify, UriKind.Absolute, out var verifyUri) || (verifyUri.Scheme != Uri.UriSchemeHttp && verifyUri.Scheme != Uri.UriSchemeHttps))
             throw new UnverifiableRailException("settlement cannot be detected: the LNURL returned no usable verify URL");
         // Rail settlement rests on verify alone, so an on-path attacker answering it could forge a paid invoice.
         if (verifyUri.Scheme == Uri.UriSchemeHttp && callbackUri.Scheme == Uri.UriSchemeHttps)
             throw new UnverifiableRailException("settlement cannot be detected: the LNURL returned a plain-http verify URL for an https callback");
-        if (json["expiresAt"]?.Type == JTokenType.Integer &&
-            DateTimeOffset.FromUnixTimeSeconds(json["expiresAt"]!.Value<long>()) < invoiceExpiry)
+        if (ExpiresAt(answer["expiresAt"]) is { } at && DateTimeOffset.FromUnixTimeSeconds(at) < invoiceExpiry)
             throw Unavailable("the destination expires before the invoice");
-        if (!rail.IsValidDestination(destination, network))
-            throw Unavailable($"'{destination}' is not a valid {rail.Label} destination for {network.ChainName}");
-        return new RailDestination(option.Id, destination, Str(json["paymentURI"]), verify,
-            LNURLReceiver.BatchUrl(json["verifyBatch"], verify), amountMsat);
+        return (verify, LNURLReceiver.BatchUrl(answer["verifyBatch"], verify));
     }
 
-    private static async Task<JObject> Get(HttpClient http, Uri uri, string what, CancellationToken ct)
+    private const long MaxUnixSeconds = 253_402_300_799;
+
+    // A stated expiry that cannot be read, or that DateTimeOffset cannot hold, refuses the rail rather than go unchecked.
+    internal static long? ExpiresAt(JToken? token)
+    {
+        if (token is null || token.Type == JTokenType.Null) return null;
+        var seconds = UnixSeconds(token);
+        if (seconds is null or < 0 or > MaxUnixSeconds) throw Unavailable("the LNURL returned an expiry that could not be read");
+        return seconds;
+    }
+
+    private static long? UnixSeconds(JToken token)
+    {
+        if (token is JValue { Type: JTokenType.Integer, Value: long n }) return n;
+        // Json.NET has already read an ISO 8601 string as a date; one without a zone is UTC, as below.
+        if (token.Type == JTokenType.Date)
+        {
+            var date = token.Value<DateTime>();
+            return new DateTimeOffset(date.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(date, DateTimeKind.Utc) : date.ToUniversalTime()).ToUnixTimeSeconds();
+        }
+        var s = token.Type == JTokenType.String ? token.Value<string>() : null;
+        if (s is { Length: > 0 and <= 12 } && s.All(char.IsAsciiDigit)) return long.Parse(s, CultureInfo.InvariantCulture);
+        if (s is not null && DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at))
+            return at.ToUnixTimeSeconds();
+        return null;
+    }
+
+    internal static async Task<JObject> Get(HttpClient http, Uri uri, string what, CancellationToken ct)
     {
         try { return await LNURLResolver.GetJson(http, uri, ct); }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch (Exception e) { throw Unavailable($"{what} ({e.Message})"); }
+        catch (Exception e) { throw new TransientRailException($"{what} ({e.Message})"); }
     }
 
     private static PaymentMethodUnavailableException Unavailable(string reason) => new(reason);
 
-    private static string? Str(JToken? t) => t?.Type == JTokenType.String && t.Value<string>() is { Length: > 0 } s ? s : null;
+    internal static string? Str(JToken? t) => t?.Type == JTokenType.String && t.Value<string>() is { Length: > 0 } s ? s : null;
 }
 
 /// <summary>A refusal that will repeat for this LNURL and rail, because its settlement cannot be learnt.</summary>
 public sealed class UnverifiableRailException : PaymentMethodUnavailableException
 {
     public UnverifiableRailException(string message) : base(message) { }
+}
+
+/// <summary>A refusal that may not repeat: the LNURL could not be reached, answered an error, or did not answer in time.</summary>
+public sealed class TransientRailException : PaymentMethodUnavailableException
+{
+    public TransientRailException(string message) : base(message) { }
 }
 
 /// <summary>LNURL rails refused as unverifiable, kept off new invoices for a day.</summary>

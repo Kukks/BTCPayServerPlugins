@@ -33,6 +33,7 @@ public class SupersededRailDestination
     public string Verify { get; set; } = "";
     public string? VerifyBatch { get; set; }
     public long AmountMsat { get; set; }
+    public string? Asset { get; set; }
 }
 
 public class LnurlRailPaymentData
@@ -40,13 +41,14 @@ public class LnurlRailPaymentData
     public string PaymentReference { get; set; } = "";
     public string VerifyUrl { get; set; } = "";
     public string Destination { get; set; } = "";
+    public string? Asset { get; set; }
 }
 
 /// <summary>
 /// One LNURL paymentOptions rail as a BTCPay payment method. The prompt is inactive at invoice creation,
 /// so the LNURL is asked for a destination only once a checkout wants it.
 /// </summary>
-public class LnurlRailPaymentHandler : IPaymentMethodHandler
+public class LnurlRailPaymentHandler : ILnurlRailHandler
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly Network _network;
@@ -60,6 +62,15 @@ public class LnurlRailPaymentHandler : IPaymentMethodHandler
 
     public LnurlRail Rail { get; }
     public PaymentMethodId PaymentMethodId => Rail.PaymentMethodId;
+
+    public string Label => Rail.Label;
+
+    public IEnumerable<TrackedDestination> Tracked(InvoiceEntity invoice, PaymentPrompt prompt) =>
+        Destinations(invoice, PaymentMethodId, prompt.Destination, ParsePaymentPromptDetails(prompt.Details));
+
+    public bool NeedsReissue(PaymentPrompt prompt) =>
+        LnurlRailRecorder.NeedsReissue(prompt.Calculate().Due, ParsePaymentPromptDetails(prompt.Details).AmountMsat);
+
     public JsonSerializer Serializer { get; } = BlobSerializer.CreateSerializer().Serializer;
 
     public Task BeforeFetchingRates(PaymentMethodContext context)
@@ -85,7 +96,7 @@ public class LnurlRailPaymentHandler : IPaymentMethodHandler
 
     // Core falls back to BTC-CHAIN, BTC-LNURL, then the first prompt: without a wallet that can be this rail,
     // which the checkout would then activate, calling the LNURL, on every view.
-    private static void PreferCoreDefault(PaymentMethodContext context)
+    internal static void PreferCoreDefault(PaymentMethodContext context)
     {
         if (context.InvoiceEntity.DefaultPaymentMethod is not null || context.Store.GetDefaultPaymentId() is not null) return;
         context.InvoiceEntity.DefaultPaymentMethod =

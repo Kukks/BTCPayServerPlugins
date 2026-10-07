@@ -97,4 +97,38 @@ public class LnurlRailProvisioningTests
         Assert.Null(store.GetPaymentMethodConfig(LnurlRails.OnChain.PaymentMethodId));
         Assert.NotNull(store.GetPaymentMethodConfig(LnurlRails.Arkade.PaymentMethodId));
     }
+
+    static readonly TokenAssets Assets = TokenAssets.Parse("USDT,USDC").Assets;
+    const string ArbitrumUsdt = "{\"id\":\"usdt-arbitrum\",\"type\":\"eip155\",\"asset\":\"eip155:42161/erc20:0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9\",\"unit\":\"USDT\"}";
+    const string SolanaUsdc = "{\"id\":\"usdc-solana\",\"type\":\"solana\",\"asset\":\"solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/token:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\"unit\":\"USDC\",\"verifiable\":false}";
+    const string BaseEurc = "{\"id\":\"eurc-base\",\"type\":\"eip155\",\"asset\":\"eip155:8453/erc20:0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42\",\"unit\":\"EURC\"}";
+
+    static JObject TokenPay(params string[] options) => JObject.Parse(
+        "{\"units\":[{\"code\":\"USDT\",\"decimals\":6},{\"code\":\"USDC\",\"decimals\":6},{\"code\":\"EURC\",\"decimals\":6}],\"paymentOptions\":[" +
+        string.Join(",", options) + "]}");
+
+    [Fact]
+    public void A_configured_asset_is_provisioned_while_one_of_its_networks_is_verifiable() =>
+        Assert.Equal(new[] { "LNURL-USDT" },
+            LnurlRailProvisioning.DesiredTokens(Store(), TokenPay(ArbitrumUsdt, SolanaUsdc, BaseEurc), Assets).Select(p => p.ToString()));
+
+    [Fact]
+    public void Stores_without_an_lnurl_backend_get_no_tokens() =>
+        Assert.Empty(LnurlRailProvisioning.DesiredTokens(Store(ln: LndRest), TokenPay(ArbitrumUsdt), Assets));
+
+    [Fact]
+    public void Token_reconcile_adds_and_removes_only_token_configs()
+    {
+        var store = Store();
+        LnurlRailProvisioning.Reconcile(store, LnurlRailProvisioning.Desired(store, Everything));
+        var usdt = TokenAssets.PaymentMethodIdOf("USDT");
+
+        Assert.True(LnurlRailProvisioning.Reconcile(store, Assets.PaymentMethodIds, new[] { usdt }));
+        Assert.NotNull(store.GetPaymentMethodConfig(usdt));
+        Assert.Null(store.GetPaymentMethodConfig(TokenAssets.PaymentMethodIdOf("USDC")));
+
+        Assert.True(LnurlRailProvisioning.Reconcile(store, Assets.PaymentMethodIds, Array.Empty<PaymentMethodId>()));
+        Assert.Null(store.GetPaymentMethodConfig(usdt));
+        Assert.NotNull(store.GetPaymentMethodConfig(LnurlRails.Arkade.PaymentMethodId));
+    }
 }
