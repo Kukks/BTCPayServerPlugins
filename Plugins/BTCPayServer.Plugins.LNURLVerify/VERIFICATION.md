@@ -1,6 +1,6 @@
 # LNURL Verify — verification runbook
 
-The plugin is unit-tested (347 tests) and reviewed, but three things can only be confirmed by running
+The plugin is unit-tested (363 tests) and reviewed, but three things can only be confirmed by running
 it. This is the concrete checklist to gain that confidence, ordered cheapest-first.
 
 ## 1. Unit tests (seconds, no infra)
@@ -8,14 +8,15 @@ it. This is the concrete checklist to gain that confidence, ordered cheapest-fir
 ```
 dotnet test BTCPayServer.Plugins.LNURLVerify.Tests
 ```
-Expected: 347 passed, and no warnings from plugin or test code. Covers capability decode, verify-support probe, receive guards +
+Expected: 363 passed, and no warnings from plugin or test code. Covers capability decode, verify-support probe, receive guards +
 settled-cache, the shared poller (incl. a 60-invoice concurrent settle/error stress), the full send
 chain (parse → k1-refresh → bounds/balance → submit), connection-scoped reconciliation, persistence
 save/restore (against a fake settings store), paymentOptions selection, verifyBatch batching (chunking,
 414 halving, unsupported fallback, backoff), the GetInvoice cache, a self-signed BOLT11 pinning the
 payment-hash byte order, the rail table and BIP321 merging, rail destination requests and their refusals,
 destination polling through verifyBatch, provisioning rules, the rail payment-method handler, activation
-planning, the checkout re-skin, CAIP-19 parsing and the per-namespace URIs, token options and their provisioning, token quotes and their refusals, the token payment method (per-network quotes, expiry, re-issue), token activation planning, and the asset tab's model.
+planning, the checkout re-skin, CAIP-19 parsing and the per-namespace URIs, token options and their provisioning, token quotes and their refusals, the token payment method (per-network quotes, expiry, re-issue), token activation planning, the asset tab's model, token providers and destination tags, and lnurl-server's FixedFloat rails as a
+stock install sees them.
 
 ## 2. Receive integration — real BTCPay LNURL + regtest LN (ServerTester)
 
@@ -140,3 +141,7 @@ project ID set. Confirm each once, and that the invoice settles with the network
 | Arbitrum Sepolia | MetaMask scans the EIP-681 QR | "Open in wallet" opens MetaMask | Connect wallet, scan with MetaMask |
 | Solana devnet | Phantom scans the Solana Pay QR | "Open in wallet" opens Phantom | Connect wallet, scan with a WalletConnect Solana wallet |
 | Tron Nile | TronLink scans the recipient; enter the amount shown | none | Connect wallet, scan with TronLink |
+
+On a provider's network (lnurl-server's FixedFloat rails, or its simulated provider), confirm the notice next to the QR. It
+must say that the deposit address belongs to the provider and not the merchant, that the quote expires, and that a late,
+short or excess deposit is resolved with the provider, not with the merchant or BTCPay.

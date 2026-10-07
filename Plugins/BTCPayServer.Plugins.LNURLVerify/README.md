@@ -86,6 +86,14 @@ LNURL quotes the token amount and settles it through `verify`, as for the Bitcoi
   tried again.
 - **Settlement:** recorded from `verify` at the BTC amount agreed for the destination. The payments list shows the network and
   links the transaction.
+- **Third-party providers:** an option may name a `provider`, the service a payment passes through. lnurl-server's FixedFloat
+  rails name FixedFloat, which takes the payer's tokens at its own deposit address and pays the LNURL over Lightning. The
+  network's chip and amount then read "via FixedFloat". Next to the QR, the checkout tells the payer three things: the deposit
+  address belongs to the provider, not the merchant; the quote has a hard expiry; and a late, short or excess deposit is
+  resolved with the provider, not with the merchant or BTCPay. BTCPay never holds those tokens and cannot refund them.
+  Settlement still comes only from the LNURL's `verify`.
+- **Destination tags:** an answer that needs a memo (`paymentDestinationTag`) gets its network refused, since no QR or wallet
+  link the checkout builds can carry one.
 
 ## Limitations
 

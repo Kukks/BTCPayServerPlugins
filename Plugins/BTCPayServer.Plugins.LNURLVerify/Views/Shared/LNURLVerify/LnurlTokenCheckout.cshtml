@@ -21,6 +21,7 @@
             </div>
             <p class="text-center mt-3 mb-0" id="LnurlTokenAmount" v-text="summary"></p>
             <p v-if="secondsLeft !== null" class="text-center text-muted small" id="LnurlTokenExpiry" v-text="'Quote valid for ' + countdown"></p>
+            <p v-if="current.provider" class="text-center text-muted small" id="LnurlTokenProvider" v-text="providerTerms"></p>
             <div class="input-group mt-3">
                 <div class="form-floating" id="LnurlTokenRecipient">
                     <vc:truncate-center text="current.destination" is-vue="true" padding="15" elastic="true" classes="form-control-plaintext" />
@@ -74,7 +75,12 @@
                 return this.sent && this.sent.key === key ? this.sent.ref : this.storedRef(key);
             },
             sentHere () { return !!this.sentRef; },
-            summary () { return this.current.amount + ' ' + this.token.code + ' on ' + this.named(this.current); }
+            summary () { return this.current.amount + ' ' + this.token.code + ' on ' + this.named(this.current); },
+            providerTerms () {
+                const p = this.current.provider;
+                return 'This deposit address belongs to ' + p + ', a third-party service, not to the merchant. Send exactly this amount before the quote ' +
+                    'expires: a late, short or excess deposit is resolved with ' + p + ', not with the merchant or BTCPay Server.';
+            }
         },
         watch: {
             'token.pmi' () { this.selected = null; this.walletError = null; this.request(null); }
