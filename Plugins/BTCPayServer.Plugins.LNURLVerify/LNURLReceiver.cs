@@ -44,29 +44,24 @@ public sealed class LNURLReceiver
         JObject meta;
         try { meta = await LNURLResolver.GetJson(_http, _resolved.PayEndpoint, ct); }
         catch (Exception e) { return e.Message; }
-        return (await Probe(_http, meta, _network, ct)).Error;
-    }
 
-    /// <summary>The probe behind <see cref="CheckVerifySupport"/>, also reporting what its one invoice request learnt.</summary>
-    internal static async Task<(string? Error, bool Verify, string? VerifyBatch)> Probe(HttpClient http, JObject meta, Network network,
-        CancellationToken ct)
-    {
         var callback = meta["callback"]?.Value<string>();
-        if (string.IsNullOrEmpty(callback)) return ("The LNURL-pay endpoint is missing a callback URL.", false, null);
+        if (string.IsNullOrEmpty(callback)) return "The LNURL-pay endpoint is missing a callback URL.";
         long min;
         string? option;
         try { (min, _, option) = PaymentOption.PlanLightning(meta, 1000, long.MaxValue); }
-        catch (NotSupportedException e) { return (e.Message, false, null); }
+        catch (NotSupportedException e) { return e.Message; }
 
         JObject json;
-        try { json = await LNURLResolver.GetJson(http, CallbackUri(callback, min, option, null), ct); }
-        catch (Exception e) { return ($"Could not request a probe invoice: {e.Message}", false, null); }
+        try { json = await LNURLResolver.GetJson(_http, CallbackUri(callback, min, option, null), ct); }
+        catch (Exception e) { return $"Could not request a probe invoice: {e.Message}"; }
 
+        if (json["pr"]?.Type == JTokenType.String && NetworkMismatch(json["pr"]!.Value<string>()!, _network) is { } mismatch)
+            return mismatch;
         var verify = json["verify"]?.Value<string>();
-        var verifiable = !string.IsNullOrEmpty(verify) && Uri.TryCreate(verify, UriKind.Absolute, out _);
-        var mismatch = json["pr"]?.Type == JTokenType.String ? NetworkMismatch(json["pr"]!.Value<string>()!, network) : null;
-        return (mismatch ?? (verifiable ? null : VerifyUnsupportedMessage), verifiable,
-            verifiable ? BatchUrl(json["verifyBatch"], verify!) : null);
+        if (string.IsNullOrEmpty(verify) || !Uri.TryCreate(verify, UriKind.Absolute, out _))
+            return VerifyUnsupportedMessage;
+        return null;
     }
 
     public async Task<LightningInvoice> CreateInvoice(LightMoney? amount, string? description,
