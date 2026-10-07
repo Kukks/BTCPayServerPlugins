@@ -61,7 +61,8 @@ public class LnurlRailSettingsController : Controller
         {
             var http = _httpClientFactory.CreateClient(nameof(LnurlRailSettingsController));
             http.Timeout = TimeSpan.FromSeconds(10);
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
             var resolved = await LNURLVerifyConnectionStringHandler.ResolveCached(lnurl, _network, http, cts.Token);
             return _assets.Unconfigured(await LNURLResolver.GetJson(http, resolved.PayEndpoint, cts.Token));
         }
