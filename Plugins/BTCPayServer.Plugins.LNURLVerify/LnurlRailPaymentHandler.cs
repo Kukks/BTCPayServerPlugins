@@ -119,6 +119,7 @@ public class LnurlRailPaymentHandler : ILnurlRailHandler
 
         var http = _httpClientFactory.CreateClient(nameof(LnurlRailPaymentHandler));
         http.Timeout = TimeSpan.FromSeconds(15);
+        PayerIp.Forward(http);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         ResolvedLnurl resolved;
         try { resolved = await LNURLVerifyConnectionStringHandler.ResolveCached(lnurl, _network, http, cts.Token); }

@@ -107,6 +107,7 @@ public class LnurlTokenPaymentHandler : ILnurlRailHandler
 
         var http = _httpClientFactory.CreateClient(nameof(LnurlTokenPaymentHandler));
         http.Timeout = TimeSpan.FromSeconds(15);
+        PayerIp.Forward(http);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         JObject pay;
         try

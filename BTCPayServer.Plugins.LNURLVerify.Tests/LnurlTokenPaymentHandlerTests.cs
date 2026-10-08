@@ -181,6 +181,16 @@ public class LnurlTokenPaymentHandlerTests
     }
 
     [Fact]
+    public async Task A_quote_the_payer_asks_for_forwards_their_ip()
+    {
+        var lnurl = new Lnurl();
+        PayerIp.Current = IPAddress.Parse("198.51.100.23");
+        await lnurl.Activate(lnurl.Invoice(), "usdt-arbitrum");
+        Assert.Equal(1, lnurl.CallsTo("usdt-arbitrum"));
+        Assert.All(lnurl.Http.ForwardedFor, v => Assert.Equal("198.51.100.23", v));
+    }
+
+    [Fact]
     public async Task Each_network_keeps_its_own_quote()
     {
         var lnurl = new Lnurl();

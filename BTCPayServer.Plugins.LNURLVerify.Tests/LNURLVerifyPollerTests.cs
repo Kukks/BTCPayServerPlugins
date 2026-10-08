@@ -435,6 +435,25 @@ public class LNURLVerifyPollerTests
     }
 
     [Fact]
+    public async Task The_poller_forwards_no_payer_ip()
+    {
+        var host = NewHost("xff");
+        var hash = NewHash();
+        var d = Destination(host, batched: false);
+        TrackedInvoiceRegistry.Add(Batched(host, hash));
+        var http = new FakeHttp();
+        var server = new FakeBatchServer(http, host, _ => HttpStatusCode.OK, _ => Pending, _ => DestinationState(false));
+        // Started beside a checkout, so its loop inherits the payer's IP.
+        PayerIp.Current = IPAddress.Parse("203.0.113.7");
+
+        await Tracking(new[] { d }, () => Polling(NewPoller(http, 30), new[] { hash }, async () =>
+        {
+            await Until(() => !server.Batches.IsEmpty && server.Singles.Contains(d.VerifyUrl));
+            Assert.All(http.ForwardedFor, v => Assert.Null(v));
+        }));
+    }
+
+    [Fact]
     public async Task A_destination_settled_with_a_reference_is_reported_and_untracked()
     {
         var host = NewHost("paid");
