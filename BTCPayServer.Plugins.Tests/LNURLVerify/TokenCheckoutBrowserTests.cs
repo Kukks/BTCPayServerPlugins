@@ -24,7 +24,7 @@ public class TokenCheckoutBrowserTests : UnitTestBase
     public async Task A_payer_sees_each_network_and_a_settled_quote_pays_the_invoice()
     {
         await using var stub = await StubLnurl.Start();
-        using var tester = await Start();
+        using var tester = await Start(this);
         var (user, invoiceId) = await Invoice(tester, stub.PayUrl, "USDT");
         using var playwright = await Playwright.CreateAsync();
         await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
@@ -74,7 +74,7 @@ public class TokenCheckoutBrowserTests : UnitTestBase
     {
         await using var stub = await StubLnurl.Start();
         stub.QuoteLifetimes["ff-usdtarbitrum"] = TimeSpan.FromSeconds(60);
-        using var tester = await Start();
+        using var tester = await Start(this);
         var (user, invoiceId) = await Invoice(tester, stub.FixedFloatPayUrl, "USDT", "USDC");
         using var playwright = await Playwright.CreateAsync();
         await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
@@ -135,7 +135,7 @@ public class TokenCheckoutBrowserTests : UnitTestBase
         var projectId = Environment.GetEnvironmentVariable("WALLETCONNECT_PROJECT_ID")
                         ?? throw new InvalidOperationException("Set WALLETCONNECT_PROJECT_ID to a Reown project ID (see VERIFICATION.md §6).");
         await using var stub = await StubLnurl.Start();
-        using var tester = await Start();
+        using var tester = await Start(this);
         await tester.PayTester.GetService<ISettingsRepository>().UpdateSetting(new LnurlTokenServerSettings { WalletConnectProjectId = projectId });
         var (_, invoiceId) = await Invoice(tester, stub.PayUrl, "USDT");
         using var playwright = await Playwright.CreateAsync();
@@ -156,12 +156,12 @@ public class TokenCheckoutBrowserTests : UnitTestBase
         Assert.Empty(refused);
     }
 
-    async Task<ServerTester> Start([CallerMemberName] string scope = "")
+    internal static async Task<ServerTester> Start(UnitTestBase test, [CallerMemberName] string scope = "")
     {
         var dll = typeof(LNURLVerifyPlugin).Assembly.Location.Replace("\\", "/");
         // ServerTester reads DEBUG_PLUGINS from this file over the environment, so it names this plugin alone (as the Electrum tests do).
         await File.WriteAllTextAsync(Path.Combine(TestUtils.TestDirectory, "appsettings.dev.json"), $"{{\"DEBUG_PLUGINS\":\"{dll}\"}}");
-        var tester = CreateServerTester(scope, newDb: true);
+        var tester = test.CreateServerTester(scope, newDb: true);
         await tester.StartAsync();
         return tester;
     }

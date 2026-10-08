@@ -13,6 +13,8 @@ namespace BTCPayServer.Plugins.LNURLVerify;
 public sealed record PaymentOption(string Id, string Type, bool Available, long? MinSendable, long? MaxSendable, bool? Verifiable = null,
     string? Asset = null, string? Unit = null, string? Provider = null)
 {
+    public bool IsLightning => Type.Equals("lightning", StringComparison.OrdinalIgnoreCase);
+
     public static IReadOnlyList<PaymentOption> Parse(JObject payRequest)
     {
         var options = new List<PaymentOption>();
@@ -38,7 +40,7 @@ public sealed record PaymentOption(string Id, string Type, bool Available, long?
     {
         var min = payRequest["minSendable"]?.Value<long>() ?? defaultMin;
         var max = payRequest["maxSendable"]?.Value<long>() ?? defaultMax;
-        var lightning = Parse(payRequest).Where(o => o.Type.Equals("lightning", StringComparison.OrdinalIgnoreCase)).ToList();
+        var lightning = Parse(payRequest).Where(o => o.IsLightning).ToList();
         if (lightning.Count == 0) return (min, max, null);
         var option = lightning.FirstOrDefault(o => o.Available)
                      ?? throw new NotSupportedException("The LNURL service reports Lightning as currently unavailable.");
@@ -48,7 +50,7 @@ public sealed record PaymentOption(string Id, string Type, bool Available, long?
     private static string? Str(JToken? t) => t?.Type == JTokenType.String ? t.Value<string>() : null;
 
     // Every option is parsed to plan Lightning, so a bound no msat amount can hold is ignored rather than thrown on.
-    private static long? Msat(JToken? t) => t switch
+    internal static long? Msat(JToken? t) => t switch
     {
         JValue { Type: JTokenType.Integer, Value: long v } when v >= 0 => v,
         JValue { Type: JTokenType.Float } f when f.Value<double>() is >= 0 and < 9.2e18 => (long)f.Value<double>(),

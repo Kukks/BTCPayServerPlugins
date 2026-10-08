@@ -45,7 +45,7 @@ public class ConnectionStringBuildTests
         var host = "xff" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".example";
         var fake = new FakeHttp()
             .Map($"https://{host}/pay", "{\"tag\":\"payRequest\",\"callback\":\"https://" + host + "/cb\",\"minSendable\":1000,\"maxSendable\":100000000,\"metadata\":\"[]\"}")
-            .Map($"https://{host}/cb?amount=1000", $"{{\"pr\":\"lnbc1\",\"verify\":\"https://{host}/verify/abc\"}}");
+            .Map($"https://{host}/cb?amount=1000", $"{{\"pr\":\"{TestBolt11.Create(new Key(), 1000, new byte[32])}\",\"verify\":\"https://{host}/verify/abc\"}}");
         PayerIp.Current = IPAddress.Parse("203.0.113.7");
 
         var client = new LNURLVerifyConnectionStringHandler(new FakeHttpClientFactory(fake), NullLoggerFactory.Instance)

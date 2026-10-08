@@ -54,6 +54,29 @@ public class LnurlRailSettingsController : Controller
         return RedirectToAction(nameof(Index), new { storeId });
     }
 
+    /// <summary>The Lightning setup page's preview of an LNURL before it is saved.</summary>
+    [HttpPost("resolve")]
+    public async Task<IActionResult> Resolve([FromRoute] string storeId, string? lnurl)
+    {
+        if (string.IsNullOrWhiteSpace(lnurl)) return BadRequest(new { error = "Enter a Lightning address or LNURL." });
+        var http = _httpClientFactory.CreateClient(nameof(LnurlRailSettingsController));
+        http.Timeout = TimeSpan.FromSeconds(10);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+        cts.CancelAfter(TimeSpan.FromSeconds(10));
+        try
+        {
+            return Json(await LnurlSetupSummary.Read(lnurl.Trim(), HttpContext.GetStoreData(), _assets, _network, http, cts.Token));
+        }
+        catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            return BadRequest(new { error = "The LNURL did not answer within 10 seconds." });
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            return BadRequest(new { error = e.Message });
+        }
+    }
+
     private async Task<IReadOnlyList<string>> Unconfigured(StoreData store)
     {
         if (LnurlRailProvisioning.LnurlValue(store) is not { } lnurl) return Array.Empty<string>();

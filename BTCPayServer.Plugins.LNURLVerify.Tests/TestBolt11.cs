@@ -7,16 +7,16 @@ using NBitcoin;
 
 namespace BTCPayServer.Plugins.LNURLVerify.Tests;
 
-/// <summary>Mints correctly signed regtest BOLT11 invoices for a chosen payment hash (BOLT #11 encoding).</summary>
+/// <summary>Mints correctly signed BOLT11 invoices for a chosen payment hash (BOLT #11 encoding), regtest unless given another prefix.</summary>
 public static class TestBolt11
 {
     private const string Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 
     public static string Create(Key nodeKey, long amountMsat, byte[] paymentHash, string description = "lnurlverify test",
-        int expirySeconds = 3600)
+        int expirySeconds = 3600, string prefix = "lnbcrt")
     {
         if (amountMsat % 100 != 0) throw new ArgumentException("must be a multiple of 100 msat (the n unit)", nameof(amountMsat));
-        var hrp = $"lnbcrt{amountMsat / 100}n";
+        var hrp = $"{prefix}{amountMsat / 100}n";
         var words = new List<byte>();
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         for (var i = 6; i >= 0; i--) words.Add((byte)((timestamp >> (5 * i)) & 31));
