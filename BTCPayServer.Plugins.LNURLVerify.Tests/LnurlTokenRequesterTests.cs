@@ -52,6 +52,8 @@ public class LnurlTokenRequesterTests
             case "destination with markup": answer["paymentDestination"] = "0x1111<script>"; break;
             case "tron destination for an evm option": answer["paymentDestination"] = "TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7"; break;
             case "destination expiring before the invoice": answer["expiresAt"] = 1_790_000_300; break;
+            case "destination tag": answer["paymentDestinationTag"] = "123456"; break;
+            case "numeric destination tag": answer["paymentDestinationTag"] = 123456; break;
             default: throw new ArgumentOutOfRangeException(nameof(how));
         }
     }
@@ -115,11 +117,32 @@ public class LnurlTokenRequesterTests
     [InlineData("destination with markup")]
     [InlineData("tron destination for an evm option")]
     [InlineData("destination expiring before the invoice")]
+    [InlineData("destination tag")]
+    [InlineData("numeric destination tag")]
     public async Task An_answer_the_checkout_could_not_show_or_settle_is_refused(string how)
     {
         var answer = Answer();
         Spoil(answer, how);
         await Assert.ThrowsAnyAsync<PaymentMethodUnavailableException>(() => Request(answer));
+    }
+
+    [Theory]
+    [InlineData("\"123456\"")]
+    [InlineData("123456")]
+    public async Task An_answer_needing_a_destination_tag_is_refused_naming_the_tag(string json)
+    {
+        var answer = Answer();
+        answer["paymentDestinationTag"] = JToken.Parse(json);
+        var e = await Assert.ThrowsAsync<PaymentMethodUnavailableException>(() => Request(answer));
+        Assert.Contains("destination tag ('123456') for 'usdt-arbitrum'", e.Message);
+    }
+
+    [Fact]
+    public async Task A_null_destination_tag_is_no_tag()
+    {
+        var answer = Answer();
+        answer["paymentDestinationTag"] = JValue.CreateNull();
+        Assert.Equal("63360000", (await Request(answer)).Amount);
     }
 
     [Fact]

@@ -20,6 +20,13 @@ public class TokenOptionTests
             (o.Id, o.Asset.ChainId, o.Unit.Code, o.Unit.Decimals, o.Unit.Name, o.Available));
     }
 
+    [Fact]
+    public void A_token_option_carries_its_provider_and_none_when_the_lnurl_names_none()
+    {
+        var viaFixedFloat = Arbitrum.Replace("usdt-arbitrum", "ff-usdtarbitrum").Replace("}", ",\"provider\":\"FixedFloat\"}");
+        Assert.Equal(new[] { null, "FixedFloat" }, TokenOption.Parse(Pay(Arbitrum + "," + viaFixedFloat)).Select(o => o.Provider));
+    }
+
     [Theory]
     [InlineData("{\"id\":\"x\",\"type\":\"solana\",\"asset\":\"eip155:42161/erc20:0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9\",\"unit\":\"USDT\"}")]
     [InlineData("{\"id\":\"x\",\"type\":\"eip155\",\"asset\":\"eip155:42161\",\"unit\":\"USDT\"}")]

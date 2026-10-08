@@ -14,6 +14,7 @@ public sealed class FakeHttp : HttpMessageHandler
     public readonly Dictionary<string, (HttpStatusCode Code, string Body)> Routes = new(StringComparer.OrdinalIgnoreCase);
     public readonly ConcurrentQueue<string> Requests = new();
     public readonly ConcurrentQueue<string> AcceptHeaders = new();
+    public readonly ConcurrentQueue<string?> ForwardedFor = new();
     private readonly List<(Func<HttpRequestMessage, bool> Match, Func<HttpRequestMessage, (HttpStatusCode Code, string Body)> Respond)> _handlers = new();
     private readonly List<(Func<HttpRequestMessage, bool> Match, Func<HttpRequestMessage, CancellationToken, Task<(HttpStatusCode Code, string Body)>> Respond)> _late = new();
 
@@ -32,6 +33,7 @@ public sealed class FakeHttp : HttpMessageHandler
         var url = request.RequestUri!.ToString();
         Requests.Enqueue(url);
         AcceptHeaders.Enqueue(request.Headers.Accept.ToString());
+        ForwardedFor.Enqueue(request.Headers.TryGetValues("X-Forwarded-For", out var xff) ? string.Join(", ", xff) : null);
         if (Routes.TryGetValue(url, out var r)) return Respond(r);
         lock (_late)
             foreach (var h in _late)

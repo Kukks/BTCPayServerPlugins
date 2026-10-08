@@ -42,5 +42,8 @@
         <input asp-for="ActivateAllRailsOnOpen" type="checkbox" class="form-check-input" />
         <label asp-for="ActivateAllRailsOnOpen" class="form-check-label">Request every rail when the checkout opens</label>
     </div>
-    <p class="form-text">When off, a rail or network is requested from your LNURL only when the payer taps it.</p>
+    <p class="form-text">
+        When off, a Bitcoin rail is requested from your LNURL only when the payer taps it. A token network is always requested only
+        on a tap, since its quote can be a real order with a third party.
+    </p>
 </form>

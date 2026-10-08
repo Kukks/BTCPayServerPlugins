@@ -50,18 +50,11 @@ public class LnurlTokenCheckoutExtension : ICheckoutModelExtension
         foreach (var n in details.Networks.Where(n => !n.Refused))
         {
             if (CaipAsset.Parse(n.Asset) is not { } asset || TokenNamespaces.For(asset) is not { } ns) continue;
-            var state = n.Quote switch
-            {
-                null when n.FailedAt is not null => "failed",
-                null => "unrequested",
-                { ExpiresAt: { } at } when at <= now.ToUnixTimeSeconds() => "expired",
-                { } q when q.AmountMsat != dueMsat => "stale",
-                _ => "live"
-            };
+            var state = n.State(dueMsat, now);
             var json = new JObject
             {
                 ["id"] = n.OptionId, ["chain"] = asset.ChainId, ["namespace"] = asset.Namespace, ["label"] = ChainDirectory.Label(asset.ChainId),
-                ["token"] = asset.AssetReference, ["state"] = state
+                ["token"] = asset.AssetReference, ["state"] = state, ["provider"] = n.Provider is null ? JValue.CreateNull() : new JValue(n.Provider)
             };
             if (state == "live")
             {

@@ -29,9 +29,19 @@ public class TokenNetworkState
 {
     public string OptionId { get; set; } = "";
     public string Asset { get; set; } = "";
+    public string? Provider { get; set; }
     public bool Refused { get; set; }
     public long? FailedAt { get; set; }
     public TokenQuoteState? Quote { get; set; }
+
+    public string State(long dueMsat, DateTimeOffset now) => Quote switch
+    {
+        null when FailedAt is not null => "failed",
+        null => "unrequested",
+        { ExpiresAt: { } at } when at <= now.ToUnixTimeSeconds() => "expired",
+        { } q when q.AmountMsat != dueMsat => "stale",
+        _ => "live"
+    };
 }
 
 public class LnurlTokenPromptDetails
@@ -97,6 +107,7 @@ public class LnurlTokenPaymentHandler : ILnurlRailHandler
 
         var http = _httpClientFactory.CreateClient(nameof(LnurlTokenPaymentHandler));
         http.Timeout = TimeSpan.FromSeconds(15);
+        PayerIp.Forward(http);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         JObject pay;
         try
@@ -121,7 +132,8 @@ public class LnurlTokenPaymentHandler : ILnurlRailHandler
             var old = previous?.Networks.FirstOrDefault(n => n.OptionId == option.Id);
             var network = new TokenNetworkState
             {
-                OptionId = option.Id, Asset = option.Asset.ToString(), Refused = old?.Refused ?? false, FailedAt = old?.FailedAt, Quote = old?.Quote
+                OptionId = option.Id, Asset = option.Asset.ToString(), Provider = option.Provider, Refused = old?.Refused ?? false, FailedAt = old?.FailedAt,
+                Quote = old?.Quote
             };
             details.Networks.Add(network);
             var reissue = network.Quote is { } held && held.AmountMsat != msat;

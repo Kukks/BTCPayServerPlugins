@@ -21,6 +21,15 @@ public class PaymentOptionTests
         Assert.Equal(10_000_000L, options[1].MinSendable);
     }
 
+    [Fact]
+    public void A_provider_is_read_off_an_option_when_it_is_a_short_string()
+    {
+        var options = PaymentOption.Parse(JObject.Parse("{\"paymentOptions\":[{\"id\":\"a\",\"type\":\"tron\",\"provider\":\"FixedFloat\"}," +
+            "{\"id\":\"b\",\"type\":\"tron\"},{\"id\":\"c\",\"type\":\"tron\",\"provider\":7}," +
+            "{\"id\":\"d\",\"type\":\"tron\",\"provider\":\"" + new string('x', 65) + "\"}]}"));
+        Assert.Equal(new[] { "FixedFloat", null, null, null }, options.Select(o => o.Provider));
+    }
+
     [Theory]
     [InlineData("100000000000000000000")]
     [InlineData("1e300")]

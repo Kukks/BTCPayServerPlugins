@@ -23,6 +23,23 @@ public class ChainDirectoryTests
         Assert.Equal($"https://solscan.io/tx/{solana}?cluster=devnet", ChainDirectory.TxUrl("solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", solana));
     }
 
+    // lnurl-server's FF_ASSETS chains: one it adds first must fail here rather than reach a payer as a raw CAIP-2 id.
+    [Theory]
+    [InlineData("eip155:1")]
+    [InlineData("eip155:42161")]
+    [InlineData("eip155:8453")]
+    [InlineData("eip155:10")]
+    [InlineData("eip155:137")]
+    [InlineData("eip155:43114")]
+    [InlineData("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp")]
+    [InlineData("tron:0x2b6653dc")]
+    public void Every_fixedfloat_chain_is_named_and_links_its_deposit_transactions(string chain)
+    {
+        var depositTx = chain.Split(':')[0] switch { "eip155" => "0x" + new string('a', 64), "solana" => new string('5', 88), _ => new string('b', 64) };
+        Assert.NotEqual(chain, ChainDirectory.Label(chain));
+        Assert.NotNull(ChainDirectory.TxUrl(chain, depositTx));
+    }
+
     [Fact]
     public void A_reference_that_is_not_a_transaction_id_gets_no_explorer_link()
     {

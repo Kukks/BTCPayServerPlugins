@@ -79,13 +79,43 @@ LNURL quotes the token amount and settles it through `verify`, as for the Bitcoi
   With a WalletConnect project ID set in Server settings → LNURL Verify, "Connect wallet" pays from a wallet over WalletConnect.
   "Connect wallet" contacts Reown only once the payer presses it: its relay and API, plus some telemetry that carries the
   checkout URL (and with it the invoice id). AppKit's optional analytics are off.
-- **Quotes:** a network is requested from the LNURL when the tab opens, or on a tap when "Request every rail when the
-  checkout opens" is off. An expired quote hides its QR until the payer asks for a new one. A partial payment re-issues
+- **Quotes:** a network is requested from the LNURL only when the payer taps it. That holds whatever "Request every rail when
+  the checkout opens" says, which governs the Bitcoin rails alone: a token quote can be a real order with a third party, so
+  opening a tab must not place one per network. A tap on a network whose quote is still live sends nothing; a tap on one
+  whose quote expired, failed or is for an old amount asks again. An expired quote hides its QR until then. A partial payment
+  re-issues
   every quoted network for the remainder. A network the LNURL refuses outright stays hidden for the rest of that invoice;
   one whose request fails, that the LNURL marks unavailable, or that does not answer in time, stays offered and can be
   tried again.
 - **Settlement:** recorded from `verify` at the BTC amount agreed for the destination. The payments list shows the network and
   links the transaction.
+- **Third-party providers:** an option may name a `provider`, the service a payment passes through. lnurl-server's FixedFloat
+  rails name FixedFloat, which takes the payer's tokens at its own deposit address and pays the LNURL over Lightning. The
+  network's chip and amount then read "via FixedFloat". Next to the QR, the checkout tells the payer three things: the deposit
+  address belongs to the provider, not the merchant; the quote has a hard expiry; and a late, short or excess deposit is
+  resolved with the provider, not with the merchant or BTCPay. BTCPay never holds those tokens and cannot refund them.
+  Settlement still comes only from the LNURL's `verify`.
+- **Destination tags:** an answer that needs a memo (`paymentDestinationTag`) gets its network refused, since no QR or wallet
+  link the checkout builds can carry one.
+
+## The payer's IP
+
+When a checkout asks the LNURL for a rail or a token quote, the requests carry the payer's IP in `X-Forwarded-For`. An LNURL
+service that limits requests per IP then limits each payer, instead of every checkout this server makes. The IP is sent,
+as a single value, only when BTCPay can vouch for it:
+- **the checkout request came straight to BTCPay;**
+- **or it came through a reverse proxy on a loopback or private address,** such as the nginx of a Docker install, whose
+  `X-Forwarded-For` BTCPay applied.
+
+BTCPay applies that header whoever sends it. A request whose hop was public sends nothing, whether that hop was a client
+naming its own IP or a public proxy, and that payer shares this server's own limit. A missing, unspecified, loopback or
+private IP is never sent. Lightning invoice requests, the connection's lookup and save probe, and `verify` polling carry
+none. Nor does a rail that BTCPay's own checkout page activates because a store or invoice makes it the default payment
+method.
+
+- **To take effect,** the LNURL service must trust this server to name its payers. On lnurl-server, its operator lists this
+  BTCPay server in `TRUSTED_FORWARDERS` ([ArkLabsHQ/lnurl-server#69](https://github.com/ArkLabsHQ/lnurl-server/pull/69)).
+- **Privacy:** the payer's IP reaches the LNURL service, just as it would if the payer's own wallet had contacted it.
 
 ## Limitations
 
