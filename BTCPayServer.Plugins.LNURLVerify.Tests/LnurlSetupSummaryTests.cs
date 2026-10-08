@@ -98,13 +98,15 @@ public class LnurlSetupSummaryTests
     }
 
     [Fact]
-    public void An_option_reported_unavailable_is_not_offered_now()
+    public void An_unavailable_rail_is_not_offered_but_an_unavailable_token_network_stays_offered()
     {
         var summary = Summary(PayJson("https://h.example/cb", Lightning.Replace("}", Unavailable),
             "{\"id\":\"ln-backup\",\"type\":\"lightning\"}", Arkade.Replace("}", Unavailable), ArbitrumUsdt.Replace("}", Unavailable)));
 
-        Assert.Equal(new[] { "ln-backup" }, Offered(summary));
-        Assert.All(summary.Options.Where(o => !o.Offered), o => Assert.Contains("unavailable", o.Reason));
+        Assert.Equal(new[] { "ln-backup", "usdt-arbitrum" }, Offered(summary));
+        Assert.Contains("unavailable", Reason(summary, "lightning"));
+        Assert.Contains("unavailable", Reason(summary, "arkade"));
+        Assert.False(summary.Options.Single(o => o.Id == "usdt-arbitrum").Available);
     }
 
     [Fact]

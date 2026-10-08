@@ -57,13 +57,14 @@ public sealed record LnurlSetupSummary(string Target, string Domain, bool Sends,
                 return (rail.Label, o.Verifiable == false ? Unverifiable
                     : LnurlRailProvisioning.Refusal(saved, rail)
                       ?? (blob.IsExcluded(rail.PaymentMethodId) ? SwitchedOff : o.Available ? null : Unavailable));
+            // Unlike a rail, an unavailable token network stays on offer at checkout: LnurlTokenRequester treats it as a transient outage.
             if (tokens.TryGetValue(o.Id, out var token))
             {
                 var pmi = TokenAssets.PaymentMethodIdOf(token.Unit.Code);
                 return ($"{token.Unit.Code} on {ChainDirectory.Label(token.Asset.ChainId)}", o.Verifiable == false ? Unverifiable
                     : !desiredTokens.Contains(pmi) ? $"this server does not show {token.Unit.Code}: a server admin can add it to {TokenAssets.ConfigKey}"
                     : blob.IsExcluded(pmi) ? SwitchedOff
-                    : o.Available ? null : Unavailable);
+                    : null);
             }
             return (o.Id, TokenNamespaces.All.ContainsKey(o.Type)
                 ? "its asset or unit is not one this plugin can read" : $"this plugin does not support '{o.Type}'");
