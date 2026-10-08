@@ -163,7 +163,8 @@ short or excess deposit is resolved with the provider, not with the merchant or 
 The unit tests prove which requests carry `X-Forwarded-For`; only a live host proves which IP BTCPay resolves. Open a checkout
 from a machine other than BTCPay's, so it requests its rails, and tap a token network. In lnurl-server's `http_request` log
 lines, `forwardedFor` on those callbacks carries the payer machine's IP. Saving the store's Lightning connection and `verify`
-polling carry none.
+polling carry none. Neither does a checkout opened with its own `X-Forwarded-For` straight against BTCPay's public port,
+nor one opened through a public proxy.
 
 The header changes nothing until the lnurl-server operator lists this BTCPay server in `TRUSTED_FORWARDERS`
 ([ArkLabsHQ/lnurl-server#69](https://github.com/ArkLabsHQ/lnurl-server/pull/69)). The payer's IP reaches the LNURL service, just as it would if the payer's own

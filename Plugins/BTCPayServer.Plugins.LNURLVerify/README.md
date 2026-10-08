@@ -101,15 +101,20 @@ LNURL quotes the token amount and settles it through `verify`, as for the Bitcoi
 ## The payer's IP
 
 When a checkout asks the LNURL for a rail or a token quote, the requests carry the payer's IP in `X-Forwarded-For`. An LNURL
-service that limits requests per IP then limits each payer, instead of every checkout this server makes. The IP is the one
-BTCPay resolved for the checkout's request, sent as a single value; a missing, unspecified or loopback IP is not sent.
-Lightning invoice requests, the connection's lookup and save probe, and `verify` polling carry none. Nor does a rail that
-BTCPay's own checkout page activates because a store or invoice makes it the default payment method.
+service that limits requests per IP then limits each payer, instead of every checkout this server makes. The IP is sent,
+as a single value, only when BTCPay can vouch for it:
+- **the checkout request came straight to BTCPay;**
+- **or it came through a reverse proxy on a loopback or private address,** such as the nginx of a Docker install, whose
+  `X-Forwarded-For` BTCPay applied.
+
+BTCPay applies that header whoever sends it. A request whose hop was public sends nothing, whether that hop was a client
+naming its own IP or a public proxy, and that payer shares this server's own limit. A missing, unspecified, loopback or
+private IP is never sent. Lightning invoice requests, the connection's lookup and save probe, and `verify` polling carry
+none. Nor does a rail that BTCPay's own checkout page activates because a store or invoice makes it the default payment
+method.
 
 - **To take effect,** the LNURL service must trust this server to name its payers. On lnurl-server, its operator lists this
-  BTCPay server in `TRUSTED_FORWARDERS` ([ArkLabsHQ/lnurl-server#69](https://github.com/ArkLabsHQ/lnurl-server/pull/69)). BTCPay takes a client's IP from the last
-  `X-Forwarded-For` hop, whoever sends it, so list a server only when a reverse proxy in front of it sets that header;
-  otherwise a payer can choose the IP they are limited as.
+  BTCPay server in `TRUSTED_FORWARDERS` ([ArkLabsHQ/lnurl-server#69](https://github.com/ArkLabsHQ/lnurl-server/pull/69)).
 - **Privacy:** the payer's IP reaches the LNURL service, just as it would if the payer's own wallet had contacted it.
 
 ## Limitations

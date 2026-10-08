@@ -259,6 +259,7 @@ public class LnurlRailPaymentHandlerTests
     [InlineData("203.0.113.7", "203.0.113.7")]
     [InlineData("2001:db8::7", "2001:db8::7")]
     [InlineData("::ffff:203.0.113.7", "203.0.113.7")]
+    [InlineData("172.32.0.1", "172.32.0.1")]
     public async Task A_checkout_activation_forwards_the_payer_ip(string payer, string forwarded)
     {
         var (host, http, handler, store) = Lnurl();
@@ -280,7 +281,14 @@ public class LnurlRailPaymentHandlerTests
     [InlineData("0.0.0.0")]
     [InlineData("::")]
     [InlineData("::ffff:0.0.0.0")]
-    public async Task An_activation_forwards_no_missing_unspecified_or_loopback_ip(string? payer)
+    [InlineData("10.1.2.3")]
+    [InlineData("172.31.255.254")]
+    [InlineData("192.168.1.10")]
+    [InlineData("169.254.1.1")]
+    [InlineData("fd00::1")]
+    [InlineData("fe80::1")]
+    [InlineData("::ffff:10.1.2.3")]
+    public async Task An_activation_forwards_no_missing_unspecified_or_local_ip(string? payer)
     {
         var (host, http, handler, store) = Lnurl();
         PayerIp.Current = payer is null ? null : IPAddress.Parse(payer);

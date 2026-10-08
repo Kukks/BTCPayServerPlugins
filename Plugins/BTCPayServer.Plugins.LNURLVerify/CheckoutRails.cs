@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using BTCPayServer.Data;
 using BTCPayServer.Payments;
 using BTCPayServer.Services.Invoices;
+using Microsoft.AspNetCore.Http;
 
 namespace BTCPayServer.Plugins.LNURLVerify;
 
@@ -120,11 +121,29 @@ public static class PayerIp
         set => _current.Value = value;
     }
 
+    /// <summary>BTCPay takes X-Forwarded-For from any sender, so it names the payer only behind a local proxy.</summary>
+    public static IPAddress? Resolve(HttpContext context)
+    {
+        // ForwardedHeadersMiddleware overwrites this with the TCP peer it replaced; absent, nothing was forwarded.
+        var peer = context.Request.Headers["X-Original-For"].ToString();
+        if (peer.Length == 0) return context.Connection.RemoteIpAddress;
+        return IPEndPoint.TryParse(peer, out var endpoint) && IsLocal(endpoint.Address) ? context.Connection.RemoteIpAddress : null;
+    }
+
     public static void Forward(HttpClient http)
     {
         var ip = Current;
         if (ip is { IsIPv4MappedToIPv6: true }) ip = ip.MapToIPv4();
-        if (ip is null || IPAddress.IsLoopback(ip) || ip.Equals(IPAddress.Any) || ip.Equals(IPAddress.IPv6Any)) return;
+        if (ip is null || IsLocal(ip) || ip.Equals(IPAddress.Any) || ip.Equals(IPAddress.IPv6Any)) return;
         http.DefaultRequestHeaders.Add("X-Forwarded-For", ip.ToString());
+    }
+
+    static bool IsLocal(IPAddress ip)
+    {
+        if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+        if (IPAddress.IsLoopback(ip)) return true;
+        if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6) return ip.IsIPv6UniqueLocal || ip.IsIPv6LinkLocal;
+        var b = ip.GetAddressBytes();
+        return b[0] == 10 || (b[0] == 172 && (b[1] & 0xF0) == 16) || (b[0] == 192 && b[1] == 168) || (b[0] == 169 && b[1] == 254);
     }
 }

@@ -1,5 +1,11 @@
+using System.Net;
 using BTCPayServer.Payments;
 using BTCPayServer.Services.Invoices;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace BTCPayServer.Plugins.LNURLVerify.Tests;
@@ -120,4 +126,39 @@ public class CheckoutRailsTests
 
         Assert.DoesNotContain(false, await Task.WhenAll(runs));
     }
+
+    // BTCPay's own forwarded-headers setup (Startup.cs): every sender trusted, the last hop applied.
+    static IPAddress? PayerOf(string peer, string? forwardedFor, string? originalFor)
+    {
+        var context = new DefaultHttpContext();
+        context.Connection.RemoteIpAddress = IPAddress.Parse(peer);
+        context.Connection.RemotePort = 40000;
+        if (forwardedFor is not null) context.Request.Headers["X-Forwarded-For"] = forwardedFor;
+        if (originalFor is not null) context.Request.Headers["X-Original-For"] = originalFor;
+        var options = new ForwardedHeadersOptions { ForwardedHeaders = ForwardedHeaders.All };
+        options.KnownIPNetworks.Clear();
+        options.KnownProxies.Clear();
+        new ForwardedHeadersMiddleware(_ => Task.CompletedTask, NullLoggerFactory.Instance, Options.Create(options)).ApplyForwarders(context);
+        return PayerIp.Resolve(context);
+    }
+
+    [Theory]
+    [InlineData("203.0.113.9", null, null, "203.0.113.9")]
+    [InlineData("203.0.113.9", null, "10.0.0.1:5", "203.0.113.9")]
+    [InlineData("127.0.0.1", "203.0.113.7", null, "203.0.113.7")]
+    [InlineData("172.18.0.5", "198.51.100.1, 203.0.113.7", null, "203.0.113.7")]
+    [InlineData("fd00::5", "203.0.113.7", null, "203.0.113.7")]
+    [InlineData("fe80::5", "203.0.113.7", null, "203.0.113.7")]
+    [InlineData("::ffff:192.168.1.2", "203.0.113.7", null, "203.0.113.7")]
+    public void A_direct_connection_or_a_local_proxy_names_the_payer(string peer, string? forwardedFor, string? originalFor, string payer) =>
+        Assert.Equal(IPAddress.Parse(payer), PayerOf(peer, forwardedFor, originalFor));
+
+    [Theory]
+    [InlineData("203.0.113.9", "198.51.100.1", null)]
+    [InlineData("203.0.113.9", "198.51.100.1", "10.0.0.1:5")]
+    [InlineData("203.0.113.9", null, "198.51.100.1:5")]
+    [InlineData("2001:db8::5", "203.0.113.7", null)]
+    [InlineData("203.0.113.9", null, "not-an-endpoint")]
+    public void A_public_peer_or_an_unreadable_original_names_no_payer(string peer, string? forwardedFor, string? originalFor) =>
+        Assert.Null(PayerOf(peer, forwardedFor, originalFor));
 }
