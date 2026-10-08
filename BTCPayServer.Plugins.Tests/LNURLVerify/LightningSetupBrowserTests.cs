@@ -38,8 +38,24 @@ public class LightningSetupBrowserTests : UnitTestBase
         await page.GotoAsync(setup);
         await Expect(page.Locator("#CustomLNURLVerifyHeader")).ToHaveCountAsync(0);
         await page.ClickAsync("label[for='LightningNodeType-LNURLVerify']");
-        stub.InvoicePrefix = "lntbs";
+
+        // A's answer arrives while B waits out the debounce, before B's own lookup starts: it must not render under B.
+        var stale = new TaskCompletionSource<IRoute>();
+        var fresh = new TaskCompletionSource<IRoute>();
+        await page.RouteAsync("**/lnurlverify/rails/resolve", route =>
+        {
+            (route.Request.PostData!.Contains("stale.example") ? stale : fresh).TrySetResult(route);
+            return Task.CompletedTask;
+        });
+        await page.FillAsync("#LNURLVerifyAddress", "a@stale.example");
+        var a = await stale.Task;
         await page.FillAsync("#LNURLVerifyAddress", stub.PayUrl);
+        await a.FulfillAsync(new() { ContentType = "application/json", Body = "{\"domain\":\"stale.example\",\"options\":[]}" });
+        var b = await fresh.Task;
+        await Expect(summary).Not.ToContainTextAsync("stale.example");
+        await b.ContinueAsync();
+        await page.UnrouteAsync("**/lnurlverify/rails/resolve");
+        stub.InvoicePrefix = "lntbs";
 
         await Expect(summary.Locator("tr[data-option='lightning']")).ToContainTextAsync("Offered", new() { Timeout = 30_000 });
         await Expect(summary.Locator("tr[data-option='usdt-arbitrum']")).ToContainTextAsync("USDT on Arbitrum Sepolia");

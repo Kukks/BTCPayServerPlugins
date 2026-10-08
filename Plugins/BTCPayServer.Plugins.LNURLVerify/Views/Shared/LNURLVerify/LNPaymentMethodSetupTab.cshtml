@@ -62,6 +62,11 @@
                 summary = { error: 'The lookup failed: ' + e.message };
             }
             if (value !== resolving) return;
+            // The input moved on and its own lookup is waiting out the debounce; forgetting this one lets a return to it look up again.
+            if (value !== input.value.trim()) {
+                resolving = null;
+                return;
+            }
             status.textContent = '';
             if (summary.error) resolving = null;
             render(summary);
