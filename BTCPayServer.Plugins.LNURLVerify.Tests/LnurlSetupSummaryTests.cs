@@ -82,6 +82,22 @@ public class LnurlSetupSummaryTests
     }
 
     [Fact]
+    public void A_rail_or_asset_switched_off_on_the_rails_page_is_not_offered()
+    {
+        var store = Store();
+        var blob = store.GetStoreBlob();
+        blob.SetExcluded(LnurlRails.Arkade.PaymentMethodId, true);
+        blob.SetExcluded(TokenAssets.PaymentMethodIdOf("USDT"), true);
+        store.SetStoreBlob(blob);
+
+        var summary = Summary(PayJson("https://h.example/cb", Lightning, Arkade, OnChain, ArbitrumUsdt), store);
+
+        Assert.Equal(new[] { "lightning", "onchain" }, Offered(summary));
+        Assert.Contains("switched off", Reason(summary, "arkade"));
+        Assert.Contains("switched off", Reason(summary, "usdt-arbitrum"));
+    }
+
+    [Fact]
     public void An_option_reported_unavailable_is_not_offered_now()
     {
         var summary = Summary(PayJson("https://h.example/cb", Lightning.Replace("}", Unavailable),

@@ -25,6 +25,7 @@ public sealed record LnurlSetupSummary(string Target, string Domain, bool Sends,
 {
     private const string Unavailable = "the LNURL reports it unavailable right now";
     private const string Unverifiable = "the LNURL marks it not verifiable, so its settlement could not be detected";
+    private const string SwitchedOff = "switched off on the LNURL rails page";
 
     /// <summary>Reads the payRequest alone: a callback costs the LNURL an invoice (on lnurl-server, a swap), so verify and the network are left to Save's probe.</summary>
     public static async Task<LnurlSetupSummary> Read(string lnurl, StoreData store, TokenAssets assets, Network network, HttpClient http,
@@ -40,6 +41,7 @@ public sealed record LnurlSetupSummary(string Target, string Domain, bool Sends,
         var saved = new StoreData { Id = store.Id, DerivationStrategies = store.DerivationStrategies, StoreBlob = store.StoreBlob };
         saved.SetPaymentMethodConfig(LnurlRailProvisioning.Lightning, new JObject { ["connectionString"] = "type=lnurl;value=" + lnurl });
         var blocked = LnurlRailProvisioning.LnurlValue(saved) is null ? "Lightning is disabled for this store" : null;
+        var blob = saved.GetStoreBlob();
         var tokens = TokenOption.Parse(pay).ToDictionary(t => t.Id);
         var desiredTokens = LnurlRailProvisioning.DesiredTokens(saved, pay, assets);
         string? lightningId = null, lightningRefusal = null;
@@ -53,12 +55,16 @@ public sealed record LnurlSetupSummary(string Target, string Domain, bool Sends,
                     (o is null || o.Id == lightningId ? null : o.Available ? $"Lightning uses the '{lightningId}' option" : Unavailable));
             if (LnurlRails.All.FirstOrDefault(r => r.OptionType.Equals(o.Type, StringComparison.OrdinalIgnoreCase)) is { } rail)
                 return (rail.Label, o.Verifiable == false ? Unverifiable
-                    : LnurlRailProvisioning.Refusal(saved, rail) ?? (o.Available ? null : Unavailable));
+                    : LnurlRailProvisioning.Refusal(saved, rail)
+                      ?? (blob.IsExcluded(rail.PaymentMethodId) ? SwitchedOff : o.Available ? null : Unavailable));
             if (tokens.TryGetValue(o.Id, out var token))
+            {
+                var pmi = TokenAssets.PaymentMethodIdOf(token.Unit.Code);
                 return ($"{token.Unit.Code} on {ChainDirectory.Label(token.Asset.ChainId)}", o.Verifiable == false ? Unverifiable
-                    : !desiredTokens.Contains(TokenAssets.PaymentMethodIdOf(token.Unit.Code))
-                        ? $"this server does not show {token.Unit.Code}: a server admin can add it to {TokenAssets.ConfigKey}"
+                    : !desiredTokens.Contains(pmi) ? $"this server does not show {token.Unit.Code}: a server admin can add it to {TokenAssets.ConfigKey}"
+                    : blob.IsExcluded(pmi) ? SwitchedOff
                     : o.Available ? null : Unavailable);
+            }
             return (o.Id, TokenNamespaces.All.ContainsKey(o.Type)
                 ? "its asset or unit is not one this plugin can read" : $"this plugin does not support '{o.Type}'");
         }
