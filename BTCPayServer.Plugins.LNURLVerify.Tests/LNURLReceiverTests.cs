@@ -84,6 +84,7 @@ public class LNURLReceiverTests
 
     // mutinynet is a signet, so its invoices carry lntbs.
     static string SignetInvoice() => TestBolt11.Create(new Key(), 1000, RandomNumberGenerator.GetBytes(32), prefix: "lntbs");
+    static string RegtestInvoice(long msat) => TestBolt11.Create(new Key(), msat, RandomNumberGenerator.GetBytes(32));
 
     static string SpecCallback(string host, string extra = "") =>
         $"{{\"pr\":\"{SpecBolt11}\",\"verify\":\"https://{host}/verify/{SpecHash}\"{extra}}}";
@@ -144,9 +145,23 @@ public class LNURLReceiverTests
             .Map($"https://{host}/pay", PayJson($"https://{host}/cb",
                 options: "[{\"id\":\"lightning\",\"type\":\"lightning\",\"minSendable\":5000}]"))
             .Map($"https://{host}/cb?amount=5000&paymentOption=lightning",
-                $"{{\"pr\":\"lnbcrt1\",\"verify\":\"https://{host}/verify/abc\"}}");
+                $"{{\"pr\":\"{RegtestInvoice(5000)}\",\"verify\":\"https://{host}/verify/abc\"}}");
 
         Assert.Null(await Receiver(host, http, Network.RegTest).CheckVerifySupport(TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("\"pr\":42,")]
+    [InlineData("\"pr\":\"lnbcrt1notaninvoice\",")]
+    public async Task CheckVerifySupport_refuses_a_probe_answer_without_a_readable_invoice(string pr)
+    {
+        var host = UniqueHost("noinv");
+        var http = new FakeHttp()
+            .Map($"https://{host}/pay", PayJson($"https://{host}/cb"))
+            .Map($"https://{host}/cb?amount=1000", "{" + pr + $"\"verify\":\"https://{host}/verify/abc\"}}");
+
+        Assert.Contains("invoice", await Receiver(host, http, Network.RegTest).CheckVerifySupport(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -320,7 +335,7 @@ public class LNURLReceiverTests
         var host = "nv.example";
         var http = new FakeHttp()
             .Map($"https://{host}/pay", PayMeta.Replace("{CB}", $"https://{host}/cb"))
-            .Map($"https://{host}/cb?amount=1000", "{\"pr\":\"lnbcrt1\"}"); // invoice returned, but no verify field
+            .Map($"https://{host}/cb?amount=1000", $"{{\"pr\":\"{RegtestInvoice(1000)}\"}}"); // invoice returned, but no verify field
         var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, null, host);
         var rx = new LNURLReceiver(resolved, Network.RegTest, http.Client(), NullLogger.Instance);
 
@@ -336,7 +351,7 @@ public class LNURLReceiverTests
         var host = "yv.example";
         var http = new FakeHttp()
             .Map($"https://{host}/pay", PayMeta.Replace("{CB}", $"https://{host}/cb"))
-            .Map($"https://{host}/cb?amount=1000", $"{{\"pr\":\"lnbcrt1\",\"verify\":\"https://{host}/lnurlp/verify/abc\"}}");
+            .Map($"https://{host}/cb?amount=1000", $"{{\"pr\":\"{RegtestInvoice(1000)}\",\"verify\":\"https://{host}/lnurlp/verify/abc\"}}");
         var resolved = new ResolvedLnurl(LnurlCapability.ReceiveOnly, new Uri($"https://{host}/pay"), null, null, host);
         var rx = new LNURLReceiver(resolved, Network.RegTest, http.Client(), NullLogger.Instance);
 

@@ -34,9 +34,9 @@ public sealed class LNURLReceiver
         "payment settlement. Use a verify-capable LNURL server (e.g. BTCPay Server or blink-lnurl-server).";
 
     /// <summary>
-    /// Config-time probe: requests a minimal invoice from the pay callback and checks that the LUD-21
-    /// verify field is present and the invoice is on this store's network. Returns null when both hold,
-    /// or a user-facing error message.
+    /// Config-time probe: requests a minimal invoice from the pay callback and checks that it is a readable
+    /// invoice on this store's network and that the LUD-21 verify field is present. Returns null when all
+    /// hold, or a user-facing error message.
     /// (LUD-21 exposes verify only in the callback response, so this can't be checked from metadata alone.)
     /// </summary>
     public async Task<string?> CheckVerifySupport(CancellationToken ct)
@@ -56,8 +56,12 @@ public sealed class LNURLReceiver
         try { json = await LNURLResolver.GetJson(_http, CallbackUri(callback, min, option, null), ct); }
         catch (Exception e) { return $"Could not request a probe invoice: {e.Message}"; }
 
-        if (json["pr"]?.Type == JTokenType.String && NetworkMismatch(json["pr"]!.Value<string>()!, _network) is { } mismatch)
+        if (json["pr"]?.Type != JTokenType.String || json["pr"]!.Value<string>() is not { Length: > 0 } pr)
+            return "The LNURL callback did not return an invoice.";
+        if (NetworkMismatch(pr, _network) is { } mismatch)
             return mismatch;
+        if (!BOLT11PaymentRequest.TryParse(pr, out _, _network))
+            return "The LNURL callback returned an invoice that could not be read.";
         var verify = json["verify"]?.Value<string>();
         if (string.IsNullOrEmpty(verify) || !Uri.TryCreate(verify, UriKind.Absolute, out _))
             return VerifyUnsupportedMessage;
