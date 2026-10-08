@@ -1,6 +1,6 @@
 # LNURL Verify — verification runbook
 
-The plugin is unit-tested (368 tests) and reviewed, but three things can only be confirmed by running
+The plugin is unit-tested (381 tests) and reviewed, but three things can only be confirmed by running
 it. This is the concrete checklist to gain that confidence, ordered cheapest-first.
 
 ## 1. Unit tests (seconds, no infra)
@@ -8,15 +8,15 @@ it. This is the concrete checklist to gain that confidence, ordered cheapest-fir
 ```
 dotnet test BTCPayServer.Plugins.LNURLVerify.Tests
 ```
-Expected: 368 passed, and no warnings from plugin or test code. Covers capability decode, verify-support probe, receive guards +
+Expected: 381 passed, and no warnings from plugin or test code. Covers capability decode, verify-support probe, receive guards +
 settled-cache, the shared poller (incl. a 60-invoice concurrent settle/error stress), the full send
 chain (parse → k1-refresh → bounds/balance → submit), connection-scoped reconciliation, persistence
 save/restore (against a fake settings store), paymentOptions selection, verifyBatch batching (chunking,
 414 halving, unsupported fallback, backoff), the GetInvoice cache, a self-signed BOLT11 pinning the
 payment-hash byte order, the rail table and BIP321 merging, rail destination requests and their refusals,
 destination polling through verifyBatch, provisioning rules, the rail payment-method handler, activation
-planning, the checkout re-skin, CAIP-19 parsing and the per-namespace URIs, token options and their provisioning, token quotes and their refusals, the token payment method (per-network quotes, expiry, re-issue), token activation planning (on a tap only, never past a live quote), the asset tab's model, token providers and destination tags, and lnurl-server's FixedFloat rails as a
-stock install sees them.
+planning, the checkout re-skin, CAIP-19 parsing and the per-namespace URIs, token options and their provisioning, token quotes and their refusals, the token payment method (per-network quotes, expiry, re-issue), token activation planning (on a tap only, never past a live quote), the asset tab's model, token providers and destination tags, lnurl-server's FixedFloat rails as a
+stock install sees them, and the payer's IP sent on a checkout's rail and token requests alone.
 
 ## 2. Receive integration — real BTCPay LNURL + regtest LN (ServerTester)
 
@@ -157,3 +157,14 @@ project ID set. Confirm each once, and that the invoice settles with the network
 On a provider's network (lnurl-server's FixedFloat rails, or its simulated provider), confirm the notice next to the QR. It
 must say that the deposit address belongs to the provider and not the merchant, that the quote expires, and that a late,
 short or excess deposit is resolved with the provider, not with the merchant or BTCPay.
+
+## 7. The payer's IP — live check
+
+The unit tests prove which requests carry `X-Forwarded-For`; only a live host proves which IP BTCPay resolves. Open a checkout
+from a machine other than BTCPay's, so it requests its rails, and tap a token network. In lnurl-server's `http_request` log
+lines, `forwardedFor` on those callbacks carries the payer machine's IP. Saving the store's Lightning connection and `verify`
+polling carry none.
+
+The header changes nothing until the lnurl-server operator lists this BTCPay server in `TRUSTED_FORWARDERS`
+([ArkLabsHQ/lnurl-server#69](https://github.com/ArkLabsHQ/lnurl-server/pull/69)). The payer's IP reaches the LNURL service, just as it would if the payer's own
+wallet had contacted it.

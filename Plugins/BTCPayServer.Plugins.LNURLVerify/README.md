@@ -98,6 +98,20 @@ LNURL quotes the token amount and settles it through `verify`, as for the Bitcoi
 - **Destination tags:** an answer that needs a memo (`paymentDestinationTag`) gets its network refused, since no QR or wallet
   link the checkout builds can carry one.
 
+## The payer's IP
+
+When a checkout asks the LNURL for a rail or a token quote, the requests carry the payer's IP in `X-Forwarded-For`. An LNURL
+service that limits requests per IP then limits each payer, instead of every checkout this server makes. The IP is the one
+BTCPay resolved for the checkout's request, sent as a single value; a missing, unspecified or loopback IP is not sent.
+Lightning invoice requests, the connection's lookup and save probe, and `verify` polling carry none. Nor does a rail that
+BTCPay's own checkout page activates because a store or invoice makes it the default payment method.
+
+- **To take effect,** the LNURL service must trust this server to name its payers. On lnurl-server, its operator lists this
+  BTCPay server in `TRUSTED_FORWARDERS` ([ArkLabsHQ/lnurl-server#69](https://github.com/ArkLabsHQ/lnurl-server/pull/69)). BTCPay takes a client's IP from the last
+  `X-Forwarded-For` hop, whoever sends it, so list a server only when a reverse proxy in front of it sets that header;
+  otherwise a payer can choose the IP they are limited as.
+- **Privacy:** the payer's IP reaches the LNURL service, just as it would if the payer's own wallet had contacted it.
+
 ## Limitations
 
 - **Payment detection across a restart** — tracked invoices are persisted to BTCPay settings and

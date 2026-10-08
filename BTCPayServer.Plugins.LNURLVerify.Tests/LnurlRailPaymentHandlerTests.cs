@@ -255,6 +255,40 @@ public class LnurlRailPaymentHandlerTests
         Assert.Contains($"https://{host}/cb?amount=20000000&paymentOption=arkade", http.Requests);
     }
 
+    [Theory]
+    [InlineData("203.0.113.7", "203.0.113.7")]
+    [InlineData("2001:db8::7", "2001:db8::7")]
+    [InlineData("::ffff:203.0.113.7", "203.0.113.7")]
+    public async Task A_checkout_activation_forwards_the_payer_ip(string payer, string forwarded)
+    {
+        var (host, http, handler, store) = Lnurl();
+        PayerIp.Current = IPAddress.Parse(payer);
+        await new RailActivationGate().Run("inv", LnurlRails.Arkade.PaymentMethodId, async () =>
+        {
+            await Activate(handler, store, Priced());
+            return true;
+        });
+        Assert.Contains($"https://{host}/cb?amount=20000000&paymentOption=arkade", http.Requests);
+        Assert.All(http.ForwardedFor, v => Assert.Equal(forwarded, v));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("127.0.0.1")]
+    [InlineData("::1")]
+    [InlineData("::ffff:127.0.0.1")]
+    [InlineData("0.0.0.0")]
+    [InlineData("::")]
+    [InlineData("::ffff:0.0.0.0")]
+    public async Task An_activation_forwards_no_missing_unspecified_or_loopback_ip(string? payer)
+    {
+        var (host, http, handler, store) = Lnurl();
+        PayerIp.Current = payer is null ? null : IPAddress.Parse(payer);
+        await Activate(handler, store, Priced());
+        Assert.Contains($"https://{host}/cb?amount=20000000&paymentOption=arkade", http.Requests);
+        Assert.All(http.ForwardedFor, v => Assert.Null(v));
+    }
+
     [Fact]
     public async Task A_reissue_supersedes_the_previous_destination()
     {

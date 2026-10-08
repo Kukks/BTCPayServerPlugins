@@ -3,6 +3,9 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Data;
 using BTCPayServer.Payments;
@@ -102,5 +105,26 @@ public class RailActivationGate
             if (ReferenceEquals(run, mine))
                 _inFlight.TryRemove(new KeyValuePair<(string, PaymentMethodId), Lazy<Task<bool>>>((invoiceId, rail), mine));
         }
+    }
+}
+
+/// <summary>The checkout payer's IP, sent as X-Forwarded-For on the LNURL requests made on their behalf.</summary>
+public static class PayerIp
+{
+    // Ambient because core's InvoiceActivator stands between the checkout request and the handlers, and passes nothing through.
+    private static readonly AsyncLocal<IPAddress?> _current = new();
+
+    public static IPAddress? Current
+    {
+        get => _current.Value;
+        set => _current.Value = value;
+    }
+
+    public static void Forward(HttpClient http)
+    {
+        var ip = Current;
+        if (ip is { IsIPv4MappedToIPv6: true }) ip = ip.MapToIPv4();
+        if (ip is null || IPAddress.IsLoopback(ip) || ip.Equals(IPAddress.Any) || ip.Equals(IPAddress.IPv6Any)) return;
+        http.DefaultRequestHeaders.Add("X-Forwarded-For", ip.ToString());
     }
 }
