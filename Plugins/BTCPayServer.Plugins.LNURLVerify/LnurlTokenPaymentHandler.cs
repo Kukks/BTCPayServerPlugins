@@ -33,6 +33,15 @@ public class TokenNetworkState
     public bool Refused { get; set; }
     public long? FailedAt { get; set; }
     public TokenQuoteState? Quote { get; set; }
+
+    public string State(long dueMsat, DateTimeOffset now) => Quote switch
+    {
+        null when FailedAt is not null => "failed",
+        null => "unrequested",
+        { ExpiresAt: { } at } when at <= now.ToUnixTimeSeconds() => "expired",
+        { } q when q.AmountMsat != dueMsat => "stale",
+        _ => "live"
+    };
 }
 
 public class LnurlTokenPromptDetails

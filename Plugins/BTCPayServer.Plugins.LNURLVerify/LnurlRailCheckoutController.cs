@@ -70,13 +70,13 @@ public class LnurlRailCheckoutController : Controller
         if (!PaymentMethodId.TryParse(pmi, out var id) || _handlers.TryGet(id) is not LnurlTokenPaymentHandler handler) return NotFound();
         var invoice = await _invoices.GetInvoice(invoiceId);
         if (invoice?.GetPaymentPrompt(id) is not { } prompt) return NotFound();
-        var activateAllOnOpen =
-            (await _stores.GetSettingAsync<LnurlRailSettings>(invoice.StoreId, LnurlRailSettings.Key) ?? new LnurlRailSettings()).ActivateAllRailsOnOpen;
         // Re-reads the invoice: the prompt above was read before the activation lock.
         async Task<IReadOnlyCollection<string>> Plan()
         {
             var fresh = (await _invoices.GetInvoice(invoiceId))?.GetPaymentPrompt(id);
-            return CheckoutRails.PlanTokens(fresh is null ? null : Details(handler, fresh), network, activateAllOnOpen);
+            return fresh is null
+                ? Array.Empty<string>()
+                : CheckoutRails.PlanTokens(Details(handler, fresh), network, LnurlRailPaymentHandler.MsatOf(fresh.Calculate().Due), DateTimeOffset.UtcNow);
         }
         if (await _tokenActivations.Run(invoiceId, id, Plan, () => _activator.ActivateInvoicePaymentMethod(invoiceId, id, forceNew: true)))
             prompt = (await _invoices.GetInvoice(invoiceId))?.GetPaymentPrompt(id) ?? prompt;

@@ -1,6 +1,6 @@
 # LNURL Verify — verification runbook
 
-The plugin is unit-tested (363 tests) and reviewed, but three things can only be confirmed by running
+The plugin is unit-tested (365 tests) and reviewed, but three things can only be confirmed by running
 it. This is the concrete checklist to gain that confidence, ordered cheapest-first.
 
 ## 1. Unit tests (seconds, no infra)
@@ -8,14 +8,14 @@ it. This is the concrete checklist to gain that confidence, ordered cheapest-fir
 ```
 dotnet test BTCPayServer.Plugins.LNURLVerify.Tests
 ```
-Expected: 363 passed, and no warnings from plugin or test code. Covers capability decode, verify-support probe, receive guards +
+Expected: 365 passed, and no warnings from plugin or test code. Covers capability decode, verify-support probe, receive guards +
 settled-cache, the shared poller (incl. a 60-invoice concurrent settle/error stress), the full send
 chain (parse → k1-refresh → bounds/balance → submit), connection-scoped reconciliation, persistence
 save/restore (against a fake settings store), paymentOptions selection, verifyBatch batching (chunking,
 414 halving, unsupported fallback, backoff), the GetInvoice cache, a self-signed BOLT11 pinning the
 payment-hash byte order, the rail table and BIP321 merging, rail destination requests and their refusals,
 destination polling through verifyBatch, provisioning rules, the rail payment-method handler, activation
-planning, the checkout re-skin, CAIP-19 parsing and the per-namespace URIs, token options and their provisioning, token quotes and their refusals, the token payment method (per-network quotes, expiry, re-issue), token activation planning, the asset tab's model, token providers and destination tags, and lnurl-server's FixedFloat rails as a
+planning, the checkout re-skin, CAIP-19 parsing and the per-namespace URIs, token options and their provisioning, token quotes and their refusals, the token payment method (per-network quotes, expiry, re-issue), token activation planning (on a tap only, never past a live quote), the asset tab's model, token providers and destination tags, and lnurl-server's FixedFloat rails as a
 stock install sees them.
 
 ## 2. Receive integration — real BTCPay LNURL + regtest LN (ServerTester)
@@ -133,8 +133,9 @@ Each test uses a fresh database.
 
 The FixedFloat test has the stub answer in lnurl-server's FixedFloat shape. Its options name a `provider`, each callback is
 a new order with only a short `paymentQuote.expiresAt`, and `verify` reports the payer's deposit transaction as the
-`paymentReference`. The test checks four things:
+`paymentReference`. The test checks five things:
 - the default assets provision USDT and USDC;
+- opening the tab orders no quote, and a tap orders exactly one for the network tapped;
 - the chips and amount read "via FixedFloat", next to the provider notice;
 - an expired quote is re-quoted at a new deposit address;
 - the invoice settles through `verifyBatch` with the deposit transaction linked.

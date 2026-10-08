@@ -60,13 +60,14 @@ public static class CheckoutRails
         return (inactive.Where(p => !failedRecently(p)).ToList(), inactive.Where(failedRecently).ToList());
     }
 
-    /// <summary>The networks a token activation asks the LNURL for: the tapped one, or on open each one not yet quoted.</summary>
-    public static IReadOnlyCollection<string> PlanTokens(LnurlTokenPromptDetails? details, string? network, bool activateAllOnOpen)
-    {
-        var open = details?.Networks.Where(n => !n.Refused).ToList() ?? new List<TokenNetworkState>();
-        if (network is not null) return open.Any(n => n.OptionId == network) ? new[] { network } : Array.Empty<string>();
-        return activateAllOnOpen ? open.Where(n => n.Quote is null && n.FailedAt is null).Select(n => n.OptionId).ToArray() : Array.Empty<string>();
-    }
+    /// <summary>
+    /// The network a token activation asks the LNURL for: the one the payer tapped, unless its quote is still live. Never any on
+    /// open, whatever the rails' setting says, because a token quote can be a real order with a third party.
+    /// </summary>
+    public static IReadOnlyCollection<string> PlanTokens(LnurlTokenPromptDetails? details, string? network, long dueMsat, DateTimeOffset now) =>
+        details?.Networks.FirstOrDefault(n => n.OptionId == network) is { Refused: false } tapped && tapped.State(dueMsat, now) != "live"
+            ? new[] { tapped.OptionId }
+            : Array.Empty<string>();
 }
 
 /// <summary>Activations the LNURL refused, so reopening a checkout within the hour does not repeat the callback.</summary>

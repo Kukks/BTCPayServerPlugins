@@ -45,7 +45,6 @@ public sealed class StubLnurl : IAsyncDisposable
     private readonly ConcurrentDictionary<string, string> _settled = new();
     private readonly ConcurrentDictionary<string, int> _orders = new();
     private readonly ConcurrentDictionary<string, (string Option, string Deposit)> _deposits = new();
-    private readonly ConcurrentDictionary<string, int> _orderOf = new();
     private int _batchVerifies, _fixedFloatSingleVerifies;
 
     private StubLnurl(IHost host, Uri root)
@@ -62,7 +61,6 @@ public sealed class StubLnurl : IAsyncDisposable
     public int BatchVerifies => _batchVerifies;
     public int FixedFloatSingleVerifies => _fixedFloatSingleVerifies;
     public int Orders(string option) => _orders.GetValueOrDefault(option);
-    public int OrderOf(string deposit) => _orderOf[deposit];
 
     public static string DepositAddress(string option, int n)
     {
@@ -133,7 +131,6 @@ public sealed class StubLnurl : IAsyncDisposable
         var n = _orders.AddOrUpdate(option, 1, (_, c) => c + 1);
         var deposit = DepositAddress(option, n);
         _deposits[$"{option}/{n}"] = (option, deposit);
-        _orderOf[deposit] = n;
         var rail = FixedFloatRails[option];
         var baseUnits = (new BigInteger(msat) * 63_360 / 100_000).ToString();
         var answer = new JObject

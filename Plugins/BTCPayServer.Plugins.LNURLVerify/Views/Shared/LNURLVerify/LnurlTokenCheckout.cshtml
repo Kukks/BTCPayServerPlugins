@@ -83,11 +83,10 @@
             }
         },
         watch: {
-            'token.pmi' () { this.selected = null; this.walletError = null; this.request(null); }
+            'token.pmi' () { this.selected = null; this.walletError = null; }
         },
         mounted () {
             this.timer = setInterval(() => { this.now = Math.floor(Date.now() / 1000); }, 1000);
-            this.request(null);
         },
         beforeDestroy () { clearInterval(this.timer); },
         methods: {
@@ -97,7 +96,7 @@
                 this.busy = network;
                 this.pending = true;
                 try {
-                    const query = '?pmi=' + encodeURIComponent(this.token.pmi) + (network ? '&network=' + encodeURIComponent(network) : '');
+                    const query = '?pmi=' + encodeURIComponent(this.token.pmi) + '&network=' + encodeURIComponent(network);
                     await fetch(this.activateUrl + query, { method: 'POST' });
                 } catch (e) { }
                 try { await this.$root.fetchData(); }
