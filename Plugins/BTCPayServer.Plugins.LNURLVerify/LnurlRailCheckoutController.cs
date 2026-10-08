@@ -42,6 +42,7 @@ public class LnurlRailCheckoutController : Controller
     [RateLimitsFilter(ZoneLimits.PublicInvoices, Scope = RateLimitsScope.RouteData, DataKey = "invoiceId")]
     public async Task<IActionResult> Activate([FromRoute] string invoiceId, string? rail = null)
     {
+        PayerIp.Current = PayerIp.Resolve(HttpContext);
         var invoice = await _invoices.GetInvoice(invoiceId);
         if (invoice is null || !CheckoutRails.Applies(invoice)) return NotFound();
         var activateAllOnOpen = rail is not null ||
@@ -67,16 +68,17 @@ public class LnurlRailCheckoutController : Controller
     [RateLimitsFilter(ZoneLimits.PublicInvoices, Scope = RateLimitsScope.RouteData, DataKey = "invoiceId")]
     public async Task<IActionResult> ActivateToken([FromRoute] string invoiceId, string? pmi = null, string? network = null)
     {
+        PayerIp.Current = PayerIp.Resolve(HttpContext);
         if (!PaymentMethodId.TryParse(pmi, out var id) || _handlers.TryGet(id) is not LnurlTokenPaymentHandler handler) return NotFound();
         var invoice = await _invoices.GetInvoice(invoiceId);
         if (invoice?.GetPaymentPrompt(id) is not { } prompt) return NotFound();
-        var activateAllOnOpen =
-            (await _stores.GetSettingAsync<LnurlRailSettings>(invoice.StoreId, LnurlRailSettings.Key) ?? new LnurlRailSettings()).ActivateAllRailsOnOpen;
         // Re-reads the invoice: the prompt above was read before the activation lock.
         async Task<IReadOnlyCollection<string>> Plan()
         {
             var fresh = (await _invoices.GetInvoice(invoiceId))?.GetPaymentPrompt(id);
-            return CheckoutRails.PlanTokens(fresh is null ? null : Details(handler, fresh), network, activateAllOnOpen);
+            return fresh is null
+                ? Array.Empty<string>()
+                : CheckoutRails.PlanTokens(Details(handler, fresh), network, LnurlRailPaymentHandler.MsatOf(fresh.Calculate().Due), DateTimeOffset.UtcNow);
         }
         if (await _tokenActivations.Run(invoiceId, id, Plan, () => _activator.ActivateInvoicePaymentMethod(invoiceId, id, forceNew: true)))
             prompt = (await _invoices.GetInvoice(invoiceId))?.GetPaymentPrompt(id) ?? prompt;

@@ -9,8 +9,9 @@ namespace BTCPayServer.Plugins.LNURLVerify;
 /// <summary>One LUD-XX <c>paymentOptions</c> entry advertised by a payRequest.</summary>
 /// <param name="Verifiable">Whether callback answers carry a LUD-21 verify URL; null when the service does not say.</param>
 /// <param name="Asset">A CAIP-19 asset ID, on options for a token on a non-Bitcoin network.</param>
+/// <param name="Provider">The third party a payment through this option passes through, when the LNURL names one.</param>
 public sealed record PaymentOption(string Id, string Type, bool Available, long? MinSendable, long? MaxSendable, bool? Verifiable = null,
-    string? Asset = null, string? Unit = null)
+    string? Asset = null, string? Unit = null, string? Provider = null)
 {
     public bool IsLightning => Type.Equals("lightning", StringComparison.OrdinalIgnoreCase);
 
@@ -26,7 +27,7 @@ public sealed record PaymentOption(string Id, string Type, bool Available, long?
                 o["available"]?.Type != JTokenType.Boolean || o["available"]!.Value<bool>(),
                 Msat(o["minSendable"]), Msat(o["maxSendable"]),
                 o["verifiable"]?.Type == JTokenType.Boolean ? o["verifiable"]!.Value<bool>() : null,
-                Str(o["asset"]), Str(o["unit"])));
+                Str(o["asset"]), Str(o["unit"]), Str(o["provider"]) is { Length: > 0 and <= 64 } provider ? provider : null));
         }
         return options;
     }

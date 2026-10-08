@@ -3,10 +3,14 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Data;
 using BTCPayServer.Payments;
 using BTCPayServer.Services.Invoices;
+using Microsoft.AspNetCore.Http;
 
 namespace BTCPayServer.Plugins.LNURLVerify;
 
@@ -60,13 +64,14 @@ public static class CheckoutRails
         return (inactive.Where(p => !failedRecently(p)).ToList(), inactive.Where(failedRecently).ToList());
     }
 
-    /// <summary>The networks a token activation asks the LNURL for: the tapped one, or on open each one not yet quoted.</summary>
-    public static IReadOnlyCollection<string> PlanTokens(LnurlTokenPromptDetails? details, string? network, bool activateAllOnOpen)
-    {
-        var open = details?.Networks.Where(n => !n.Refused).ToList() ?? new List<TokenNetworkState>();
-        if (network is not null) return open.Any(n => n.OptionId == network) ? new[] { network } : Array.Empty<string>();
-        return activateAllOnOpen ? open.Where(n => n.Quote is null && n.FailedAt is null).Select(n => n.OptionId).ToArray() : Array.Empty<string>();
-    }
+    /// <summary>
+    /// The network a token activation asks the LNURL for: the one the payer tapped, unless its quote is still live. Never any on
+    /// open, whatever the rails' setting says, because a token quote can be a real order with a third party.
+    /// </summary>
+    public static IReadOnlyCollection<string> PlanTokens(LnurlTokenPromptDetails? details, string? network, long dueMsat, DateTimeOffset now) =>
+        details?.Networks.FirstOrDefault(n => n.OptionId == network) is { Refused: false } tapped && tapped.State(dueMsat, now) != "live"
+            ? new[] { tapped.OptionId }
+            : Array.Empty<string>();
 }
 
 /// <summary>Activations the LNURL refused, so reopening a checkout within the hour does not repeat the callback.</summary>
@@ -101,5 +106,44 @@ public class RailActivationGate
             if (ReferenceEquals(run, mine))
                 _inFlight.TryRemove(new KeyValuePair<(string, PaymentMethodId), Lazy<Task<bool>>>((invoiceId, rail), mine));
         }
+    }
+}
+
+/// <summary>The checkout payer's IP, sent as X-Forwarded-For on the LNURL requests made on their behalf.</summary>
+public static class PayerIp
+{
+    // Ambient because core's InvoiceActivator stands between the checkout request and the handlers, and passes nothing through.
+    private static readonly AsyncLocal<IPAddress?> _current = new();
+
+    public static IPAddress? Current
+    {
+        get => _current.Value;
+        set => _current.Value = value;
+    }
+
+    /// <summary>BTCPay takes X-Forwarded-For from any sender, so it names the payer only behind a local proxy.</summary>
+    public static IPAddress? Resolve(HttpContext context)
+    {
+        // ForwardedHeadersMiddleware overwrites this with the TCP peer it replaced; absent, nothing was forwarded.
+        var peer = context.Request.Headers["X-Original-For"].ToString();
+        if (peer.Length == 0) return context.Connection.RemoteIpAddress;
+        return IPEndPoint.TryParse(peer, out var endpoint) && IsLocal(endpoint.Address) ? context.Connection.RemoteIpAddress : null;
+    }
+
+    public static void Forward(HttpClient http)
+    {
+        var ip = Current;
+        if (ip is { IsIPv4MappedToIPv6: true }) ip = ip.MapToIPv4();
+        if (ip is null || IsLocal(ip) || ip.Equals(IPAddress.Any) || ip.Equals(IPAddress.IPv6Any)) return;
+        http.DefaultRequestHeaders.Add("X-Forwarded-For", ip.ToString());
+    }
+
+    static bool IsLocal(IPAddress ip)
+    {
+        if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+        if (IPAddress.IsLoopback(ip)) return true;
+        if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6) return ip.IsIPv6UniqueLocal || ip.IsIPv6LinkLocal;
+        var b = ip.GetAddressBytes();
+        return b[0] == 10 || (b[0] == 172 && (b[1] & 0xF0) == 16) || (b[0] == 192 && b[1] == 168) || (b[0] == 169 && b[1] == 254);
     }
 }

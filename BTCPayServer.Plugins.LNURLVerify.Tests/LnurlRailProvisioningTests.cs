@@ -121,6 +121,24 @@ public class LnurlRailProvisioningTests
         Assert.Equal(new[] { "LNURL-USDT" },
             LnurlRailProvisioning.DesiredTokens(Store(), TokenPay(ArbitrumUsdt, SolanaUsdc, BaseEurc), Assets).Select(p => p.ToString()));
 
+    // lnurl-server's FixedFloat rails (its spec §14): the whole case for their unit codes is that a stock install offers them.
+    static readonly JObject FixedFloat = JObject.Parse(
+        "{\"tag\":\"payRequest\",\"minSendable\":1000,\"maxSendable\":100000000,\"units\":[{\"code\":\"USDT\",\"decimals\":6,\"name\":\"Tether USD\"}," +
+        "{\"code\":\"USDC\",\"decimals\":6,\"name\":\"USD Coin\"}],\"paymentOptions\":[{\"id\":\"ff-usdtarbitrum\",\"type\":\"eip155\"," +
+        "\"asset\":\"eip155:42161/erc20:0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9\",\"unit\":\"USDT\",\"provider\":\"FixedFloat\",\"verifiable\":true," +
+        "\"minSendable\":2844000,\"maxSendable\":100000000},{\"id\":\"ff-usdcarbitrum\",\"type\":\"eip155\"," +
+        "\"asset\":\"eip155:42161/erc20:0xaf88d065e77c8cC2239327C5EDb3A432268e5831\",\"unit\":\"USDC\",\"provider\":\"FixedFloat\",\"verifiable\":true," +
+        "\"minSendable\":2863000,\"maxSendable\":100000000}]}");
+
+    [Fact]
+    public void A_stock_install_offers_fixedfloat_usdt_and_usdc_with_no_configuration()
+    {
+        Assert.Equal(new[] { "LNURL-USDT", "LNURL-USDC" },
+            LnurlRailProvisioning.DesiredTokens(Store(), FixedFloat, TokenAssets.Parse(null).Assets).Select(p => p.ToString()));
+        Assert.Equal(new[] { ("ff-usdtarbitrum", "USDT", 2_844_000L), ("ff-usdcarbitrum", "USDC", 2_863_000L) },
+            TokenOption.Parse(FixedFloat).Select(o => (o.Id, o.Unit.Code, o.MinSendable!.Value)));
+    }
+
     [Fact]
     public void Stores_without_an_lnurl_backend_get_no_tokens() =>
         Assert.Empty(LnurlRailProvisioning.DesiredTokens(Store(ln: LndRest), TokenPay(ArbitrumUsdt), Assets));
