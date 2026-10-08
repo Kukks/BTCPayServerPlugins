@@ -81,8 +81,9 @@ LNURL quotes the token amount and settles it through `verify`, as for the Bitcoi
   checkout URL (and with it the invoice id). AppKit's optional analytics are off.
 - **Quotes:** a network is requested from the LNURL only when the payer taps it. That holds whatever "Request every rail when
   the checkout opens" says, which governs the Bitcoin rails alone: a token quote can be a real order with a third party, so
-  opening a tab must not place one per network. A tap on a network whose quote is still live sends nothing. An expired quote
-  hides its QR until the payer asks for a new one. A partial payment re-issues
+  opening a tab must not place one per network. A tap on a network whose quote is still live sends nothing; a tap on one
+  whose quote expired, failed or is for an old amount asks again. An expired quote hides its QR until then. A partial payment
+  re-issues
   every quoted network for the remainder. A network the LNURL refuses outright stays hidden for the rest of that invoice;
   one whose request fails, that the LNURL marks unavailable, or that does not answer in time, stays offered and can be
   tried again.

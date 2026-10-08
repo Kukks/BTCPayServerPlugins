@@ -84,9 +84,11 @@ public class TokenCheckoutBrowserTests : UnitTestBase
         await OpenTokenTab(page, tester, invoiceId);
         await Expect(page.Locator("#LnurlTokenNetworks button")).ToHaveTextAsync(new[] { "Arbitrum One via FixedFloat", "Tron via FixedFloat" });
         string Evm(int n) => $"ethereum:{StubLnurl.ArbitrumUsdt}@42161/transfer?address={StubLnurl.DepositAddress("ff-usdtarbitrum", n)}&uint256=63360000";
-        await page.Locator("#LnurlTokenNetworks button[data-network='ff-usdtarbitrum']").ClickAsync();
+        // Opening the tab orders no quote; a tap orders one, for the network tapped alone.
+        Assert.Equal((0, 0), (stub.Orders("ff-usdtarbitrum"), stub.Orders("ff-usdttrc")));
+        var arbitrum = page.Locator("#LnurlTokenNetworks button[data-network='ff-usdtarbitrum']");
+        await arbitrum.ClickAsync();
         await Expect(page.Locator("#LnurlTokenAmount")).ToHaveTextAsync("63.36 USDT on Arbitrum One via FixedFloat");
-        // Only a tap orders a quote: Tron, open in the same tab but never tapped, has none.
         Assert.Equal((1, 0), (stub.Orders("ff-usdtarbitrum"), stub.Orders("ff-usdttrc")));
         await Expect(qr).ToHaveAttributeAsync("data-qr-value", Evm(1));
         await Expect(page.Locator("#LnurlTokenProvider")).ToHaveTextAsync(
@@ -96,10 +98,11 @@ public class TokenCheckoutBrowserTests : UnitTestBase
 
         await Expect(page.Locator("#LnurlTokenRefresh")).ToHaveTextAsync("Quote expired: get a new one", new() { Timeout = 120_000 });
         stub.QuoteLifetimes.TryRemove("ff-usdtarbitrum", out _);
-        await page.Locator("#LnurlTokenRefresh").ClickAsync();
+        await arbitrum.ClickAsync();
         await Expect(qr).ToHaveAttributeAsync("data-qr-value", Evm(2), new() { Timeout = 60_000 });
         await Expect(page.Locator("#LnurlTokenExpiry")).ToHaveTextAsync(new Regex(@"^Quote valid for (10:00|[5-9]:[0-5]\d)$"));
 
+        Assert.Equal((2, 0), (stub.Orders("ff-usdtarbitrum"), stub.Orders("ff-usdttrc")));
         await page.Locator("#LnurlTokenNetworks button[data-network='ff-usdttrc']").ClickAsync();
         await Expect(qr).ToHaveAttributeAsync("data-qr-value", StubLnurl.DepositAddress("ff-usdttrc", 1));
         await Expect(page.Locator("#LnurlTokenAmount")).ToHaveTextAsync("63.36 USDT on Tron via FixedFloat");

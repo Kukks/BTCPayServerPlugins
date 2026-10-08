@@ -62,7 +62,7 @@
             networks () { return this.token.networks; },
             current () { return this.networks.find(n => n.id === this.selected) || (this.networks.length === 1 ? this.networks[0] : null); },
             secondsLeft () { return this.current && this.current.expiresAt ? Math.max(0, this.current.expiresAt - this.now) : null; },
-            live () { return !!this.current && this.current.state === 'live' && this.secondsLeft !== 0; },
+            live () { return !!this.current && this.isLive(this.current); },
             expired () { return !!this.current && (this.current.state === 'expired' || (this.current.state === 'live' && this.secondsLeft === 0)); },
             renewable () { return this.expired || (!!this.current && (this.current.state === 'stale' || this.current.state === 'failed')); },
             countdown () { return Math.floor(this.secondsLeft / 60) + ':' + String(this.secondsLeft % 60).padStart(2, '0'); },
@@ -91,6 +91,7 @@
         beforeDestroy () { clearInterval(this.timer); },
         methods: {
             named (n) { return n.provider ? n.label + ' via ' + n.provider : n.label; },
+            isLive (n) { return n.state === 'live' && !(n.expiresAt && n.expiresAt <= this.now); },
             async request (network) {
                 if (!this.token.pmi) return;
                 this.busy = network;
@@ -139,7 +140,7 @@
             async pick (n) {
                 this.walletError = null;
                 this.selected = n.id;
-                if (n.state === 'unrequested') await this.request(n.id);
+                if (!this.isLive(n)) await this.request(n.id);
             }
         }
     });
