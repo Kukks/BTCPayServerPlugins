@@ -36,7 +36,7 @@ public static class LnurlTokenRequester
         var (verify, batch) = LnurlRailRequester.Settlement(answer, callbackUri, invoiceExpiry);
         if (!TokenNamespaces.For(option.Asset)!.IsValidAddress(destination))
             throw Unavailable($"the LNURL returned a destination that is not a valid {option.Asset.Namespace} address");
-        if (LnurlRailRequester.Str(answer["paymentDestinationTag"]) is { } tag)
+        if (answer["paymentDestinationTag"] is { Type: not JTokenType.Null } tag)
             throw Unavailable($"the LNURL requires a destination tag ('{tag}') for '{option.Id}', which the checkout cannot attach");
         var quote = answer["paymentQuote"] as JObject;
         var payment = quote?["payment"] as JObject;
