@@ -4,6 +4,9 @@ Use any **LNURL** or **Lightning address** as a BTCPay Server Lightning backend 
 
 ## Connection strings
 
+The store's Lightning setup page has a **Lightning address** tab: enter an address or LNURL and it shows what the LNURL offers
+and what checkout would do with each option, before you save. Saving there stores the connection string below.
+
 The capability is decided by decoding the value you provide:
 
 - **Receive only** — a Lightning address or an LNURL-pay:
@@ -22,12 +25,100 @@ invoices, so it is unusable as a store's Lightning backend.
 ## How it works
 
 - **Receive:** BTCPay asks the LNURL-pay callback for an invoice and detects settlement via the
-  LNURL **LUD-21 `verify`** endpoint. A single shared background poller watches every tracked invoice
-  across every connection (grouped by verify-host, bounded concurrency, capped back-off), so it scales
-  to many invoices and many addresses without a poll loop per connection.
+  LNURL **LUD-21 `verify`** endpoint. When the service also advertises **LUD-XX `verifyBatch`**, all
+  pending invoices at that endpoint are checked with one request per poll cycle (up to 250 per request);
+  services without it, or whose batch endpoint stops answering, are polled per invoice. One shared
+  background poller serves every connection, and
+  BTCPay's own status checks are answered from its last result rather than with more requests.
+- **Payment options:** when the payRequest advertises LUD-XX **`paymentOptions`**, the plugin requests
+  its `lightning` option explicitly and applies that option's own amount bounds. If the service reports
+  Lightning as unavailable, invoice creation fails with that reason.
 - **Send:** for an LNURL-withdraw, BTCPay pays an arbitrary invoice by submitting it to the withdraw
   callback (the linked wallet pays it), bounded by the withdraw's min/max and, when exposed, its
   balance.
+
+## One Bitcoin checkout (LNURL payment options)
+
+When the LNURL advertises a rail in LUD-XX `paymentOptions` that a BIP321 URI can carry, the plugin adds it to the store as a
+payment method, automatically, and re-checks hourly. Today that is `arkade` (`LNURL-ARKADE`), and `onchain` (`LNURL-ONCHAIN`)
+for stores without their own on-chain wallet: a store with an enabled wallet never requests the LNURL's on-chain option.
+A store that already has the Arkade plugin's own `ARKADE` payment method gets no LNURL rails.
+
+- **Checkout:** one "Bitcoin" tab replaces the Lightning and on-chain tabs. Its QR is one BIP321 URI carrying every active rail;
+  a chip per rail switches the QR to that rail alone, and an "All" chip switches it back.
+- **No cost at invoice creation:** a rail is requested from the LNURL when the checkout opens, or, with the store setting
+  "Request every rail when the checkout opens" turned off (Integrations → LNURL rails), only when the payer taps it. Reopening
+  the checkout does not request a rail the LNURL refused within the last hour; a payer's tap does.
+- **Settlement:** a rail payment is recorded when the LNURL's `verify` reports it `settled` with a `paymentReference`, at the
+  amount agreed with the LNURL. An underpayment never settles there, so BTCPay never sees it; recovering those funds is the
+  LNURL service's job. An overpayment is recorded at the agreed amount. Late payments are recorded until the invoice stops
+  being monitored.
+- **Rails whose settlement cannot be detected:** an option the LNURL marks `verifiable: false` (proposed for LUD-XX in
+  lnurl/luds#303) is never provisioned. A rail whose LNURL answers without a usable `verify` URL is left off new invoices for
+  a day, so a checkout does not keep offering a payment method that cannot activate.
+- **Turning a rail off:** switch it off on Integrations → LNURL rails.
+- **Tokens on other networks:** see "Token rails" below.
+- **Upgrading to 1.2.0:** stores whose LNURL advertises a rail switch to the single "Bitcoin" tab for invoices created after
+  the upgrade. Nothing else changes for them.
+
+## Token rails (EVM, Solana, Tron)
+
+When the LNURL advertises a token on another network as a payment option, with a CAIP-19 `asset` and a `unit` from its
+`units`, the payer can pay in that token. For example, USDT on Arbitrum, Solana or Tron. The invoice stays priced in BTC; the
+LNURL quotes the token amount and settles it through `verify`, as for the Bitcoin rails.
+
+- **Assets:** one checkout tab per configured unit code, as payment method `LNURL-<CODE>`. The codes come from the server
+  setting `LNURLVERIFY_ASSETS` (environment `BTCPAY_LNURLVERIFY_ASSETS`), default `USDT,USDC`. A change takes effect after
+  a restart, because BTCPay registers payment methods at startup. Integrations → LNURL rails lists any unit the LNURL offers
+  that is not configured.
+- **Networks:** one chip per advertised network. Any EVM chain works, as do Solana and Tron. Network names and explorer links
+  come from a built-in list of chains; an unlisted chain shows its CAIP-2 id and no explorer link.
+- **Checkout:** each network has a QR; EVM and Solana networks also have an "Open in wallet" link, which follows the store's
+  "Pay in wallet" button setting (Checkout Appearance):
+  - EIP-681 for EVM;
+  - Solana Pay for Solana;
+  - for Tron, the QR is the recipient, with the amount below it.
+
+  With a WalletConnect project ID set in Server settings → LNURL Verify, "Connect wallet" pays from a wallet over WalletConnect.
+  "Connect wallet" contacts Reown only once the payer presses it: its relay and API, plus some telemetry that carries the
+  checkout URL (and with it the invoice id). AppKit's optional analytics are off.
+- **Quotes:** a network is requested from the LNURL only when the payer taps it. That holds whatever "Request every rail when
+  the checkout opens" says, which governs the Bitcoin rails alone: a token quote can be a real order with a third party, so
+  opening a tab must not place one per network. A tap on a network whose quote is still live sends nothing; a tap on one
+  whose quote expired, failed or is for an old amount asks again. An expired quote hides its QR until then. A partial payment
+  re-issues
+  every quoted network for the remainder. A network the LNURL refuses outright stays hidden for the rest of that invoice;
+  one whose request fails, that the LNURL marks unavailable, or that does not answer in time, stays offered and can be
+  tried again.
+- **Settlement:** recorded from `verify` at the BTC amount agreed for the destination. The payments list shows the network and
+  links the transaction.
+- **Third-party providers:** an option may name a `provider`, the service a payment passes through. lnurl-server's FixedFloat
+  rails name FixedFloat, which takes the payer's tokens at its own deposit address and pays the LNURL over Lightning. The
+  network's chip and amount then read "via FixedFloat". Next to the QR, the checkout tells the payer three things: the deposit
+  address belongs to the provider, not the merchant; the quote has a hard expiry; and a late, short or excess deposit is
+  resolved with the provider, not with the merchant or BTCPay. BTCPay never holds those tokens and cannot refund them.
+  Settlement still comes only from the LNURL's `verify`.
+- **Destination tags:** an answer that needs a memo (`paymentDestinationTag`) gets its network refused, since no QR or wallet
+  link the checkout builds can carry one.
+
+## The payer's IP
+
+When a checkout asks the LNURL for a rail or a token quote, the requests carry the payer's IP in `X-Forwarded-For`. An LNURL
+service that limits requests per IP then limits each payer, instead of every checkout this server makes. The IP is sent,
+as a single value, only when BTCPay can vouch for it:
+- **the checkout request came straight to BTCPay;**
+- **or it came through a reverse proxy on a loopback or private address,** such as the nginx of a Docker install, whose
+  `X-Forwarded-For` BTCPay applied.
+
+BTCPay applies that header whoever sends it. A request whose hop was public sends nothing, whether that hop was a client
+naming its own IP or a public proxy, and that payer shares this server's own limit. A missing, unspecified, loopback or
+private IP is never sent. Lightning invoice requests, the connection's lookup and save probe, and `verify` polling carry
+none. Nor does a rail that BTCPay's own checkout page activates because a store or invoice makes it the default payment
+method.
+
+- **To take effect,** the LNURL service must trust this server to name its payers. On lnurl-server, its operator lists this
+  BTCPay server in `TRUSTED_FORWARDERS` ([ArkLabsHQ/lnurl-server#69](https://github.com/ArkLabsHQ/lnurl-server/pull/69)).
+- **Privacy:** the payer's IP reaches the LNURL service, just as it would if the payer's own wallet had contacted it.
 
 ## Limitations
 
@@ -51,8 +142,23 @@ invoices, so it is unusable as a store's Lightning backend.
   manual review. (Reporting unknown rather than failed is deliberate — a blind retry could double-pay.)
 - **Validating the connection creates one throwaway probe invoice** on the receiver — this is how
   LUD-21 verify support is checked (verify is only advertised in the callback response, not metadata).
+  An LNURL whose invoices are for another network, such as a mutinynet (signet) address on a regtest
+  store, is refused there, naming both. The setup page's Lightning address tab reads only what the LNURL
+  advertises, so its lookups create no invoice; verify support and the network are checked when you save.
 - Amountless / top-up invoices are not supported (LNURL-pay is amount-driven).
 - Node, channel and on-chain operations are not available — this client holds no Lightning node.
+- **Do not uninstall the plugin, or downgrade it below 1.2.0, once invoices with LNURL rails exist.** BTCPay's checkout page
+  needs the plugin's payment-method handler for every rail on an invoice, so without it the checkout page of every such
+  invoice fails, whether it is open, paid or expired.
+- **Do not remove a code from `LNURLVERIFY_ASSETS`, or uninstall the plugin, once invoices with that token's prompt exist.**
+  As with rails, the checkout page of every such invoice, open, paid or expired, needs the payment method's handler.
+- **Connect wallet on Solana sends classic SPL Token transfers,** so it does not pay Token-2022 mints.
+- **A Solana destination must be a wallet (system account) address** — Connect wallet refuses a token account, or any other
+  off-curve address, instead of paying it through a nested token account the LNURL would never watch. Its QR stays offered.
+- **The merged QR's amount is the on-chain due** when on-chain is active, which can include a network-fee component; an Arkade
+  payer scanning the merged QR may overpay by it. Each rail's own chip carries its exact amount.
+- If re-issuing a rail destination after a partial payment fails, that rail drops out of the checkout; a payment to its
+  previous destination is still recorded, at the amount agreed for it.
 
 ## Notes
 

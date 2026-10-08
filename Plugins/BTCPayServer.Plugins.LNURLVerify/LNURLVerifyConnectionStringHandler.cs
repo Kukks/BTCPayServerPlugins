@@ -3,6 +3,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Net.Http;
 using System.Threading;
+using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Lightning;
 using BTCPayServer.Payments.Lightning;
@@ -61,27 +62,26 @@ public class LNURLVerifyConnectionStringHandler : ILightningConnectionStringHand
         http.Timeout = TimeSpan.FromSeconds(30);
 
         ResolvedLnurl resolved;
-        if (_cache.TryGetValue(value, out var cached) && cached.Expiry > DateTimeOffset.UtcNow)
+        try
         {
-            resolved = cached.Resolved;
+            // Cached so the frequent per-poll Create calls don't re-fetch; failures are not cached, so they retry next time.
+            resolved = ResolveCached(value, network, http, CancellationToken.None).GetAwaiter().GetResult();
         }
-        else
+        catch (Exception e)
         {
-            try
-            {
-                // Resolve (network) to decide capability up front; cached so the frequent per-poll
-                // Create calls don't re-fetch. Failures are not cached, so they retry next time.
-                resolved = LNURLResolver.Resolve(value, network, http, CancellationToken.None).GetAwaiter().GetResult();
-            }
-            catch (Exception e)
-            {
-                error = e.Message;
-                return null;
-            }
-            _cache[value] = (resolved, DateTimeOffset.UtcNow.Add(CacheTtl));
+            error = e.Message;
+            return null;
         }
 
         return new LNURLVerifyLightningClient(resolved, network, http, _loggerFactory);
+    }
+
+    internal static async Task<ResolvedLnurl> ResolveCached(string value, Network network, HttpClient http, CancellationToken ct)
+    {
+        if (_cache.TryGetValue(value, out var cached) && cached.Expiry > DateTimeOffset.UtcNow) return cached.Resolved;
+        var resolved = await LNURLResolver.Resolve(value, network, http, ct);
+        _cache[value] = (resolved, DateTimeOffset.UtcNow.Add(CacheTtl));
+        return resolved;
     }
 
     private void EnsurePersistedInvoicesLoaded()

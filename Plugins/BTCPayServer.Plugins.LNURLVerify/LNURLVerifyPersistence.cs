@@ -31,6 +31,7 @@ public sealed class LNURLVerifyPersistence
                 VerifyUrl = t.VerifyUrl,
                 VerifyHost = t.VerifyHost,
                 PayEndpoint = t.PayEndpoint,
+                VerifyBatch = t.VerifyBatch,
                 ExpiresAtUnix = t.ExpiresAt.ToUnixTimeSeconds()
             }).ToList()
         };
@@ -48,7 +49,8 @@ public sealed class LNURLVerifyPersistence
             if (expiresAt <= now) continue; // don't re-arm invoices that already expired while down
             if (string.IsNullOrEmpty(p.PaymentHash) || string.IsNullOrEmpty(p.VerifyUrl)) continue;
             TrackedInvoiceRegistry.Add(new TrackedInvoice(
-                p.PaymentHash, p.Bolt11, p.VerifyUrl, p.VerifyHost, p.PayEndpoint, expiresAt));
+                p.PaymentHash, p.Bolt11, p.VerifyUrl, p.VerifyHost, p.PayEndpoint, expiresAt,
+                string.IsNullOrEmpty(p.VerifyBatch) ? null : p.VerifyBatch));
         }
     }
 }
@@ -65,5 +67,6 @@ public class PersistedInvoice
     public string VerifyUrl { get; set; } = "";
     public string VerifyHost { get; set; } = "";
     public string PayEndpoint { get; set; } = "";
+    public string? VerifyBatch { get; set; }
     public long ExpiresAtUnix { get; set; }
 }
