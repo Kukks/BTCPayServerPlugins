@@ -10,13 +10,15 @@ namespace BTCPayServer.Plugins.LNURLVerify;
 
 /// <param name="PayEndpoint">The connection's LNURL-pay endpoint (its identity for Listen() filtering).</param>
 /// <param name="VerifyHost">The host of the verify URL — the registry's grouping key for batched polling.</param>
+/// <param name="VerifyBatch">The LUD-XX verifyBatch endpoint advertised with this invoice; null polls it alone.</param>
 public sealed record TrackedInvoice(
     string PaymentHash,
     string Bolt11,
     string VerifyUrl,
     string VerifyHost,
     string PayEndpoint,
-    DateTimeOffset ExpiresAt);
+    DateTimeOffset ExpiresAt,
+    string? VerifyBatch = null) : IVerifyTarget;
 
 /// <summary>
 /// Static, verify-host-keyed registry shared across every client instance BTCPay creates for a
@@ -33,6 +35,10 @@ public static class TrackedInvoiceRegistry
     // (LightningListener.PollPayment) EVICTS an invoice whose GetInvoice returns null, so a settled
     // invoice must keep reporting Paid until BTCPay has recorded it — not vanish the instant we detect it.
     private static readonly ConcurrentDictionary<string, (LightningInvoice Invoice, DateTimeOffset PruneAfter)> _settled = new();
+
+    // The poller's latest answer per tracked hash that settled nothing: Unpaid, or null when the service
+    // does not know the invoice. GetInvoice serves it so BTCPay's polling costs no extra requests.
+    private static readonly ConcurrentDictionary<string, LightningInvoice?> _lastResult = new();
 
     /// <summary>Fired when the poller observes a settled invoice. Listeners filter to their connection.</summary>
     public static event Action<TrackedInvoice, LightningInvoice>? Settled;
@@ -56,8 +62,33 @@ public static class TrackedInvoiceRegistry
                && inner.TryGetValue(paymentHash, out t!);
     }
 
+    /// <summary>Adopt a verifyBatch endpoint learnt mid-flight. Never re-adds an invoice settled meanwhile.</summary>
+    public static void SetVerifyBatch(string paymentHash, string verifyBatch)
+    {
+        if (!_hostOf.TryGetValue(paymentHash, out var host) || !_byHost.TryGetValue(host, out var inner)) return;
+        if (inner.TryGetValue(paymentHash, out var t) && t.VerifyBatch is null &&
+            inner.TryUpdate(paymentHash, t with { VerifyBatch = verifyBatch }, t))
+            Interlocked.Increment(ref _version);
+    }
+
+    public static void RecordResult(string paymentHash, LightningInvoice? invoice)
+    {
+        if (_hostOf.ContainsKey(paymentHash)) _lastResult[paymentHash] = invoice;
+    }
+
+    public static bool TryGetResult(string paymentHash, out LightningInvoice? invoice) =>
+        _lastResult.TryGetValue(paymentHash, out invoice);
+
+    public static void PruneResults()
+    {
+        foreach (var key in _lastResult.Keys)
+            if (!_hostOf.ContainsKey(key))
+                _lastResult.TryRemove(key, out _);
+    }
+
     public static void Remove(string paymentHash)
     {
+        _lastResult.TryRemove(paymentHash, out _);
         if (!_hostOf.TryRemove(paymentHash, out var host)) return;
         if (_byHost.TryGetValue(host, out var inner))
             inner.TryRemove(paymentHash, out _);

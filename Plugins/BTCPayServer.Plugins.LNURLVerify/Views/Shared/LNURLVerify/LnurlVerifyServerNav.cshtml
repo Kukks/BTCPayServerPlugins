@@ -1,0 +1,6 @@
+@using BTCPayServer.Client
+@using BTCPayServer.Plugins.LNURLVerify
+<li class="nav-item nav-item-sub" permission="@Policies.CanModifyServerSettings">
+    <a asp-controller="LnurlVerifyServer" asp-action="Index" id="Nav-LnurlVerifyServer"
+       class="nav-link @(ViewData.IsPageActive(LnurlVerifyServerController.ActivePage, null) ? "active" : "")">LNURL Verify</a>
+</li>

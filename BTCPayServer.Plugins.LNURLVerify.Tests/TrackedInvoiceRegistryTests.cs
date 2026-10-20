@@ -5,6 +5,7 @@ using Xunit;
 
 namespace BTCPayServer.Plugins.LNURLVerify.Tests;
 
+[Collection(RegistryCollection.Name)]
 public class TrackedInvoiceRegistryTests
 {
     static TrackedInvoice Mk(string hash, string host) =>
@@ -56,5 +57,37 @@ public class TrackedInvoiceRegistryTests
         TrackedInvoiceRegistry.MarkSettled(hash, paid, DateTimeOffset.UtcNow.AddMilliseconds(-1));
         Assert.False(TrackedInvoiceRegistry.TryGetSettled(hash, out _));
         TrackedInvoiceRegistry.PruneSettled(DateTimeOffset.UtcNow);
+    }
+
+    [Fact]
+    public void SetVerifyBatch_fills_only_an_absent_value_on_a_tracked_invoice()
+    {
+        TrackedInvoiceRegistry.SetVerifyBatch("reg_vb", "https://regvb.example/b"); // untracked: no-op
+        TrackedInvoiceRegistry.Add(Mk("reg_vb", "regvb.example"));
+        var before = TrackedInvoiceRegistry.Version;
+
+        TrackedInvoiceRegistry.SetVerifyBatch("reg_vb", "https://regvb.example/lnurl/verifyBatch");
+        TrackedInvoiceRegistry.SetVerifyBatch("reg_vb", "https://other.example/lnurl/verifyBatch");
+
+        Assert.True(TrackedInvoiceRegistry.TryGet("reg_vb", out var got));
+        Assert.Equal("https://regvb.example/lnurl/verifyBatch", got.VerifyBatch);
+        Assert.True(TrackedInvoiceRegistry.Version > before);
+        TrackedInvoiceRegistry.Remove("reg_vb");
+    }
+
+    [Fact]
+    public void Results_are_kept_only_for_tracked_invoices_and_cleared_on_remove()
+    {
+        TrackedInvoiceRegistry.RecordResult("reg_res", null); // untracked: ignored
+        Assert.False(TrackedInvoiceRegistry.TryGetResult("reg_res", out _));
+
+        TrackedInvoiceRegistry.Add(Mk("reg_res", "regres.example"));
+        var unpaid = new LightningInvoice { Id = "reg_res", PaymentHash = "reg_res", Status = LightningInvoiceStatus.Unpaid };
+        TrackedInvoiceRegistry.RecordResult("reg_res", unpaid);
+        Assert.True(TrackedInvoiceRegistry.TryGetResult("reg_res", out var got));
+        Assert.Same(unpaid, got);
+
+        TrackedInvoiceRegistry.Remove("reg_res");
+        Assert.False(TrackedInvoiceRegistry.TryGetResult("reg_res", out _));
     }
 }

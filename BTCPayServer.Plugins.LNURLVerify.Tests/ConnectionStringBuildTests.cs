@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 using System.Net.Http;
 using BTCPayServer.Plugins.LNURLVerify;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -36,6 +37,23 @@ public class ConnectionStringBuildTests
         Assert.NotNull(c2);
         // First Create resolved over the network; the second hit the cache (no second fetch).
         Assert.Single(fake.Requests);
+    }
+
+    [Fact]
+    public async Task The_setup_lookup_and_the_save_probe_forward_no_payer_ip()
+    {
+        var host = "xff" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".example";
+        var fake = new FakeHttp()
+            .Map($"https://{host}/pay", "{\"tag\":\"payRequest\",\"callback\":\"https://" + host + "/cb\",\"minSendable\":1000,\"maxSendable\":100000000,\"metadata\":\"[]\"}")
+            .Map($"https://{host}/cb?amount=1000", $"{{\"pr\":\"{TestBolt11.Create(new Key(), 1000, new byte[32])}\",\"verify\":\"https://{host}/verify/abc\"}}");
+        PayerIp.Current = IPAddress.Parse("203.0.113.7");
+
+        var client = new LNURLVerifyConnectionStringHandler(new FakeHttpClientFactory(fake), NullLoggerFactory.Instance)
+            .Create($"type=lnurl;value=https://{host}/pay", Network.RegTest, out _);
+        Assert.Null(await ((LNURLVerifyLightningClient)client!).Validate());
+
+        Assert.Equal(new[] { $"https://{host}/pay", $"https://{host}/pay", $"https://{host}/cb?amount=1000" }, fake.Requests);
+        Assert.All(fake.ForwardedFor, v => Assert.Null(v));
     }
 }
 

@@ -1,0 +1,19 @@
+{
+  "name": "lnurlverify-wallet",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/transfers.test.js"
+  },
+  "dependencies": {
+    "@reown/appkit-universal-connector": "1.8.24",
+    "@solana/spl-token": "0.4.15",
+    "@solana/web3.js": "1.99.0",
+    "bs58": "6.0.0",
+    "buffer": "6.0.3"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

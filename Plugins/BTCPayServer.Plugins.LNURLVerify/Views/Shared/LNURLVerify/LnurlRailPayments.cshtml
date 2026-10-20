@@ -1,0 +1,52 @@
+@using BTCPayServer.Plugins.LNURLVerify
+@using BTCPayServer.Services
+@using BTCPayServer.Services.Invoices
+@model BTCPayServer.Models.InvoicingModels.InvoiceDetailsModel
+@inject DisplayFormatter DisplayFormatter
+@inject PaymentMethodHandlerDictionary Handlers
+@{
+    var payments = Model.Payments
+        .Where(p => Handlers.TryGetValue(p.PaymentMethodId, out var h) && h is ILnurlRailHandler)
+        .Select(p =>
+        {
+            var handler = (ILnurlRailHandler)Handlers[p.PaymentMethodId];
+            var data = (LnurlRailPaymentData)handler.ParsePaymentDetails(p.Details);
+            var chain = CaipAsset.Parse(data.Asset)?.ChainId;
+            return (Payment: p, Label: handler.Label, Data: data, Network: chain is null ? "" : ChainDirectory.Label(chain),
+                TxUrl: chain is null ? null : ChainDirectory.TxUrl(chain, data.PaymentReference));
+        })
+        .ToList();
+}
+@if (payments.Any())
+{
+    <section>
+        <h5>LNURL rail payments</h5>
+        <table class="table table-hover">
+            <thead>
+            <tr>
+                <th>Rail</th>
+                <th>Network</th>
+                <th>Destination</th>
+                <th>Reference</th>
+                <th>Received</th>
+                <th class="text-end">Amount</th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var row in payments)
+            {
+                <tr>
+                    <td>@row.Label</td>
+                    <td>@row.Network</td>
+                    <td><vc:truncate-center text="@row.Data.Destination" classes="truncate-center-id" /></td>
+                    <td><vc:truncate-center text="@row.Data.PaymentReference" link="@row.TxUrl" classes="truncate-center-id" /></td>
+                    <td>@row.Payment.ReceivedTime.ToBrowserDate()</td>
+                    <td class="payment-value text-end text-nowrap">
+                        <span data-sensitive class="text-success">@DisplayFormatter.Currency(row.Payment.Value, row.Payment.Currency)</span>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </section>
+}

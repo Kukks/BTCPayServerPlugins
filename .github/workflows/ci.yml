@@ -77,6 +77,14 @@ jobs:
             exit 1
           fi
 
+      - name: Test the LNURL Verify wallet module
+        working-directory: Plugins/BTCPayServer.Plugins.LNURLVerify/walletconnect
+        run: |
+          npm ci --ignore-scripts
+          npm test
+          npm run build
+          git diff --exit-code -- ../Resources/lnurlverify/wallet.js
+
   resolve-plugins:
     name: Resolve active plugins
     runs-on: ubuntu-latest

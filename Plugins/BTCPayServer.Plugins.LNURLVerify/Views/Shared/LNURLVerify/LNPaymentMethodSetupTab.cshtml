@@ -1,45 +1,113 @@
+@using BTCPayServer.Models.StoreViewModels
+@using BTCPayServer.Plugins.LNURLVerify
 @model BTCPayServer.Models.StoreViewModels.LightningNodeViewModel
 @{
     if (Model.CryptoCode != "BTC")
     {
         return;
     }
+    var current = Model.LightningNodeType == LightningNodeType.Custom ? LnurlRailProvisioning.LnurlValue(Model.ConnectionString) : null;
+    var storeId = Context.GetStoreData().Id;
 }
 
+<div id="LNURLVerifySetup" class="pt-3 tab-pane fade" role="tabpanel" aria-labelledby="LightningNodeType-LNURLVerify">
+    <div class="form-group">
+        <label for="LNURLVerifyAddress" class="form-label">Lightning address or LNURL <span id="LNURLVerifyStatus" class="text-muted ms-1"></span></label>
+        <input id="LNURLVerifyAddress" class="form-control" value="@current" placeholder="you@example.com" autocomplete="off" spellcheck="false" />
+        <div class="form-text">
+            No node or API key: a Lightning address or LNURL-pay receives, and an LNURL-withdraw with a <code>payLink</code> also sends.
+        </div>
+        <span asp-validation-for="ConnectionString" class="text-danger"></span>
+    </div>
+    <div id="LNURLVerifySummary" aria-live="polite"></div>
+</div>
+
 <script>
-    document.addEventListener("DOMContentLoaded", function () {
-        const customNodeAccordian = document.getElementById("CustomNodeSupport");
-        const template = document.getElementById("lnurlverify");
-        customNodeAccordian.appendChild(template.content.cloneNode(true));
+    document.addEventListener('DOMContentLoaded', () => {
+        const tab = document.getElementById('LightningNodeType-LNURLVerify');
+        const input = document.getElementById('LNURLVerifyAddress');
+        const out = document.getElementById('LNURLVerifySummary');
+        const status = document.getElementById('LNURLVerifyStatus');
+        const form = input.form;
+        const resolveUrl = @Safe.Json(Url.Action("Resolve", "LnurlRailSettings", new { storeId }));
+        const railsUrl = @Safe.Json(Url.Action("Index", "LnurlRailSettings", new { storeId }));
+        let resolving = null, timer = null;
+        const el = (tag, className, text) => {
+            const e = document.createElement(tag);
+            if (className) e.className = className;
+            if (text != null) e.textContent = text;
+            return e;
+        };
+        const sats = msat => msat == null ? '?' : (msat / 1000).toLocaleString();
+        const range = o => sats(o.minSendable) + ' – ' + sats(o.maxSendable) + ' sats';
+        const flags = o => [range(o), o.verifiable === true ? 'verifiable' : o.verifiable === false ? 'not verifiable' : null,
+            o.available ? null : 'unavailable'].filter(Boolean).join(' · ');
+
+        async function resolve () {
+            clearTimeout(timer);
+            const value = input.value.trim();
+            if (value === resolving) return;
+            resolving = value;
+            status.textContent = value ? 'looking up…' : '';
+            if (!value) {
+                out.replaceChildren();
+                return;
+            }
+            // The card changes only once the answer arrives: on a blur from pressing Save, a change now would move Save from under the click.
+            let summary;
+            try {
+                const body = new URLSearchParams({ lnurl: value, __RequestVerificationToken: form.elements['__RequestVerificationToken'].value });
+                summary = await (await fetch(resolveUrl, { method: 'POST', body })).json();
+            } catch (e) {
+                summary = { error: 'The lookup failed: ' + e.message };
+            }
+            if (value !== resolving) return;
+            // The input moved on and its own lookup is waiting out the debounce; forgetting this one lets a return to it look up again.
+            if (value !== input.value.trim()) {
+                resolving = null;
+                return;
+            }
+            status.textContent = '';
+            if (summary.error) resolving = null;
+            render(summary);
+        }
+
+        function render (s) {
+            out.replaceChildren();
+            if (s.error) {
+                out.append(el('p', 'text-danger mb-0', s.error));
+                return;
+            }
+            const card = el('div', 'border rounded p-3');
+            const head = el('div', 'd-flex flex-wrap justify-content-between gap-2');
+            head.append(el('strong', null, s.domain), el('span', 'text-muted', (s.sends ? 'Sends and receives' : 'Receives only') + ', ' + range(s)));
+            card.append(head);
+            card.append(el('p', 'text-muted mt-2 mb-0', 'LUD-21 verify support, which payment detection needs, and the invoice network are '
+                + 'checked when you save: BTCPay then requests one small invoice.'));
+            const table = el('table', 'table table-sm mt-3 mb-2');
+            for (const o of s.options) {
+                const row = table.insertRow();
+                row.dataset.option = o.id || '';
+                row.insertCell().append(el('div', null, o.label), el('div', 'text-muted small text-nowrap', flags(o)));
+                row.insertCell().append(o.offered ? el('span', 'text-success', 'Offered') : el('span', 'text-muted', 'Not offered: ' + o.reason));
+            }
+            card.append(table);
+            const note = el('p', 'form-text mb-0', 'Rails and token tabs are added shortly after you save. Switch each one off, or choose whether checkout requests them all when it opens, on the ');
+            const link = el('a', null, 'LNURL rails');
+            link.href = railsUrl;
+            note.append(link, ' page.');
+            card.append(note);
+            out.append(card);
+        }
+
+        input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(resolve, 600); });
+        input.addEventListener('blur', resolve);
+        // Enter would otherwise submit through the form's first button, the hidden Custom pane's "Test connection".
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); resolve(); } });
+        tab.addEventListener('shown.bs.tab', resolve);
+        form.addEventListener('submit', () => {
+            if (tab.checked) form.elements['ConnectionString'].value = 'type=lnurl;value=' + input.value.trim();
+        });
+        if (@Safe.Json(current is not null)) tab.click();
     });
 </script>
-
-<template id="lnurlverify">
-    <div class="accordion-item">
-        <h2 class="accordion-header" id="CustomLNURLVerifyHeader">
-            <button type="button" class="accordion-button collapsed" data-bs-toggle="collapse" data-bs-target="#CustomLNURLVerifyContent" aria-controls="CustomLNURLVerifyContent" aria-expanded="false">
-                <span><strong>LNURL</strong> address / withdraw</span>
-                <vc:icon symbol="caret-down"/>
-            </button>
-        </h2>
-        <div id="CustomLNURLVerifyContent" class="accordion-collapse collapse" aria-labelledby="CustomLNURLVerifyHeader" data-bs-parent="#CustomNodeSupport">
-            <div class="accordion-body">
-                <p class="my-2">Use any LNURL or Lightning address as your Lightning backend — no node, no API key. Enter a custom connection string:</p>
-                <ul class="pb-2">
-                    <li>
-                        <b>Receive only</b> (a Lightning address or LNURL-pay):<br/>
-                        <code><b>type=</b>lnurl;<b>value=</b>you@example.com</code>
-                    </li>
-                    <li class="mt-2">
-                        <b>Send &amp; receive</b> (an LNURL-withdraw whose response includes a <code>payLink</code>):<br/>
-                        <code><b>type=</b>lnurl;<b>value=</b>LNURL1...</code>
-                    </li>
-                </ul>
-                <p class="my-2 text-muted">
-                    Settlement is detected via the LNURL LUD-21 <code>verify</code> endpoint. An LNURL-withdraw
-                    without a <code>payLink</code> is rejected, because it cannot create checkout invoices.
-                </p>
-            </div>
-        </div>
-    </div>
-</template>

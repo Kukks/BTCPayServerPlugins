@@ -1,0 +1,28 @@
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.Plugins.LNURLVerify
+@model LnurlTokenServerSettings
+@inject TokenAssets Assets
+@{
+    ViewData.SetLayoutModel(new LayoutModel(LnurlVerifyServerController.ActivePage, "LNURL Verify"));
+}
+<form method="post">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h3 class="mb-0">@ViewData["Title"]</h3>
+        <button type="submit" class="btn btn-primary" id="Save">Save</button>
+    </div>
+    <partial name="_StatusMessage" />
+    <div class="form-group">
+        <label asp-for="WalletConnectProjectId" class="form-label">WalletConnect project ID</label>
+        <input asp-for="WalletConnectProjectId" class="form-control" />
+        <span asp-validation-for="WalletConnectProjectId" class="text-danger"></span>
+        <div class="form-text">
+            From cloud.reown.com. When set, token checkouts offer "Connect wallet". Add this server's domain to the project's allowed domains.
+        </div>
+    </div>
+    <h5 class="mt-4">Token assets</h5>
+    <p id="TokenAssets">@(Assets.Codes.Any() ? string.Join(", ", Assets.Codes) : "None")</p>
+    <p class="form-text">
+        Set by the <code>@TokenAssets.ConfigKey</code> setting (environment variable <code>@("BTCPAY_" + TokenAssets.ConfigKey)</code>),
+        default <code>@TokenAssets.Default</code>. A change takes effect after a restart.
+    </p>
+</form>

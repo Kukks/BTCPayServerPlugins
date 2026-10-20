@@ -34,8 +34,9 @@ public sealed class LNURLReceiver
         "payment settlement. Use a verify-capable LNURL server (e.g. BTCPay Server or blink-lnurl-server).";
 
     /// <summary>
-    /// Config-time probe: requests a minimal invoice from the pay callback and checks that the LUD-21
-    /// verify field is present. Returns null when verify is supported, or a user-facing error message.
+    /// Config-time probe: requests a minimal invoice from the pay callback and checks that it is a readable
+    /// invoice on this store's network and that the LUD-21 verify field is present. Returns null when all
+    /// hold, or a user-facing error message.
     /// (LUD-21 exposes verify only in the callback response, so this can't be checked from metadata alone.)
     /// </summary>
     public async Task<string?> CheckVerifySupport(CancellationToken ct)
@@ -46,18 +47,21 @@ public sealed class LNURLReceiver
 
         var callback = meta["callback"]?.Value<string>();
         if (string.IsNullOrEmpty(callback)) return "The LNURL-pay endpoint is missing a callback URL.";
-        var min = meta["minSendable"]?.Value<long>() ?? 1000;
-
-        var cb = new UriBuilder(callback);
-        var q = new StringBuilder(cb.Query.TrimStart('?'));
-        if (q.Length > 0) q.Append('&');
-        q.Append("amount=").Append(min);
-        cb.Query = q.ToString();
+        long min;
+        string? option;
+        try { (min, _, option) = PaymentOption.PlanLightning(meta, 1000, long.MaxValue); }
+        catch (NotSupportedException e) { return e.Message; }
 
         JObject json;
-        try { json = await LNURLResolver.GetJson(_http, cb.Uri, ct); }
+        try { json = await LNURLResolver.GetJson(_http, CallbackUri(callback, min, option, null), ct); }
         catch (Exception e) { return $"Could not request a probe invoice: {e.Message}"; }
 
+        if (json["pr"]?.Type != JTokenType.String || json["pr"]!.Value<string>() is not { Length: > 0 } pr)
+            return "The LNURL callback did not return an invoice.";
+        if (NetworkMismatch(pr, _network) is { } mismatch)
+            return mismatch;
+        if (!BOLT11PaymentRequest.TryParse(pr, out _, _network))
+            return "The LNURL callback returned an invoice that could not be read.";
         var verify = json["verify"]?.Value<string>();
         if (string.IsNullOrEmpty(verify) || !Uri.TryCreate(verify, UriKind.Absolute, out _))
             return VerifyUnsupportedMessage;
@@ -74,26 +78,19 @@ public sealed class LNURLReceiver
         var meta = await LNURLResolver.GetJson(_http, _resolved.PayEndpoint, ct);
         var callback = meta["callback"]?.Value<string>()
                        ?? throw new Exception("LNURL-pay response is missing a callback URL.");
-        var min = meta["minSendable"]?.Value<long>() ?? 1;
-        var max = meta["maxSendable"]?.Value<long>() ?? long.MaxValue;
+        var (min, max, option) = PaymentOption.PlanLightning(meta, 1, long.MaxValue);
         var msat = amount.MilliSatoshi;
         if (msat < min) throw new Exception($"Amount {msat} msat is below the minimum ({min} msat).");
         if (msat > max) throw new Exception($"Amount {msat} msat is above the maximum ({max} msat).");
 
-        var cb = new UriBuilder(callback);
-        var q = new StringBuilder(cb.Query.TrimStart('?'));
-        if (q.Length > 0) q.Append('&');
-        q.Append("amount=").Append(msat);
+        string? comment = null;
         var commentAllowed = meta["commentAllowed"]?.Value<int>() ?? 0;
         if (commentAllowed > 0 && !string.IsNullOrEmpty(description))
-        {
-            var c = description!.Length > commentAllowed ? description.Substring(0, commentAllowed) : description;
-            q.Append("&comment=").Append(Uri.EscapeDataString(c));
-        }
-        cb.Query = q.ToString();
+            comment = description!.Length > commentAllowed ? description.Substring(0, commentAllowed) : description;
 
-        var json = await LNURLResolver.GetJson(_http, cb.Uri, ct);
+        var json = await LNURLResolver.GetJson(_http, CallbackUri(callback, msat, option, comment), ct);
         var pr = json["pr"]?.Value<string>() ?? throw new Exception("LNURL callback did not return an invoice.");
+        if (NetworkMismatch(pr, _network) is { } mismatch) throw new Exception(mismatch);
         var bolt11 = BOLT11PaymentRequest.Parse(pr, _network);
 
         // Security guards against a malicious/broken LNURL server.
@@ -112,7 +109,8 @@ public sealed class LNURLReceiver
         var verifyHost = verifyUri.Host;
 
         TrackedInvoiceRegistry.Add(new TrackedInvoice(
-            paymentHash, pr, verifyUrl, verifyHost, _resolved.PayEndpoint.ToString(), bolt11.ExpiryDate));
+            paymentHash, pr, verifyUrl, verifyHost, _resolved.PayEndpoint.ToString(), bolt11.ExpiryDate,
+            BatchUrl(json["verifyBatch"], verifyUrl)));
 
         return new LightningInvoice
         {
@@ -125,13 +123,27 @@ public sealed class LNURLReceiver
         };
     }
 
+    internal static Uri CallbackUri(string callback, long msat, string? paymentOption, string? comment)
+    {
+        var cb = new UriBuilder(callback);
+        var q = new StringBuilder(cb.Query.TrimStart('?'));
+        if (q.Length > 0) q.Append('&');
+        q.Append("amount=").Append(msat);
+        if (paymentOption is not null) q.Append("&paymentOption=").Append(Uri.EscapeDataString(paymentOption));
+        if (comment is not null) q.Append("&comment=").Append(Uri.EscapeDataString(comment));
+        cb.Query = q.ToString();
+        return cb.Uri;
+    }
+
     public Task<LightningInvoice?> GetInvoice(string paymentHash, CancellationToken ct)
     {
         // A recently-settled invoice must keep reporting Paid (never null) or BTCPay's poll path evicts it.
         if (TrackedInvoiceRegistry.TryGetSettled(paymentHash, out var paid))
             return Task.FromResult<LightningInvoice?>(paid);
         if (TrackedInvoiceRegistry.TryGet(paymentHash, out var t))
-            return PollAndBuild(t, _http, ct);
+            return TrackedInvoiceRegistry.TryGetResult(paymentHash, out var last)
+                ? Task.FromResult(last)
+                : PollAndBuild(t, _http, ct);
         // MarkSettled writes _settled BEFORE removing from tracked, so a tracked-miss here means a
         // concurrent settle may have just completed — re-check settled to avoid returning null for a
         // just-settled invoice (which BTCPay would evict from monitoring).
@@ -148,30 +160,39 @@ public sealed class LNURLReceiver
     public static async Task<LightningInvoice?> PollAndBuild(TrackedInvoice t, HttpClient http, CancellationToken ct)
     {
         JObject? json = null;
-        bool transportError = false;
         try
         {
             using var resp = await http.GetAsync(t.VerifyUrl, ct);
             var body = await resp.Content.ReadAsStringAsync(ct);
             if (resp.IsSuccessStatusCode) json = JObject.Parse(body);
-            else transportError = true;
         }
-        catch { transportError = true; }
-
-        if (json?["status"]?.Value<string>()?.Equals("ERROR", StringComparison.OrdinalIgnoreCase) == true)
-            return null; // genuine not-found
+        catch { /* transport error: answered below */ }
 
         if (json is null)
-        {
-            if (transportError)
-                return new LightningInvoice
-                { Id = t.PaymentHash, PaymentHash = t.PaymentHash, Status = LightningInvoiceStatus.Unpaid };
-            return null;
-        }
+            return new LightningInvoice { Id = t.PaymentHash, PaymentHash = t.PaymentHash, Status = LightningInvoiceStatus.Unpaid };
+        if (t.VerifyBatch is null && BatchUrl(json["verifyBatch"], t.VerifyUrl) is { } batch)
+            TrackedInvoiceRegistry.SetVerifyBatch(t.PaymentHash, batch);
+        return FromVerifyJson(t, json);
+    }
 
-        var settled = json["settled"]?.Value<bool>() ?? false;
-        var preimage = json["preimage"]?.Value<string>();
-        return BuildInvoice(t, settled, preimage);
+    /// <summary>A LUD-21 verify body (single or verifyBatch item) as an invoice; null when the service doesn't know it.</summary>
+    internal static LightningInvoice? FromVerifyJson(TrackedInvoice t, JObject json)
+    {
+        if (json["status"]?.Value<string>()?.Equals("ERROR", StringComparison.OrdinalIgnoreCase) == true)
+            return null;
+        return BuildInvoice(t, json["settled"]?.Value<bool>() ?? false, json["preimage"]?.Value<string>());
+    }
+
+    /// <summary>
+    /// The advertised verifyBatch URL if usable: absolute http(s), and never plain http for an https verify URL,
+    /// where a forged batch answer could make BTCPay drop an invoice that was paid.
+    /// </summary>
+    internal static string? BatchUrl(JToken? token, string verifyUrl)
+    {
+        var s = token?.Type == JTokenType.String ? token.Value<string>() : null;
+        if (!Uri.TryCreate(s, UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps))
+            return null;
+        return u.Scheme == Uri.UriSchemeHttp && verifyUrl.StartsWith("https:", StringComparison.OrdinalIgnoreCase) ? null : s;
     }
 
     private static LightningInvoice BuildInvoice(TrackedInvoice t, bool settled, string? preimage)
@@ -212,8 +233,20 @@ public sealed class LNURLReceiver
         catch { return false; }
     }
 
+    /// <summary>Names both networks when an invoice belongs to another one, where the parser would say only "Invalid prefix".</summary>
+    internal static string? NetworkMismatch(string bolt11, Network network)
+    {
+        // Every prefix InferNetwork knows starts with one of these; anything else is left for the parser to reject.
+        if (!bolt11.StartsWith("lnbc", StringComparison.OrdinalIgnoreCase) && !bolt11.StartsWith("lntb", StringComparison.OrdinalIgnoreCase))
+            return null;
+        var issued = InferNetwork(bolt11).ChainName;
+        return issued == network.ChainName ? null
+            : $"The LNURL issues {issued} Lightning invoices, but this store runs on {network.ChainName}. Use an LNURL on the store's network.";
+    }
+
     public static Network InferNetwork(string bolt11) =>
         bolt11.StartsWith("lnbcrt", StringComparison.OrdinalIgnoreCase) ? Network.RegTest
+        : bolt11.StartsWith("lntbs", StringComparison.OrdinalIgnoreCase) ? NBitcoin.Bitcoin.Instance.Signet
         : bolt11.StartsWith("lntb", StringComparison.OrdinalIgnoreCase) ? Network.TestNet
         : Network.Main;
 }
