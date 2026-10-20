@@ -408,8 +408,8 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
 
         public async Task<LightningInvoice> WaitInvoice(CancellationToken cancellation)
         {
-            return await _queue.Reader.ReadAsync(
-                CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellation).Token);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellation);
+            return await _queue.Reader.ReadAsync(linked.Token);
         }
     }
 
@@ -450,7 +450,7 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
                 {
                     try
                     {
-                        var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
                         cts.CancelAfter(TimeSpan.FromSeconds(30));
                         // Fetch a pooled client per poll: this refreshes the pool's usage
                         // timestamp (so the connection is not reclaimed mid-polling) and
@@ -471,14 +471,24 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
                         paid.Transactions = paid.Transactions.Where(i => i is { Type: "incoming", SettledAt: not null }).ToArray();
                         if (lastPaid is not null)
                         {
-                            var paidInvoicesSinceLastPoll = paid.Transactions.Where(i =>
-                                lastPaid.Transactions.All(j => j.PaymentHash != i.PaymentHash)).Select(i =>
-                                ToLightningInvoice(i, _network)!);
-
                             //all invoices which  are no longer in the unpaid list are paid
-                            foreach (var invoice in paidInvoicesSinceLastPoll)
+                            var known = lastPaid.Transactions.Select(j => j.PaymentHash).ToHashSet();
+                            foreach (var tx in paid.Transactions.Where(i => !known.Contains(i.PaymentHash)))
                             {
-                                await _queue.Writer.WriteAsync(invoice, token);
+                                LightningInvoice? invoice;
+                                try
+                                {
+                                    invoice = ToLightningInvoice(tx, _network);
+                                }
+                                catch (Exception e)
+                                {
+                                    _logger?.LogWarning(e, "NWC: skipping unparseable incoming transaction {PaymentHash}",
+                                        tx.PaymentHash);
+                                    continue;
+                                }
+
+                                if (invoice is not null)
+                                    await _queue.Writer.WriteAsync(invoice, token);
                             }
                         }
 
@@ -523,8 +533,8 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
 
         public async Task<LightningInvoice> WaitInvoice(CancellationToken cancellation)
         {
-            return await _queue.Reader.ReadAsync(CancellationTokenSource
-                .CreateLinkedTokenSource(_cts.Token, cancellation).Token);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellation);
+            return await _queue.Reader.ReadAsync(linked.Token);
         }
     }
 
