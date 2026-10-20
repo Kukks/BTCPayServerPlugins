@@ -281,151 +281,260 @@ public class NostrWalletConnectLightningClient : IExtendedLightningClient
 
     public async Task<ILightningInvoiceListener> Listen(CancellationToken cancellation = default)
     {
-        var x = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cancellation);
-		var info = await x.Item1.FetchNIP47InfoEvent(_connectParams.Item1, cancellationToken: cancellation);
-        var scheme = info?.EncryptionSchemes?.Contains(NIP47.EncryptionSchemeNip44V2) is true
-            ? NIP47.EncryptionScheme.Nip44V2
-            : NIP47.EncryptionScheme.Nip04;
-        _encryptionScheme = scheme;
-        bool? hasNotification = info?.Notifications?.Contains("payment_received");
-        if (hasNotification is false)
+        // Short-lived pooled client, only used to probe the wallet service capabilities.
+        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectParams.relays, cancellation);
+        using (usage)
         {
-            var response = await x.Item1.SendNIP47Request<NIP47.GetInfoResponse>(_connectParams.pubkey, _connectParams.secret, new NIP47.GetInfoRequest(), cancellationToken: cancellation, encryptionScheme: scheme);
-			hasNotification = response?.Notifications?.Contains("payment_received");
-		}
-        _logger?.LogInformation("NWC: listening for paid invoices via {Listener} ({Scheme}, payment_received supported: {HasNotification})",
-            hasNotification is true ? "push notifications" : "polling", scheme, hasNotification ?? false);
-        return hasNotification is true
-			? new NotificationListener(_network, x, _connectParams, scheme)
-            : new PollListener(_network, x, _connectParams, scheme);
+			var info = await client.FetchNIP47InfoEvent(_connectParams.pubkey, cancellationToken: cancellation);
+            var scheme = info?.EncryptionSchemes?.Contains(NIP47.EncryptionSchemeNip44V2) is true
+                ? NIP47.EncryptionScheme.Nip44V2
+                : NIP47.EncryptionScheme.Nip04;
+            _encryptionScheme = scheme;
+            bool? hasNotification = info?.Notifications?.Contains("payment_received");
+            if (hasNotification is false)
+            {
+                var response = await client.SendNIP47Request<NIP47.GetInfoResponse>(_connectParams.pubkey, _connectParams.secret, new NIP47.GetInfoRequest(), cancellationToken: cancellation, encryptionScheme: scheme);
+				hasNotification = response?.Notifications?.Contains("payment_received");
+			}
+            _logger?.LogInformation("NWC: listening for paid invoices via {Listener} ({Scheme}, payment_received supported: {HasNotification})",
+                hasNotification is true ? "push notifications" : "polling", scheme, hasNotification ?? false);
+            return hasNotification is true
+				? new NotificationListener(_network, _connectParams, scheme, _logger)
+                : new PollListener(_network, _nostrClientPool, _connectParams, scheme, _logger);
+        }
     }
 
 
     public class NotificationListener : ILightningInvoiceListener
     {
         private readonly Network _network;
-        private readonly INostrClient _client;
+        private readonly (ECXOnlyPubKey pubkey, ECPrivKey secret, Uri[] relays, string lud16) _connectParams;
+        private readonly NIP47.EncryptionScheme _encryptionScheme;
+        private readonly ILogger? _logger;
 
-        private readonly CancellationTokenSource _cts;
-        private readonly IAsyncEnumerable<NIP47.Nip47Notification> _notifications;
-        private readonly IDisposable _disposable;
+        private readonly CancellationTokenSource _cts = new();
+        private readonly Channel<LightningInvoice> _queue = Channel.CreateUnbounded<LightningInvoice>();
+        private readonly Task _loop;
 
-        public NotificationListener(Network network, (INostrClient, IDisposable) client,
-            (ECXOnlyPubKey pubkey, ECPrivKey secret, Uri[] relays, string lud16) x,
-            NIP47.EncryptionScheme encryptionScheme)
+        public NotificationListener(Network network,
+            (ECXOnlyPubKey pubkey, ECPrivKey secret, Uri[] relays, string lud16) connectParams,
+            NIP47.EncryptionScheme encryptionScheme, ILogger? logger)
         {
             _network = network;
-            _client = client.Item1;
-            _disposable = client.Item2;
-            _cts = new CancellationTokenSource();
-            _notifications = _client.SubscribeNip47Notifications(x.pubkey, x.secret, _cts.Token, encryptionScheme);
+            _connectParams = connectParams;
+            _encryptionScheme = encryptionScheme;
+            _logger = logger;
+            _loop = ListenLoop(_cts.Token);
+        }
+
+        private INostrClient CreateClient()
+        {
+            // The listener owns its own connection. It must not use NostrClientPool:
+            // the pool's cleanup timer reclaims "idle" pooled clients (based on the last
+            // usage-increment, not on the active lease we hold) which would silently kill
+            // our websocket subscription a few minutes after startup, leaving invoices
+            // unpaid with no errors logged.
+            return _connectParams.relays.Length > 1
+                ? new CompositeNostrClient(_connectParams.relays)
+                : new NostrClient(_connectParams.relays[0]);
+        }
+
+        private async Task ListenLoop(CancellationToken token)
+        {
+            try
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    INostrClient? client = null;
+                    try
+                    {
+                        client = CreateClient();
+                        await client.ConnectAndWaitUntilConnected(token, token);
+                        _logger?.LogInformation("NWC: subscribed to payment_received notifications on {Relays}",
+                            string.Join(" ", _connectParams.relays.Select(r => r.ToString())));
+                        await foreach (var notification in client.SubscribeNip47Notifications(
+                            _connectParams.pubkey, _connectParams.secret, token, _encryptionScheme))
+                        {
+                            if (notification.NotificationType != "payment_received")
+                                continue;
+                            var tx = notification.Deserialize<NIP47.Nip47Transaction>();
+                            var invoice = tx is null ? null : ToLightningInvoice(tx, _network);
+                            if (invoice is not null)
+                                await _queue.Writer.WriteAsync(invoice, token);
+                        }
+                        // The stream ended without an error: the relay dropped the connection.
+                        _logger?.LogWarning("NWC: payment_received notification stream ended, reconnecting...");
+                    }
+                    catch (Exception e) when (!token.IsCancellationRequested)
+                    {
+                        _logger?.LogWarning(e,
+                            "NWC: error while listening for payment_received notifications, reconnecting in 5 seconds...");
+                    }
+                    finally
+                    {
+                        client?.Dispose();
+                    }
+
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(5), token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                }
+            }
+            finally
+            {
+                _queue.Writer.TryComplete();
+            }
         }
 
         public void Dispose()
         {
             _cts.Cancel();
-            _disposable.Dispose();
+            try
+            {
+                _loop.Wait(TimeSpan.FromSeconds(5));
+            }
+            catch
+            {
+                // ignored
+            }
+
+            _cts.Dispose();
         }
 
         public async Task<LightningInvoice> WaitInvoice(CancellationToken cancellation)
         {
-            var enumerator = _notifications.GetAsyncEnumerator(cancellation);
-            while (await enumerator.MoveNextAsync(cancellation))
-            {
-                if (enumerator.Current.NotificationType == "payment_received")
-                {
-                    var tx = enumerator.Current.Deserialize<NIP47.Nip47Transaction>();
-                    return ToLightningInvoice(tx, _network)!;
-                }
-            }
-
-            throw new Exception("No notification received");
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellation);
+            return await _queue.Reader.ReadAsync(linked.Token);
         }
     }
 
     public class PollListener : ILightningInvoiceListener
     {
         private readonly Network _network;
+        private readonly NostrClientPool _nostrClientPool;
         private readonly (ECXOnlyPubKey pubkey, ECPrivKey secret, Uri[] relays, string lud16) _connectparams;
-        private readonly INostrClient _client;
-
-        private readonly CancellationTokenSource _cts;
-        private readonly IAsyncEnumerable<NIP47.Nip47Notification> _notifications;
-        private readonly IDisposable _disposable;
-        private NIP47.ListTransactionsResponse? _lastPaid;
-        private Channel<LightningInvoice> queue = Channel.CreateUnbounded<LightningInvoice>();
-
         private readonly NIP47.EncryptionScheme _encryptionScheme;
+        private readonly ILogger? _logger;
 
-        public PollListener(Network network, (INostrClient, IDisposable) client,
+        private readonly CancellationTokenSource _cts = new();
+        private readonly Channel<LightningInvoice> _queue = Channel.CreateUnbounded<LightningInvoice>();
+        private readonly Task _loop;
+
+        private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(10);
+        private static readonly TimeSpan ErrorRetryDelay = TimeSpan.FromSeconds(30);
+
+        public PollListener(Network network, NostrClientPool nostrClientPool,
             (ECXOnlyPubKey pubkey, ECPrivKey secret, Uri[] relays, string lud16) connectparams,
-            NIP47.EncryptionScheme encryptionScheme)
+            NIP47.EncryptionScheme encryptionScheme, ILogger? logger)
         {
             _network = network;
+            _nostrClientPool = nostrClientPool;
             _connectparams = connectparams;
-            _client = client.Item1;
-            _disposable = client.Item2;
             _encryptionScheme = encryptionScheme;
-            _cts = new CancellationTokenSource();
-            _ = Poll();
+            _logger = logger;
+            _loop = Poll(_cts.Token);
         }
 
-
-        private async Task Poll()
+        private async Task Poll(CancellationToken token)
         {
+            NIP47.ListTransactionsResponse? lastPaid = null;
+            var delay = PollInterval;
             try
             {
-                while (!_cts.IsCancellationRequested)
+                while (!token.IsCancellationRequested)
                 {
-                    var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-                    cts.CancelAfter(TimeSpan.FromSeconds(10));
-                    var paid = await _client.SendNIP47Request<NIP47.ListTransactionsResponse>(_connectparams.pubkey,
-                        _connectparams.secret, new NIP47.ListTransactionsRequest()
-                        {
-                            Type = "incoming",
-                            // Unpaid = true, //seems like this is ignored... so we only get paid ones
-                            Limit = 300
-                        }, cancellationToken: cts.Token, encryptionScheme: _encryptionScheme);
-                    paid.Transactions = paid.Transactions.Where(i => i is { Type: "incoming", SettledAt: not null }).ToArray();
-                    if (_lastPaid is not null)
+                    try
                     {
-
-                        var paidInvoicesSinceLastPoll = paid.Transactions.Where(i =>
-                            _lastPaid.Transactions.All(j => j.PaymentHash != i.PaymentHash)).Select(i =>
-                            ToLightningInvoice(i, _network)!);
-
-
-                        //all invoices which  are no longer in the unpaid list are paid
-                        // var paidInvoicesSinceLastPoll = _lastPaid.Transactions
-                        //     .Where(i => paid.Transactions.All(j => j.PaymentHash != i.PaymentHash))
-                        //     .Select(i => ToLightningInvoice(i, _network)!);
-                        foreach (var invoice in paidInvoicesSinceLastPoll)
+                        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                        cts.CancelAfter(TimeSpan.FromSeconds(30));
+                        // Fetch a pooled client per poll: this refreshes the pool's usage
+                        // timestamp (so the connection is not reclaimed mid-polling) and
+                        // transparently reconnects if the relay dropped it.
+                        var (client, usage) = await _nostrClientPool.GetClientAndConnect(_connectparams.relays, cts.Token);
+                        NIP47.ListTransactionsResponse paid;
+                        using (usage)
                         {
-                            await queue.Writer.WriteAsync(invoice, _cts.Token);
+                            paid = await client.SendNIP47Request<NIP47.ListTransactionsResponse>(_connectparams.pubkey,
+                                _connectparams.secret, new NIP47.ListTransactionsRequest()
+                                {
+                                    Type = "incoming",
+                                    // Unpaid = true, //seems like this is ignored... so we only get paid ones
+                                    Limit = 300
+                                }, cancellationToken: cts.Token, encryptionScheme: _encryptionScheme);
                         }
+
+                        paid.Transactions = paid.Transactions.Where(i => i is { Type: "incoming", SettledAt: not null }).ToArray();
+                        if (lastPaid is not null)
+                        {
+                            //all invoices which  are no longer in the unpaid list are paid
+                            var known = lastPaid.Transactions.Select(j => j.PaymentHash).ToHashSet();
+                            foreach (var tx in paid.Transactions.Where(i => !known.Contains(i.PaymentHash)))
+                            {
+                                LightningInvoice? invoice;
+                                try
+                                {
+                                    invoice = ToLightningInvoice(tx, _network);
+                                }
+                                catch (Exception e)
+                                {
+                                    _logger?.LogWarning(e, "NWC: skipping unparseable incoming transaction {PaymentHash}",
+                                        tx.PaymentHash);
+                                    continue;
+                                }
+
+                                if (invoice is not null)
+                                    await _queue.Writer.WriteAsync(invoice, token);
+                            }
+                        }
+
+                        lastPaid = paid;
+                        delay = PollInterval;
+                    }
+                    catch (Exception e) when (!token.IsCancellationRequested)
+                    {
+                        _logger?.LogWarning(e,
+                            "NWC: polling for paid invoices failed, retrying in {Seconds} seconds...",
+                            ErrorRetryDelay.TotalSeconds);
+                        delay = ErrorRetryDelay;
                     }
 
-                    _lastPaid = paid;
-                    await Task.Delay(1000, _cts.Token);
+                    await Task.Delay(delay, token);
                 }
             }
-            catch (Exception e)
+            catch (OperationCanceledException)
             {
-                Dispose();
+                // listener disposed
+            }
+            finally
+            {
+                _queue.Writer.TryComplete();
             }
         }
 
         public void Dispose()
         {
             _cts.Cancel();
-            _disposable.Dispose();
-            queue.Writer.Complete();
+            try
+            {
+                _loop.Wait(TimeSpan.FromSeconds(5));
+            }
+            catch
+            {
+                // ignored
+            }
+
+            _cts.Dispose();
         }
 
         public async Task<LightningInvoice> WaitInvoice(CancellationToken cancellation)
         {
-            return await queue.Reader.ReadAsync(CancellationTokenSource
-                .CreateLinkedTokenSource(_cts.Token, cancellation).Token);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellation);
+            return await _queue.Reader.ReadAsync(linked.Token);
         }
     }
 
