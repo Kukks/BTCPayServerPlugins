@@ -15,7 +15,7 @@
                 <div class="lnurl-options-tiles">
                     <div v-if="networks.length > 1" class="lnurl-options-caption" id="LnurlTokenChoose">
                         Choose a network
-                        <button v-if="current" type="button" class="lnurl-network-keep" id="LnurlTokenNetworkKeep" v-on:click="choosing = false">Cancel</button>
+                        <button v-if="current" type="button" class="lnurl-network-keep" id="LnurlTokenNetworkKeep" v-on:click="choosing = false; refocus('#LnurlTokenNetworkChosen')">Cancel</button>
                     </div>
                     <button v-for="n in networks" :key="n.id" type="button" :class="{ active: current && current.id === n.id }" :aria-pressed="String(!!current && current.id === n.id)"
                             :disabled="busy === n.id" :data-network="n.id" v-on:click="pick(n)">
@@ -27,7 +27,7 @@
             <div class="lnurl-collapse" :class="{ shut: !current || choosing }">
                 <div>
                     <button v-if="current" type="button" class="lnurl-network-chosen" id="LnurlTokenNetworkChosen" :disabled="networks.length === 1"
-                            aria-expanded="false" v-on:click="choosing = true">
+                            aria-expanded="false" v-on:click="choosing = true; refocus('#LnurlTokenNetworks [aria-pressed=true]')">
                         <img v-if="current.icon" :src="icon(current.icon)" alt="" />
                         <span v-text="current.label"></span>
                         <span v-if="networks.length > 1" class="lnurl-network-change">Change</span>
@@ -244,10 +244,16 @@
             // the record must outlive the component: core mounts the checkout body without keep-alive, and a wallet app round trip can reload the page
             storageKey (key) { return 'lnurlverify.sent/' + this.model.invoiceId + '/' + key; },
             storedRef (key) { try { return sessionStorage.getItem(this.storageKey(key)); } catch (e) { return null; } },
+            // the pressed button collapses out of view, so a keyboard user's focus moves to what replaced it
+            refocus (selector) {
+                if (!this.$el.contains(document.activeElement)) return;
+                this.$nextTick(() => { const el = this.$el.querySelector(selector); if (el) el.focus(); });
+            },
             async pick (n) {
                 this.walletError = null;
                 this.selected = n.id;
                 this.choosing = false;
+                this.refocus('#LnurlTokenNetworkChosen');
                 if (!this.isLive(n)) await this.request(n.id);
             }
         }

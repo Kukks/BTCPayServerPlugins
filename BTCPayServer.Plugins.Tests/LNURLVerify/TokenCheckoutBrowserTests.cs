@@ -42,9 +42,12 @@ public class TokenCheckoutBrowserTests : UnitTestBase
         await Expect(page.Locator("#LnurlTokenAmountCopy button")).ToHaveAttributeAsync("data-clipboard", "63.36");
         await Expect(page.Locator("#LnurlTokenNetworks button[data-network='usdt-solana']")).ToBeHiddenAsync();
         await Expect(page.Locator("#LnurlTokenNetworkChosen")).ToContainTextAsync("Arbitrum Sepolia");
-        await page.Locator("#LnurlTokenNetworkChosen").ClickAsync();
-        await page.Locator("#LnurlTokenNetworkKeep").ClickAsync();
+        await Expect(page.Locator("#LnurlTokenNetworkChosen")).ToBeFocusedAsync();
+        await page.Locator("#LnurlTokenNetworkChosen").PressAsync("Enter");
+        await Expect(page.Locator("#LnurlTokenNetworks button[data-network='usdt-arbitrum']")).ToBeFocusedAsync();
+        await page.Locator("#LnurlTokenNetworkKeep").PressAsync("Enter");
         await Expect(page.Locator("#LnurlTokenNetworkChosen")).ToBeVisibleAsync();
+        await Expect(page.Locator("#LnurlTokenNetworkChosen")).ToBeFocusedAsync();
         await Expect(page.Locator(".qr-container")).ToHaveAttributeAsync("data-qr-value", evm);
 
         var solana = $"solana:{StubLnurl.SolanaRecipient}?amount=63.36&spl-token={StubLnurl.SolanaMint}";

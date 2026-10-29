@@ -38,14 +38,15 @@
             @if (!string.IsNullOrEmpty(apiKey))
             {
                 <p>
-                    Your MCP API key: <code>@apiKey</code>
+                    Your MCP API key: <code>@apiKey</code><br />
+                    <span class="text-muted">Save it now: BTCPay Server keeps only a hash of API keys and stops showing this one a few minutes after it is created.</span>
                 </p>
             }
             else
             {
                 <p>
-                    Your MCP API key was created before BTCPay Server 2.4.7, which stores only its hash, so it cannot be shown again.
-                    Revoke it and generate a new one to fill it in below.
+                    BTCPay Server keeps only a hash of your MCP API key, so it cannot be shown again. Use the key you saved when you generated it.
+                    If you no longer have it, revoke it and generate a new one, then update every client that used the old key.
                 </p>
             }
             <div class="d-flex gap-2 mb-2">
