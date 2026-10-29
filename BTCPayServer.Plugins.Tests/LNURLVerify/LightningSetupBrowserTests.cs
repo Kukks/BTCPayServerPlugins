@@ -59,7 +59,8 @@ public class LightningSetupBrowserTests : UnitTestBase
         stub.InvoicePrefix = "lntbs";
 
         await Expect(summary.Locator("#LNURLVerifyOption-lightning input[role=switch]")).ToBeCheckedAsync(new() { Timeout = 30_000 });
-        await Expect(summary.Locator("[data-option='usdt-arbitrum']")).ToHaveAttributeAsync("title", "USDT on Arbitrum Sepolia");
+        await summary.Locator("[data-option='usdt-arbitrum']").HoverAsync();
+        await Expect(page.Locator(".tooltip.show")).ToHaveTextAsync("USDT on Arbitrum Sepolia");
         await Expect(summary.Locator("[data-option='usdt-tron']")).Not.ToHaveClassAsync(new Regex("off"));
         await Expect(summary.Locator("#LNURLVerifyUnit-USDT input[role=switch]")).ToBeCheckedAsync();
         await Expect(summary).ToContainTextAsync("checked when you save");
@@ -95,7 +96,8 @@ public class LightningSetupBrowserTests : UnitTestBase
         await Expect(page.Locator("#LightningNodeType-LNURLVerify")).ToBeCheckedAsync();
         await Expect(page.Locator("#LNURLVerifyAddress")).ToHaveValueAsync(stub.PayUrl);
         await Expect(summary.Locator("#LNURLVerifyUnit-USDT input[role=switch]")).Not.ToBeCheckedAsync(new() { Timeout = 30_000 });
-        await Expect(summary.Locator("[data-option='usdt-solana']")).ToHaveAttributeAsync("title", "USDT on Solana Devnet");
+        await summary.Locator("[data-option='usdt-solana']").HoverAsync();
+        await Expect(page.Locator(".tooltip.show")).ToHaveTextAsync("USDT on Solana Devnet");
         Assert.Equal(beforeReopen, stub.Callbacks);
         Assert.Empty(refused);
     }

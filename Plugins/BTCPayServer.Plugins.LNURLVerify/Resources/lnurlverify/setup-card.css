@@ -36,6 +36,14 @@
     font-size: var(--btcpay-font-size-s);
     text-align: end;
 }
+/* Token rows start their networks at one column, so a network the tokens share sits at the same spot in each row. */
+.lnurl-setup-unit {
+    min-width: 3.5rem;
+}
+.lnurl-setup-nets {
+    flex: 1;
+    justify-content: flex-start;
+}
 .lnurl-setup-end .off {
     opacity: .3;
     filter: grayscale(1);

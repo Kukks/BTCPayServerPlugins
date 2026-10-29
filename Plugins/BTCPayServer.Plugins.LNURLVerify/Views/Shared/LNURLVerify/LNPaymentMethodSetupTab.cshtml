@@ -36,7 +36,7 @@
         const resolveUrl = @Safe.Json(Url.Action("Resolve", "LnurlRailSettings", new { storeId }));
         const railsUrl = @Safe.Json(Url.Action("Index", "LnurlRailSettings", new { storeId }));
         const enabledUrl = @Safe.Json(Url.Action("Enabled", "LnurlRailSettings", new { storeId }));
-        const iconUrl = @Safe.Json(Url.Content("~/Resources/lnurlverify/icons/"));
+        const iconUrl = @Safe.Json(Url.Content("~/Resources/lnurlverify/icons/") + "{0}.svg?v=" + version);
         let resolving = null, timer = null, dirty = false, canonical = null, resubmitting = false;
 
         async function resolve () {
