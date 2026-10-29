@@ -144,7 +144,7 @@
         mounted () {
             this.timer = setInterval(() => { this.now = Math.floor(Date.now() / 1000); }, 1000);
         },
-        beforeDestroy () { clearInterval(this.timer); },
+        beforeDestroy () { clearInterval(this.timer); this.destroyed = true; },
         methods: {
             icon (name) { return this.iconUrl + name + '.svg'; },
             isLive (n) { return n.state === 'live' && !(n.expiresAt && n.expiresAt <= this.now); },
@@ -185,7 +185,7 @@
                     await window.LnurlVerifyWallet.pair({ projectId: this.projectId, networks: this.walletNetworks(), onUri: uri => { this.wcUri = uri; } });
                     this.wcUri = null;
                     // the payer approved in their wallet: ask it for what is on screen now, unless they left WalletConnect or the quote lapsed
-                    if (this.wc && this.live) await this.payWithWallet();
+                    if (!this.destroyed && this.wc && this.live) await this.payWithWallet();
                 } catch (e) {
                     this.wcUri = null;
                     if (this.wc) this.walletError = e && e.message ? e.message : String(e);

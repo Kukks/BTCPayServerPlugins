@@ -38,15 +38,21 @@ public static class EgressGuard
         if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
         if (IPAddress.IsLoopback(address) || address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any))
             return true;
-        if (address.AddressFamily != AddressFamily.InterNetwork)
-            return address.IsIPv6LinkLocal || address.IsIPv6UniqueLocal || address.IsIPv6SiteLocal || address.IsIPv6Multicast;
         var b = address.GetAddressBytes();
+        if (address.AddressFamily != AddressFamily.InterNetwork)
+            return address.IsIPv6LinkLocal || address.IsIPv6UniqueLocal || address.IsIPv6SiteLocal || address.IsIPv6Multicast
+                   || (b[0] == 0x20 && b[1] == 0x01 && b[2] == 0x0d && b[3] == 0xb8);
         return b[0] == 0
                || b[0] == 10
                || (b[0] == 172 && (b[1] & 0xf0) == 16)
                || (b[0] == 192 && b[1] == 168)
                || (b[0] == 100 && (b[1] & 0xc0) == 64)
                || (b[0] == 169 && b[1] == 254)
+               // IANA special-purpose blocks that are not globally reachable, yet some networks route internally.
+               || (b[0] == 192 && b[1] == 0 && (b[2] == 0 || b[2] == 2))
+               || (b[0] == 198 && (b[1] & 0xfe) == 18)
+               || (b[0] == 198 && b[1] == 51 && b[2] == 100)
+               || (b[0] == 203 && b[1] == 0 && b[2] == 113)
                // From 224 up: multicast, reserved and the broadcast address are all equally not a public host.
                || b[0] >= 224;
     }
