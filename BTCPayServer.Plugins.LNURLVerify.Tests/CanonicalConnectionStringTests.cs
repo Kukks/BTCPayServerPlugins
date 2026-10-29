@@ -114,42 +114,13 @@ public class CanonicalConnectionStringTests
     }
 
     [Fact]
-    public void A_public_canonical_string_passes_core_2_4_5_but_a_private_or_legacy_one_does_not()
+    public void A_public_canonical_string_passes_core_non_admin_check_but_a_private_or_legacy_one_does_not()
     {
-        Assert.True(IsSafeInCore245(LnurlRailProvisioning.ConnectionString("alice@h.example")));
-        Assert.True(IsSafeInCore245(LnurlRailProvisioning.ConnectionString($"alice@{Onion}")));
-        Assert.False(IsSafeInCore245(LnurlRailProvisioning.ConnectionString("http://127.0.0.1:1234/pay")));
-        Assert.False(IsSafeInCore245(LnurlRailProvisioning.ConnectionString("alice@lnurl.local")));
-        Assert.False(IsSafeInCore245("type=lnurl;value=alice@h.example"));
-    }
-
-    /// <summary>
-    /// Copied from core commit 8e96a65 "Harden Lightning connection validation (#7635)" (v2.4.5),
-    /// BTCPayServer/Extensions.cs. The pinned submodule predates it, so its own IsSafe still returns
-    /// true for a string with no server and cannot stand in for this.
-    /// </summary>
-    static bool IsSafeInCore245(string connectionString)
-    {
-        var kv = LightningConnectionStringHelper.ExtractValues(connectionString, out var type);
-        if (kv.Keys.Any(k => k.EndsWith("filepath", StringComparison.OrdinalIgnoreCase) ||
-                             k.EndsWith("directorypath", StringComparison.OrdinalIgnoreCase)))
-            return false;
-        var isLnd = type is "lnd-rest" or "lnd-grpc";
-        if (isLnd && kv.ContainsKey("certthumbprint"))
-            return false;
-        if (!kv.TryGetValue("server", out var server))
-            return false;
-        var uri = new Uri(server, UriKind.Absolute);
-        if (isLnd && uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) &&
-            kv.TryGetValue("allowinsecure", out var allowInsecure) &&
-            bool.TryParse(allowInsecure, out var enabled) && enabled)
-            return false;
-        if (uri.Scheme.Equals("unix", StringComparison.OrdinalIgnoreCase))
-            return false;
-        if (!Utils.TryParseEndpoint(uri.DnsSafeHost, 80, out _))
-            return false;
-        if (!IPAddress.TryParse(uri.DnsSafeHost, out _) && uri.Scheme is not ("http" or "https"))
-            return false;
-        return !BTCPayServer.Extensions.IsLocalNetwork(uri.DnsSafeHost);
+        static bool Safe(string connectionString) => BTCPayServer.Extensions.IsSafeLightningConnectionString(connectionString);
+        Assert.True(Safe(LnurlRailProvisioning.ConnectionString("alice@h.example")));
+        Assert.True(Safe(LnurlRailProvisioning.ConnectionString($"alice@{Onion}")));
+        Assert.False(Safe(LnurlRailProvisioning.ConnectionString("http://127.0.0.1:1234/pay")));
+        Assert.False(Safe(LnurlRailProvisioning.ConnectionString("alice@lnurl.local")));
+        Assert.False(Safe("type=lnurl;value=alice@h.example"));
     }
 }

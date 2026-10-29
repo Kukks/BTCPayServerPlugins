@@ -58,10 +58,10 @@ public class LightningSetupBrowserTests : UnitTestBase
         await page.UnrouteAsync("**/lnurlverify/rails/resolve");
         stub.InvoicePrefix = "lntbs";
 
-        await Expect(summary.Locator("#LNURLVerifyOption-lightning input")).ToBeCheckedAsync(new() { Timeout = 30_000 });
+        await Expect(summary.Locator("#LNURLVerifyOption-lightning input[role=switch]")).ToBeCheckedAsync(new() { Timeout = 30_000 });
         await Expect(summary.Locator("[data-option='usdt-arbitrum']")).ToHaveAttributeAsync("title", "USDT on Arbitrum Sepolia");
         await Expect(summary.Locator("[data-option='usdt-tron']")).Not.ToHaveClassAsync(new Regex("off"));
-        await Expect(summary.Locator("#LNURLVerifyUnit-USDT input")).ToBeCheckedAsync();
+        await Expect(summary.Locator("#LNURLVerifyUnit-USDT input[role=switch]")).ToBeCheckedAsync();
         await Expect(summary).ToContainTextAsync("checked when you save");
         Assert.Equal(0, stub.Callbacks);
 
@@ -72,12 +72,12 @@ public class LightningSetupBrowserTests : UnitTestBase
         await Expect(error).ToContainTextAsync("Regtest");
         await Expect(page.Locator("#LightningNodeType-LNURLVerify")).ToBeCheckedAsync();
         await Expect(page.Locator("#LNURLVerifyAddress")).ToHaveValueAsync(stub.PayUrl);
-        await Expect(summary.Locator("#LNURLVerifyOption-lightning input")).ToBeCheckedAsync(new() { Timeout = 30_000 });
+        await Expect(summary.Locator("#LNURLVerifyOption-lightning input[role=switch]")).ToBeCheckedAsync(new() { Timeout = 30_000 });
         Assert.Equal(1, stub.Callbacks);
 
         // The USDT switch saves with the page, before the page's own form.
         stub.InvoicePrefix = "lnbcrt";
-        await summary.Locator("#LNURLVerifyUnit-USDT input").UncheckAsync();
+        await summary.Locator("#LNURLVerifyUnit-USDT input[role=switch]").UncheckAsync();
         await page.ClickAsync("#page-primary");
         await Expect(page).ToHaveURLAsync(new Regex("/lightning/BTC/settings"), new() { Timeout = 30_000 });
         Assert.Equal(2, stub.Callbacks);
@@ -94,7 +94,7 @@ public class LightningSetupBrowserTests : UnitTestBase
         await page.GotoAsync(setup);
         await Expect(page.Locator("#LightningNodeType-LNURLVerify")).ToBeCheckedAsync();
         await Expect(page.Locator("#LNURLVerifyAddress")).ToHaveValueAsync(stub.PayUrl);
-        await Expect(summary.Locator("#LNURLVerifyUnit-USDT input")).Not.ToBeCheckedAsync(new() { Timeout = 30_000 });
+        await Expect(summary.Locator("#LNURLVerifyUnit-USDT input[role=switch]")).Not.ToBeCheckedAsync(new() { Timeout = 30_000 });
         await Expect(summary.Locator("[data-option='usdt-solana']")).ToHaveAttributeAsync("title", "USDT on Solana Devnet");
         Assert.Equal(beforeReopen, stub.Callbacks);
         Assert.Empty(refused);

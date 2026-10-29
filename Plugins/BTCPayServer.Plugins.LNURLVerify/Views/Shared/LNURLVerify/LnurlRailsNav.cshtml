@@ -1,15 +1,20 @@
 @using BTCPayServer.Client
 @using BTCPayServer.Data
+@using BTCPayServer.Payments
 @using BTCPayServer.Plugins.LNURLVerify
 @inject TokenAssets Assets
 @{
     var store = Context.GetStoreDataOrNull();
+    var rails = store is null ? new List<PaymentMethodId>() : LnurlRails.All.Select(r => r.PaymentMethodId).Concat(Assets.PaymentMethodIds)
+        .Where(p => store.GetPaymentMethodConfig(p) is not null).ToList();
 }
-@if (store is not null && LnurlRails.All.Select(r => r.PaymentMethodId).Concat(Assets.PaymentMethodIds).Any(p => store.GetPaymentMethodConfig(p) is not null))
+@if (rails.Any())
 {
+    var blob = store!.GetStoreBlob();
     <li class="nav-item" permission="@Policies.CanModifyStoreSettings">
         <a asp-controller="LnurlRailSettings" asp-action="Index" asp-route-storeId="@store.Id"
            class="nav-link @(ViewData.IsPageActive(LnurlRailSettingsController.ActivePage, null) ? "active" : "")" id="Nav-LnurlRails">
+            <span class="me-2 btcpay-status btcpay-status--@(rails.Any(p => !blob.IsExcluded(p)) ? "enabled" : "pending")"></span>
             <span>LNURL rails</span>
         </a>
     </li>

@@ -35,11 +35,8 @@ public class LnurlRailSettingsController : Controller
     }
 
     [HttpGet("")]
-    public async Task<IActionResult> Index([FromRoute] string storeId)
-    {
-        ViewData["UnconfiguredUnits"] = await Unconfigured(HttpContext.GetStoreData());
-        return View(await _stores.GetSettingAsync<LnurlRailSettings>(storeId, LnurlRailSettings.Key) ?? new LnurlRailSettings());
-    }
+    public async Task<IActionResult> Index([FromRoute] string storeId) =>
+        View(await _stores.GetSettingAsync<LnurlRailSettings>(storeId, LnurlRailSettings.Key) ?? new LnurlRailSettings());
 
     [HttpPost("")]
     public async Task<IActionResult> Index([FromRoute] string storeId, LnurlRailSettings settings,
@@ -60,7 +57,7 @@ public class LnurlRailSettingsController : Controller
     {
         var store = HttpContext.GetStoreData();
         var managed = LnurlRails.All.Select(r => r.PaymentMethodId).Concat(_assets.PaymentMethodIds);
-        if (LnurlRailSettings.ApplyEnabledRails(store, managed, shownRails ?? Array.Empty<string>(), enabledRails ?? Array.Empty<string>(), false))
+        if (LnurlRailSettings.ApplyEnabledRails(store, managed, shownRails ?? Array.Empty<string>(), enabledRails ?? Array.Empty<string>()))
             await _stores.UpdateStoreBlob(store);
         return Ok();
     }
@@ -86,20 +83,5 @@ public class LnurlRailSettingsController : Controller
         {
             return BadRequest(new { error = e.Message });
         }
-    }
-
-    private async Task<IReadOnlyList<string>> Unconfigured(StoreData store)
-    {
-        if (LnurlRailProvisioning.LnurlValue(store) is not { } lnurl) return Array.Empty<string>();
-        try
-        {
-            var http = _httpClientFactory.CreateClient(nameof(LnurlRailSettingsController));
-            http.Timeout = TimeSpan.FromSeconds(10);
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
-            cts.CancelAfter(TimeSpan.FromSeconds(10));
-            var resolved = await LNURLVerifyConnectionStringHandler.ResolveCached(lnurl, _network, http, cts.Token);
-            return _assets.Unconfigured(await LNURLResolver.GetJson(http, resolved.PayEndpoint, cts.Token));
-        }
-        catch (Exception) { return Array.Empty<string>(); }
     }
 }

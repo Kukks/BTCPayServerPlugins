@@ -110,7 +110,7 @@ public class LnurlTokenPaymentHandlerTests
             PaymentMethodContext? ctx = null;
             await Activations.Run(invoice.Id, Usdt, networks, async () =>
             {
-                ctx = new PaymentMethodContext(Store, Store.GetStoreBlob(), new JObject(), Handler, invoice, new InvoiceLogs());
+                ctx = new PaymentMethodContext(Store, Store.GetStoreBlob(), new JObject(), Handler, invoice, new InvoiceLogs(), null!);
                 await ctx.BeforeFetchingRates();
                 await Handler.ConfigurePrompt(ctx);
                 return true;
@@ -133,7 +133,7 @@ public class LnurlTokenPaymentHandlerTests
         var lnurl = new Lnurl();
         var invoice = new InvoiceEntity { Id = "inv", Currency = "USD", StoreId = "store" };
         var creation = new InvoiceCreationContext(lnurl.Store, lnurl.Store.GetStoreBlob(), invoice, new InvoiceLogs(),
-            new PaymentMethodHandlerDictionary(new IPaymentMethodHandler[] { lnurl.Handler }), null);
+            new PaymentMethodHandlerDictionary(new IPaymentMethodHandler[] { lnurl.Handler }), null, null!);
         creation.SetLazyActivation(false);
         await creation.BeforeFetchingRates();
         Assert.True(creation.PaymentMethodContexts[Usdt].Prompt.Inactive);

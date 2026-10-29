@@ -34,23 +34,31 @@ public class TokenCheckoutBrowserTests : UnitTestBase
         await Expect(page.Locator("#LnurlTokenNetworks button")).ToHaveTextAsync(new[] { "Arbitrum Sepolia", "Solana Devnet", "Tron Nile" });
 
         var evm = $"ethereum:{StubLnurl.ArbitrumToken}@421614/transfer?address={StubLnurl.EvmRecipient}&uint256=63360000";
-        await page.Locator("#LnurlTokenNetworks button[data-network='usdt-arbitrum']").ClickAsync();
+        await PickNetwork(page, "usdt-arbitrum");
         await Expect(page.Locator(".qr-container")).ToHaveAttributeAsync("data-qr-value", evm);
         await Expect(page.Locator("#LnurlTokenOpenWallet")).ToHaveAttributeAsync("href", evm);
         await Expect(page.Locator("#LnurlTokenAmount")).ToHaveTextAsync("63.36 USDT on Arbitrum Sepolia");
+        await Expect(page.Locator("#LnurlTokenLink [data-clipboard]")).ToHaveAttributeAsync("data-clipboard", evm);
+        await Expect(page.Locator("#LnurlTokenAmountCopy button")).ToHaveAttributeAsync("data-clipboard", "63.36");
+        await Expect(page.Locator("#LnurlTokenNetworks button[data-network='usdt-solana']")).ToBeHiddenAsync();
+        await Expect(page.Locator("#LnurlTokenNetworkChosen")).ToContainTextAsync("Arbitrum Sepolia");
+        await page.Locator("#LnurlTokenNetworkChosen").ClickAsync();
+        await page.Locator("#LnurlTokenNetworkKeep").ClickAsync();
+        await Expect(page.Locator("#LnurlTokenNetworkChosen")).ToBeVisibleAsync();
+        await Expect(page.Locator(".qr-container")).ToHaveAttributeAsync("data-qr-value", evm);
 
         var solana = $"solana:{StubLnurl.SolanaRecipient}?amount=63.36&spl-token={StubLnurl.SolanaMint}";
-        await page.Locator("#LnurlTokenNetworks button[data-network='usdt-solana']").ClickAsync();
+        await PickNetwork(page, "usdt-solana");
         await Expect(page.Locator(".qr-container")).ToHaveAttributeAsync("data-qr-value", solana);
         await Expect(page.Locator("#LnurlTokenOpenWallet")).ToHaveAttributeAsync("href", solana);
 
-        await page.Locator("#LnurlTokenNetworks button[data-network='usdt-tron']").ClickAsync();
+        await PickNetwork(page, "usdt-tron");
         await Expect(page.Locator(".qr-container")).ToHaveAttributeAsync("data-qr-value", StubLnurl.TronRecipient);
         await Expect(page.Locator("#LnurlTokenOpenWallet")).ToHaveCountAsync(0);
         await Expect(page.Locator("#LnurlTokenModes")).ToHaveCountAsync(0);
         await Expect(page.Locator("#LnurlTokenAmountCopy button")).ToHaveAttributeAsync("data-clipboard", "63.36");
 
-        await page.Locator("#LnurlTokenNetworks button[data-network='usdt-arbitrum']").ClickAsync();
+        await PickNetwork(page, "usdt-arbitrum");
         await page.Locator("#LnurlTokenModeAddress").ClickAsync();
         await Expect(page.Locator(".qr-container")).ToHaveAttributeAsync("data-qr-value", StubLnurl.EvmRecipient);
         await Expect(page.Locator("#LnurlTokenRecipient [data-clipboard]")).ToHaveAttributeAsync("data-clipboard", StubLnurl.EvmRecipient);
@@ -95,8 +103,7 @@ public class TokenCheckoutBrowserTests : UnitTestBase
         string Evm(int n) => $"ethereum:{StubLnurl.ArbitrumUsdt}@42161/transfer?address={StubLnurl.DepositAddress("ff-usdtarbitrum", n)}&uint256=63360000";
         // Opening the tab orders no quote; a tap orders one, for the network tapped alone.
         Assert.Equal((0, 0), (stub.Orders("ff-usdtarbitrum"), stub.Orders("ff-usdttrc")));
-        var arbitrum = page.Locator("#LnurlTokenNetworks button[data-network='ff-usdtarbitrum']");
-        await arbitrum.ClickAsync();
+        await PickNetwork(page, "ff-usdtarbitrum");
         await Expect(page.Locator("#LnurlTokenAmount")).ToHaveTextAsync("63.36 USDT on Arbitrum One");
         Assert.Equal((1, 0), (stub.Orders("ff-usdtarbitrum"), stub.Orders("ff-usdttrc")));
         await Expect(qr).ToHaveAttributeAsync("data-qr-value", Evm(1));
@@ -113,15 +120,22 @@ public class TokenCheckoutBrowserTests : UnitTestBase
 
         await Expect(page.Locator("#LnurlTokenRefresh")).ToHaveTextAsync("Quote expired: get a new one", new() { Timeout = 120_000 });
         stub.QuoteLifetimes.TryRemove("ff-usdtarbitrum", out _);
-        await arbitrum.ClickAsync();
+        await PickNetwork(page, "ff-usdtarbitrum");
         await Expect(qr).ToHaveAttributeAsync("data-qr-value", Evm(2), new() { Timeout = 60_000 });
         await Expect(page.Locator("#LnurlTokenExpiry")).ToHaveTextAsync(new Regex(@"^Quote valid for (10:00|[5-9]:[0-5]\d)$"));
 
         Assert.Equal((2, 0), (stub.Orders("ff-usdtarbitrum"), stub.Orders("ff-usdttrc")));
-        await page.Locator("#LnurlTokenNetworks button[data-network='ff-usdttrc']").ClickAsync();
+        await PickNetwork(page, "ff-usdttrc");
         await Expect(qr).ToHaveAttributeAsync("data-qr-value", StubLnurl.DepositAddress("ff-usdttrc", 1));
         await Expect(page.Locator("#LnurlTokenAmount")).ToHaveTextAsync("63.36 USDT on Tron");
         await Expect(page.Locator("#LnurlTokenOpenWallet")).ToHaveCountAsync(0);
+
+        // Back to a network whose quote is still live: its deposit address again, and no new order for either network.
+        await PickNetwork(page, "ff-usdtarbitrum");
+        await Expect(qr).ToHaveAttributeAsync("data-qr-value", Evm(2));
+        await PickNetwork(page, "ff-usdttrc");
+        await Expect(qr).ToHaveAttributeAsync("data-qr-value", StubLnurl.DepositAddress("ff-usdttrc", 1));
+        Assert.Equal((2, 1), (stub.Orders("ff-usdtarbitrum"), stub.Orders("ff-usdttrc")));
 
         var depositTx = "0x" + new string('c', 64);
         stub.Settle("ff-usdtarbitrum/2", depositTx);
@@ -164,7 +178,7 @@ public class TokenCheckoutBrowserTests : UnitTestBase
         page.Request += (_, r) => { if (Regex.IsMatch(new Uri(r.Url).Host, @"(walletconnect|reown|web3modal)\.(org|com)$")) reown.Add(r.Url); };
 
         await OpenTokenTab(page, tester, invoiceId);
-        await page.Locator("#LnurlTokenNetworks button[data-network='usdt-arbitrum']").ClickAsync();
+        await PickNetwork(page, "usdt-arbitrum");
         var evm = $"ethereum:{StubLnurl.ArbitrumToken}@421614/transfer?address={StubLnurl.EvmRecipient}&uint256=63360000";
         var qr = page.Locator(".qr-container");
         await Expect(qr).ToHaveAttributeAsync("data-qr-value", evm);
@@ -214,6 +228,14 @@ public class TokenCheckoutBrowserTests : UnitTestBase
         var client = await user.CreateClient();
         var invoice = await client.CreateInvoice(user.StoreId, new CreateInvoiceRequest { Amount = 0.001m, Currency = "BTC" });
         return (user, invoice.Id);
+    }
+
+    // A chosen network collapses the list to one row; reopening it picks another.
+    static async Task PickNetwork(IPage page, string network)
+    {
+        var chosen = page.Locator("#LnurlTokenNetworkChosen");
+        if (await chosen.IsVisibleAsync()) await chosen.ClickAsync();
+        await page.Locator($"#LnurlTokenNetworks button[data-network='{network}']").ClickAsync();
     }
 
     static async Task OpenTokenTab(IPage page, ServerTester tester, string invoiceId)

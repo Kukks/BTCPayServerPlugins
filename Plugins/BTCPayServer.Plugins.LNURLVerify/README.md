@@ -70,7 +70,7 @@ A store that already has the Arkade plugin's own `ARKADE` payment method gets no
 - **Checkout:** one "Bitcoin" tab replaces the Lightning and on-chain tabs. Its QR is one BIP321 URI carrying every active rail;
   a chip per rail switches the QR to that rail alone, and an "All" chip switches it back.
 - **No cost at invoice creation:** a rail is requested from the LNURL when the checkout opens, or, with the store setting
-  "Request every rail when the checkout opens" turned off (Integrations → LNURL rails), only when the payer taps it. Reopening
+  "Request every rail when the checkout opens" turned off (Wallets → LNURL rails), only when the payer taps it. Reopening
   the checkout does not request a rail the LNURL refused within the last hour; a payer's tap does.
 - **Settlement:** a rail payment is recorded when the LNURL's `verify` reports it `settled` with a `paymentReference`, at the
   amount agreed with the LNURL. An underpayment never settles there, so BTCPay never sees it; recovering those funds is the
@@ -79,7 +79,7 @@ A store that already has the Arkade plugin's own `ARKADE` payment method gets no
 - **Rails whose settlement cannot be detected:** an option the LNURL marks `verifiable: false` (proposed for LUD-XX in
   lnurl/luds#303) is never provisioned. A rail whose LNURL answers without a usable `verify` URL is left off new invoices for
   a day, so a checkout does not keep offering a payment method that cannot activate.
-- **Turning a rail off:** switch it off on the Lightning address tab, or on Integrations → LNURL rails.
+- **Turning a rail off:** switch it off on the Lightning address tab, or on Wallets → LNURL rails.
 - **Tokens on other networks:** see "Token rails" below.
 - **Upgrading to 1.2.0:** stores whose LNURL advertises a rail switch to the single "Bitcoin" tab for invoices created after
   the upgrade. Nothing else changes for them.
@@ -92,7 +92,7 @@ LNURL quotes the token amount and settles it through `verify`, as for the Bitcoi
 
 - **Assets:** one checkout tab per configured unit code, as payment method `LNURL-<CODE>`. The codes come from the server
   setting `LNURLVERIFY_ASSETS` (environment `BTCPAY_LNURLVERIFY_ASSETS`), default `USDT,USDC`. A change takes effect after
-  a restart, because BTCPay registers payment methods at startup. Integrations → LNURL rails lists any unit the LNURL offers
+  a restart, because BTCPay registers payment methods at startup. Wallets → LNURL rails shows any unit the LNURL offers
   that is not configured.
 - **Networks:** one button per advertised network. Any EVM chain works, as do Solana and Tron. Network names, icons and
   explorer links come from a built-in list of chains; an unlisted chain shows its CAIP-2 id, no icon and no explorer link.
