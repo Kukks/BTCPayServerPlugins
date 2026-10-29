@@ -19,6 +19,13 @@ public static class LnurlRailProvisioning
     public static string? LnurlValue(StoreData store) =>
         LnurlValue(store.GetPaymentMethodConfig(Lightning, onlyEnabled: true)?["connectionString"]?.Value<string>());
 
+    /// <summary>
+    /// The canonical connection string for an LNURL value. The <c>server</c> is the value's own origin, so a
+    /// non-admin can save it: since core 2.4.5 a string without one is admin-only.
+    /// </summary>
+    public static string ConnectionString(string value) =>
+        $"type=lnurl;server={LNURLResolver.Origin(value)};value={value.Trim()}";
+
     public static string? LnurlValue(string? connectionString)
     {
         if (string.IsNullOrEmpty(connectionString)) return null;

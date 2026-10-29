@@ -4,10 +4,10 @@
 <template id="@LnurlRailCheckoutExtension.ComponentName">
     @await Component.InvokeAsync("UiExtensionPoint", new { location = "checkout-bitcoin-pre-content", model = Model })
     <div class="payment-box">
-        <div v-if="rails.length > 1" class="btcpay-pills d-flex flex-wrap justify-content-center gap-2 mb-3" id="LnurlRails">
-            <button v-if="activeRails.length > 1" type="button" class="btcpay-pill" :class="{ active: !current }" id="LnurlRailsAll"
+        <div v-if="rails.length > 1" class="lnurl-options" id="LnurlRails">
+            <button v-if="activeRails.length > 1" type="button" :class="{ active: !current }" :aria-pressed="String(!current)" id="LnurlRailsAll"
                     v-on:click="selected = null">All</button>
-            <button v-for="rail in rails" :key="rail.pmi" type="button" class="btcpay-pill" :class="{ active: selected === rail.pmi }"
+            <button v-for="rail in rails" :key="rail.pmi" type="button" :class="{ active: selected === rail.pmi }" :aria-pressed="String(selected === rail.pmi)"
                     :disabled="busy === rail.pmi" :data-rail="rail.pmi" v-on:click="pick(rail)" v-text="rail.label"></button>
         </div>
         <div v-if="qr" class="qr-container clipboard-button" :data-qr-value="qr" :data-clipboard="uri" :data-clipboard-confirm-element="confirmTarget">

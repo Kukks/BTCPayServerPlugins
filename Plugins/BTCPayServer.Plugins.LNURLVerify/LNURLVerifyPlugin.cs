@@ -24,7 +24,11 @@ public class LNURLVerifyPlugin : BaseBTCPayServerPlugin
     public override void Execute(IServiceCollection services)
     {
         var bootstrap = (services as PluginServiceCollection)?.BootstrapServices;
-        var (assets, rejected) = TokenAssets.Parse(bootstrap?.GetService<IConfiguration>()?[TokenAssets.ConfigKey]);
+        var configuration = bootstrap?.GetService<IConfiguration>();
+        var allowPrivate = EgressGuard.AllowPrivate(configuration);
+        foreach (var name in EgressGuard.ClientNames)
+            services.AddHttpClient(name).ConfigurePrimaryHttpMessageHandler(() => EgressGuard.Handler(allowPrivate));
+        var (assets, rejected) = TokenAssets.Parse(configuration?[TokenAssets.ConfigKey]);
         if (rejected.Count > 0)
             bootstrap?.GetService<Logs>()?.Configuration.LogWarning(
                 "LNURL Verify ignores {Codes} in {Key}: a code is 1-16 letters or digits and cannot name an LNURL rail",
@@ -61,6 +65,7 @@ public class LNURLVerifyPlugin : BaseBTCPayServerPlugin
         services.AddSingleton<RailActivationGate>();
         services.AddSingleton<IGlobalCheckoutModelExtension, LnurlRailCheckoutExtension>();
         services.AddUIExtension("checkout-end", "LNURLVerify/LnurlRailsCheckout");
+        services.AddUIExtension("checkout-end", "LNURLVerify/LnurlCheckoutStyles");
         services.AddUIExtension("store-invoices-payments", "LNURLVerify/LnurlRailPayments");
         services.AddUIExtension("store-integrations-nav", "LNURLVerify/LnurlRailsNav");
         services.AddUIExtension("server-nav", "LNURLVerify/LnurlVerifyServerNav");

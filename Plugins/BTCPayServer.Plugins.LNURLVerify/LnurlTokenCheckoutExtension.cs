@@ -54,7 +54,9 @@ public class LnurlTokenCheckoutExtension : ICheckoutModelExtension
             var json = new JObject
             {
                 ["id"] = n.OptionId, ["chain"] = asset.ChainId, ["namespace"] = asset.Namespace, ["label"] = ChainDirectory.Label(asset.ChainId),
-                ["token"] = asset.AssetReference, ["state"] = state, ["provider"] = n.Provider is null ? JValue.CreateNull() : new JValue(n.Provider)
+                ["icon"] = ChainDirectory.Icon(asset.ChainId) is { } chainIcon ? new JValue(chainIcon) : JValue.CreateNull(),
+                ["token"] = asset.AssetReference, ["state"] = state,
+                ["provider"] = n.Provider is null ? JValue.CreateNull() : new JValue(n.Provider)
             };
             if (state == "live")
             {
@@ -72,6 +74,7 @@ public class LnurlTokenCheckoutExtension : ICheckoutModelExtension
         return new JObject
         {
             ["pmi"] = handler.PaymentMethodId.ToString(), ["code"] = handler.Code, ["decimals"] = details.Decimals,
+            ["icon"] = ChainDirectory.TokenIcon(handler.Code) is { } tokenIcon ? new JValue(tokenIcon) : JValue.CreateNull(),
             ["name"] = details.UnitName is null ? JValue.CreateNull() : new JValue(details.UnitName), ["networks"] = networks
         };
     }

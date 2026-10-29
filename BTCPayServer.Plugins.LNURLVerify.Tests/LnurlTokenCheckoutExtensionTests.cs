@@ -51,6 +51,7 @@ public class LnurlTokenCheckoutExtensionTests
         var model = LnurlTokenCheckoutExtension.Model(Handler, Prompt(Quoted("usdt-arbitrum", Arbitrum, EvmTo)), DateTimeOffset.UtcNow);
         Assert.Equal(("LNURL-USDT", "USDT", "Tether USD", 6), ((string)model["pmi"]!, (string)model["code"]!, (string)model["name"]!, (int)model["decimals"]!));
         var n = (JObject)model["networks"]!.Single();
+        Assert.Equal(("usdt", "arbitrum"), ((string)model["icon"]!, (string)n["icon"]!));
         const string uri = "ethereum:0x30fA2FbE15c1EaDfbEF28C188b7B8dbd3c1Ff2eB@421614/transfer?address=0x1111111111111111111111111111111111111111&uint256=12672000";
         Assert.Equal(("live", "Arbitrum Sepolia", "eip155", "eip155:421614", "12.672", uri, uri),
             ((string)n["state"]!, (string)n["label"]!, (string)n["namespace"]!, (string)n["chain"]!, (string)n["amount"]!, (string)n["uri"]!, (string)n["qr"]!));
@@ -66,7 +67,7 @@ public class LnurlTokenCheckoutExtensionTests
     }
 
     [Fact]
-    public void A_network_names_its_provider_on_its_chip_and_one_without_a_provider_names_none()
+    public void A_network_names_its_provider_and_one_without_a_provider_names_none()
     {
         var viaFixedFloat = new TokenNetworkState { OptionId = "ff-usdtarbitrum", Asset = Arbitrum, Provider = "FixedFloat" };
         var networks = LnurlTokenCheckoutExtension.Model(Handler, Prompt(viaFixedFloat, Quoted("usdt-tron", Nile, "TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7")),

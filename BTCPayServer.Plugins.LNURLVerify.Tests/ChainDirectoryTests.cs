@@ -40,6 +40,42 @@ public class ChainDirectoryTests
         Assert.NotNull(ChainDirectory.TxUrl(chain, depositTx));
     }
 
+    [Theory]
+    [InlineData("eip155:421614", "arbitrum")]
+    [InlineData("solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", "solana")]
+    [InlineData("eip155:999999", null)]
+    public void A_testnet_shares_its_mainnet_icon_and_an_unlisted_chain_has_none(string chain, string? icon) =>
+        Assert.Equal(icon, ChainDirectory.Icon(chain));
+
+    [Theory]
+    [InlineData("USDT", "usdt")]
+    [InlineData("USDC", "usdc")]
+    [InlineData("EURC", null)]
+    public void Only_a_unit_with_a_shipped_icon_names_one(string unit, string? icon) =>
+        Assert.Equal(icon, ChainDirectory.TokenIcon(unit));
+
+    // The checkout builds an icon's URL from its name alone: a name without its file shows a broken image.
+    [Theory]
+    [InlineData("eip155:1")]
+    [InlineData("eip155:42161")]
+    [InlineData("eip155:8453")]
+    [InlineData("eip155:10")]
+    [InlineData("eip155:137")]
+    [InlineData("eip155:56")]
+    [InlineData("eip155:43114")]
+    [InlineData("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp")]
+    [InlineData("tron:0x2b6653dc")]
+    public void Every_chain_icon_ships_with_the_plugin(string chain) => Assert.True(Ships(ChainDirectory.Icon(chain)));
+
+    [Theory]
+    [InlineData("usdt")]
+    [InlineData("usdc")]
+    [InlineData("walletconnect")]
+    public void The_token_and_walletconnect_icons_ship_with_the_plugin(string icon) => Assert.True(Ships(icon));
+
+    static bool Ships(string? icon) => icon is not null && typeof(LNURLVerifyPlugin).Assembly.GetManifestResourceNames()
+        .Contains($"BTCPayServer.Plugins.LNURLVerify.Resources.lnurlverify.icons.{icon}.svg");
+
     [Fact]
     public void A_reference_that_is_not_a_transaction_id_gets_no_explorer_link()
     {

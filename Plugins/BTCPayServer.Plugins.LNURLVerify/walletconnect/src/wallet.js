@@ -36,6 +36,26 @@ async function connect (projectId, networks) {
   return connector
 }
 
+// Proposes a session without AppKit's modal, handing its wc: URI to onUri for the checkout's own QR. AppKit hears the same
+// display_uri, so open() shows this proposal rather than starting another. Resolves once a wallet approves, at once if one is connected.
+export async function pair ({ projectId, networks, onUri }) {
+  const wallet = await connect(projectId, networks)
+  if (wallet.provider.session) return
+  const optionalNamespaces = Object.fromEntries(wallet.config.networks.map(({ namespace, chains, methods, events }) =>
+    [namespace, { methods, events, chains: chains.map((c) => c.caipNetworkId) }]))
+  wallet.provider.on('display_uri', onUri)
+  try {
+    await wallet.provider.connect({ optionalNamespaces })
+  } finally {
+    wallet.provider.removeListener('display_uri', onUri)
+  }
+  await wallet.appKit.close()
+}
+
+export function open () {
+  return connector?.appKit.open()
+}
+
 function account (chain) {
   const accounts = connector.provider.session?.namespaces[chain.split(':')[0]]?.accounts ?? []
   const match = accounts.find((a) => a.startsWith(chain + ':'))

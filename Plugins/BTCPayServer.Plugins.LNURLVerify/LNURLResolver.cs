@@ -34,15 +34,7 @@ public static class LNURLResolver
     public static async Task<ResolvedLnurl> Resolve(string value, Network network, HttpClient http, CancellationToken ct)
     {
         value = value.Trim();
-
-        Uri endpoint;
-        if (value.Contains('@'))
-            endpoint = LNURL.LNURL.ExtractUriFromInternetIdentifier(value);
-        else if (value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                 value.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            endpoint = new Uri(value);
-        else
-            endpoint = LNURL.LNURL.Parse(value, out _);
+        var endpoint = FirstEndpoint(value);
 
         var root = await GetJson(http, endpoint, ct);
         var tag = root["tag"]?.Value<string>();
@@ -70,6 +62,36 @@ public static class LNURLResolver
         }
 
         throw new FormatException($"Unsupported LNURL tag '{tag}'. Expected 'payRequest' or 'withdrawRequest'.");
+    }
+
+    /// <summary>The first URL a value is fetched over: a Lightning address's well-known endpoint, or a decoded LNURL.</summary>
+    internal static Uri FirstEndpoint(string value)
+    {
+        if (value.Contains('@'))
+            return LNURL.LNURL.ExtractUriFromInternetIdentifier(value);
+        if (value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            value.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            return new Uri(value);
+        return LNURL.LNURL.Parse(value, out _);
+    }
+
+    /// <summary>
+    /// The scheme://host[:port] of <see cref="FirstEndpoint"/>. A connection string carries it as <c>server</c>,
+    /// which is the key core's non-admin safety check reads, so the host it vets is the one actually fetched.
+    /// </summary>
+    public static string Origin(string value) =>
+        FirstEndpoint(value.Trim()).GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped);
+
+    /// <summary>Whether a connection string's <c>server</c> is exactly the origin its value resolves through.</summary>
+    internal static bool IsOriginOf(string server, string value)
+    {
+        try
+        {
+            return Uri.TryCreate(server, UriKind.Absolute, out var declared) &&
+                   Origin(value).Equals(declared.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped),
+                       StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception) { return false; }
     }
 
     internal static async Task<JObject> GetJson(HttpClient http, Uri uri, CancellationToken ct)
