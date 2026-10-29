@@ -189,7 +189,9 @@ public class TokenCheckoutBrowserTests : UnitTestBase
     {
         var dll = typeof(LNURLVerifyPlugin).Assembly.Location.Replace("\\", "/");
         // ServerTester reads DEBUG_PLUGINS from this file over the environment, so it names this plugin alone (as the Electrum tests do).
-        await File.WriteAllTextAsync(Path.Combine(TestUtils.TestDirectory, "appsettings.dev.json"), $"{{\"DEBUG_PLUGINS\":\"{dll}\"}}");
+        // StubLnurl answers on loopback, which the egress guard refuses unless the operator flag is on.
+        await File.WriteAllTextAsync(Path.Combine(TestUtils.TestDirectory, "appsettings.dev.json"),
+            $"{{\"DEBUG_PLUGINS\":\"{dll}\",\"{EgressGuard.ConfigKey}\":\"true\"}}");
         var tester = test.CreateServerTester(scope, newDb: true);
         await tester.StartAsync();
         return tester;

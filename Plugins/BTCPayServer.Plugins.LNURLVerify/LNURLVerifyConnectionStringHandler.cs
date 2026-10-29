@@ -54,6 +54,14 @@ public class LNURLVerifyConnectionStringHandler : ILightningConnectionStringHand
             return null;
         }
 
+        // Before any request: core vets 'server' for non-admins, so a server naming some other host than the
+        // one the value is fetched from would let a public origin front a private endpoint.
+        if (kv.TryGetValue("server", out var server) && !LNURLResolver.IsOriginOf(server, value))
+        {
+            error = "The key 'server' of an lnurl connection string must be the origin of its 'value'";
+            return null;
+        }
+
         EnsurePersistedInvoicesLoaded();
 
         error = null;

@@ -82,7 +82,9 @@ public class LightningSetupBrowserTests : UnitTestBase
         await Expect(page).ToHaveURLAsync(new Regex("/lightning/BTC/settings"), new() { Timeout = 30_000 });
         Assert.Equal(2, stub.Callbacks);
         var store = await tester.PayTester.GetService<StoreRepository>().FindStore(user.StoreId);
-        Assert.Equal($"type=lnurl;value={stub.PayUrl}", store!.GetPaymentMethodConfig(PaymentMethodId.Parse("BTC-LN"))?["connectionString"]?.ToString());
+        // The canonical form the tab posts: its server is the origin the value is fetched from, so a non-admin may save it.
+        var origin = stub.Root.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped);
+        Assert.Equal($"type=lnurl;server={origin};value={stub.PayUrl}", store!.GetPaymentMethodConfig(PaymentMethodId.Parse("BTC-LN"))?["connectionString"]?.ToString());
         Assert.True(store.GetStoreBlob().IsExcluded(TokenAssets.PaymentMethodIdOf("USDT")));
         var client = await user.CreateClient();
         var invoice = await client.CreateInvoice(user.StoreId, new CreateInvoiceRequest { Amount = 0.001m, Currency = "BTC" });
