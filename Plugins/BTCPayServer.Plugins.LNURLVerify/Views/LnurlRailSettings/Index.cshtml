@@ -49,7 +49,7 @@
             } catch (e) {
                 summary = { error: 'The lookup failed: ' + e.message };
             }
-            LnurlSetupCard.render(out, summary, { iconUrl: @Safe.Json(Url.Content("~/Resources/lnurlverify/icons/")) });
+            LnurlSetupCard.render(out, summary, { iconUrl: @Safe.Json(Url.Content("~/Resources/lnurlverify/icons/") + "{0}.svg?v=" + version) });
         });
     </script>
 }

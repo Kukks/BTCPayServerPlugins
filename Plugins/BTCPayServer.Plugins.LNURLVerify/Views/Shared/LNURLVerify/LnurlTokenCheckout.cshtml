@@ -5,7 +5,8 @@
     var projectId = (await Settings.GetSettingAsync<LnurlTokenServerSettings>())?.WalletConnectProjectId;
     var version = typeof(LNURLVerifyPlugin).Assembly.GetName().Version;
     var walletUrl = Url.Content("~/Resources/lnurlverify/wallet.js") + "?v=" + version;
-    var iconUrl = Url.Content("~/Resources/lnurlverify/icons/");
+    // Resources are served with a year's max-age, so the version keeps a CDN from holding an old icon.
+    var iconUrl = Url.Content("~/Resources/lnurlverify/icons/") + "{0}.svg?v=" + version;
 }
 
 <template id="@LnurlTokenCheckoutExtension.ComponentName">
@@ -173,7 +174,7 @@
         },
         beforeDestroy () { clearInterval(this.timer); this.destroyed = true; },
         methods: {
-            icon (name) { return this.iconUrl + name + '.svg'; },
+            icon (name) { return this.iconUrl.replace('{0}', name); },
             isLive (n) { return n.state === 'live' && !(n.expiresAt && n.expiresAt <= this.now); },
             async request (network) {
                 if (!this.token.pmi) return;
