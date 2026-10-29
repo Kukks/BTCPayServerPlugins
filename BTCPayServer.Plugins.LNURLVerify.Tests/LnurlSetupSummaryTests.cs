@@ -98,6 +98,42 @@ public class LnurlSetupSummaryTests
     }
 
     [Fact]
+    public void Each_switch_names_the_method_it_controls_and_only_a_lock_overrides_it()
+    {
+        var store = Store("BTC-CHAIN");
+        var blob = store.GetStoreBlob();
+        blob.SetExcluded(LnurlRails.Arkade.PaymentMethodId, true);
+        store.SetStoreBlob(blob);
+
+        var summary = Summary(PayJson("https://h.example/cb", Lightning, Arkade.Replace("}", Unavailable), OnChain, ArbitrumUsdt, BaseEurc), store);
+        LnurlSetupOption Option(string id) => summary.Options.Single(o => o.Id == id);
+
+        Assert.Equal((null, false, null), (Option("lightning").Toggle, Option("lightning").Excluded, Option("lightning").Locked));
+        Assert.Equal(("LNURL-ARKADE", true, null), (Option("arkade").Toggle, Option("arkade").Excluded, Option("arkade").Locked));
+        Assert.Contains("unavailable", Option("arkade").Transient);
+        Assert.Contains("switched off", Option("arkade").Reason);
+        Assert.Contains("on-chain wallet", Option("onchain").Locked);
+        var usdt = Option("usdt-arbitrum");
+        Assert.Equal(("LNURL-USDT", false, null, "arbitrum", "usdt"), (usdt.Toggle, usdt.Excluded, usdt.Locked, usdt.Icon, usdt.UnitIcon));
+        Assert.Equal(("LNURL-EURC", "base", null), (Option("eurc-base").Toggle, Option("eurc-base").Icon, Option("eurc-base").UnitIcon));
+        Assert.Contains(TokenAssets.ConfigKey, Option("eurc-base").Locked);
+    }
+
+    [Fact]
+    public void The_setup_page_switches_a_rail_off_before_it_is_provisioned()
+    {
+        var store = Store();
+        var managed = new[] { LnurlRails.Arkade.PaymentMethodId, TokenAssets.PaymentMethodIdOf("USDT") };
+
+        Assert.False(LnurlRailSettings.ApplyEnabledRails(store, managed, new[] { "LNURL-ARKADE" }, Array.Empty<string>()));
+        Assert.True(LnurlRailSettings.ApplyEnabledRails(store, managed, new[] { "LNURL-ARKADE", "BTC-CHAIN" }, Array.Empty<string>(), false));
+
+        Assert.True(store.GetStoreBlob().IsExcluded(LnurlRails.Arkade.PaymentMethodId));
+        Assert.False(store.GetStoreBlob().IsExcluded(PaymentMethodId.Parse("BTC-CHAIN")));
+        Assert.False(store.GetStoreBlob().IsExcluded(TokenAssets.PaymentMethodIdOf("USDT")));
+    }
+
+    [Fact]
     public void An_unavailable_rail_is_not_offered_but_an_unavailable_token_network_stays_offered()
     {
         var summary = Summary(PayJson("https://h.example/cb", Lightning.Replace("}", Unavailable),

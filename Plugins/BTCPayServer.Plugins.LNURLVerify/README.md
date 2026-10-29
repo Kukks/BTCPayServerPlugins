@@ -5,7 +5,8 @@ Use any **LNURL** or **Lightning address** as a BTCPay Server Lightning backend 
 ## Connection strings
 
 The store's Lightning setup page has a **Lightning address** tab: enter an address or LNURL and it shows what the LNURL offers
-and what checkout would do with each option, before you save. Saving there stores the connection string below.
+before you save: one switch per rail and per token, with the token's networks as icons, dimmed where checkout cannot offer
+them. Saving there stores the switches and the connection string below.
 
 The capability is decided by decoding the value you provide:
 
@@ -56,7 +57,7 @@ A store that already has the Arkade plugin's own `ARKADE` payment method gets no
 - **Rails whose settlement cannot be detected:** an option the LNURL marks `verifiable: false` (proposed for LUD-XX in
   lnurl/luds#303) is never provisioned. A rail whose LNURL answers without a usable `verify` URL is left off new invoices for
   a day, so a checkout does not keep offering a payment method that cannot activate.
-- **Turning a rail off:** switch it off on Integrations → LNURL rails.
+- **Turning a rail off:** switch it off on the Lightning address tab, or on Integrations → LNURL rails.
 - **Tokens on other networks:** see "Token rails" below.
 - **Upgrading to 1.2.0:** stores whose LNURL advertises a rail switch to the single "Bitcoin" tab for invoices created after
   the upgrade. Nothing else changes for them.
@@ -71,17 +72,17 @@ LNURL quotes the token amount and settles it through `verify`, as for the Bitcoi
   setting `LNURLVERIFY_ASSETS` (environment `BTCPAY_LNURLVERIFY_ASSETS`), default `USDT,USDC`. A change takes effect after
   a restart, because BTCPay registers payment methods at startup. Integrations → LNURL rails lists any unit the LNURL offers
   that is not configured.
-- **Networks:** one chip per advertised network. Any EVM chain works, as do Solana and Tron. Network names and explorer links
-  come from a built-in list of chains; an unlisted chain shows its CAIP-2 id and no explorer link.
-- **Checkout:** each network has a QR; EVM and Solana networks also have an "Open in wallet" link, which follows the store's
-  "Pay in wallet" button setting (Checkout Appearance):
-  - EIP-681 for EVM;
-  - Solana Pay for Solana;
-  - for Tron, the QR is the recipient, with the amount below it.
-
-  With a WalletConnect project ID set in Server settings → LNURL Verify, "Connect wallet" pays from a wallet over WalletConnect.
-  "Connect wallet" contacts Reown only once the payer presses it: its relay and API, plus some telemetry that carries the
-  checkout URL (and with it the invoice id). AppKit's optional analytics are off.
+- **Networks:** one button per advertised network. Any EVM chain works, as do Solana and Tron. Network names, icons and
+  explorer links come from a built-in list of chains; an unlisted chain shows its CAIP-2 id, no icon and no explorer link.
+- **Checkout:** a toggle above the QR picks how to pay:
+  - **Payment link** (EVM and Solana): the QR is an EIP-681 or Solana Pay link, with an "Open in wallet" button that follows
+    the store's "Pay in wallet" button setting (Checkout Appearance);
+  - **Address**: the QR is the bare recipient, with the recipient and the amount below it to copy. Tron has no payment link,
+    so it opens here;
+  - **WalletConnect**, with a WalletConnect project ID set in Server settings → LNURL Verify: the QR is a pairing, "Open in
+    wallet" lists wallets for it, and once a wallet connects the checkout asks it for the transfer. The checkout contacts
+    Reown only once the payer picks WalletConnect: its relay and API, plus some telemetry that carries the checkout URL (and
+    with it the invoice id). AppKit's optional analytics are off.
 - **Quotes:** a network is requested from the LNURL only when the payer taps it. That holds whatever "Request every rail when
   the checkout opens" says, which governs the Bitcoin rails alone: a token quote can be a real order with a third party, so
   opening a tab must not place one per network. A tap on a network whose quote is still live sends nothing; a tap on one
@@ -94,7 +95,8 @@ LNURL quotes the token amount and settles it through `verify`, as for the Bitcoi
   links the transaction.
 - **Third-party providers:** an option may name a `provider`, the service a payment passes through. lnurl-server's FixedFloat
   rails name FixedFloat, which takes the payer's tokens at its own deposit address and pays the LNURL over Lightning. The
-  network's chip and amount then read "via FixedFloat". Next to the QR, the checkout tells the payer three things: the deposit
+  network buttons and amount do not name the provider; one "Serviced by FixedFloat" line below the payment details does, and
+  its info button opens a dialog that tells the payer three things: the deposit
   address belongs to the provider, not the merchant; the quote has a hard expiry; and a late, short or excess deposit is
   resolved with the provider, not with the merchant or BTCPay. BTCPay never holds those tokens and cannot refund them.
   Settlement still comes only from the LNURL's `verify`.

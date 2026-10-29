@@ -3,34 +3,86 @@
 @inject BTCPayServer.Abstractions.Contracts.ISettingsRepository Settings
 @{
     var projectId = (await Settings.GetSettingAsync<LnurlTokenServerSettings>())?.WalletConnectProjectId;
-    var walletUrl = Url.Content("~/Resources/lnurlverify/wallet.js") + "?v=" + typeof(LNURLVerifyPlugin).Assembly.GetName().Version;
+    var version = typeof(LNURLVerifyPlugin).Assembly.GetName().Version;
+    var walletUrl = Url.Content("~/Resources/lnurlverify/wallet.js") + "?v=" + version;
+    var iconUrl = Url.Content("~/Resources/lnurlverify/icons/");
 }
 
 <template id="@LnurlTokenCheckoutExtension.ComponentName">
     <div class="payment-box">
-        <div v-if="networks.length" class="btcpay-pills d-flex flex-wrap justify-content-center gap-2 mb-3" id="LnurlTokenNetworks">
-            <button v-for="n in networks" :key="n.id" type="button" class="btcpay-pill" :class="{ active: current && current.id === n.id }"
-                    :disabled="busy === n.id" :data-network="n.id" v-on:click="pick(n)" v-text="named(n)"></button>
+        <div v-if="networks.length" class="lnurl-options lnurl-options-tiles" id="LnurlTokenNetworks" role="group" aria-label="Network">
+            <button v-for="n in networks" :key="n.id" type="button" :class="{ active: current && current.id === n.id }" :aria-pressed="String(!!current && current.id === n.id)"
+                    :disabled="busy === n.id" :data-network="n.id" v-on:click="pick(n)">
+                <img v-if="n.icon" :src="icon(n.icon)" alt="" />
+                <span v-text="n.label"></span>
+            </button>
         </div>
         <p v-else class="text-center my-4" id="LnurlTokenNone">No network is available for this payment right now.</p>
         <template v-if="live">
-            <div class="qr-container" :data-qr-value="current.qr" :data-clipboard="current.qr">
-                <div>
-                    <qrcode :value="current.qr" tag="div" :options="qrOptions" />
-                </div>
+            <div v-if="current.uri || walletConnect" class="lnurl-options lnurl-options-modes" id="LnurlTokenModes" role="group" aria-label="Pay by">
+                <button v-if="current.uri" type="button" :class="{ active: view === 'link' }" :aria-pressed="String(view === 'link')" id="LnurlTokenModeLink"
+                        v-on:click="mode = 'link'">Payment link</button>
+                <button type="button" :class="{ active: view === 'address' }" :aria-pressed="String(view === 'address')" id="LnurlTokenModeAddress"
+                        v-on:click="mode = 'address'">Address</button>
+                <button v-if="walletConnect" type="button" :class="{ active: wc }" :aria-pressed="String(wc)" id="LnurlTokenModeWalletConnect" v-on:click="useWalletConnect">
+                    <img :src="icon('walletconnect')" alt="" />
+                    <span>WalletConnect</span>
+                </button>
             </div>
+            <div v-if="qr" class="qr-container" :data-qr-value="qr" :data-clipboard="qr">
+                <div>
+                    <qrcode :value="qr" tag="div" :options="qrOptions" />
+                </div>
+                <img v-if="wc" class="qr-icon" :src="icon('walletconnect')" alt="WalletConnect" />
+                <span v-else-if="token.icon" class="lnurl-qr-icon">
+                    <img :src="icon(token.icon)" :alt="token.code" />
+                    <img v-if="current.icon" class="lnurl-qr-badge" :src="icon(current.icon)" :alt="current.label" />
+                </span>
+            </div>
+            <div v-else-if="pairing || sending" class="text-center my-4"><span class="spinner-border" role="status"></span></div>
             <p class="text-center mt-3 mb-0" id="LnurlTokenAmount" v-text="summary"></p>
             <p v-if="secondsLeft !== null" class="text-center text-muted small" id="LnurlTokenExpiry" v-text="'Quote valid for ' + countdown"></p>
-            <p v-if="current.provider" class="text-center text-muted small" id="LnurlTokenProvider" v-text="providerTerms"></p>
-            <div class="input-group mt-3">
-                <div class="form-floating" id="LnurlTokenRecipient">
-                    <vc:truncate-center text="current.destination" is-vue="true" padding="15" elastic="true" classes="form-control-plaintext" />
-                    <label>Recipient</label>
+            <template v-if="view === 'address'">
+                <div class="input-group mt-3">
+                    <div class="form-floating" id="LnurlTokenRecipient">
+                        <vc:truncate-center text="current.destination" is-vue="true" padding="15" elastic="true" classes="form-control-plaintext" />
+                        <label>Recipient</label>
+                    </div>
                 </div>
-            </div>
-            <a v-if="current.uri && model.showPayInWalletButton" class="btn btn-primary rounded-pill w-100 mt-4" id="LnurlTokenOpenWallet" target="_blank" :href="current.uri">Open in wallet</a>
-            <button v-if="walletConnect && !sentHere" type="button" class="btn btn-secondary rounded-pill w-100 mt-2" id="LnurlTokenConnect"
-                    :disabled="sending" v-on:click="payWithWallet">Connect wallet</button>
+                <div class="input-group mt-3">
+                    <div class="form-floating" id="LnurlTokenAmountCopy">
+                        <span class="truncate-center truncate-center--copy form-control-plaintext">
+                            <span v-text="current.amount + ' ' + token.code"></span>
+                            <button type="button" class="btn btn-link p-0 clipboard-button" :data-clipboard="current.amount"><vc:icon symbol="actions-copy" /></button>
+                        </span>
+                        <label>Amount</label>
+                    </div>
+                </div>
+            </template>
+            <a v-else-if="view === 'link' && model.showPayInWalletButton" class="btn btn-primary rounded-pill w-100 mt-4" id="LnurlTokenOpenWallet" target="_blank" :href="current.uri">Open in wallet</a>
+            <template v-else-if="wc && !sentHere">
+                <p v-if="sending" class="text-center text-muted mt-3" id="LnurlTokenConfirm">Confirm the payment in your wallet</p>
+                <button v-else-if="wcUri || !pairing" type="button" class="btn btn-primary rounded-pill w-100 mt-4" id="LnurlTokenConnect"
+                        v-on:click="wcUri ? openWallet() : startPairing()">
+                    <svg class="lnurl-wc-glyph" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6.685 8.71c2.935-2.813 7.695-2.813 10.63 0l.353.339a.35.35 0 0 1 0 .51l-1.208 1.158a.194.194 0 0 1-.266 0l-.486-.466c-2.048-1.963-5.368-1.963-7.416 0l-.52.498a.194.194 0 0 1-.266 0L6.297 9.592a.35.35 0 0 1 0-.51zm13.13 2.396 1.075 1.03a.35.35 0 0 1 0 .51l-4.85 4.648a.39.39 0 0 1-.531 0l-3.443-3.299a.097.097 0 0 0-.132 0l-3.442 3.3a.39.39 0 0 1-.532 0l-4.85-4.65a.35.35 0 0 1 0-.508l1.076-1.031a.387.387 0 0 1 .531 0l3.442 3.299a.097.097 0 0 0 .133 0l3.442-3.3a.387.387 0 0 1 .532 0l3.442 3.3a.097.097 0 0 0 .133 0l3.442-3.3a.39.39 0 0 1 .531 0"/></svg>
+                    <span v-text="wcUri ? 'Open in wallet' : 'Pay with WalletConnect'"></span>
+                </button>
+            </template>
+            <template v-if="current.provider">
+                <button type="button" class="lnurl-provider" id="LnurlTokenProvider" v-on:click="$refs.terms.showModal()">
+                    <span v-text="'Serviced by ' + current.provider"></span>
+                    <vc:icon symbol="info" />
+                </button>
+                <dialog ref="terms" class="lnurl-terms" id="LnurlTokenProviderTerms" v-on:click.self="$refs.terms.close()">
+                    <div>
+                        <h5 v-text="'Serviced by ' + current.provider"></h5>
+                        <ul>
+                            <li v-for="term in providerTerms" v-text="term"></li>
+                        </ul>
+                        <form method="dialog"><button class="btn btn-primary rounded-pill w-100">Got it</button></form>
+                    </div>
+                </dialog>
+            </template>
         </template>
         <div v-else-if="renewable" class="text-center my-4">
             <button type="button" class="btn btn-secondary" id="LnurlTokenRefresh" :disabled="busy === current.id" v-on:click="request(current.id)"
@@ -52,8 +104,8 @@
         data () {
             return {
                 selected: null, busy: null, pending: false, now: Math.floor(Date.now() / 1000), timer: null,
-                projectId: @Safe.Json(projectId), walletUrl: @Safe.Json(walletUrl), walletNamespaces: ['eip155', 'solana', 'tron'],
-                sending: false, sent: null, walletError: null,
+                projectId: @Safe.Json(projectId), walletUrl: @Safe.Json(walletUrl), iconUrl: @Safe.Json(iconUrl), walletNamespaces: ['eip155', 'solana', 'tron'],
+                mode: 'link', wcUri: null, pairing: false, sending: false, sent: null, walletError: null,
                 activateUrl: @Safe.Json(Url.Action("ActivateToken", "LnurlRailCheckout", new { invoiceId = Model.InvoiceId }))
             };
         },
@@ -66,7 +118,10 @@
             expired () { return !!this.current && (this.current.state === 'expired' || (this.current.state === 'live' && this.secondsLeft === 0)); },
             renewable () { return this.expired || (!!this.current && (this.current.state === 'stale' || this.current.state === 'failed')); },
             countdown () { return Math.floor(this.secondsLeft / 60) + ':' + String(this.secondsLeft % 60).padStart(2, '0'); },
-            walletConnect () { return !!this.projectId && this.walletNamespaces.includes(this.current.namespace); },
+            walletConnect () { return !!this.projectId && !!this.current && this.walletNamespaces.includes(this.current.namespace); },
+            view () { return this.mode === 'wc' && this.walletConnect ? 'wc' : this.mode === 'address' || !this.current.uri ? 'address' : 'link'; },
+            wc () { return this.view === 'wc'; },
+            qr () { return { wc: this.wcUri, link: this.current.uri, address: this.current.destination }[this.view]; },
             sentRef () {
                 if (!this.current) return null;
                 const key = this.token.pmi + '/' + this.current.id;
@@ -75,11 +130,12 @@
                 return this.sent && this.sent.key === key ? this.sent.ref : this.storedRef(key);
             },
             sentHere () { return !!this.sentRef; },
-            summary () { return this.current.amount + ' ' + this.token.code + ' on ' + this.named(this.current); },
+            summary () { return this.current.amount + ' ' + this.token.code + ' on ' + this.current.label; },
             providerTerms () {
                 const p = this.current.provider;
-                return 'This deposit address belongs to ' + p + ', a third-party service, not to the merchant. Send exactly this amount before the quote ' +
-                    'expires: a late, short or excess deposit is resolved with ' + p + ', not with the merchant or BTCPay Server.';
+                return ['This deposit address belongs to ' + p + ', a third-party service, not to the merchant.',
+                    'Send exactly the amount shown before the quote expires.',
+                    'A late, short or excess deposit is resolved with ' + p + ', not with the merchant or BTCPay Server.'];
             }
         },
         watch: {
@@ -90,7 +146,7 @@
         },
         beforeDestroy () { clearInterval(this.timer); },
         methods: {
-            named (n) { return n.provider ? n.label + ' via ' + n.provider : n.label; },
+            icon (name) { return this.iconUrl + name + '.svg'; },
             isLive (n) { return n.state === 'live' && !(n.expiresAt && n.expiresAt <= this.now); },
             async request (network) {
                 if (!this.token.pmi) return;
@@ -113,14 +169,38 @@
                     document.head.appendChild(script);
                 });
             },
+            walletNetworks () {
+                return this.networks.filter(n => this.walletNamespaces.includes(n.namespace)).map(n => Object.assign({}, n, { decimals: this.token.decimals }));
+            },
+            useWalletConnect () {
+                this.mode = 'wc';
+                if (!this.wcUri && !this.pairing && !this.sending && !this.sentHere) this.startPairing();
+            },
+            // Reown is contacted only from here, once the payer picks WalletConnect.
+            async startPairing () {
+                this.pairing = true;
+                this.walletError = null;
+                try {
+                    await this.loadWallet();
+                    await window.LnurlVerifyWallet.pair({ projectId: this.projectId, networks: this.walletNetworks(), onUri: uri => { this.wcUri = uri; } });
+                    this.wcUri = null;
+                    // the payer approved in their wallet: ask it for what is on screen now, unless they left WalletConnect or the quote lapsed
+                    if (this.wc && this.live) await this.payWithWallet();
+                } catch (e) {
+                    this.wcUri = null;
+                    if (this.wc) this.walletError = e && e.message ? e.message : String(e);
+                } finally {
+                    this.pairing = false;
+                }
+            },
+            openWallet () { window.LnurlVerifyWallet.open(); },
             async payWithWallet () {
                 this.sending = true;
                 this.walletError = null;
                 // read before the first await: a tab switch meanwhile must change neither what is paid nor where the result lands
                 const pmi = this.token.pmi;
-                const withDecimals = n => Object.assign({}, n, { decimals: this.token.decimals });
-                const network = withDecimals(this.current);
-                const networks = this.networks.filter(n => this.walletNamespaces.includes(n.namespace)).map(withDecimals);
+                const network = Object.assign({}, this.current, { decimals: this.token.decimals });
+                const networks = this.walletNetworks();
                 const key = pmi + '/' + network.id;
                 const store = this.storageKey(key);
                 try {

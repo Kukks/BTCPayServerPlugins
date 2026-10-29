@@ -22,6 +22,51 @@
     <div id="LNURLVerifySummary" aria-live="polite"></div>
 </div>
 
+<style>
+    .lnurl-setup {
+        padding: var(--btcpay-space-s) var(--btcpay-space-m);
+    }
+    .lnurl-setup-head {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: var(--btcpay-space-s);
+        padding-bottom: var(--btcpay-space-s);
+    }
+    .lnurl-setup-row {
+        display: flex;
+        align-items: center;
+        gap: var(--btcpay-space-s);
+        min-height: 2.5rem;
+        border-top: 1px solid var(--btcpay-body-border-light);
+    }
+    .lnurl-setup-row .form-check {
+        min-height: 0;
+        margin: 0;
+    }
+    .lnurl-setup-row .form-check-input {
+        margin-top: 0;
+    }
+    .lnurl-setup-row img {
+        width: 1.25rem;
+        height: 1.25rem;
+    }
+    .lnurl-setup-end {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: .375rem;
+        margin-inline-start: auto;
+        color: var(--btcpay-body-text-muted);
+        font-size: var(--btcpay-font-size-s);
+        text-align: end;
+    }
+    .lnurl-setup-end .off {
+        opacity: .3;
+        filter: grayscale(1);
+    }
+</style>
+
 <script>
     document.addEventListener('DOMContentLoaded', () => {
         const tab = document.getElementById('LightningNodeType-LNURLVerify');
@@ -31,7 +76,9 @@
         const form = input.form;
         const resolveUrl = @Safe.Json(Url.Action("Resolve", "LnurlRailSettings", new { storeId }));
         const railsUrl = @Safe.Json(Url.Action("Index", "LnurlRailSettings", new { storeId }));
-        let resolving = null, timer = null;
+        const enabledUrl = @Safe.Json(Url.Action("Enabled", "LnurlRailSettings", new { storeId }));
+        const iconUrl = @Safe.Json(Url.Content("~/Resources/lnurlverify/icons/"));
+        let resolving = null, timer = null, dirty = false;
         const el = (tag, className, text) => {
             const e = document.createElement(tag);
             if (className) e.className = className;
@@ -40,8 +87,12 @@
         };
         const sats = msat => msat == null ? '?' : (msat / 1000).toLocaleString();
         const range = o => sats(o.minSendable) + ' – ' + sats(o.maxSendable) + ' sats';
-        const flags = o => [range(o), o.verifiable === true ? 'verifiable' : o.verifiable === false ? 'not verifiable' : null,
-            o.available ? null : 'unavailable'].filter(Boolean).join(' · ');
+        const icon = (name, alt) => {
+            const i = el('img');
+            i.src = iconUrl + name + '.svg';
+            i.alt = alt;
+            return i;
+        };
 
         async function resolve () {
             clearTimeout(timer);
@@ -72,32 +123,66 @@
             render(summary);
         }
 
+        // One switch per rail or token asset; a token's networks are its icons, dimmed where checkout cannot offer them.
+        function row (lead, options, ...label) {
+            const r = el('div', 'lnurl-setup-row');
+            const locked = options.every(o => o.locked) ? lead.locked : null;
+            const sw = el('input', 'form-check-input');
+            sw.type = 'checkbox';
+            sw.setAttribute('role', 'switch');
+            sw.setAttribute('aria-label', label.map(l => l.textContent || l.alt).join(' '));
+            sw.checked = !locked && !lead.excluded;
+            sw.disabled = !lead.toggle || !!locked;
+            if (lead.toggle && !locked) {
+                sw.dataset.toggle = lead.toggle;
+                sw.addEventListener('change', () => { dirty = true; });
+            }
+            const end = el('span', 'lnurl-setup-end');
+            if (lead.unit && lead.toggle && !locked) {
+                for (const o of options) {
+                    const why = o.locked || o.transient;
+                    const net = o.icon ? icon(o.icon, o.label) : el('span', null, o.label);
+                    net.title = o.label + (why ? ': ' + why : '');
+                    net.dataset.option = o.id;
+                    if (o.locked) net.classList.add('off');
+                    end.append(net);
+                }
+            } else {
+                end.textContent = locked || (lead.excluded ? '' : lead.transient) || '';
+            }
+            const toggle = el('div', 'form-check form-switch');
+            toggle.append(sw);
+            r.append(toggle, ...label, end);
+            return r;
+        }
+
         function render (s) {
             out.replaceChildren();
+            dirty = false;
             if (s.error) {
                 out.append(el('p', 'text-danger mb-0', s.error));
                 return;
             }
-            const card = el('div', 'border rounded p-3');
-            const head = el('div', 'd-flex flex-wrap justify-content-between gap-2');
-            head.append(el('strong', null, s.domain), el('span', 'text-muted', (s.sends ? 'Sends and receives' : 'Receives only') + ', ' + range(s)));
+            const card = el('div', 'lnurl-setup border rounded');
+            const head = el('div', 'lnurl-setup-head');
+            head.append(el('strong', null, s.domain), el('span', 'text-muted', (s.sends ? 'Sends and receives' : 'Receives only') + ' · ' + range(s)));
             card.append(head);
-            card.append(el('p', 'text-muted mt-2 mb-0', 'LUD-21 verify support, which payment detection needs, and the invoice network are '
-                + 'checked when you save: BTCPay then requests one small invoice.'));
-            const table = el('table', 'table table-sm mt-3 mb-2');
+            const units = new Map();
             for (const o of s.options) {
-                const row = table.insertRow();
-                row.dataset.option = o.id || '';
-                row.insertCell().append(el('div', null, o.label), el('div', 'text-muted small text-nowrap', flags(o)));
-                row.insertCell().append(o.offered ? el('span', 'text-success', 'Offered') : el('span', 'text-muted', 'Not offered: ' + o.reason));
+                if (o.unit && o.toggle) units.set(o.unit, [...(units.get(o.unit) || []), o]);
+                else card.append(Object.assign(row(o, [o], el('span', null, o.label)), { id: 'LNURLVerifyOption-' + (o.id || 'lightning') }));
             }
-            card.append(table);
-            const note = el('p', 'form-text mb-0', 'Rails and token tabs are added shortly after you save. Switch each one off, or choose whether checkout requests them all when it opens, on the ');
+            for (const [unit, options] of units) {
+                const name = el('span', null, unit);
+                const r = options[0].unitIcon ? row(options[0], options, icon(options[0].unitIcon, ''), name) : row(options[0], options, name);
+                card.append(Object.assign(r, { id: 'LNURLVerifyUnit-' + unit }));
+            }
+            out.append(card);
+            const note = el('p', 'form-text mb-0', 'Verify support is checked when you save, with one small invoice. More options on the ');
             const link = el('a', null, 'LNURL rails');
             link.href = railsUrl;
             note.append(link, ' page.');
-            card.append(note);
-            out.append(card);
+            out.append(note);
         }
 
         input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(resolve, 600); });
@@ -105,6 +190,26 @@
         // Enter would otherwise submit through the form's first button, the hidden Custom pane's "Test connection".
         input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); resolve(); } });
         tab.addEventListener('shown.bs.tab', resolve);
+        // Capture phase: the switches save before the page's form does, never alongside it, since both write the store.
+        form.addEventListener('submit', async e => {
+            if (!tab.checked || !dirty) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            dirty = false;
+            const body = new URLSearchParams({ __RequestVerificationToken: form.elements['__RequestVerificationToken'].value });
+            for (const sw of out.querySelectorAll('input[data-toggle]')) {
+                body.append('shownRails', sw.dataset.toggle);
+                if (sw.checked) body.append('enabledRails', sw.dataset.toggle);
+            }
+            let saved = false;
+            try { saved = (await fetch(enabledUrl, { method: 'POST', body })).ok; } catch (err) { }
+            if (!saved) {
+                dirty = true;
+                status.textContent = 'the switches could not be saved, try again';
+                return;
+            }
+            form.requestSubmit(e.submitter);
+        }, true);
         form.addEventListener('submit', () => {
             if (tab.checked) form.elements['ConnectionString'].value = 'type=lnurl;value=' + input.value.trim();
         });

@@ -124,7 +124,7 @@ export TESTS_POSTGRES="User ID=postgres;Include Error Detail=true;Host=127.0.0.1
 dotnet build BTCPayServer.Plugins.Tests -p:StaticWebAssetsEnabled=false
 pwsh BTCPayServer.Plugins.Tests/bin/Debug/net10.0/playwright.ps1 install chromium
 dotnet test BTCPayServer.Plugins.Tests --no-build -p:StaticWebAssetsEnabled=false --filter "FullyQualifiedName~TokenCheckoutBrowserTests.A_payer_sees_each_network"
-WALLETCONNECT_PROJECT_ID=<Reown project id> dotnet test BTCPayServer.Plugins.Tests --no-build -p:StaticWebAssetsEnabled=false --filter "FullyQualifiedName~TokenCheckoutBrowserTests.Connect_wallet"
+WALLETCONNECT_PROJECT_ID=<Reown project id> dotnet test BTCPayServer.Plugins.Tests --no-build -p:StaticWebAssetsEnabled=false --filter "FullyQualifiedName~TokenCheckoutBrowserTests.WalletConnect"
 dotnet test BTCPayServer.Plugins.Tests --no-build -p:StaticWebAssetsEnabled=false --filter "FullyQualifiedName~TokenCheckoutBrowserTests.A_fixedfloat"
 ```
 
@@ -138,7 +138,7 @@ a new order with only a short `paymentQuote.expiresAt`, and `verify` reports the
 `paymentReference`. The test checks five things:
 - the default assets provision USDT and USDC;
 - opening the tab orders no quote, and a tap orders exactly one for the network tapped;
-- the chips and amount read "via FixedFloat", next to the provider notice;
+- the network buttons and amount name no provider; one "Serviced by FixedFloat" line does, and its dialog holds the terms;
 - an expired quote is re-quoted at a new deposit address;
 - the invoice settles through `verifyBatch` with the deposit transaction linked.
 
@@ -152,13 +152,14 @@ project ID set. Confirm each once, and that the invoice settles with the network
 
 | Network | By QR | By deeplink (phone) | By WalletConnect (desktop) |
 |---|---|---|---|
-| Arbitrum Sepolia | MetaMask scans the EIP-681 QR | "Open in wallet" opens MetaMask | Connect wallet, scan with MetaMask |
-| Solana devnet | Phantom scans the Solana Pay QR | "Open in wallet" opens Phantom | Connect wallet, scan with a WalletConnect Solana wallet |
-| Tron Nile | TronLink scans the recipient; enter the amount shown | none | Connect wallet, scan with TronLink |
+| Arbitrum Sepolia | MetaMask scans the EIP-681 QR | "Open in wallet" opens MetaMask | Pick WalletConnect, scan its QR with MetaMask |
+| Solana devnet | Phantom scans the Solana Pay QR | "Open in wallet" opens Phantom | Pick WalletConnect, scan its QR with a WalletConnect Solana wallet |
+| Tron Nile | TronLink scans the recipient; enter the amount shown | none | Pick WalletConnect, scan its QR with TronLink |
 
-On a provider's network (lnurl-server's FixedFloat rails, or its simulated provider), confirm the notice next to the QR. It
-must say that the deposit address belongs to the provider and not the merchant, that the quote expires, and that a late,
-short or excess deposit is resolved with the provider, not with the merchant or BTCPay.
+On a provider's network (lnurl-server's FixedFloat rails, or its simulated provider), confirm the "Serviced by" line below
+the payment details and the dialog its info button opens. The dialog must say that the deposit address belongs to the
+provider and not the merchant, that the quote expires, and that a late, short or excess deposit is resolved with the
+provider, not with the merchant or BTCPay.
 
 ## 7. The payer's IP — live check
 

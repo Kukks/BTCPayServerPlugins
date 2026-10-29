@@ -47,6 +47,15 @@ public class TokenCheckoutBrowserTests : UnitTestBase
         await page.Locator("#LnurlTokenNetworks button[data-network='usdt-tron']").ClickAsync();
         await Expect(page.Locator(".qr-container")).ToHaveAttributeAsync("data-qr-value", StubLnurl.TronRecipient);
         await Expect(page.Locator("#LnurlTokenOpenWallet")).ToHaveCountAsync(0);
+        await Expect(page.Locator("#LnurlTokenModes")).ToHaveCountAsync(0);
+        await Expect(page.Locator("#LnurlTokenAmountCopy button")).ToHaveAttributeAsync("data-clipboard", "63.36");
+
+        await page.Locator("#LnurlTokenNetworks button[data-network='usdt-arbitrum']").ClickAsync();
+        await page.Locator("#LnurlTokenModeAddress").ClickAsync();
+        await Expect(page.Locator(".qr-container")).ToHaveAttributeAsync("data-qr-value", StubLnurl.EvmRecipient);
+        await Expect(page.Locator("#LnurlTokenRecipient [data-clipboard]")).ToHaveAttributeAsync("data-clipboard", StubLnurl.EvmRecipient);
+        await Expect(page.Locator("#LnurlTokenAmountCopy")).ToContainTextAsync("63.36 USDT");
+        await Expect(page.Locator("#LnurlTokenOpenWallet")).ToHaveCountAsync(0);
 
         var txHash = "0x" + new string('a', 64);
         stub.Settle("usdt-arbitrum", txHash);
@@ -82,18 +91,24 @@ public class TokenCheckoutBrowserTests : UnitTestBase
         var qr = page.Locator(".qr-container");
 
         await OpenTokenTab(page, tester, invoiceId);
-        await Expect(page.Locator("#LnurlTokenNetworks button")).ToHaveTextAsync(new[] { "Arbitrum One via FixedFloat", "Tron via FixedFloat" });
+        await Expect(page.Locator("#LnurlTokenNetworks button")).ToHaveTextAsync(new[] { "Arbitrum One", "Tron" });
         string Evm(int n) => $"ethereum:{StubLnurl.ArbitrumUsdt}@42161/transfer?address={StubLnurl.DepositAddress("ff-usdtarbitrum", n)}&uint256=63360000";
         // Opening the tab orders no quote; a tap orders one, for the network tapped alone.
         Assert.Equal((0, 0), (stub.Orders("ff-usdtarbitrum"), stub.Orders("ff-usdttrc")));
         var arbitrum = page.Locator("#LnurlTokenNetworks button[data-network='ff-usdtarbitrum']");
         await arbitrum.ClickAsync();
-        await Expect(page.Locator("#LnurlTokenAmount")).ToHaveTextAsync("63.36 USDT on Arbitrum One via FixedFloat");
+        await Expect(page.Locator("#LnurlTokenAmount")).ToHaveTextAsync("63.36 USDT on Arbitrum One");
         Assert.Equal((1, 0), (stub.Orders("ff-usdtarbitrum"), stub.Orders("ff-usdttrc")));
         await Expect(qr).ToHaveAttributeAsync("data-qr-value", Evm(1));
-        await Expect(page.Locator("#LnurlTokenProvider")).ToHaveTextAsync(
-            "This deposit address belongs to FixedFloat, a third-party service, not to the merchant. Send exactly this amount before the " +
-            "quote expires: a late, short or excess deposit is resolved with FixedFloat, not with the merchant or BTCPay Server.");
+        await Expect(page.Locator("#LnurlTokenProvider")).ToHaveTextAsync("Serviced by FixedFloat");
+        var terms = page.Locator("#LnurlTokenProviderTerms");
+        await Expect(terms).ToBeHiddenAsync();
+        await page.Locator("#LnurlTokenProvider").ClickAsync();
+        await Expect(terms).ToContainTextAsync("This deposit address belongs to FixedFloat, a third-party service, not to the merchant.");
+        await Expect(terms).ToContainTextAsync("Send exactly the amount shown before the quote expires.");
+        await Expect(terms).ToContainTextAsync("A late, short or excess deposit is resolved with FixedFloat, not with the merchant or BTCPay Server.");
+        await page.Keyboard.PressAsync("Escape");
+        await Expect(terms).ToBeHiddenAsync();
         await Expect(page.Locator("#LnurlTokenExpiry")).ToHaveTextAsync(new Regex(@"^Quote valid for (1:00|0:[0-5]\d)$"));
 
         await Expect(page.Locator("#LnurlTokenRefresh")).ToHaveTextAsync("Quote expired: get a new one", new() { Timeout = 120_000 });
@@ -105,7 +120,7 @@ public class TokenCheckoutBrowserTests : UnitTestBase
         Assert.Equal((2, 0), (stub.Orders("ff-usdtarbitrum"), stub.Orders("ff-usdttrc")));
         await page.Locator("#LnurlTokenNetworks button[data-network='ff-usdttrc']").ClickAsync();
         await Expect(qr).ToHaveAttributeAsync("data-qr-value", StubLnurl.DepositAddress("ff-usdttrc", 1));
-        await Expect(page.Locator("#LnurlTokenAmount")).ToHaveTextAsync("63.36 USDT on Tron via FixedFloat");
+        await Expect(page.Locator("#LnurlTokenAmount")).ToHaveTextAsync("63.36 USDT on Tron");
         await Expect(page.Locator("#LnurlTokenOpenWallet")).ToHaveCountAsync(0);
 
         var depositTx = "0x" + new string('c', 64);
@@ -130,7 +145,7 @@ public class TokenCheckoutBrowserTests : UnitTestBase
     }
 
     [Fact(Timeout = 300_000)]
-    public async Task Connect_wallet_opens_a_walletconnect_pairing_under_the_checkout_csp()
+    public async Task WalletConnect_shows_its_pairing_as_the_checkout_qr_under_the_checkout_csp()
     {
         var projectId = Environment.GetEnvironmentVariable("WALLETCONNECT_PROJECT_ID")
                         ?? throw new InvalidOperationException("Set WALLETCONNECT_PROJECT_ID to a Reown project ID (see VERIFICATION.md §6).");
@@ -145,14 +160,28 @@ public class TokenCheckoutBrowserTests : UnitTestBase
         // Chromium 149 words a violation "Loading the script ... violates the following Content Security Policy directive", with no "Refused to".
         page.Console += (_, m) => { if (m.Text.Contains("Content Security Policy")) refused.Add(m.Text); };
 
+        var reown = new List<string>();
+        page.Request += (_, r) => { if (Regex.IsMatch(new Uri(r.Url).Host, @"(walletconnect|reown|web3modal)\.(org|com)$")) reown.Add(r.Url); };
+
         await OpenTokenTab(page, tester, invoiceId);
         await page.Locator("#LnurlTokenNetworks button[data-network='usdt-arbitrum']").ClickAsync();
+        var evm = $"ethereum:{StubLnurl.ArbitrumToken}@421614/transfer?address={StubLnurl.EvmRecipient}&uint256=63360000";
+        var qr = page.Locator(".qr-container");
+        await Expect(qr).ToHaveAttributeAsync("data-qr-value", evm);
+        Assert.Empty(reown);
+
+        await page.Locator("#LnurlTokenModeWalletConnect").ClickAsync();
+        await Expect(qr).ToHaveAttributeAsync("data-qr-value", new Regex("^wc:"), new() { Timeout = 60_000 });
+        await Expect(qr.Locator("img.qr-icon[alt='WalletConnect']")).ToBeVisibleAsync();
+        var pairing = (await qr.GetAttributeAsync("data-qr-value"))!;
         await page.Locator("#LnurlTokenConnect").ClickAsync();
-        await Expect(page.Locator("wui-qr-code[uri^='wc:']")).ToBeVisibleAsync(new() { Timeout = 60_000 });
+        await Expect(page.Locator("wui-qr-code")).ToHaveAttributeAsync("uri", pairing, new() { Timeout = 60_000 });
 
         await page.Keyboard.PressAsync("Escape");
-        await Expect(page.Locator("#LnurlTokenWalletError")).ToContainTextAsync("closed");
-        await Expect(page.Locator("#LnurlTokenConnect")).ToBeEnabledAsync();
+        await Expect(qr).ToHaveAttributeAsync("data-qr-value", pairing);
+        await Expect(page.Locator("#LnurlTokenWalletError")).ToHaveCountAsync(0);
+        await page.Locator("#LnurlTokenModeLink").ClickAsync();
+        await Expect(qr).ToHaveAttributeAsync("data-qr-value", evm);
         Assert.Empty(refused);
     }
 

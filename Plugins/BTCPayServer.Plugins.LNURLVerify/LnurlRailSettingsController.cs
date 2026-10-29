@@ -54,6 +54,17 @@ public class LnurlRailSettingsController : Controller
         return RedirectToAction(nameof(Index), new { storeId });
     }
 
+    /// <summary>The Lightning setup page's switches, saved before the page's own form.</summary>
+    [HttpPost("enabled")]
+    public async Task<IActionResult> Enabled([FromRoute] string storeId, string[]? shownRails, string[]? enabledRails)
+    {
+        var store = HttpContext.GetStoreData();
+        var managed = LnurlRails.All.Select(r => r.PaymentMethodId).Concat(_assets.PaymentMethodIds);
+        if (LnurlRailSettings.ApplyEnabledRails(store, managed, shownRails ?? Array.Empty<string>(), enabledRails ?? Array.Empty<string>(), false))
+            await _stores.UpdateStoreBlob(store);
+        return Ok();
+    }
+
     /// <summary>The Lightning setup page's preview of an LNURL before it is saved.</summary>
     [HttpPost("resolve")]
     public async Task<IActionResult> Resolve([FromRoute] string storeId, string? lnurl)

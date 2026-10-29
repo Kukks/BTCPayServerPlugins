@@ -1,0 +1,134 @@
+<style>
+    /* A choice inside the selected tab: a recessed track, so it never reads as another row of core's tab pills. */
+    .lnurl-options {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: var(--btcpay-space-xs);
+        margin: 0 0 var(--btcpay-space-m);
+        padding: var(--btcpay-space-xs);
+        border-radius: var(--btcpay-border-radius-l);
+        background: var(--btcpay-body-bg);
+    }
+    .lnurl-options > button {
+        flex: 1 1 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: .375rem;
+        padding: .375rem .75rem;
+        border: 1px solid transparent;
+        border-radius: var(--btcpay-border-radius);
+        background: transparent;
+        color: var(--btcpay-body-text-muted);
+        font-size: var(--btcpay-font-size-s);
+        font-weight: var(--btcpay-font-weight-semibold);
+        white-space: nowrap;
+    }
+    .lnurl-options > button:hover:not(:disabled) {
+        color: var(--btcpay-body-text);
+    }
+    .lnurl-options > button.active {
+        color: var(--btcpay-body-text);
+        background: var(--btcpay-bg-tile);
+        border-color: var(--btcpay-primary);
+    }
+    .lnurl-options img,
+    .lnurl-options .icon {
+        width: 1.125rem;
+        height: 1.125rem;
+        flex-shrink: 0;
+    }
+    .lnurl-options-tiles > button {
+        flex: 0 0 calc((100% - 2 * var(--btcpay-space-xs)) / 3);
+        flex-direction: column;
+        gap: .25rem;
+        padding: .5rem .25rem;
+        font-size: var(--btcpay-font-size-xs);
+        white-space: normal;
+    }
+    .lnurl-options-tiles img {
+        width: 1.5rem;
+        height: 1.5rem;
+    }
+    .lnurl-options-modes {
+        flex-wrap: nowrap;
+    }
+    .lnurl-options-modes > button {
+        padding-inline: .5rem;
+        font-size: var(--btcpay-font-size-xs);
+    }
+    .lnurl-options-modes img {
+        width: 1rem;
+        height: 1rem;
+    }
+    .lnurl-qr-icon {
+        position: absolute;
+        box-sizing: content-box;
+        width: var(--icon-size);
+        height: var(--icon-size);
+        padding: var(--icon-border-size);
+        border-radius: 50%;
+        background: var(--icon-border-color);
+    }
+    .lnurl-qr-icon > img {
+        width: 100%;
+        height: 100%;
+    }
+    .lnurl-qr-icon > .lnurl-qr-badge {
+        position: absolute;
+        right: -.25rem;
+        bottom: -.25rem;
+        width: 45%;
+        height: 45%;
+        padding: 2px;
+        border-radius: 50%;
+        background: var(--icon-border-color);
+    }
+    .lnurl-provider {
+        display: flex;
+        align-items: center;
+        gap: var(--btcpay-space-xs);
+        margin: var(--btcpay-space-m) auto 0;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: var(--btcpay-body-text-muted);
+        font-size: var(--btcpay-font-size-s);
+    }
+    .lnurl-provider:hover {
+        color: var(--btcpay-body-text);
+    }
+    .lnurl-provider .icon {
+        width: 1rem;
+        height: 1rem;
+        color: var(--btcpay-info);
+    }
+    .lnurl-terms {
+        width: min(24rem, calc(100% - 2rem));
+        padding: 0;
+        border: 0;
+        border-radius: var(--btcpay-border-radius-l);
+        background: var(--btcpay-bg-tile);
+        color: var(--btcpay-body-text);
+    }
+    .lnurl-terms > div {
+        padding: var(--btcpay-space-l);
+    }
+    .lnurl-terms::backdrop {
+        background: rgba(0, 0, 0, .5);
+    }
+    .lnurl-terms ul {
+        text-align: start;
+        padding-inline-start: 1.25rem;
+        margin-bottom: var(--btcpay-space-l);
+    }
+    .lnurl-terms li + li {
+        margin-top: var(--btcpay-space-s);
+    }
+    .lnurl-wc-glyph {
+        width: 1.5rem;
+        height: 1.5rem;
+        margin: -.25rem .25rem -.25rem 0;
+    }
+</style>
