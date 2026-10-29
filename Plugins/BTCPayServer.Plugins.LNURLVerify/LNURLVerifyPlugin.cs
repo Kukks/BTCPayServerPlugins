@@ -24,7 +24,11 @@ public class LNURLVerifyPlugin : BaseBTCPayServerPlugin
     public override void Execute(IServiceCollection services)
     {
         var bootstrap = (services as PluginServiceCollection)?.BootstrapServices;
-        var (assets, rejected) = TokenAssets.Parse(bootstrap?.GetService<IConfiguration>()?[TokenAssets.ConfigKey]);
+        var configuration = bootstrap?.GetService<IConfiguration>();
+        var allowPrivate = EgressGuard.AllowPrivate(configuration);
+        foreach (var name in EgressGuard.ClientNames)
+            services.AddHttpClient(name).ConfigurePrimaryHttpMessageHandler(() => EgressGuard.Handler(allowPrivate));
+        var (assets, rejected) = TokenAssets.Parse(configuration?[TokenAssets.ConfigKey]);
         if (rejected.Count > 0)
             bootstrap?.GetService<Logs>()?.Configuration.LogWarning(
                 "LNURL Verify ignores {Codes} in {Key}: a code is 1-16 letters or digits and cannot name an LNURL rail",

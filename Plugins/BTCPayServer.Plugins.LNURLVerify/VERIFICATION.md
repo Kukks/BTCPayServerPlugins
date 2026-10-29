@@ -60,9 +60,12 @@ To enable:
 
 ## 4. Live BTCPay — manual (the real acceptance test)
 
-1. Load the plugin, configure a store's Lightning with `type=lnurl;value=<a verify-capable LN address>`
-   (e.g. another BTCPay store's LN address). Confirm the store's Lightning **connect/validate** succeeds
-   (this exercises `Validate()` + the verify-support probe).
+1. Load the plugin, configure a store's Lightning from the **Lightning address** tab with a verify-capable
+   LN address (e.g. another BTCPay store's LN address). Confirm the store's Lightning **connect/validate**
+   succeeds (this exercises `Validate()` + the verify-support probe). The tab stores
+   `type=lnurl;server=<the value's origin>;value=<the value>`; check the saved string carries that `server`,
+   since without it core 2.4.5+ refuses the save for a non-admin. Do this as a store owner who is **not** a
+   server admin too: that is the case the `server` key exists for.
 2. Take a checkout; pay it; confirm the invoice settles with a preimage.
 3. **Persistence across restart:** create a checkout, leave it unpaid, **restart BTCPay**, then pay it.
    Confirm the invoice still settles (this is the restart-survival path — re-seed on first `Create`).
@@ -83,7 +86,9 @@ recorder and restart rebuild in a live host. Needs Docker, and an lnurl-server c
 Steps 2-4 run in the lnurl-server checkout; steps 1 and 5 run in this repository.
 
 1. BTCPay: `docker compose -f submodules/btcpayserver/BTCPayServer.Tests/docker-compose.yml up -d dev`. Then write
-   `submodules/btcpayserver/BTCPayServer/appsettings.dev.json` as `{"DEBUG_PLUGINS":"<built plugin dll path>"}` and run
+   `submodules/btcpayserver/BTCPayServer/appsettings.dev.json` as
+   `{"DEBUG_PLUGINS":"<built plugin dll path>","LNURLVERIFY_ALLOWPRIVATE":"true"}` — the flag is required because
+   step 6's lnurl-server is on localhost, which the egress guard refuses by default — and run
    `dotnet run --project submodules/btcpayserver/BTCPayServer --launch-profile Bitcoin-HTTPS`.
 2. Arkade regtest, from the lnurl-server checkout:
    `ARKD_VTXO_TREE_EXPIRY=6144 ARKD_UNILATERAL_EXIT_DELAY=512 ARKD_PUBLIC_UNILATERAL_EXIT_DELAY=512 ARKD_BOARDING_EXIT_DELAY=2048 ARKD_CHECKPOINT_EXIT_DELAY=1536 AUTOMINE_INTERVAL=0 PRICEFEED_PORT=18088 node regtest/regtest.mjs start --profile emulator`
@@ -98,7 +103,8 @@ Steps 2-4 run in the lnurl-server checkout; steps 1 and 5 run in this repository
    `PORT=80 BASE_URL=http://localhost DB_PATH=<file> ALLOW_INSECURE_TOKEN_STORAGE=1 BOOTSTRAP_DOMAIN=localhost OFFLINE_COVENANT_DESTINATIONS=true ARK_SERVER_URL=http://localhost:7070 OFFLINE_EMULATOR_URL=http://localhost:7073 pnpm start`
 5. The address `alice`, held open by a test-project helper that answers Lightning requests with self-signed invoices:
    `LNURL_SERVER_URL=http://localhost LNURL_ARKADE_ADDRESS=<offchain_address> LNURL_BOARDING_ADDRESS=<boarding_address> LNURL_RUNBOOK_MINUTES=120 dotnet test BTCPayServer.Plugins.Tests -p:StaticWebAssetsEnabled=false --filter "FullyQualifiedName~Serves_an_arkade_address_for_the_checkout_runbook"`
-6. In BTCPay, create a store with default currency BTC and Lightning `type=lnurl;value=http://localhost/.well-known/lnurlp/alice`.
+6. In BTCPay, create a store with default currency BTC and Lightning
+   `type=lnurl;server=http://localhost;value=http://localhost/.well-known/lnurlp/alice`.
    Integrations → LNURL rails then lists the provisioned rails.
 
 Count lnurl-server's destination requests with

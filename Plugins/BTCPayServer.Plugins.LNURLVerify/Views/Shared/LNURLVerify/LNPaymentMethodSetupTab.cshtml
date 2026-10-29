@@ -31,7 +31,7 @@
         const form = input.form;
         const resolveUrl = @Safe.Json(Url.Action("Resolve", "LnurlRailSettings", new { storeId }));
         const railsUrl = @Safe.Json(Url.Action("Index", "LnurlRailSettings", new { storeId }));
-        let resolving = null, timer = null;
+        let resolving = null, timer = null, canonical = null, resubmitting = false;
         const el = (tag, className, text) => {
             const e = document.createElement(tag);
             if (className) e.className = className;
@@ -69,6 +69,7 @@
             }
             status.textContent = '';
             if (summary.error) resolving = null;
+            canonical = summary.connectionString ? { value: value, string: summary.connectionString } : null;
             render(summary);
         }
 
@@ -105,8 +106,29 @@
         // Enter would otherwise submit through the form's first button, the hidden Custom pane's "Test connection".
         input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); resolve(); } });
         tab.addEventListener('shown.bs.tab', resolve);
-        form.addEventListener('submit', () => {
-            if (tab.checked) form.elements['ConnectionString'].value = 'type=lnurl;value=' + input.value.trim();
+        // Only the lookup knows the canonical string, whose server is the value's origin — the key core's
+        // non-admin safety check reads. Without one yet, look up first and re-submit through the same button.
+        form.addEventListener('submit', e => {
+            if (!tab.checked) return;
+            const value = input.value.trim();
+            if (canonical && canonical.value === value) {
+                form.elements['ConnectionString'].value = canonical.string;
+                return;
+            }
+            // Nothing entered has no origin to look up; post it so the server names the missing value.
+            if (!value) {
+                form.elements['ConnectionString'].value = 'type=lnurl;value=';
+                return;
+            }
+            e.preventDefault();
+            if (resubmitting) return;
+            resubmitting = true;
+            resolving = null;
+            const submitter = e.submitter;
+            resolve().then(() => {
+                resubmitting = false;
+                if (canonical && canonical.value === input.value.trim()) form.requestSubmit(submitter);
+            });
         });
         if (@Safe.Json(current is not null)) tab.click();
     });

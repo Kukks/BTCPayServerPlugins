@@ -11,16 +11,38 @@ The capability is decided by decoding the value you provide:
 
 - **Receive only** — a Lightning address or an LNURL-pay:
   ```
-  type=lnurl;value=you@example.com
-  type=lnurl;value=LNURL1DP68...
+  type=lnurl;server=https://example.com;value=you@example.com
+  type=lnurl;server=https://example.com;value=LNURL1DP68...
   ```
 - **Send & receive** — an LNURL-withdraw whose response carries a `payLink` (LUD-19):
   ```
-  type=lnurl;value=LNURL1DP68...
+  type=lnurl;server=https://example.com;value=LNURL1DP68...
   ```
+
+`server` is the `scheme://host[:port]` of the **first URL the value is fetched over** — a Lightning
+address's `.well-known/lnurlp/` endpoint, or the URL a bech32 LNURL decodes to (`http` only for
+`.onion`, per LUD-16/LUD-17). The setup tab fills it in for you from its lookup. It must match the
+value, and is checked before any request is made: a `server` naming some other host is refused.
+
+BTCPay core 2.4.5 and later only lets a user **without** `btcpay.server.canmodifyserversettings`
+save a connection string that carries a public `server`, so the `server` key is what makes this
+backend usable by a non-admin store owner. A string without it still works, but only for an admin.
 
 An LNURL-withdraw **without** a `payLink` is rejected: it can send but cannot create checkout
 invoices, so it is unusable as a store's Lightning backend.
+
+### Private network addresses
+
+Every request the plugin makes — the lookup, the save probe, invoice callbacks, `verify` polling, and
+any `callback`, `payLink`, `balanceCheck` or withdraw URL the service returns — is refused if the host
+resolves to a loopback, private, CGNAT, link-local, unique-local, unspecified, multicast or broadcast
+address. The check runs on the resolved address at connect time, so it also covers a host that answers
+DNS with a private address later. Redirects are not followed.
+
+To point the plugin at an LNURL on the host's own network — a docker-internal `lnurl-server`, or a
+regtest stub — set `LNURLVERIFY_ALLOWPRIVATE=true` (environment `BTCPAY_LNURLVERIFY_ALLOWPRIVATE`),
+default `false`. It is server-wide, not per store. **An admin whose existing LNURL points at an
+internal host must set this flag**, or that store's Lightning stops resolving after the upgrade.
 
 ## How it works
 

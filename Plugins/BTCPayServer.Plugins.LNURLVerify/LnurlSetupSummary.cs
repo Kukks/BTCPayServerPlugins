@@ -20,8 +20,9 @@ public sealed record LnurlSetupOption(string? Id, string Type, string Label, lon
 }
 
 /// <summary>An LNURL as the Lightning setup page shows it: what it is, and what checkout would do with each of its options.</summary>
+/// <param name="ConnectionString">What the setup tab must post: the canonical string the lookup confirmed.</param>
 public sealed record LnurlSetupSummary(string Target, string Domain, bool Sends, long? MinSendable, long? MaxSendable,
-    IReadOnlyList<LnurlSetupOption> Options)
+    IReadOnlyList<LnurlSetupOption> Options, string ConnectionString)
 {
     private const string Unavailable = "the LNURL reports it unavailable right now";
     private const string Unverifiable = "the LNURL marks it not verifiable, so its settlement could not be detected";
@@ -37,9 +38,10 @@ public sealed record LnurlSetupSummary(string Target, string Domain, bool Sends,
 
     public static LnurlSetupSummary Build(string lnurl, ResolvedLnurl resolved, JObject pay, StoreData store, TokenAssets assets)
     {
+        var connectionString = LnurlRailProvisioning.ConnectionString(lnurl);
         // The store as Save leaves it: its own configs and exclusions, with this LNURL as its Lightning.
         var saved = new StoreData { Id = store.Id, DerivationStrategies = store.DerivationStrategies, StoreBlob = store.StoreBlob };
-        saved.SetPaymentMethodConfig(LnurlRailProvisioning.Lightning, new JObject { ["connectionString"] = "type=lnurl;value=" + lnurl });
+        saved.SetPaymentMethodConfig(LnurlRailProvisioning.Lightning, new JObject { ["connectionString"] = connectionString });
         var blocked = LnurlRailProvisioning.LnurlValue(saved) is null ? "Lightning is disabled for this store" : null;
         var blob = saved.GetStoreBlob();
         var tokens = TokenOption.Parse(pay).ToDictionary(t => t.Id);
@@ -82,6 +84,6 @@ public sealed record LnurlSetupSummary(string Target, string Domain, bool Sends,
         var rows = options.Select(o => Row(o, o.MinSendable ?? topMin, o.MaxSendable ?? topMax)).ToList();
         if (!options.Any(o => o.IsLightning)) rows.Insert(0, Row(null, topMin, topMax));
         return new LnurlSetupSummary(resolved.PayEndpoint.AbsoluteUri, resolved.DisplayHost,
-            resolved.Capability == LnurlCapability.SendAndReceive, topMin, topMax, rows);
+            resolved.Capability == LnurlCapability.SendAndReceive, topMin, topMax, rows, connectionString);
     }
 }
