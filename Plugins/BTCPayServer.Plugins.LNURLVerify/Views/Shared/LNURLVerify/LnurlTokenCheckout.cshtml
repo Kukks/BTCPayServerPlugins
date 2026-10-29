@@ -10,26 +10,44 @@
 
 <template id="@LnurlTokenCheckoutExtension.ComponentName">
     <div class="payment-box">
-        <div v-if="networks.length" class="lnurl-options lnurl-options-tiles" id="LnurlTokenNetworks" role="group" aria-label="Network">
-            <button v-for="n in networks" :key="n.id" type="button" :class="{ active: current && current.id === n.id }" :aria-pressed="String(!!current && current.id === n.id)"
-                    :disabled="busy === n.id" :data-network="n.id" v-on:click="pick(n)">
-                <img v-if="n.icon" :src="icon(n.icon)" alt="" />
-                <span v-text="n.label"></span>
-            </button>
+        <div v-if="networks.length" class="lnurl-options lnurl-networks" id="LnurlTokenNetworks" role="group" aria-label="Network">
+            <div class="lnurl-collapse" :class="{ shut: current && !choosing }">
+                <div class="lnurl-options-tiles">
+                    <div v-if="networks.length > 1" class="lnurl-options-caption" id="LnurlTokenChoose">
+                        Choose a network
+                        <button v-if="current" type="button" class="lnurl-network-keep" id="LnurlTokenNetworkKeep" v-on:click="choosing = false; refocus('#LnurlTokenNetworkChosen')">Cancel</button>
+                    </div>
+                    <button v-for="n in networks" :key="n.id" type="button" :class="{ active: current && current.id === n.id }" :aria-pressed="String(!!current && current.id === n.id)"
+                            :disabled="busy === n.id" :data-network="n.id" v-on:click="pick(n)">
+                        <img v-if="n.icon" :src="icon(n.icon)" alt="" />
+                        <span v-text="n.label"></span>
+                    </button>
+                </div>
+            </div>
+            <div class="lnurl-collapse" :class="{ shut: !current || choosing }">
+                <div>
+                    <button v-if="current" type="button" class="lnurl-network-chosen" id="LnurlTokenNetworkChosen" :disabled="networks.length === 1"
+                            aria-expanded="false" v-on:click="choosing = true; refocus('#LnurlTokenNetworks [aria-pressed=true]')">
+                        <img v-if="current.icon" :src="icon(current.icon)" alt="" />
+                        <span v-text="current.label"></span>
+                        <span v-if="networks.length > 1" class="lnurl-network-change">Change</span>
+                    </button>
+                </div>
+            </div>
         </div>
         <p v-else class="text-center my-4" id="LnurlTokenNone">No network is available for this payment right now.</p>
-        <template v-if="live">
-            <div v-if="current.uri || walletConnect" class="lnurl-options lnurl-options-modes" id="LnurlTokenModes" role="group" aria-label="Pay by">
-                <button v-if="current.uri" type="button" :class="{ active: view === 'link' }" :aria-pressed="String(view === 'link')" id="LnurlTokenModeLink"
-                        v-on:click="mode = 'link'">Payment link</button>
-                <button type="button" :class="{ active: view === 'address' }" :aria-pressed="String(view === 'address')" id="LnurlTokenModeAddress"
-                        v-on:click="mode = 'address'">Address</button>
-                <button v-if="walletConnect" type="button" :class="{ active: wc }" :aria-pressed="String(wc)" id="LnurlTokenModeWalletConnect" v-on:click="useWalletConnect">
-                    <img :src="icon('walletconnect')" alt="" />
-                    <span>WalletConnect</span>
-                </button>
-            </div>
-            <div v-if="qr" class="qr-container" :data-qr-value="qr" :data-clipboard="qr">
+        <div v-if="live && (current.uri || walletConnect)" class="lnurl-options lnurl-options-modes" id="LnurlTokenModes" role="group" aria-label="Pay by">
+            <button v-if="current.uri" type="button" :class="{ active: view === 'link' }" :aria-pressed="String(view === 'link')" id="LnurlTokenModeLink"
+                    v-on:click="mode = 'link'">Payment link</button>
+            <button type="button" :class="{ active: view === 'address' }" :aria-pressed="String(view === 'address')" id="LnurlTokenModeAddress"
+                    v-on:click="mode = 'address'">Address</button>
+            <button v-if="walletConnect" type="button" :class="{ active: wc }" :aria-pressed="String(wc)" id="LnurlTokenModeWalletConnect" v-on:click="useWalletConnect">
+                <img :src="icon('walletconnect')" alt="" />
+                <span>WalletConnect</span>
+            </button>
+        </div>
+        <transition name="lnurl-fade" mode="out-in">
+            <div v-if="live && qr" :key="qr" class="qr-container" :data-qr-value="qr" :data-clipboard="qr">
                 <div>
                     <qrcode :value="qr" tag="div" :options="qrOptions" />
                 </div>
@@ -39,10 +57,26 @@
                     <img v-if="current.icon" class="lnurl-qr-badge" :src="icon(current.icon)" :alt="current.label" />
                 </span>
             </div>
-            <div v-else-if="pairing || sending" class="text-center my-4"><span class="spinner-border" role="status"></span></div>
+            <div v-else-if="live && (pairing || sending)" key="waiting" class="text-center my-4"><span class="spinner-border" role="status"></span></div>
+            <div v-else-if="renewable" key="renew" class="text-center my-4">
+                <button type="button" class="btn btn-secondary" id="LnurlTokenRefresh" :disabled="busy === current.id" v-on:click="request(current.id)"
+                        v-text="current.state === 'stale' ? 'The amount due changed: get a new quote'
+                               : current.state === 'failed' ? 'No quote for this network yet: try again' : 'Quote expired: get a new one'"></button>
+            </div>
+            <div v-else-if="current && pending" key="pending" class="text-center my-4"><span class="spinner-border" role="status"></span></div>
+        </transition>
+        <template v-if="live">
             <p class="text-center mt-3 mb-0" id="LnurlTokenAmount" v-text="summary"></p>
             <p v-if="secondsLeft !== null" class="text-center text-muted small" id="LnurlTokenExpiry" v-text="'Quote valid for ' + countdown"></p>
-            <template v-if="view === 'address'">
+        </template>
+        <transition name="lnurl-fade" mode="out-in">
+            <div v-if="live && !wc" :key="current.id + view">
+                <div v-if="view === 'link'" class="input-group mt-3">
+                    <div class="form-floating" id="LnurlTokenLink">
+                        <vc:truncate-center text="current.uri" is-vue="true" padding="15" elastic="true" classes="form-control-plaintext" />
+                        <label>Payment link</label>
+                    </div>
+                </div>
                 <div class="input-group mt-3">
                     <div class="form-floating" id="LnurlTokenRecipient">
                         <vc:truncate-center text="current.destination" is-vue="true" padding="15" elastic="true" classes="form-control-plaintext" />
@@ -58,39 +92,32 @@
                         <label>Amount</label>
                     </div>
                 </div>
-            </template>
-            <a v-else-if="view === 'link' && model.showPayInWalletButton" class="btn btn-primary rounded-pill w-100 mt-4" id="LnurlTokenOpenWallet" target="_blank" :href="current.uri">Open in wallet</a>
-            <template v-else-if="wc && !sentHere">
+                <a v-if="view === 'link' && model.showPayInWalletButton" class="btn btn-primary rounded-pill w-100 mt-4" id="LnurlTokenOpenWallet" target="_blank" :href="current.uri">Open in wallet</a>
+            </div>
+            <div v-else-if="live && !sentHere" key="wc">
                 <p v-if="sending" class="text-center text-muted mt-3" id="LnurlTokenConfirm">Confirm the payment in your wallet</p>
                 <button v-else-if="wcUri || !pairing" type="button" class="btn btn-primary rounded-pill w-100 mt-4" id="LnurlTokenConnect"
                         v-on:click="wcUri ? openWallet() : startPairing()">
                     <svg class="lnurl-wc-glyph" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6.685 8.71c2.935-2.813 7.695-2.813 10.63 0l.353.339a.35.35 0 0 1 0 .51l-1.208 1.158a.194.194 0 0 1-.266 0l-.486-.466c-2.048-1.963-5.368-1.963-7.416 0l-.52.498a.194.194 0 0 1-.266 0L6.297 9.592a.35.35 0 0 1 0-.51zm13.13 2.396 1.075 1.03a.35.35 0 0 1 0 .51l-4.85 4.648a.39.39 0 0 1-.531 0l-3.443-3.299a.097.097 0 0 0-.132 0l-3.442 3.3a.39.39 0 0 1-.532 0l-4.85-4.65a.35.35 0 0 1 0-.508l1.076-1.031a.387.387 0 0 1 .531 0l3.442 3.299a.097.097 0 0 0 .133 0l3.442-3.3a.387.387 0 0 1 .532 0l3.442 3.3a.097.097 0 0 0 .133 0l3.442-3.3a.39.39 0 0 1 .531 0"/></svg>
                     <span v-text="wcUri ? 'Open in wallet' : 'Pay with WalletConnect'"></span>
                 </button>
-            </template>
-            <template v-if="current.provider">
-                <button type="button" class="lnurl-provider" id="LnurlTokenProvider" v-on:click="$refs.terms.showModal()">
-                    <span v-text="'Serviced by ' + current.provider"></span>
-                    <vc:icon symbol="info" />
-                </button>
-                <dialog ref="terms" class="lnurl-terms" id="LnurlTokenProviderTerms" v-on:click.self="$refs.terms.close()">
-                    <div>
-                        <h5 v-text="'Serviced by ' + current.provider"></h5>
-                        <ul>
-                            <li v-for="term in providerTerms" v-text="term"></li>
-                        </ul>
-                        <form method="dialog"><button class="btn btn-primary rounded-pill w-100">Got it</button></form>
-                    </div>
-                </dialog>
-            </template>
+            </div>
+        </transition>
+        <template v-if="live && current.provider">
+            <button type="button" class="lnurl-provider" id="LnurlTokenProvider" v-on:click="$refs.terms.showModal()">
+                <span v-text="'Serviced by ' + current.provider"></span>
+                <vc:icon symbol="info" />
+            </button>
+            <dialog ref="terms" class="lnurl-terms" id="LnurlTokenProviderTerms" v-on:click.self="$refs.terms.close()">
+                <div>
+                    <h5 v-text="'Serviced by ' + current.provider"></h5>
+                    <ul>
+                        <li v-for="term in providerTerms" v-text="term"></li>
+                    </ul>
+                    <form method="dialog"><button class="btn btn-primary rounded-pill w-100">Got it</button></form>
+                </div>
+            </dialog>
         </template>
-        <div v-else-if="renewable" class="text-center my-4">
-            <button type="button" class="btn btn-secondary" id="LnurlTokenRefresh" :disabled="busy === current.id" v-on:click="request(current.id)"
-                    v-text="current.state === 'stale' ? 'The amount due changed: get a new quote'
-                           : current.state === 'failed' ? 'No quote for this network yet: try again' : 'Quote expired: get a new one'"></button>
-        </div>
-        <div v-else-if="current && pending" class="text-center my-4"><span class="spinner-border" role="status"></span></div>
-        <p v-else-if="networks.length" class="text-center my-4" id="LnurlTokenChoose">Choose a network</p>
         <p v-if="sentHere" class="text-center mt-3" id="LnurlTokenSent">Sent, waiting for confirmation: <code v-text="sentRef"></code></p>
         <p v-if="walletError" class="text-center text-danger mt-3" id="LnurlTokenWalletError" v-text="walletError"></p>
     </div>
@@ -105,7 +132,7 @@
             return {
                 selected: null, busy: null, pending: false, now: Math.floor(Date.now() / 1000), timer: null,
                 projectId: @Safe.Json(projectId), walletUrl: @Safe.Json(walletUrl), iconUrl: @Safe.Json(iconUrl), walletNamespaces: ['eip155', 'solana', 'tron'],
-                mode: 'link', wcUri: null, pairing: false, sending: false, sent: null, walletError: null,
+                mode: 'link', choosing: false, wcUri: null, pairing: false, sending: false, sent: null, walletError: null,
                 activateUrl: @Safe.Json(Url.Action("ActivateToken", "LnurlRailCheckout", new { invoiceId = Model.InvoiceId }))
             };
         },
@@ -139,7 +166,7 @@
             }
         },
         watch: {
-            'token.pmi' () { this.selected = null; this.walletError = null; }
+            'token.pmi' () { this.selected = null; this.choosing = false; this.walletError = null; }
         },
         mounted () {
             this.timer = setInterval(() => { this.now = Math.floor(Date.now() / 1000); }, 1000);
@@ -217,9 +244,16 @@
             // the record must outlive the component: core mounts the checkout body without keep-alive, and a wallet app round trip can reload the page
             storageKey (key) { return 'lnurlverify.sent/' + this.model.invoiceId + '/' + key; },
             storedRef (key) { try { return sessionStorage.getItem(this.storageKey(key)); } catch (e) { return null; } },
+            // the pressed button collapses out of view, so a keyboard user's focus moves to what replaced it
+            refocus (selector) {
+                if (!this.$el.contains(document.activeElement)) return;
+                this.$nextTick(() => { const el = this.$el.querySelector(selector); if (el) el.focus(); });
+            },
             async pick (n) {
                 this.walletError = null;
                 this.selected = n.id;
+                this.choosing = false;
+                this.refocus('#LnurlTokenNetworkChosen');
                 if (!this.isLive(n)) await this.request(n.id);
             }
         }

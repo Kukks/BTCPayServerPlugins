@@ -24,9 +24,12 @@ stock install sees them, and the payer's IP sent on a checkout's rail and token 
 uses a ServerTester store's own LN address as the verify-capable endpoint (BTCPay core serves LUD-21
 verify by default) and drives the plugin client directly.
 
-Bring up the tester stack (same as the other ServerTester tests), then:
+Bring up the tester stack (same as the other ServerTester tests), build the test project, then run its executable. Since
+BTCPay 2.4.7 core's test project runs on Microsoft.Testing.Platform, which `dotnet test` cannot drive from this repository,
+so every integration test below runs this way, selected with an xunit query filter:
 ```
-dotnet test BTCPayServer.Plugins.Tests --filter "FullyQualifiedName~LNURLVerifyIntegrationTests"
+dotnet build BTCPayServer.Plugins.Tests -p:StaticWebAssetsEnabled=false
+BTCPayServer.Plugins.Tests/bin/Debug/net10.0/BTCPayServer.Plugins.Tests -filter "/*/*/LNURLVerifyIntegrationTests/*"
 ```
 Confirms: create invoice via the LN address → pay from the regtest node → the plugin reports `Paid` with
 a validated preimage. **This is the single highest-value check** — it exercises the receive + verify path
@@ -44,7 +47,7 @@ cd <lnurl-server>; pnpm build:server
 $env:PORT='3999'; $env:BASE_URL='http://127.0.0.1:3999'; pnpm start
 # second terminal, from this repo:
 $env:LNURL_SERVER_URL='http://127.0.0.1:3999'
-dotnet test BTCPayServer.Plugins.Tests -p:StaticWebAssetsEnabled=false --filter "FullyQualifiedName~LNURLVerifyLnurlServerTests"
+BTCPayServer.Plugins.Tests/bin/Debug/net10.0/BTCPayServer.Plugins.Tests -filter "/*/*/LNURLVerifyLnurlServerTests/*"
 ```
 
 ## 3. Send integration — needs LNbits (currently a `[Skip]` scaffold)
@@ -102,23 +105,23 @@ Steps 2-4 run in the lnurl-server checkout; steps 1 and 5 run in this repository
 4. lnurl-server on port 80, because an address's callback URL drops the port: `pnpm build:server`, then
    `PORT=80 BASE_URL=http://localhost DB_PATH=<file> ALLOW_INSECURE_TOKEN_STORAGE=1 BOOTSTRAP_DOMAIN=localhost OFFLINE_COVENANT_DESTINATIONS=true ARK_SERVER_URL=http://localhost:7070 OFFLINE_EMULATOR_URL=http://localhost:7073 pnpm start`
 5. The address `alice`, held open by a test-project helper that answers Lightning requests with self-signed invoices:
-   `LNURL_SERVER_URL=http://localhost LNURL_ARKADE_ADDRESS=<offchain_address> LNURL_BOARDING_ADDRESS=<boarding_address> LNURL_RUNBOOK_MINUTES=120 dotnet test BTCPayServer.Plugins.Tests -p:StaticWebAssetsEnabled=false --filter "FullyQualifiedName~Serves_an_arkade_address_for_the_checkout_runbook"`
+   `LNURL_SERVER_URL=http://localhost LNURL_ARKADE_ADDRESS=<offchain_address> LNURL_BOARDING_ADDRESS=<boarding_address> LNURL_RUNBOOK_MINUTES=120 BTCPayServer.Plugins.Tests/bin/Debug/net10.0/BTCPayServer.Plugins.Tests -filter "/*/*/*/Serves_an_arkade_address_for_the_checkout_runbook"`
 6. In BTCPay, create a store with default currency BTC and Lightning
    `type=lnurl;server=http://localhost;value=http://localhost/.well-known/lnurlp/alice`.
-   Integrations → LNURL rails then lists the provisioned rails.
+   Wallets → LNURL rails then lists the provisioned rails.
 
 Count lnurl-server's destination requests with
 `SELECT payment_option, COUNT(*) FROM settlements WHERE payment_option<>'lightning' GROUP BY payment_option` on its database.
 
 | Scenario | Expected |
 |---|---|
-| Setup | Integrations → LNURL rails lists the provisioned rails. The store's Lightning setup page renders its Lightning address tab with no CSP error in the browser console: plugin views get their inline-script nonce only through `@addTagHelper *, BTCPayServer.Abstractions` in `_ViewImports.cshtml`. |
+| Setup | Wallets → LNURL rails lists the provisioned rails. The store's Lightning setup page renders its Lightning address tab with no CSP error in the browser console: plugin views get their inline-script nonce only through `@addTagHelper *, BTCPayServer.Abstractions` in `_ViewImports.cshtml`. |
 | A. Setting on, no wallet | Chips Lightning and Arkade. On-chain is refused, since lnurl-server's on-chain rail has no `verify`, and reloading never repeats that request. The QR carries `lightning=` and `ark=`. `docker exec arkd ark send --to <ark destination> --amount <sats> --password secret` settles the invoice and adds a row under "LNURL rail payments". |
 | B. Setting off | Only Lightning is active on open; tapping Arkade costs exactly one destination request. |
 | C. Store with a wallet | The on-chain rail is dropped. The checkout opens on-chain, the QR's path is the store's address, and the LNURL's on-chain option is never requested. |
 | D. Partial payment | Pay part on-chain with cheat mode and mine a block. The Arkade chip is re-issued for the remainder with exactly one request, and paying it settles the invoice. |
 | E. Restart | Pay an activated Arkade destination while BTCPay is stopped; after the restart the invoice settles. |
-| F. Rail switched off | Switch Arkade off on Integrations → LNURL rails. The next invoice's checkout shows no Arkade chip, and lnurl-server sees no arkade request for it. |
+| F. Rail switched off | Switch Arkade off on Wallets → LNURL rails. The next invoice's checkout shows no Arkade chip, and lnurl-server sees no arkade request for it. |
 
 ## 6. Token rails — acceptance
 
@@ -129,15 +132,15 @@ BTCPay test stack (postgres, nbxplorer, bitcoind) and runs alone:
 export TESTS_POSTGRES="User ID=postgres;Include Error Detail=true;Host=127.0.0.1;Port=39372;Database=btcpayserver"
 dotnet build BTCPayServer.Plugins.Tests -p:StaticWebAssetsEnabled=false
 pwsh BTCPayServer.Plugins.Tests/bin/Debug/net10.0/playwright.ps1 install chromium
-dotnet test BTCPayServer.Plugins.Tests --no-build -p:StaticWebAssetsEnabled=false --filter "FullyQualifiedName~TokenCheckoutBrowserTests.A_payer_sees_each_network"
-WALLETCONNECT_PROJECT_ID=<Reown project id> dotnet test BTCPayServer.Plugins.Tests --no-build -p:StaticWebAssetsEnabled=false --filter "FullyQualifiedName~TokenCheckoutBrowserTests.WalletConnect"
-dotnet test BTCPayServer.Plugins.Tests --no-build -p:StaticWebAssetsEnabled=false --filter "FullyQualifiedName~TokenCheckoutBrowserTests.A_fixedfloat"
+BTCPayServer.Plugins.Tests/bin/Debug/net10.0/BTCPayServer.Plugins.Tests -filter "/*/*/TokenCheckoutBrowserTests/A_payer*"
+WALLETCONNECT_PROJECT_ID=<Reown project id> BTCPayServer.Plugins.Tests/bin/Debug/net10.0/BTCPayServer.Plugins.Tests -filter "/*/*/TokenCheckoutBrowserTests/WalletConnect*"
+BTCPayServer.Plugins.Tests/bin/Debug/net10.0/BTCPayServer.Plugins.Tests -filter "/*/*/TokenCheckoutBrowserTests/A_fixedfloat*"
 ```
 
 Point the `TESTS_*` variables at the stack's real ports (`TESTS_POSTGRES`, `TESTS_EXPLORER_POSTGRES`, `TESTS_BTCNBXPLORERURL`).
 Each test uses a fresh database. The same setup runs the Lightning setup page's Lightning address tab (a look-up that requests
 no invoice, a save refused for the network, a save, a reopen):
-`--filter "FullyQualifiedName~LightningSetupBrowserTests"`.
+`-filter "/*/*/LightningSetupBrowserTests/*"`.
 
 The FixedFloat test has the stub answer in lnurl-server's FixedFloat shape. Its options name a `provider`, each callback is
 a new order with only a short `paymentQuote.expiresAt`, and `verify` reports the payer's deposit transaction as the

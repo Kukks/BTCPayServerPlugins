@@ -125,8 +125,7 @@ public class LnurlSetupSummaryTests
         var store = Store();
         var managed = new[] { LnurlRails.Arkade.PaymentMethodId, TokenAssets.PaymentMethodIdOf("USDT") };
 
-        Assert.False(LnurlRailSettings.ApplyEnabledRails(store, managed, new[] { "LNURL-ARKADE" }, Array.Empty<string>()));
-        Assert.True(LnurlRailSettings.ApplyEnabledRails(store, managed, new[] { "LNURL-ARKADE", "BTC-CHAIN" }, Array.Empty<string>(), false));
+        Assert.True(LnurlRailSettings.ApplyEnabledRails(store, managed, new[] { "LNURL-ARKADE", "BTC-CHAIN" }, Array.Empty<string>()));
 
         Assert.True(store.GetStoreBlob().IsExcluded(LnurlRails.Arkade.PaymentMethodId));
         Assert.False(store.GetStoreBlob().IsExcluded(PaymentMethodId.Parse("BTC-CHAIN")));

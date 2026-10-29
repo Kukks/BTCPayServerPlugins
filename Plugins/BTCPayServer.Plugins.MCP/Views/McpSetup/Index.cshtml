@@ -2,8 +2,10 @@
     ViewData["Title"] = "MCP Setup";
     var mcpUrl = ViewData["McpEndpointUrl"]?.ToString();
     var apiKey = ViewData["McpApiKey"]?.ToString();
-    var hasKey = !string.IsNullOrEmpty(apiKey);
-    var tokenDisplay = hasKey ? apiKey : "YOUR_API_KEY";
+    var apiKeyId = ViewData["McpApiKeyId"]?.ToString();
+    var hasKey = !string.IsNullOrEmpty(apiKeyId);
+    var keyShown = !string.IsNullOrEmpty(apiKey);
+    var tokenDisplay = string.IsNullOrEmpty(apiKey) ? "YOUR_API_KEY" : apiKey;
 }
 
 <style>
@@ -33,12 +35,23 @@
         <h4 class="mt-4">1. API Key</h4>
         @if (hasKey)
         {
-            <p>
-                Your MCP API key: <code>@apiKey</code>
-            </p>
+            @if (!string.IsNullOrEmpty(apiKey))
+            {
+                <p>
+                    Your MCP API key: <code>@apiKey</code><br />
+                    <span class="text-muted">Save it now: BTCPay Server keeps only a hash of API keys and stops showing this one a few minutes after it is created.</span>
+                </p>
+            }
+            else
+            {
+                <p>
+                    BTCPay Server keeps only a hash of your MCP API key, so it cannot be shown again. Use the key you saved when you generated it.
+                    If you no longer have it, revoke it and generate a new one, then update every client that used the old key.
+                </p>
+            }
             <div class="d-flex gap-2 mb-2">
                 <form asp-controller="McpSetup" asp-action="RevokeKey" method="post">
-                    <input type="hidden" name="keyId" value="@apiKey" />
+                    <input type="hidden" name="keyId" value="@apiKeyId" />
                     <button type="submit" class="btn btn-outline-danger btn-sm">Revoke Key</button>
                 </form>
                 <a asp-controller="UIManage" asp-action="APIKeys" class="btn btn-outline-secondary btn-sm">Manage API Keys</a>
@@ -56,7 +69,7 @@
         }
 
         <h4 class="mt-4">2. Configure Your LLM Client</h4>
-        @if (!hasKey)
+        @if (!keyShown)
         {
             <p>Copy the configuration below and paste it into your LLM client's config file. Replace <code>YOUR_API_KEY</code> with your key.</p>
         }
@@ -120,7 +133,7 @@
                         Copy
                     </button>
                 </div>
-                @if (!hasKey)
+                @if (!keyShown)
                 {
                     <p class="text-muted mt-2">
                         Replace <code>YOUR_API_KEY</code> with your API key from step 1. The token is passed as a query parameter and promoted to an authorization header automatically.
@@ -193,7 +206,7 @@
                         </tr>
                     </tbody>
                 </table>
-                @if (!hasKey)
+                @if (!keyShown)
                 {
                     <p class="text-muted">
                         Your client needs to send an <code>Authorization</code> header with every request.

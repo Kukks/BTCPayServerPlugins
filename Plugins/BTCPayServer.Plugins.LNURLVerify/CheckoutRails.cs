@@ -19,16 +19,16 @@ public class LnurlRailSettings
     public const string Key = "LNURLVerify.Rails";
     public bool ActivateAllRailsOnOpen { get; set; } = true;
 
-    /// <param name="configuredOnly">False for the Lightning setup page, whose LNURL's rails are not provisioned until after its save.</param>
+    /// <summary>A rail need not be provisioned yet: its exclusion waits for it, as the setup page saves before provisioning.</summary>
     public static bool ApplyEnabledRails(StoreData store, IEnumerable<PaymentMethodId> managed, IReadOnlyCollection<string> shown,
-        IReadOnlyCollection<string> enabled, bool configuredOnly = true)
+        IReadOnlyCollection<string> enabled)
     {
         var blob = store.GetStoreBlob();
         // Only managed rails the page showed are touched, so a posted id for another method or an unseen rail keeps its exclusion.
         foreach (var pmi in managed)
         {
             var id = pmi.ToString();
-            if (shown.Contains(id) && (!configuredOnly || store.GetPaymentMethodConfig(pmi) is not null))
+            if (shown.Contains(id))
                 blob.SetExcluded(pmi, !enabled.Contains(id));
         }
         return store.SetStoreBlob(blob);

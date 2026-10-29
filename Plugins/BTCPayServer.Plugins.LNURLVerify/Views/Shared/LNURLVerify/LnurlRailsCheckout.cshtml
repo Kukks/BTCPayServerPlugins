@@ -10,13 +10,15 @@
             <button v-for="rail in rails" :key="rail.pmi" type="button" :class="{ active: selected === rail.pmi }" :aria-pressed="String(selected === rail.pmi)"
                     :disabled="busy === rail.pmi" :data-rail="rail.pmi" v-on:click="pick(rail)" v-text="rail.label"></button>
         </div>
-        <div v-if="qr" class="qr-container clipboard-button" :data-qr-value="qr" :data-clipboard="uri" :data-clipboard-confirm-element="confirmTarget">
-            <div>
-                <qrcode :value="qr" tag="div" :options="qrOptions" />
+        <transition name="lnurl-fade" mode="out-in">
+            <div v-if="qr" :key="qr" class="qr-container clipboard-button" :data-qr-value="qr" :data-clipboard="uri" :data-clipboard-confirm-element="confirmTarget">
+                <div>
+                    <qrcode :value="qr" tag="div" :options="qrOptions" />
+                </div>
+                <img class="qr-icon" :src="model.cryptoImage" :alt="model.paymentMethodName"/>
             </div>
-            <img class="qr-icon" :src="model.cryptoImage" :alt="model.paymentMethodName"/>
-        </div>
-        <div v-else class="text-center my-4"><span class="spinner-border" role="status"></span></div>
+            <div v-else key="waiting" class="text-center my-4"><span class="spinner-border" role="status"></span></div>
+        </transition>
         <div v-for="rail in shown" :key="'destination-' + rail.pmi" class="input-group mt-3">
             <div class="form-floating" :id="'LnurlRailDestination-' + rail.pmi">
                 <vc:truncate-center text="rail.destination" is-vue="true" padding="15" elastic="true" classes="form-control-plaintext" />

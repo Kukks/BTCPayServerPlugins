@@ -40,14 +40,14 @@ public class LnurlRailPaymentHandlerTests
     {
         invoice ??= Invoice();
         var creation = new InvoiceCreationContext(store, store.GetStoreBlob(), invoice, new InvoiceLogs(),
-            new PaymentMethodHandlerDictionary(new IPaymentMethodHandler[] { Handler }), null);
+            new PaymentMethodHandlerDictionary(new IPaymentMethodHandler[] { Handler }), null, null!);
         creation.SetLazyActivation(false);
         await creation.BeforeFetchingRates();
         return (invoice, creation.PaymentMethodContexts[LnurlRails.Arkade.PaymentMethodId]);
     }
 
     static PaymentMethodContext Activation(StoreData store, InvoiceEntity invoice) =>
-        new(store, store.GetStoreBlob(), new JObject(), Handler, invoice, new InvoiceLogs());
+        new(store, store.GetStoreBlob(), new JObject(), Handler, invoice, new InvoiceLogs(), null!);
 
     // A fresh host per call keeps the static ResolveCached cache from colliding across tests. The arkade
     // callback answers tark1qdestq, tark1qdestqq, ... on successive requests ('1' is not in the bech32 alphabet).
@@ -90,7 +90,7 @@ public class LnurlRailPaymentHandlerTests
 
     static async Task<PaymentMethodContext> Activate(LnurlRailPaymentHandler handler, StoreData store, InvoiceEntity invoice)
     {
-        var ctx = new PaymentMethodContext(store, store.GetStoreBlob(), new JObject(), handler, invoice, new InvoiceLogs());
+        var ctx = new PaymentMethodContext(store, store.GetStoreBlob(), new JObject(), handler, invoice, new InvoiceLogs(), null!);
         await ctx.BeforeFetchingRates();
         await handler.ConfigurePrompt(ctx);
         return ctx;

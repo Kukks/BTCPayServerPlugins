@@ -35,7 +35,7 @@ public class LnurlRailSettingsTests
     }
 
     [Fact]
-    public void Only_configured_rails_are_ever_touched()
+    public void Only_managed_rails_the_page_showed_are_touched()
     {
         var store = Store(ArkadeId);
         var seeded = store.GetStoreBlob();

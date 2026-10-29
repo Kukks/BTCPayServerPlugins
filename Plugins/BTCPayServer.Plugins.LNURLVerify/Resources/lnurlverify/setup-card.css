@@ -1,0 +1,42 @@
+.lnurl-setup {
+    padding: var(--btcpay-space-s) var(--btcpay-space-m);
+}
+.lnurl-setup-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: var(--btcpay-space-s);
+    padding-bottom: var(--btcpay-space-s);
+}
+.lnurl-setup-row {
+    display: flex;
+    align-items: center;
+    gap: var(--btcpay-space-s);
+    min-height: 2.5rem;
+    border-top: 1px solid var(--btcpay-body-border-light);
+}
+.lnurl-setup-row .form-check {
+    min-height: 0;
+    margin: 0;
+}
+.lnurl-setup-row .form-check-input {
+    margin-top: 0;
+}
+.lnurl-setup-row img {
+    width: 1.25rem;
+    height: 1.25rem;
+}
+.lnurl-setup-end {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: .375rem;
+    margin-inline-start: auto;
+    color: var(--btcpay-body-text-muted);
+    font-size: var(--btcpay-font-size-s);
+    text-align: end;
+}
+.lnurl-setup-end .off {
+    opacity: .3;
+    filter: grayscale(1);
+}

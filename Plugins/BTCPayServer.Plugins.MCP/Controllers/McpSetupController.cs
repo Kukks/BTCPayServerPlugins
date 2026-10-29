@@ -9,8 +9,6 @@ using BTCPayServer.Security.Greenfield;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using NBitcoin;
-using NBitcoin.DataEncoders;
 
 namespace BTCPayServer.Plugins.MCP.Controllers;
 
@@ -35,7 +33,8 @@ public class McpSetupController : Controller
         ViewData["McpEndpointUrl"] = $"{baseUrl}/plugins/mcp";
 
         var mcpKey = await FindMcpKey();
-        ViewData["McpApiKey"] = mcpKey?.Id;
+        ViewData["McpApiKey"] = mcpKey?.Key;
+        ViewData["McpApiKeyId"] = mcpKey?.Id;
 
         return View();
     }
@@ -55,13 +54,9 @@ public class McpSetupController : Controller
             return RedirectToAction(nameof(Index));
         }
 
-        var key = new APIKeyData
-        {
-            Id = Encoders.Hex.EncodeData(RandomUtils.GetBytes(20)),
-            Type = APIKeyType.Permanent,
-            UserId = userId,
-            Label = "MCP",
-        };
+        var key = APIKeyRepository.New();
+        key.UserId = userId;
+        key.Label = "MCP";
         key.SetBlob(new APIKeyBlob
         {
             Permissions = new[] { Policies.Unrestricted },
@@ -72,7 +67,7 @@ public class McpSetupController : Controller
         TempData.SetStatusMessageModel(new StatusMessageModel
         {
             Severity = StatusMessageModel.StatusSeverity.Success,
-            Html = $"API key created! <code class='alert-link'>{key.Id}</code>"
+            Html = $"API key created! <code class='alert-link'>{key.Key}</code>"
         });
         return RedirectToAction(nameof(Index));
     }
@@ -81,7 +76,7 @@ public class McpSetupController : Controller
     public async Task<IActionResult> RevokeKey(string keyId)
     {
         var userId = _userManager.GetUserId(User);
-        if (!string.IsNullOrEmpty(keyId) && await _apiKeyRepository.Remove(keyId, userId))
+        if (!string.IsNullOrEmpty(keyId) && await _apiKeyRepository.Remove(new APIKeyRepository.Selector.ById(keyId), userId))
         {
             TempData.SetStatusMessageModel(new StatusMessageModel
             {
