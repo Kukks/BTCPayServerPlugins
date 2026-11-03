@@ -60,7 +60,9 @@
             computed: {
     
                 content () {
-                    return this.$i18n.i18next.t("conversion_body", this.model).replace(/\n/ig, '<br>');
+                    // BTCPay 2.x renamed the checkout model's cryptoCode to paymentMethodCurrency
+                    const cryptoCode = this.model.paymentMethodCurrency || this.model.cryptoCode;
+                    return this.$i18n.i18next.t("conversion_body", { ...this.model, cryptoCode }).replace(/\n/ig, '<br>');
                 },
                 currency () {
                     return this.model.paymentMethodId;
