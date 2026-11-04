@@ -191,6 +191,88 @@ public class SecSwitchMonitorTests
     }
 
     [Fact]
+    public async Task Only_a_core_update_that_really_started_is_reported_as_dispatched()
+    {
+        _sink.LatestCore = new Version(2, 5, 0);
+        var state = State(canUpdateCore: true);
+
+        var advisory = await Process([CoreAdvisory("9.0.0")], state);
+        var auto = await AutoUpdate(state);
+        var held = await Process([Adv(id: "core-2", identifier: "BTCPayServer", affected: "<9.0.0", fixedVersion: "9.0.0")], state);
+
+        Assert.True(advisory.CoreUpdateDispatched);
+        Assert.False(auto.CoreUpdateDispatched);
+        Assert.False(held.CoreUpdateDispatched);
+        Assert.Equal(1, _sink.CoreUpdates);
+    }
+
+    [Fact]
+    public async Task A_failed_core_update_is_not_reported_as_dispatched()
+    {
+        _sink.CoreUpdateThrows = new InvalidOperationException("host update failed");
+
+        var result = await Process([CoreAdvisory("9.0.0")], State(canUpdateCore: true));
+
+        Assert.False(result.CoreUpdateDispatched);
+    }
+
+    [Fact]
+    public async Task An_auto_update_of_core_that_started_is_reported_as_dispatched()
+    {
+        _sink.LatestCore = new Version(2, 5, 0);
+
+        var result = await AutoUpdate(State(canUpdateCore: true));
+
+        Assert.True(result.CoreUpdateDispatched);
+    }
+
+    [Fact]
+    public async Task An_advisory_that_found_a_recent_core_update_is_a_lockdown_entry_and_does_not_extend_the_window()
+    {
+        _sink.LatestCore = new Version(2, 5, 0);
+        var state = State(canUpdateCore: true);
+        await AutoUpdate(state);
+
+        var skipped = await Process([CoreAdvisory("9.0.0")], state);
+
+        Assert.False(skipped.CoreUpdateDispatched);
+        var held = await EntryFor("core-1");
+        Assert.Equal(nameof(SecSwitchAction.Lockdown), held.Action);
+        Assert.Equal(LedgerStatus.Acted, held.Status);
+        Assert.True(held.LockedDown);
+
+        var auto = await EntryFor("autoupdate:BTCPayServer@2.5.0");
+        auto.RecordedAt = DateTimeOffset.UtcNow - SecSwitchMonitor.CoreUpdateWindow - TimeSpan.FromMinutes(1);
+        await _ledger.RecordAsync(auto);
+        var retry = await Process([CoreAdvisory("9.0.0")], state);
+
+        Assert.True(retry.CoreUpdateDispatched);
+        Assert.Equal(2, _sink.CoreUpdates);
+        Assert.Equal(nameof(SecSwitchAction.UpdateCore), (await EntryFor("core-1")).Action);
+    }
+
+    [Theory]
+    [InlineData("DisablePlugin", LedgerStatus.Acted, "Plug", true)]
+    [InlineData("UpdatePlugin", LedgerStatus.Acted, "plug", true)]
+    [InlineData("DisablePlugin", LedgerStatus.NeedsAttention, "Plug", false)]
+    [InlineData("Lockdown", LedgerStatus.Acted, "Plug", false)]
+    [InlineData("DisablePlugin", LedgerStatus.Acted, "Other", false)]
+    public void A_pending_plugin_change_counts_only_when_SecSwitch_queued_it(string action, string status, string pending, bool expected)
+    {
+        var entries = new[] { new LedgerEntry { AdvisoryId = "a", Identifier = "Plug", Action = action, Status = status } };
+
+        Assert.Equal(expected, SecSwitchMonitor.HasPendingChanges([pending], entries));
+    }
+
+    [Fact]
+    public void Nothing_pending_means_no_restart_is_waited_for()
+    {
+        var entries = new[] { new LedgerEntry { AdvisoryId = "a", Identifier = "Plug", Action = "DisablePlugin", Status = LedgerStatus.Acted } };
+
+        Assert.False(SecSwitchMonitor.HasPendingChanges([], entries));
+    }
+
+    [Fact]
     public async Task A_failed_core_update_keeps_the_lockdown()
     {
         _sink.CoreUpdateThrows = new InvalidOperationException("host update failed");

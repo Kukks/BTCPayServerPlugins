@@ -37,6 +37,7 @@ public sealed class FakeSink : IActionSink
     public Exception? CoreUpdateThrows { get; set; }
     public List<PluginUpdate> PluginUpdates { get; set; } = [];
     public Version? LatestCore { get; set; }
+    public List<string> Pending { get; set; } = [];
 
     public bool QueueDisable(string identifier)
     {
@@ -61,6 +62,8 @@ public sealed class FakeSink : IActionSink
     }
 
     public void StopApplication() => Stops++;
+
+    public IReadOnlyCollection<string> PendingPluginIdentifiers() => Pending;
 
     public Task<IReadOnlyList<PluginUpdate>> FindPluginUpdatesAsync(
         IReadOnlyDictionary<string, Version> installed, CancellationToken ct)

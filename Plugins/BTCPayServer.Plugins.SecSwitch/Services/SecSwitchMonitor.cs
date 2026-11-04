@@ -8,7 +8,8 @@ using Microsoft.Extensions.Logging;
 
 namespace BTCPayServer.Plugins.SecSwitch.Services;
 
-public sealed record ProcessResult(IReadOnlyList<LedgerEntry> Recorded, bool RestartNeeded);
+/// <param name="CoreUpdateDispatched">True only when a core update was actually started, not merely recorded.</param>
+public sealed record ProcessResult(IReadOnlyList<LedgerEntry> Recorded, bool RestartNeeded, bool CoreUpdateDispatched = false);
 
 public sealed class SecSwitchMonitor(
     ActionExecutor executor,
@@ -38,6 +39,7 @@ public sealed class SecSwitchMonitor(
         var recorded = new List<LedgerEntry>();
         var restartNeeded = false;
         var coreUpdateRecent = CoreUpdateDispatchedRecently(entries.Values);
+        var coreUpdateDispatched = false;
 
         foreach (var advisory in advisories)
         {
@@ -54,7 +56,9 @@ public sealed class SecSwitchMonitor(
                 if (evaluation.Entry is not { } entry)
                     continue;
 
-                coreUpdateRecent |= evaluation.Executed && entry.Action == nameof(SecSwitchAction.UpdateCore) && entry.Status == LedgerStatus.Acted;
+                var dispatched = evaluation.Executed && IsCoreUpdateEntry(entry);
+                coreUpdateRecent |= dispatched;
+                coreUpdateDispatched |= dispatched;
                 if (IsChange(existing, entry) || (evaluation.Executed && entry.Status == LedgerStatus.Acted))
                 {
                     await ledger.RecordAsync(entry);
@@ -78,7 +82,7 @@ public sealed class SecSwitchMonitor(
             recorded.Add(stale);
         }
 
-        return new ProcessResult(recorded, restartNeeded);
+        return new ProcessResult(recorded, restartNeeded, coreUpdateDispatched);
     }
 
     /// <summary>Updates plugins (and BTCPay Server through the host integration) to newer releases, once per target version.</summary>
@@ -95,15 +99,31 @@ public sealed class SecSwitchMonitor(
             restartNeeded |= outcome?.RestartNeeded == true;
         }
 
+        var coreUpdateDispatched = false;
         if (state.CanUpdateCore && state.CoreVersion is { } current && !CoreUpdateDispatchedRecently(entries.Values) &&
             await sink.GetLatestCoreVersionAsync(ct) is { } latest &&
             AdvisoryApplicability.Pad(latest) > AdvisoryApplicability.Pad(current))
         {
-            await UpdateOnceAsync(entries, AdvisoryApplicability.CoreIdentifier, latest,
+            var outcome = await UpdateOnceAsync(entries, AdvisoryApplicability.CoreIdentifier, latest,
                 SecSwitchAction.UpdateCore, executor.UpdateCoreAsync, recorded);
+            coreUpdateDispatched = outcome?.Succeeded == true;
         }
 
-        return new ProcessResult(recorded, restartNeeded);
+        return new ProcessResult(recorded, restartNeeded, coreUpdateDispatched);
+    }
+
+    /// <summary>
+    /// True while a plugin change SecSwitch queued is still waiting for a restart. Derived from core's own pending-command
+    /// file rather than remembered, so a restart that was skipped, or that did not happen, is requested again later.
+    /// </summary>
+    public static bool HasPendingChanges(IEnumerable<string> pendingPluginIdentifiers, IEnumerable<LedgerEntry> entries)
+    {
+        var ours = entries
+            .Where(e => e.Status == LedgerStatus.Acted &&
+                        e.Action is nameof(SecSwitchAction.DisablePlugin) or nameof(SecSwitchAction.UpdatePlugin))
+            .Select(e => e.Identifier)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return pendingPluginIdentifiers.Any(ours.Contains);
     }
 
     async Task<Evaluation> EvaluateAsync(
@@ -142,6 +162,8 @@ public sealed class SecSwitchMonitor(
 
         if (decision.Action == SecSwitchAction.UpdateCore && coreUpdateRecent)
         {
+            // Recorded as the lockdown it is: an UpdateCore entry must only ever mean an update was really dispatched.
+            entry.Action = nameof(SecSwitchAction.Lockdown);
             entry.Status = LedgerStatus.Acted;
             entry.Reason = $"{entry.Reason} A BTCPay Server update was already dispatched within the last day.".Trim();
             return new Evaluation(entry, false, false);

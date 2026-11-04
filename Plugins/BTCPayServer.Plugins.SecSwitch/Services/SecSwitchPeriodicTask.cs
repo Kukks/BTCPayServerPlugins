@@ -37,6 +37,7 @@ public sealed class SecSwitchPeriodicTask(
         var state = BuildState(installedPlugins, environment.Version, sink.CanUpdateCore);
         var recorded = new List<LedgerEntry>();
         var restartNeeded = false;
+        var coreUpdateDispatched = false;
 
         var pollError = await Run("advisory poll", () => PollAdvisoriesAsync(settings, state, cancellationToken));
         if (settings.AutoApply && settings.AutoUpdateAll)
@@ -47,10 +48,9 @@ public sealed class SecSwitchPeriodicTask(
         await NotifyAsync(recorded);
 
         // A core update restarts BTCPay Server itself and applies queued plugin changes; stopping the process
-        // while it runs could kill the update.
-        var coreUpdateDispatched = recorded.Any(e =>
-            e.Action == nameof(SecSwitchAction.UpdateCore) && e.Status == LedgerStatus.Acted);
-        if (restartNeeded && !coreUpdateDispatched)
+        // while it runs could kill the update. If it never restarts the server, the changes are still pending
+        // on a later poll and the restart is requested then.
+        if ((restartNeeded || await HasPendingPluginChangesAsync()) && !coreUpdateDispatched)
             executor.RequestRestart();
 
         async Task<Exception?> Run(string name, Func<Task<ProcessResult>> step)
@@ -60,6 +60,7 @@ public sealed class SecSwitchPeriodicTask(
                 var result = await step();
                 recorded.AddRange(result.Recorded);
                 restartNeeded |= result.RestartNeeded;
+                coreUpdateDispatched |= result.CoreUpdateDispatched;
                 return null;
             }
             catch (Exception e) when (e is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
@@ -81,6 +82,19 @@ public sealed class SecSwitchPeriodicTask(
             logger.LogWarning("SecSwitch skipped a malformed feed entry: {Reason}", ActionExecutor.Sanitize(skipped.Reason));
 
         return await monitor.ProcessAsync(feed.Advisories, feed.Skipped.Select(s => s.Id), state, settings, ct);
+    }
+
+    async Task<bool> HasPendingPluginChangesAsync()
+    {
+        try
+        {
+            return SecSwitchMonitor.HasPendingChanges(sink.PendingPluginIdentifiers(), (await ledger.GetAsync()).Entries.Values);
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "SecSwitch could not tell whether plugin changes are still waiting for a restart");
+            return false;
+        }
     }
 
     async Task RecordPollAsync(Exception? error)

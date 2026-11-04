@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using BTCPayServer.Abstractions.Constants;
+using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client;
 using BTCPayServer.Configuration;
 using BTCPayServer.Plugins.SecSwitch.Models;
@@ -123,6 +124,52 @@ public class LockdownTests : IDisposable
 
         await _gate.RefreshAsync();
         Assert.True(await _gate.IsActiveAsync());
+    }
+
+    [Fact]
+    public async Task Overlapping_refreshes_cannot_let_a_stale_read_overwrite_a_newer_one()
+    {
+        var gated = new GatedSettings(_settings);
+        var gate = new LockdownGate(gated, new LedgerStore(gated), NullLogger<LockdownGate>.Instance);
+        await _settings.UpdateSetting(new SecSwitchSettings { Enabled = true });
+        await Lock();
+
+        var stale = gate.RefreshAsync();
+        await gated.FirstReadTaken;
+        await _settings.UpdateSetting(new SecSwitchSettings { Enabled = false });
+        var fresh = gate.RefreshAsync();
+        gated.Release();
+        await Task.WhenAll(stale, fresh);
+
+        Assert.False(await gate.IsActiveAsync());
+    }
+
+    sealed class GatedSettings(ISettingsRepository inner) : ISettingsRepository
+    {
+        readonly TaskCompletionSource _firstReadTaken = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int _reads;
+
+        public Task FirstReadTaken => _firstReadTaken.Task;
+
+        public void Release() => _release.TrySetResult();
+
+        // The first settings read takes its snapshot and then waits, like a refresh that is slow to finish.
+        public async Task<T?> GetSettingAsync<T>(string? name = null) where T : class
+        {
+            var snapshot = await inner.GetSettingAsync<T>(name);
+            if (typeof(T) == typeof(SecSwitchSettings) && Interlocked.Increment(ref _reads) == 1)
+            {
+                _firstReadTaken.TrySetResult();
+                await _release.Task;
+            }
+            return snapshot;
+        }
+
+        public Task UpdateSetting<T>(T obj, string? name = null) where T : class => inner.UpdateSetting(obj, name);
+
+        public Task<T> WaitSettingsChanged<T>(CancellationToken cancellationToken = default) where T : class
+            => throw new NotSupportedException();
     }
 
     [Fact]

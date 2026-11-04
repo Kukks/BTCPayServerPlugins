@@ -27,6 +27,8 @@ public interface IActionSink
 {
     /// <summary>True when the host integration (<c>btcpay-host</c>) offers the <c>update</c> command.</summary>
     bool CanUpdateCore { get; }
+    /// <summary>Plugins with a queued disable, install or delete that only a restart applies.</summary>
+    IReadOnlyCollection<string> PendingPluginIdentifiers();
     bool QueueDisable(string identifier);
     Task<bool> QueueUpdateAsync(string identifier, string version);
     Task TriggerCoreUpdateAsync();
@@ -206,14 +208,15 @@ public sealed class BtcPayActionSink(
         return padded == parsed.ToString() ? [padded] : [padded, parsed.ToString()];
     }
 
+    public IReadOnlyCollection<string> PendingPluginIdentifiers() =>
+        PluginManager.GetPendingCommands(dataDirectories.Value.PluginDir).Select(command => command.plugin).ToList();
+
     public async Task<IReadOnlyList<PluginUpdate>> FindPluginUpdatesAsync(
         IReadOnlyDictionary<string, Version> installed, CancellationToken ct)
     {
         // A queued disable or install is applied at the next start, and "install" re-enables the plugin first,
         // so a plugin with a pending command must not be queued again.
-        var pending = PluginManager.GetPendingCommands(dataDirectories.Value.PluginDir)
-            .Select(command => command.plugin)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var pending = PendingPluginIdentifiers().ToHashSet(StringComparer.OrdinalIgnoreCase);
         var requests = installed
             .Where(kv => !pending.Contains(kv.Key) &&
                          TryResolveInstalledDirectory(dataDirectories.Value.PluginDir, kv.Key, out _, out _))

@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Contracts;
@@ -19,19 +20,27 @@ namespace BTCPayServer.Plugins.SecSwitch.Services;
 /// <summary>In-memory view of "is a core advisory holding this server in lockdown", derived from the ledger.</summary>
 public sealed class LockdownGate(ISettingsRepository settingsRepository, LedgerStore ledger, ILogger<LockdownGate> logger)
 {
+    // Refreshes are serialized so the last one to finish is also the last one to have read: an hourly poll that
+    // read the ledger before an admin lifted the lockdown must not write its stale answer after the admin's.
+    readonly SemaphoreSlim _refreshing = new(1, 1);
     volatile int _state; // 0 = not loaded yet, 1 = open, 2 = locked down
 
     public async ValueTask<bool> IsActiveAsync()
     {
         if (_state == 0)
-            await RefreshAsync();
+            await RefreshAsync(onlyIfNotLoaded: true);
         return _state == 2;
     }
 
-    public async Task RefreshAsync()
+    public Task RefreshAsync() => RefreshAsync(onlyIfNotLoaded: false);
+
+    async Task RefreshAsync(bool onlyIfNotLoaded)
     {
+        await _refreshing.WaitAsync();
         try
         {
+            if (onlyIfNotLoaded && _state != 0)
+                return;
             var settings = await settingsRepository.GetSettingAsync<SecSwitchSettings>();
             var locked = settings is { Enabled: true, AutoApply: true } &&
                          (await ledger.GetAsync()).Entries.Values.Any(e => e is { LockedDown: true, Suppressed: false });
@@ -40,6 +49,10 @@ public sealed class LockdownGate(ISettingsRepository settingsRepository, LedgerS
         catch (Exception e)
         {
             logger.LogError(e, "SecSwitch could not read its lockdown state; leaving the server reachable");
+        }
+        finally
+        {
+            _refreshing.Release();
         }
     }
 }

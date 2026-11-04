@@ -64,7 +64,8 @@ Every hour SecSwitch evaluates every advisory against this server.
 Queued plugin changes apply on the next start. BTCPay Server does not restart itself, so after queueing,
 SecSwitch stops the process once per poll and relies on your supervisor (Docker, systemd) to start it again. When a
 core update was dispatched in the same poll it does not stop the process: the update restarts BTCPay Server and
-applies the queued changes. `btcpay-host update` is not awaited to completion, so while a core advisory still applies
+applies the queued changes. If that does not happen, the changes are still pending on a later poll (core's own
+command file is the source of truth) and the process is stopped then. `btcpay-host update` is not awaited to completion, so while a core advisory still applies
 it is dispatched again once every 24 hours.
 
 **Lockdown** keeps BTCPay Server running but answers `503` to everyone except server admins signed in through
