@@ -1,30 +1,16 @@
 @using BTCPayServer.Plugins.SecSwitch.Models
-@model List<BTCPayServer.Plugins.SecSwitch.Controllers.SecSwitchController.AuditEntryRow>
+@model List<LedgerEntry>
 @{
     ViewData["Title"] = "SecSwitch audit log";
 
-    // Maps every LedgerStatus constant to an admin-facing label/badge/explanation, so the page
-    // surfaces WHY a status is or isn't final rather than a bare string - see LedgerStatus's own
-    // doc comments (Models/SecSwitchLedger.cs) for the authoritative reasoning this mirrors.
-    (string Badge, string Label, string Explanation) Describe(string status) => status switch
+    (string Badge, string Label) Describe(LedgerEntry entry) => entry switch
     {
-        LedgerStatus.Rejected => ("bg-danger", "Rejected",
-            "The advisory payload could not be parsed at all. Not final — SecSwitch retries this on the next poll."),
-        LedgerStatus.Unverified => ("bg-danger", "Unverified",
-            "Parsed, but the signatures presented did not meet GPG quorum. Not final — retried on the next poll in case more co-signers or an honest mirror appear."),
-        LedgerStatus.NotApplicable => ("bg-secondary", "Not applicable",
-            "Quorum met; this advisory does not apply to this instance. Final — cached, and will not be re-checked."),
-        LedgerStatus.NeedsAttention => ("bg-warning text-dark", "Needs attention",
-            "Quorum met, but SecSwitch did not apply an action. Either it could not resolve the advisory on its own — the installed version is indeterminate, or (for a core advisory) SSH connectivity has not finished verifying yet — or it tried to act and the action FAILED (for example the plugin could not be resolved to an installed directory, or the update could not be queued). Not final — retried on the next poll, which can mean indefinitely if the underlying cause persists. See the Reason column for which case this is."),
-        LedgerStatus.NeedsDecision => ("bg-warning text-dark", "Needs decision",
-            "Quorum met and an action was computed, but policy is holding it open for a manual decision."),
-        LedgerStatus.Acted => ("bg-success", "Acted",
-            "Quorum met; SecSwitch applied the resulting action automatically, and the action reported success. An action that failed is recorded as Needs attention instead, never here."),
-        LedgerStatus.Suppressed => ("bg-dark", "Suppressed",
-            "An admin suppressed this advisory on this instance; it will not be acted on again."),
-        LedgerStatus.Unsuppressed => ("bg-info text-dark", "Un-suppressed",
-            "An admin un-suppressed this advisory. Not final — it will be re-evaluated on the next poll."),
-        _ => ("bg-secondary", string.IsNullOrEmpty(status) ? "(none)" : status, "")
+        { Suppressed: true } => ("bg-dark", "Suppressed"),
+        { Status: LedgerStatus.Acted } => ("bg-success", "Acted"),
+        { Status: LedgerStatus.NeedsDecision } => ("bg-warning text-dark", "Needs decision"),
+        { Status: LedgerStatus.NeedsAttention } => ("bg-warning text-dark", "Needs attention"),
+        { Status: LedgerStatus.Resolved } => ("bg-secondary", "Resolved"),
+        _ => ("bg-secondary", entry.Status)
     };
 }
 
@@ -39,33 +25,32 @@
     </tr>
     </thead>
     <tbody>
-    @foreach (var row in Model)
+    @foreach (var entry in Model)
     {
-        var (badge, label, explanation) = Describe(row.Entry.Status);
+        var (badge, label) = Describe(entry);
         <tr>
-            <td>@row.Entry.RecordedAt.ToString("u")</td>
-            <td><code>@row.AdvisoryId</code><br />@row.Entry.Title</td>
-            <td>@row.Entry.Identifier</td>
-            <td>@row.Entry.Severity</td>
+            <td>@entry.RecordedAt.ToString("u")</td>
+            <td><code>@entry.AdvisoryId</code><br />@entry.Title</td>
+            <td>@entry.Identifier</td>
+            <td>@entry.Severity</td>
             <td>
                 <span class="badge @badge">@label</span>
-                @if (!string.IsNullOrEmpty(explanation))
+                @if (entry.LockedDown && !entry.Suppressed)
                 {
-                    <div class="text-muted small">@explanation</div>
+                    <span class="badge bg-danger">Locked down</span>
                 }
             </td>
-            <td>@row.Entry.Action</td>
-            <td>@row.Entry.Reason</td>
+            <td>@entry.Action</td>
+            <td>@entry.Reason</td>
             <td>
-                @if (!row.Entry.Suppressed)
+                @if (!entry.Suppressed)
                 {
-                    <a asp-action="SuppressConfirm" asp-route-advisoryId="@row.AdvisoryId"
+                    <a asp-action="SuppressConfirm" asp-route-advisoryId="@entry.AdvisoryId"
                        class="btn btn-sm btn-outline-secondary">Suppress</a>
                 }
                 else
                 {
-                    <span class="text-muted d-block">Suppressed</span>
-                    <a asp-action="UnsuppressConfirm" asp-route-advisoryId="@row.AdvisoryId"
+                    <a asp-action="UnsuppressConfirm" asp-route-advisoryId="@entry.AdvisoryId"
                        class="btn btn-sm btn-outline-secondary">Un-suppress</a>
                 }
             </td>
@@ -73,7 +58,15 @@
     }
     @if (Model.Count == 0)
     {
-        <tr><td colspan="8" class="text-muted">No advisories seen yet.</td></tr>
+        <tr><td colspan="8" class="text-muted">No advisory has applied to this instance yet.</td></tr>
     }
     </tbody>
 </table>
+
+<ul class="text-muted small">
+    <li><strong>Acted</strong>: the action was applied. A failed action is shown as Needs attention, never as Acted.</li>
+    <li><strong>Needs decision</strong>: automatic actions are off; apply the action yourself.</li>
+    <li><strong>Needs attention</strong>: the installed version could not be determined, or the action failed. It is retried on every poll.</li>
+    <li><strong>Resolved</strong>: the advisory stopped applying or left the feed, so any lockdown it held was lifted.</li>
+    <li><strong>Locked down</strong>: while shown, only server admins can reach this server. Suppress the advisory to lift it by hand.</li>
+</ul>

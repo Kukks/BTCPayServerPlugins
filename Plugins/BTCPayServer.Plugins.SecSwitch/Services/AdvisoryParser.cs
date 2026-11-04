@@ -1,21 +1,23 @@
 using System;
-using System.Linq;
+using System.Collections.Generic;
+using System.IO;
 using System.Text.Json;
 using BTCPayServer.Plugins.SecSwitch.Models;
 
 namespace BTCPayServer.Plugins.SecSwitch.Services;
 
+/// <param name="Id">The entry's id when it had one, so an unreadable entry still counts as "listed".</param>
+public sealed record SkippedEntry(string? Id, string Reason);
+
 public static class AdvisoryParser
 {
-    static readonly JsonSerializerOptions Options = new()
+    /// <summary>
+    /// Parses <c>{"advisories": [...]}</c>. A malformed envelope throws; a malformed entry is skipped
+    /// (reported in <paramref name="skipped"/>) so one bad entry cannot hide the rest of the feed.
+    /// </summary>
+    public static List<Advisory> ParseFeed(byte[] json, out List<SkippedEntry> skipped)
     {
-        PropertyNameCaseInsensitive = true
-    };
-
-    public static bool TryParse(byte[] json, out Advisory? advisory, out string? error)
-    {
-        advisory = null;
-        error = null;
+        skipped = [];
         JsonDocument doc;
         try
         {
@@ -23,82 +25,71 @@ public static class AdvisoryParser
         }
         catch (JsonException e)
         {
-            error = $"Malformed advisory JSON: {e.Message}";
-            return false;
+            throw new InvalidDataException($"Malformed advisory feed JSON: {e.Message}", e);
         }
 
         using (doc)
         {
-            var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object)
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("advisories", out var list) ||
+                list.ValueKind != JsonValueKind.Array)
+                throw new InvalidDataException("The advisory feed must be a JSON object with an \"advisories\" array.");
+
+            var advisories = new List<Advisory>();
+            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var index = -1;
+            foreach (var element in list.EnumerateArray())
             {
-                error = "Advisory root must be a JSON object.";
-                return false;
+                index++;
+                if (!TryParse(element, out var advisory, out var error))
+                    skipped.Add(new SkippedEntry(element.ValueKind == JsonValueKind.Object ? GetString(element, "id") : null, $"advisories[{index}]: {error}"));
+                else if (!ids.Add(advisory!.Id))
+                    skipped.Add(new SkippedEntry(null, $"advisories[{index}]: duplicate id '{advisory.Id}'"));
+                else
+                    advisories.Add(advisory);
             }
+            return advisories;
+        }
+    }
 
-            var id = GetString(root, "id");
-            var identifier = GetString(root, "identifier");
-            var affected = GetString(root, "affectedVersions");
-            var severityRaw = GetString(root, "severity");
+    static bool TryParse(JsonElement element, out Advisory? advisory, out string? error)
+    {
+        advisory = null;
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            error = "entry must be a JSON object";
+            return false;
+        }
 
-            if (string.IsNullOrWhiteSpace(id)) { error = "Missing required field: id"; return false; }
-            if (string.IsNullOrWhiteSpace(identifier)) { error = "Missing required field: identifier"; return false; }
-            if (string.IsNullOrWhiteSpace(affected)) { error = "Missing required field: affectedVersions"; return false; }
-            if (!TryParseSeverity(severityRaw, out var severity))
-            {
-                error = $"Unrecognised severity '{severityRaw}'.";
-                return false;
-            }
+        var id = GetString(element, "id");
+        var identifier = GetString(element, "identifier");
+        var affected = GetString(element, "affectedVersions");
+        var severityRaw = GetString(element, "severity");
 
+        if (string.IsNullOrWhiteSpace(id)) error = "missing required field: id";
+        else if (string.IsNullOrWhiteSpace(identifier)) error = "missing required field: identifier";
+        else if (!AdvisoryApplicability.TryParseCondition(affected, out _)) error = $"affectedVersions '{affected}' is not a valid version condition";
+        else if (!TryParseSeverity(severityRaw, out var severity)) error = $"unrecognised severity '{severityRaw}'";
+        else
+        {
+            error = null;
             advisory = new Advisory
             {
-                Id = id!,
-                Identifier = identifier!,
+                Id = id,
+                Identifier = identifier,
                 AffectedVersions = affected!,
-                FixedVersion = GetString(root, "fixedVersion"),
+                FixedVersion = GetString(element, "fixedVersion"),
                 Severity = severity,
-                Title = GetString(root, "title") ?? "",
-                Description = GetString(root, "description") ?? "",
-                References = root.TryGetProperty("references", out var refs) && refs.ValueKind == JsonValueKind.Array
-                    ? refs.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString() ?? "").Where(s => s.Length > 0).ToArray()
-                    : [],
-                PublishedAt = root.TryGetProperty("publishedAt", out var pub) && pub.ValueKind == JsonValueKind.String
-                              && DateTimeOffset.TryParse(pub.GetString(), out var parsed)
-                    ? parsed
-                    : default,
-                Supersedes = GetString(root, "supersedes"),
-                Revoked = root.TryGetProperty("revoked", out var rev) && rev.ValueKind == JsonValueKind.True
+                Title = GetString(element, "title") ?? ""
             };
-            return true;
         }
+        return advisory is not null;
     }
 
-    public static AdvisoryIndexEntry[] ParseIndex(byte[] json)
-    {
-        try
-        {
-            return JsonSerializer.Deserialize<AdvisoryIndexEntry[]>(json, Options) ?? [];
-        }
-        catch (JsonException)
-        {
-            // Fail closed: malformed, empty, or wrongly-shaped input means "no advisories
-            // seen", not a thrown exception a future caller might forget to catch.
-            return [];
-        }
-    }
+    static string? GetString(JsonElement element, string name)
+        => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
-    static string? GetString(JsonElement root, string name)
-        => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
-
-    // The advisory schema is string-names-only ("high", not "2"). Enum.TryParse would otherwise
-    // accept the enum's underlying numeric value too - optionally sign-prefixed and whitespace-
-    // padded per Enum.Parse's documented acceptance rules ("One or more blank spaces can precede
-    // or follow each value, name, or comma") - which TryParse shares. Rather than keep chasing
-    // that permissive surface one hole at a time, match against an explicit allowlist instead:
-    // it is categorically immune to numerics, sign prefixes, whitespace padding, and any future
-    // Enum.TryParse leniency. Trade-off: adding a severity level now means touching two places
-    // (the enum and this switch) - for a security-relevant mapping that is a feature, since it
-    // forces explicit intent rather than silently inheriting a new value.
+    // Explicit allowlist: Enum.TryParse would also accept numeric strings such as "7".
     static bool TryParseSeverity(string? raw, out AdvisorySeverity severity)
     {
         severity = default;

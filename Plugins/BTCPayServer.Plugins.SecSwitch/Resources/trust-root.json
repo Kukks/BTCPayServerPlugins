@@ -1,4 +1,0 @@
-{
-  "comment": "Founding signer public keys. Replace before the first public release; an empty list means SecSwitch can never verify an advisory.",
-  "keys": []
-}
