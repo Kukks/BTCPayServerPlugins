@@ -115,11 +115,15 @@ public sealed class SecSwitchMonitor(
     /// <summary>
     /// True while a plugin change SecSwitch queued is still waiting for a restart. Derived from core's own pending-command
     /// file rather than remembered, so a restart that was skipped, or that did not happen, is requested again later.
+    /// Only entries recorded since this process started count: core applies the command file at startup, so an older
+    /// entry cannot still be pending, and its ledger record (which never expires) must not claim an admin's own
+    /// queued change for the same plugin.
     /// </summary>
-    public static bool HasPendingChanges(IEnumerable<string> pendingPluginIdentifiers, IEnumerable<LedgerEntry> entries)
+    public static bool HasPendingChanges(
+        IEnumerable<string> pendingPluginIdentifiers, IEnumerable<LedgerEntry> entries, DateTimeOffset processStartedAt)
     {
         var ours = entries
-            .Where(e => e.Status == LedgerStatus.Acted &&
+            .Where(e => e.Status == LedgerStatus.Acted && e.RecordedAt >= processStartedAt &&
                         e.Action is nameof(SecSwitchAction.DisablePlugin) or nameof(SecSwitchAction.UpdatePlugin))
             .Select(e => e.Identifier)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);

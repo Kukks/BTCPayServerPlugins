@@ -18,8 +18,10 @@ the action.
 ## Feed format
 
 The default feed is `advisories.json` in the `btcpayserver/advisories` repository
-(`https://raw.githubusercontent.com/btcpayserver/advisories/master/advisories.json`). It can be changed on the
-settings page to any absolute `https://` URL.
+(`https://raw.githubusercontent.com/btcpayserver/advisories/master/advisories.json`). **That name is a placeholder
+and the repository does not exist yet**, so until it does, point SecSwitch at a working feed on the settings page
+(any absolute `https://` URL); with the default, every poll fails and nothing is checked. The settings page shows
+whether the last poll succeeded.
 
 ```json
 {
@@ -39,7 +41,8 @@ settings page to any absolute `https://` URL.
 - `id` must be unique; it keys the audit log.
 - `identifier` is a plugin identifier, or `BTCPayServer` for the core.
 - `affectedVersions` uses BTCPay's `VersionCondition` syntax. Combine bounds with `&&` (`">=1.0.0 && <1.2.3"`);
-  space-separated ranges and blank values, including blank `||` clauses, are rejected. Versions are compared with
+  space-separated ranges, blank values, blank `||` clauses and doubled or dangling separators (`a||||b`) are
+  rejected. Versions are compared with
   missing parts as `0`, so `1.2.3` and the published `1.2.3.0` are the same version.
 - `fixedVersion` is optional. It is only used when it is newer than the installed version and not itself inside
   `affectedVersions`; otherwise it is ignored (the plugin is disabled, or the core stays locked down), so a typo

@@ -155,6 +155,17 @@ public class AdvisoryApplicabilityTests
     }
 
     [Theory]
+    [InlineData("<1.0.0||||>=2.0.0")]
+    [InlineData(">=1.0.0&&&&<2.0.0")]
+    [InlineData("||<1.0.0")]
+    [InlineData("&&<1.0.0")]
+    public void Doubled_or_dangling_separators_are_rejected_because_core_drops_them_silently(string affected)
+    {
+        Assert.False(AdvisoryApplicability.TryParseCondition(affected, out _));
+        Assert.False(AdvisoryApplicability.IsApplicable(Adv(affected: affected), State("1.5.0"), out _, out _));
+    }
+
+    [Theory]
     [InlineData("1.2.3", "1.2.3.0")]
     [InlineData("1.2", "1.2.0.0")]
     [InlineData("1.2.3.4", "1.2.3.4")]

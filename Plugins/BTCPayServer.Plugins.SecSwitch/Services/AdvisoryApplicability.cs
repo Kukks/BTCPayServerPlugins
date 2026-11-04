@@ -19,13 +19,16 @@ public static class AdvisoryApplicability
     public static Version Pad(Version version) => new(version.Major, version.Minor, Math.Max(version.Build, 0), Math.Max(version.Revision, 0));
 
     /// <summary>
-    /// Parses an <c>affectedVersions</c> value. VersionCondition reads a blank string, or a blank clause such as
-    /// "&lt;1.0.0 || ", as "matches every version", so those are rejected instead of being allowed to act on everything.
+    /// Parses an <c>affectedVersions</c> value. VersionCondition reads a blank string, or a whitespace-only clause such
+    /// as "&lt;1.0.0 || || &gt;=2.0.0", as "matches every version", so those are rejected instead of being allowed to
+    /// act on everything. It silently drops zero-length segments ("a||||b" becomes "a||b"); those are rejected too,
+    /// because a clause the author meant to write is then missing without anyone noticing.
     /// </summary>
     public static bool TryParseCondition(string? text, out VersionCondition? condition)
     {
         condition = null;
-        if (string.IsNullOrWhiteSpace(text) || !VersionCondition.TryParse(text, out var parsed) || ContainsBlankClause(parsed))
+        if (string.IsNullOrWhiteSpace(text) || HasEmptySegment(text) ||
+            !VersionCondition.TryParse(text, out var parsed) || ContainsBlankClause(parsed))
             return false;
 
         PadVersions(parsed);
@@ -85,6 +88,9 @@ public static class AdvisoryApplicability
         reason = $"Installed version {installedVersion} matches {advisory.AffectedVersions}.";
         return true;
     }
+
+    static bool HasEmptySegment(string text) =>
+        text.Split("||").Any(string.IsNullOrWhiteSpace) || text.Split("&&").Any(string.IsNullOrWhiteSpace);
 
     static bool ContainsBlankClause(VersionCondition condition) => condition switch
     {

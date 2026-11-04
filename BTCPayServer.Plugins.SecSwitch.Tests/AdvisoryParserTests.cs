@@ -100,6 +100,8 @@ public class AdvisoryParserTests
     [InlineData(">=1.0.0 && <2.0.0 || ||")]
     [InlineData(">=1.0.0 && ")]
     [InlineData("1.0.0")]
+    [InlineData("<1.0.0||||>=2.0.0")]
+    [InlineData(">=1.0.0&&&&<2.0.0")]
     [InlineData("<abc")]
     public void An_affectedVersions_that_is_not_a_strict_condition_is_skipped_and_keeps_its_id(string affected)
     {

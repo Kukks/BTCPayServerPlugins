@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -27,6 +28,8 @@ public sealed class SecSwitchPeriodicTask(
     ILogger<SecSwitchPeriodicTask> logger) : IPeriodicTask
 {
     public const string HttpClientName = "SecSwitch";
+
+    static readonly DateTimeOffset ProcessStartedAt = StartOfThisProcess();
 
     public async Task Do(CancellationToken cancellationToken)
     {
@@ -88,7 +91,8 @@ public sealed class SecSwitchPeriodicTask(
     {
         try
         {
-            return SecSwitchMonitor.HasPendingChanges(sink.PendingPluginIdentifiers(), (await ledger.GetAsync()).Entries.Values);
+            return SecSwitchMonitor.HasPendingChanges(
+                sink.PendingPluginIdentifiers(), (await ledger.GetAsync()).Entries.Values, ProcessStartedAt);
         }
         catch (Exception e)
         {
@@ -129,6 +133,12 @@ public sealed class SecSwitchPeriodicTask(
                 logger.LogError(e, "SecSwitch failed to send an admin notification for {Id}", entry.AdvisoryId);
             }
         }
+    }
+
+    static DateTimeOffset StartOfThisProcess()
+    {
+        using var process = Process.GetCurrentProcess();
+        return new DateTimeOffset(process.StartTime.ToUniversalTime());
     }
 
     public static InstanceState BuildState(IEnumerable<IBTCPayServerPlugin> plugins, string? coreVersion, bool canUpdateCore)

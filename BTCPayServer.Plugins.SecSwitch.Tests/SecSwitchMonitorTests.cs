@@ -259,17 +259,28 @@ public class SecSwitchMonitorTests
     [InlineData("DisablePlugin", LedgerStatus.Acted, "Other", false)]
     public void A_pending_plugin_change_counts_only_when_SecSwitch_queued_it(string action, string status, string pending, bool expected)
     {
-        var entries = new[] { new LedgerEntry { AdvisoryId = "a", Identifier = "Plug", Action = action, Status = status } };
+        var entries = new[] { new LedgerEntry { AdvisoryId = "a", Identifier = "Plug", Action = action, Status = status, RecordedAt = DateTimeOffset.UtcNow } };
 
-        Assert.Equal(expected, SecSwitchMonitor.HasPendingChanges([pending], entries));
+        Assert.Equal(expected, SecSwitchMonitor.HasPendingChanges([pending], entries, DateTimeOffset.UtcNow.AddMinutes(-5)));
     }
 
     [Fact]
     public void Nothing_pending_means_no_restart_is_waited_for()
     {
-        var entries = new[] { new LedgerEntry { AdvisoryId = "a", Identifier = "Plug", Action = "DisablePlugin", Status = LedgerStatus.Acted } };
+        var entries = new[] { new LedgerEntry { AdvisoryId = "a", Identifier = "Plug", Action = "DisablePlugin", Status = LedgerStatus.Acted, RecordedAt = DateTimeOffset.UtcNow } };
 
-        Assert.False(SecSwitchMonitor.HasPendingChanges([], entries));
+        Assert.False(SecSwitchMonitor.HasPendingChanges([], entries, DateTimeOffset.UtcNow.AddMinutes(-5)));
+    }
+
+    [Fact]
+    public void An_entry_from_before_this_process_started_cannot_still_be_pending()
+    {
+        var started = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var old = new LedgerEntry { AdvisoryId = "a", Identifier = "Plug", Action = "UpdatePlugin", Status = LedgerStatus.Acted, RecordedAt = started.AddDays(-30) };
+        var current = new LedgerEntry { AdvisoryId = "b", Identifier = "Plug", Action = "UpdatePlugin", Status = LedgerStatus.Acted, RecordedAt = started.AddMinutes(1) };
+
+        Assert.False(SecSwitchMonitor.HasPendingChanges(["Plug"], [old], started));
+        Assert.True(SecSwitchMonitor.HasPendingChanges(["Plug"], [old, current], started));
     }
 
     [Fact]
