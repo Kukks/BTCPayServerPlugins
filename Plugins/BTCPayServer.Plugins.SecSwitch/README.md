@@ -41,7 +41,10 @@ settings page to any absolute `https://` URL.
 - `affectedVersions` uses BTCPay's `VersionCondition` syntax. Combine bounds with `&&` (`">=1.0.0 && <1.2.3"`);
   space-separated ranges and blank values, including blank `||` clauses, are rejected. Versions are compared with
   missing parts as `0`, so `1.2.3` and the published `1.2.3.0` are the same version.
-- `fixedVersion` is optional. `severity` is `low`, `medium`, `high` or `critical` and is informational.
+- `fixedVersion` is optional. It is only used when it is newer than the installed version and not itself inside
+  `affectedVersions`; otherwise it is ignored (the plugin is disabled, or the core stays locked down), so a typo
+  cannot downgrade a plugin or reinstall a vulnerable version. `severity` is `low`, `medium`, `high` or `critical`
+  and is informational.
 - To withdraw an advisory, delete it from the file.
 - Malformed entries are skipped and logged without affecting the others, and an entry that cannot be read still
   counts as listed: a typo never lifts a lockdown, only deleting the entry does. The file is limited to 1 MB and a

@@ -33,6 +33,15 @@ public static class AdvisoryApplicability
         return true;
     }
 
+    /// <summary>
+    /// A fix is only usable when it is newer than the installed version and itself outside the affected range;
+    /// anything else would downgrade, or reinstall a vulnerable version.
+    /// </summary>
+    public static bool HasUsableFix(Advisory advisory, Version installed) =>
+        Version.TryParse(advisory.FixedVersion, out var fix) &&
+        TryParseCondition(advisory.AffectedVersions, out var condition) &&
+        Pad(fix) > Pad(installed) && !condition!.IsFulfilled(Pad(fix));
+
     public static bool IsApplicable(Advisory advisory, InstanceState state, out Version? installedVersion, out string reason)
     {
         installedVersion = null;

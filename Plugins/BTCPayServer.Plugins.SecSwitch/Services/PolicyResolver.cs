@@ -11,12 +11,14 @@ public static class PolicyResolver
         if (!settings.Enabled)
             return new PolicyDecision(SecSwitchAction.None, "SecSwitch is disabled.");
 
-        if (!AdvisoryApplicability.IsApplicable(advisory, state, out _, out var reason))
+        if (!AdvisoryApplicability.IsApplicable(advisory, state, out var installed, out var reason))
             return new PolicyDecision(SecSwitchAction.None, reason);
 
         var isCore = string.Equals(advisory.Identifier, AdvisoryApplicability.CoreIdentifier,
             StringComparison.OrdinalIgnoreCase);
-        var hasFix = !string.IsNullOrWhiteSpace(advisory.FixedVersion);
+        var hasFix = AdvisoryApplicability.HasUsableFix(advisory, installed!);
+        if (!hasFix && !string.IsNullOrWhiteSpace(advisory.FixedVersion))
+            reason += $" Its fixedVersion {advisory.FixedVersion} is not a newer version outside the affected range, so it is ignored.";
 
         var intended = isCore
             ? hasFix && state.CanUpdateCore ? SecSwitchAction.UpdateCore : SecSwitchAction.Lockdown
