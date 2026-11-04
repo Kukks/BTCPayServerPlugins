@@ -17,6 +17,7 @@
   "BTCPayServer.Plugins.MicroNode": { "slug": null, "deprecated": false },
   "BTCPayServer.Plugins.NIP05": { "slug": "nip5", "deprecated": false, "tagPrefix": "Nostr" },
   "BTCPayServer.Plugins.Prism": { "slug": "prism", "deprecated": false },
+  "BTCPayServer.Plugins.SecSwitch": { "slug": null, "deprecated": false },
   "BTCPayServer.Plugins.ServerMessage": { "slug": "server-message", "deprecated": false },
   "BTCPayServer.Plugins.SideShift": { "slug": "sideshift", "deprecated": false },
   "BTCPayServer.Plugins.Stripe": { "slug": "stripe-payments", "deprecated": false },

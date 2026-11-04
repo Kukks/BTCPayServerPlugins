@@ -1,0 +1,50 @@
+@using BTCPayServer.Client
+@using BTCPayServer.Plugins.SecSwitch.Models
+@using BTCPayServer.Plugins.SecSwitch.Services
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Logging
+@inject LedgerStore Ledger
+@inject IAuthorizationService AuthorizationService
+@inject ILogger<LedgerStore> Logger
+@{
+    if (!(await AuthorizationService.AuthorizeAsync(User, Policies.CanModifyServerSettings)).Succeeded)
+    {
+        return;
+    }
+
+    // Nothing above this extension point catches exceptions, so a throwing banner would 500 every backend
+    // page - including the one an admin needs to disable SecSwitch.
+    var active = new List<LedgerEntry>();
+    try
+    {
+        active = (await Ledger.GetAsync()).Entries.Values
+            .Where(e => !e.Suppressed && (e.LockedDown || e.Status is LedgerStatus.NeedsDecision or LedgerStatus.NeedsAttention))
+            .ToList();
+    }
+    catch (Exception e)
+    {
+        Logger.LogError(e, "SecSwitch alert banner failed to read the ledger; hiding the banner for this page render");
+    }
+
+    var locked = active.Count(e => e.LockedDown);
+    var pending = active.Count(e => !e.LockedDown);
+}
+@if (locked > 0)
+{
+    <div class="alert alert-danger d-flex align-items-center justify-content-between mb-0" role="alert">
+        <span>
+            <strong>SecSwitch lockdown:</strong> this server is offline for everyone except server admins until
+            @locked security advisor@(locked == 1 ? "y is" : "ies are") resolved.
+        </span>
+        <a class="btn btn-sm btn-outline-light" asp-controller="SecSwitch" asp-action="Audit">Review</a>
+    </div>
+}
+@if (pending > 0)
+{
+    <div class="alert alert-warning d-flex align-items-center justify-content-between mb-0" role="alert">
+        <span>
+            <strong>SecSwitch:</strong> @pending security advisor@(pending == 1 ? "y needs" : "ies need") your attention.
+        </span>
+        <a class="btn btn-sm btn-outline-dark" asp-controller="SecSwitch" asp-action="Audit">Review</a>
+    </div>
+}

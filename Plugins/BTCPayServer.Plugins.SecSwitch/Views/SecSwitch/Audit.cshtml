@@ -1,0 +1,72 @@
+@using BTCPayServer.Plugins.SecSwitch.Models
+@model List<LedgerEntry>
+@{
+    ViewData["Title"] = "SecSwitch audit log";
+
+    (string Badge, string Label) Describe(LedgerEntry entry) => entry switch
+    {
+        { Suppressed: true } => ("bg-dark", "Suppressed"),
+        { Status: LedgerStatus.Acted } => ("bg-success", "Acted"),
+        { Status: LedgerStatus.NeedsDecision } => ("bg-warning text-dark", "Needs decision"),
+        { Status: LedgerStatus.NeedsAttention } => ("bg-warning text-dark", "Needs attention"),
+        { Status: LedgerStatus.Resolved } => ("bg-secondary", "Resolved"),
+        _ => ("bg-secondary", entry.Status)
+    };
+}
+
+<div class="sticky-header"><h2>SecSwitch audit log</h2></div>
+<partial name="_StatusMessage" />
+
+<table class="table">
+    <thead>
+    <tr>
+        <th>Recorded</th><th>Advisory</th><th>Target</th><th>Severity</th>
+        <th>Status</th><th>Action</th><th>Reason</th><th></th>
+    </tr>
+    </thead>
+    <tbody>
+    @foreach (var entry in Model)
+    {
+        var (badge, label) = Describe(entry);
+        <tr>
+            <td>@entry.RecordedAt.ToString("u")</td>
+            <td><code>@entry.AdvisoryId</code><br />@entry.Title</td>
+            <td>@entry.Identifier</td>
+            <td>@entry.Severity</td>
+            <td>
+                <span class="badge @badge">@label</span>
+                @if (entry.LockedDown && !entry.Suppressed)
+                {
+                    <span class="badge bg-danger">Locked down</span>
+                }
+            </td>
+            <td>@entry.Action</td>
+            <td>@entry.Reason</td>
+            <td>
+                @if (!entry.Suppressed)
+                {
+                    <a asp-action="SuppressConfirm" asp-route-advisoryId="@entry.AdvisoryId"
+                       class="btn btn-sm btn-outline-secondary">Suppress</a>
+                }
+                else
+                {
+                    <a asp-action="UnsuppressConfirm" asp-route-advisoryId="@entry.AdvisoryId"
+                       class="btn btn-sm btn-outline-secondary">Un-suppress</a>
+                }
+            </td>
+        </tr>
+    }
+    @if (Model.Count == 0)
+    {
+        <tr><td colspan="8" class="text-muted">No advisory has applied to this instance yet.</td></tr>
+    }
+    </tbody>
+</table>
+
+<ul class="text-muted small">
+    <li><strong>Acted</strong>: the action was applied. A failed action is shown as Needs attention, never as Acted.</li>
+    <li><strong>Needs decision</strong>: automatic actions are off; apply the action yourself.</li>
+    <li><strong>Needs attention</strong>: the installed version could not be determined, or the action failed. It is retried on every poll.</li>
+    <li><strong>Resolved</strong>: the advisory stopped applying or left the feed, so any lockdown it held was lifted.</li>
+    <li><strong>Locked down</strong>: while shown, only server admins can reach this server. Suppress the advisory to lift it by hand.</li>
+</ul>
