@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Plugins.SecSwitch.Models;
+using PluginDependency = BTCPayServer.Abstractions.Contracts.IBTCPayServerPlugin.PluginDependency;
 
 namespace BTCPayServer.Plugins.SecSwitch.Services;
 
@@ -36,6 +38,15 @@ public static class AdvisoryApplicability
         return true;
     }
 
+    internal static bool TryParseDependencyCondition(string? text, out VersionCondition? condition)
+    {
+        if (!string.IsNullOrWhiteSpace(text))
+            return TryParseCondition(text, out condition);
+
+        condition = new VersionCondition.Yes();
+        return true;
+    }
+
     /// <summary>
     /// A fix is only usable when it is newer than the installed version and itself outside the affected range;
     /// anything else would downgrade, or reinstall a vulnerable version.
@@ -50,11 +61,12 @@ public static class AdvisoryApplicability
 
     /// <summary>Checks whether a candidate update would leave a related advisory applicable to the resulting versions.</summary>
     public static bool IsApplicableAfterUpdate(Advisory advisory, InstanceState state, string identifier, Version version) =>
-        (SameIdentifier(advisory.Identifier, identifier) || SameIdentifier(advisory.Requires?.Identifier, identifier)) &&
+        (SameIdentifier(advisory.Identifier, identifier) ||
+         advisory.Dependencies.Any(dependency => SameIdentifier(dependency.Identifier, identifier))) &&
         IsApplicable(advisory, state, (identifier, version), out _, out _);
 
-    internal static bool IsDistinctPluginPair(string target, string dependency) =>
-        !SameIdentifier(target, CoreIdentifier) && !SameIdentifier(dependency, CoreIdentifier) &&
+    internal static bool IsAllowedDependency(string target, string dependency) =>
+        !SameIdentifier(target, CoreIdentifier) && !string.IsNullOrWhiteSpace(dependency) &&
         !SameIdentifier(target, dependency);
 
     static bool IsApplicable(Advisory advisory, InstanceState state, (string Identifier, Version Version)? update,
@@ -86,38 +98,56 @@ public static class AdvisoryApplicability
             return false;
         }
 
-        reason = $"Installed version {installedVersion} matches {advisory.AffectedVersions}.";
-        if (advisory.Requires is not { } dependency)
-            return true;
-
-        if (RequirementMatches(advisory.Identifier, dependency, state, update, out var dependencyReason))
+        var reasons = new List<string> { $"Installed version {installedVersion} matches {advisory.AffectedVersions}." };
+        foreach (var dependency in advisory.Dependencies)
         {
-            reason += $" {dependencyReason}";
-            return true;
+            if (!DependencyMatches(advisory.Identifier, dependency, state, update, out reason))
+            {
+                installedVersion = null;
+                return false;
+            }
+            reasons.Add(reason);
         }
 
-        installedVersion = null;
-        reason = dependencyReason;
-        return false;
+        reason = string.Join(" ", reasons);
+        return true;
     }
 
-    static bool RequirementMatches(string target, AdvisoryDependency dependency, InstanceState state,
+    static bool DependencyMatches(string target, PluginDependency dependency, InstanceState state,
         (string Identifier, Version Version)? update, out string reason)
     {
-        if (!IsDistinctPluginPair(target, dependency.Identifier) ||
-            !TryParseCondition(dependency.AffectedVersions, out var condition))
-            reason = "The required plugin or its affected version range is invalid.";
-        else if (!TryGetVersion(state, dependency.Identifier, update, out var version))
-            reason = $"Required plugin {dependency.Identifier} is not installed on this instance.";
-        else if (version is null)
-            reason = $"Installed version of required plugin {dependency.Identifier} {IndeterminateVersionPhrase}.";
-        else if (!condition!.IsFulfilled(Pad(version)))
-            reason = $"Required plugin {dependency.Identifier} {version} is not affected by {dependency.AffectedVersions}.";
-        else
+        if (!IsAllowedDependency(target, dependency.Identifier) ||
+            !TryParseDependencyCondition(dependency.Condition, out var condition))
         {
-            reason = $"Required plugin {dependency.Identifier} {version} matches {dependency.AffectedVersions}.";
+            reason = "The dependency identifier or condition is invalid.";
+            return false;
+        }
+
+        var present = TryGetVersion(state, dependency.Identifier, update, out var version);
+        if (condition is VersionCondition.Not)
+        {
+            reason = present
+                ? $"Dependency {dependency.Identifier} must be absent."
+                : $"Dependency {dependency.Identifier} is absent.";
+            return !present;
+        }
+        if (!present)
+            reason = $"Dependency {dependency.Identifier} is not present on this instance.";
+        else if (condition is VersionCondition.Yes)
+        {
+            reason = $"Dependency {dependency.Identifier} is present.";
             return true;
         }
+        else if (version is null)
+            reason = $"Installed version of dependency {dependency.Identifier} {IndeterminateVersionPhrase}.";
+        else if (!condition!.IsFulfilled(Pad(version)))
+            reason = $"Dependency {dependency.Identifier} {version} does not match {dependency.Condition}.";
+        else
+        {
+            reason = $"Dependency {dependency.Identifier} {version} matches {dependency.Condition}.";
+            return true;
+        }
+
         return false;
     }
 

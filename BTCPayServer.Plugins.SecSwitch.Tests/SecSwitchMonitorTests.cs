@@ -639,7 +639,7 @@ public class SecSwitchMonitorTests
             Id = "pair",
             Identifier = "Plug",
             AffectedVersions = ">=1.3.0",
-            Requires = new AdvisoryDependency("Other", ">=1.3.0"),
+            Dependencies = [new() { Identifier = "Other", Condition = ">=1.3.0" }],
             Severity = AdvisorySeverity.High
         };
 
@@ -649,9 +649,9 @@ public class SecSwitchMonitorTests
     }
 
     [Fact]
-    public async Task A_newly_queued_conditional_peer_is_checked_again_at_commit()
+    public async Task A_newly_queued_dependency_blocks_a_companion_dependency_update_at_commit()
     {
-        _sink.PluginUpdates = [new PluginUpdate("Plug", new Version(1, 3, 0))];
+        _sink.PluginUpdates = [new PluginUpdate("Another", new Version(1, 3, 0))];
         _sink.BeforePluginQueue = () =>
         {
             _sink.Pending.Add("Other");
@@ -662,16 +662,22 @@ public class SecSwitchMonitorTests
             Id = "pair",
             Identifier = "Plug",
             AffectedVersions = ">=1.3.0",
-            Requires = new AdvisoryDependency("Other", ">=1.3.0")
+            Dependencies =
+            [
+                new() { Identifier = "Another", Condition = ">=1.3.0" },
+                new() { Identifier = "Other", Condition = ">=1.3.0" }
+            ]
         };
         var state = new InstanceState(new Dictionary<string, Version>(StringComparer.OrdinalIgnoreCase)
         {
-            ["Plug"] = new(1, 1, 0),
-            ["Other"] = new(1, 1, 0)
+            ["Plug"] = new(1, 3, 0),
+            ["Other"] = new(1, 1, 0),
+            ["Another"] = new(1, 0, 0)
         }, null, false);
 
-        var result = await AutoUpdate(state, Settings(autoUpdatePlugin: true), [advisory]);
+        var result = await AutoUpdate(state, new SecSwitchSettings { AutoUpdatePlugins = ["Another"] }, [advisory]);
 
+        Assert.Equal(["Other"], _sink.Pending);
         Assert.False(result.RestartNeeded);
         Assert.Empty(_sink.Updated);
     }

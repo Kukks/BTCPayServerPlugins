@@ -249,10 +249,12 @@ public sealed class SecSwitchMonitor(
         {
             if (AdvisoryApplicability.IsApplicableAfterUpdate(advisory, state, identifier, candidate))
                 return false;
-            // A pending command may change the other half of a conditional advisory on the same restart.
-            if (advisory.Requires is { } required &&
-                ((SameIdentifier(advisory.Identifier, identifier) && pending.Contains(required.Identifier)) ||
-                 (SameIdentifier(required.Identifier, identifier) && pending.Contains(advisory.Identifier))))
+            // A pending command may change a related component on the same restart.
+            var updatingTarget = SameIdentifier(advisory.Identifier, identifier);
+            if (advisory.Dependencies.Length != 0 &&
+                (updatingTarget || advisory.Dependencies.Any(d => SameIdentifier(d.Identifier, identifier))) &&
+                ((!updatingTarget && pending.Contains(advisory.Identifier)) ||
+                 advisory.Dependencies.Any(d => !SameIdentifier(d.Identifier, identifier) && pending.Contains(d.Identifier))))
                 return false;
         }
         return true;

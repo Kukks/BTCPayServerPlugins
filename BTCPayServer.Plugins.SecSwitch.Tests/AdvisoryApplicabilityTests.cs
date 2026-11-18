@@ -18,6 +18,92 @@ public class AdvisoryApplicabilityTests
         }
         """;
 
+    static Advisory NativeAdvisory(string dependencies)
+    {
+        var feed = $$"""
+            {"advisories": [], "conditionalAdvisories": [{
+              "id": "combination", "identifier": "Plug", "affectedVersions": "<1.2.3", "severity": "high",
+              "Dependencies": {{dependencies}}
+            }]}
+            """;
+        return Assert.Single(AdvisoryParser.ParseFeed(Encoding.UTF8.GetBytes(feed), out _));
+    }
+
+    [Theory]
+    [InlineData("2.0.0", "2.4.7", false, true)]
+    [InlineData("1.9.0", "2.4.7", false, false)]
+    [InlineData("2.0.0", "2.4.6", false, false)]
+    [InlineData("2.0.0", null, false, false)]
+    [InlineData("2.0.0", "2.4.7", true, false)]
+    public void Native_dependencies_must_all_match(string dependency, string? core, bool alternativePresent, bool expected)
+    {
+        var advisory = NativeAdvisory("""
+            [{"Identifier":"Dependency","Condition":">=2.0.0"},
+             {"Identifier":"BTCPayServer","Condition":">=2.4.7"},
+             {"Identifier":"Alternative","Condition":"!"}]
+            """);
+        var plugins = new Dictionary<string, Version> { ["Plug"] = new(1, 2, 2), ["Dependency"] = Version.Parse(dependency) };
+        if (alternativePresent)
+            plugins.Add("alternative", new Version(1, 0));
+        var state = new InstanceState(plugins, core is null ? null : Version.Parse(core), false);
+
+        Assert.Equal(expected, AdvisoryApplicability.IsApplicable(advisory, state, out _, out _));
+    }
+
+    [Theory]
+    [InlineData("""{"Identifier":"Dependency"}""")]
+    [InlineData("""{"Identifier":"Dependency","Condition":null}""")]
+    [InlineData("""{"Identifier":"Dependency","Condition":"   "}""")]
+    public void An_unspecified_condition_requires_presence_even_with_an_unknown_version(string dependency)
+    {
+        var advisory = NativeAdvisory($"[{dependency}]");
+        var plugins = new Dictionary<string, Version> { ["Plug"] = new(1, 2, 2) };
+        var state = new InstanceState(plugins, null, false);
+
+        Assert.False(AdvisoryApplicability.IsApplicable(advisory, state, out _, out _));
+        plugins.Add("Dependency", null!);
+        Assert.True(AdvisoryApplicability.IsApplicable(advisory, state, out _, out _));
+    }
+
+    [Theory]
+    [InlineData("", true)]
+    [InlineData("!", false)]
+    [InlineData(">=2.4.7", false)]
+    public void BTCPay_core_is_present_even_when_its_version_is_unknown(string condition, bool expected)
+    {
+        var advisory = NativeAdvisory($$"""[{"Identifier":"BTCPayServer","Condition":"{{condition}}"}]""");
+
+        Assert.Equal(expected, AdvisoryApplicability.IsApplicable(advisory, State(coreVersion: null), out _, out _));
+    }
+
+    [Fact]
+    public void Legacy_requires_with_bang_does_not_become_an_absence_check()
+    {
+        var feed = ConditionalFeed.Replace(">=2.0.0 && <2.1.0", "!");
+        var advisory = Assert.Single(AdvisoryParser.ParseFeed(Encoding.UTF8.GetBytes(feed), out _));
+        var plugins = new Dictionary<string, Version> { ["Plug"] = new(1, 2, 2) };
+        var state = new InstanceState(plugins, null, false);
+
+        Assert.False(AdvisoryApplicability.IsApplicable(advisory, state, out _, out _));
+        plugins.Add("Dependency", new Version(2, 0));
+        Assert.False(AdvisoryApplicability.IsApplicable(advisory, state, out _, out _));
+    }
+
+    [Fact]
+    public void Candidate_update_of_any_listed_dependency_is_checked()
+    {
+        var advisory = NativeAdvisory("""
+            [{"Identifier":"Dependency","Condition":">=2.0.0"},
+             {"Identifier":"BTCPayServer","Condition":">=2.4.8"}]
+            """);
+        var state = new InstanceState(
+            new Dictionary<string, Version> { ["Plug"] = new(1, 2, 2), ["Dependency"] = new(2, 0) },
+            new Version(2, 4, 7), true);
+
+        Assert.True(AdvisoryApplicability.IsApplicableAfterUpdate(advisory, state, "btcpayserver", new Version(2, 4, 8)));
+        Assert.False(AdvisoryApplicability.IsApplicableAfterUpdate(advisory, state, "Dependency", new Version(2, 1)));
+    }
+
     [Theory]
     [InlineData("1.2.2.0", "2.0.0.0", true)]
     [InlineData("1.2.3.0", "2.0.0.0", false)]

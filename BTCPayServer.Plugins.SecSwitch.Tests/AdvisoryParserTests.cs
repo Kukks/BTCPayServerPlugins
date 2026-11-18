@@ -18,6 +18,12 @@ public class AdvisoryParserTests
     static string Conditional(string requirement = ValidRequirement, string id = "conditional") =>
         $$"""{"id":"{{id}}","identifier":"Plug","affectedVersions":">=1.0.0 && <1.2.3","severity":"high","requires":{{requirement}}}""";
 
+    static string WithQualifiers(string qualifiers, string target = "Plug") =>
+        $$"""{"id":"conditional","identifier":"{{target}}","affectedVersions":"<1.2.3","severity":"high",{{qualifiers}}}""";
+
+    static byte[] ConditionalFeed(string entry) =>
+        Encoding.UTF8.GetBytes($$"""{"advisories":[],"conditionalAdvisories":[{{entry}}]}""");
+
     [Fact]
     public void Parses_a_valid_advisory()
     {
@@ -112,6 +118,41 @@ public class AdvisoryParserTests
     }
 
     [Theory]
+    [InlineData("dependencies", "identifier", "condition")]
+    [InlineData("Dependencies", "Identifier", "Condition")]
+    [InlineData("DEPENDENCIES", "iDeNtIfIeR", "CoNdItIoN")]
+    public void Native_dependency_fields_are_case_insensitive(string block, string identifier, string condition)
+    {
+        var entry = WithQualifiers($$"""
+            "{{block}}":[{"{{identifier}}":"BTCPayServer","{{condition}}":">=2.4.7"},
+                         {"{{identifier}}":"Dependency","{{condition}}":"!"}]
+            """);
+
+        Assert.Single(AdvisoryParser.ParseFeed(ConditionalFeed(entry), out var skipped));
+        Assert.Empty(skipped);
+    }
+
+    [Theory]
+    [InlineData(""" "dependencies":null""")]
+    [InlineData(""" "dependencies":[]""")]
+    [InlineData(""" "dependencies":[{}]""")]
+    [InlineData(""" "dependencies":[{"identifier":"pLuG"}]""")]
+    [InlineData(""" "dependencies":[{"identifier":"Dep","condition":false}]""")]
+    [InlineData(""" "dependencies":[{"identifier":"Dep","condition":">=2.4.7 || && <=2.5.0"}]""")]
+    [InlineData(""" "dependencies":[{"identifier":"Dep","Conditions":"<2.0.0"}]""")]
+    [InlineData(""" "dependencies":[{"Identifier":"Dep","identifier":"Other"}]""")]
+    [InlineData(""" "dependencies":[{"identifier":"Dep","condition":"<2.0.0","Condition":null}]""")]
+    [InlineData(""" "dependencies":[{"identifier":"Dep"}],"Dependencies":[{"identifier":"Other"}]""")]
+    [InlineData(""" "dependencies":[{"identifier":"Dep"}],"requires":{"identifier":"Other","affectedVersions":"<2.0.0"}""")]
+    public void Invalid_or_ambiguous_native_dependency_lists_are_skipped(string qualifiers)
+    {
+        var advisories = AdvisoryParser.ParseFeed(ConditionalFeed(WithQualifiers(qualifiers)), out var skipped);
+
+        Assert.Empty(advisories);
+        Assert.Equal("conditional", Assert.Single(skipped).Id);
+    }
+
+    [Theory]
     [InlineData("null")]
     [InlineData("[]")]
     [InlineData("{}")]
@@ -138,13 +179,26 @@ public class AdvisoryParserTests
         Assert.Equal("conditional", Assert.Single(skipped).Id);
     }
 
-    [Fact]
-    public void A_core_advisory_cannot_depend_on_a_plugin()
+    [Theory]
+    [InlineData("dependencies")]
+    [InlineData("Dependencies")]
+    public void A_direct_advisory_with_native_dependencies_is_rejected(string property)
     {
-        var entry = Conditional().Replace("\"Plug\"", "\"BTCpayserver\"");
-        var feed = $$"""{"advisories":[],"conditionalAdvisories":[{{entry}}]}""";
+        var entry = WithQualifiers($$""" "{{property}}":[{"identifier":"Dependency"}]""");
+        var advisories = AdvisoryParser.ParseFeed(Feed(entry), out var skipped);
 
-        var advisories = AdvisoryParser.ParseFeed(Encoding.UTF8.GetBytes(feed), out var skipped);
+        Assert.Empty(advisories);
+        Assert.Equal("conditional", Assert.Single(skipped).Id);
+    }
+
+    [Theory]
+    [InlineData(""" "requires":{"identifier":"Dep","affectedVersions":"<2.0.0"}""")]
+    [InlineData(""" "dependencies":[{"identifier":"Dep","condition":"<2.0.0"}]""")]
+    public void A_core_advisory_cannot_depend_on_a_plugin(string qualifiers)
+    {
+        var entry = WithQualifiers(qualifiers, "BTCpayserver");
+
+        var advisories = AdvisoryParser.ParseFeed(ConditionalFeed(entry), out var skipped);
 
         Assert.Empty(advisories);
         Assert.Equal("conditional", Assert.Single(skipped).Id);

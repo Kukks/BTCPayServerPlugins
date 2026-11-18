@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Plugins.SecSwitch.Models;
+using PluginDependency = BTCPayServer.Abstractions.Contracts.IBTCPayServerPlugin.PluginDependency;
 
 namespace BTCPayServer.Plugins.SecSwitch.Services;
 
@@ -111,7 +113,7 @@ public static class AdvisoryParser
         else if (string.IsNullOrWhiteSpace(identifier)) error = "missing required field: identifier";
         else if (!AdvisoryApplicability.TryParseCondition(affected, out _)) error = $"affectedVersions '{affected}' is not a valid version condition";
         else if (!TryParseSeverity(severityRaw, out var severity)) error = $"unrecognised severity '{severityRaw}'";
-        else if (TryParseDependency(element, identifier, conditional, out var requires, out error))
+        else if (TryParseDependencies(element, identifier, conditional, out var dependencies, out error))
         {
             return new Advisory
             {
@@ -119,7 +121,7 @@ public static class AdvisoryParser
                 Identifier = identifier,
                 AffectedVersions = affected!,
                 FixedVersion = GetString(element, "fixedVersion"),
-                Requires = requires,
+                Dependencies = dependencies,
                 Severity = severity,
                 Title = GetString(element, "title") ?? ""
             };
@@ -127,22 +129,92 @@ public static class AdvisoryParser
         return null;
     }
 
-    static bool TryParseDependency(
-        JsonElement element, string identifier, bool conditional, out AdvisoryDependency? requires, out string? error)
+    static bool TryParseDependencies(
+        JsonElement element, string identifier, bool conditional, out PluginDependency[] dependencies, out string? error)
     {
-        requires = null;
+        dependencies = [];
         error = null;
-        var hasRequirement = element.TryGetProperty("requires", out var requirement);
+        var qualifiers = element.EnumerateObject()
+            .Where(property => IsProperty(property.Name, "dependencies") || IsProperty(property.Name, "requires"))
+            .Take(2)
+            .ToArray();
         if (!conditional)
         {
-            if (hasRequirement)
-                error = "requires is only allowed in conditionalAdvisories";
-            return !hasRequirement;
+            if (qualifiers.Length != 0)
+                error = "dependencies and requires are only allowed in conditionalAdvisories";
+            return qualifiers.Length == 0;
+        }
+        if (qualifiers.Length != 1)
+        {
+            error = "conditional advisories must specify either dependencies or requires once";
+            return false;
+        }
+        if (string.Equals(identifier, AdvisoryApplicability.CoreIdentifier, StringComparison.OrdinalIgnoreCase))
+        {
+            error = "conditional advisories must target a plugin";
+            return false;
         }
 
-        if (!hasRequirement || requirement.ValueKind != JsonValueKind.Object ||
-            element.EnumerateObject().Count(property => property.NameEquals("requires")) != 1 ||
-            requirement.EnumerateObject().Count() != 2)
+        var qualifier = qualifiers[0];
+        if (IsProperty(qualifier.Name, "requires"))
+            return TryParseLegacyRequirement(qualifier.Value, identifier, out dependencies, out error);
+
+        if (qualifier.Value.ValueKind != JsonValueKind.Array || qualifier.Value.GetArrayLength() == 0)
+        {
+            error = "dependencies must be a nonempty array";
+            return false;
+        }
+
+        var parsed = new List<PluginDependency>();
+        foreach (var item in qualifier.Value.EnumerateArray())
+        {
+            if (!TryParseNativeDependency(item, identifier, out var dependency))
+            {
+                error = $"dependencies[{parsed.Count}] must name a different component with a valid optional condition";
+                return false;
+            }
+            parsed.Add(dependency!);
+        }
+        dependencies = parsed.ToArray();
+        return true;
+    }
+
+    static bool TryParseNativeDependency(JsonElement item, string target, out PluginDependency? dependency)
+    {
+        dependency = null;
+        if (item.ValueKind != JsonValueKind.Object)
+            return false;
+
+        JsonElement identifier = default;
+        JsonElement condition = default;
+        foreach (var property in item.EnumerateObject())
+        {
+            if (IsProperty(property.Name, "identifier") && identifier.ValueKind == JsonValueKind.Undefined)
+                identifier = property.Value;
+            else if (IsProperty(property.Name, "condition") && condition.ValueKind == JsonValueKind.Undefined)
+                condition = property.Value;
+            else
+                return false;
+        }
+
+        var dependencyId = identifier.ValueKind == JsonValueKind.String ? identifier.GetString() : null;
+        if (string.IsNullOrWhiteSpace(dependencyId) || !AdvisoryApplicability.IsAllowedDependency(target, dependencyId) ||
+            condition.ValueKind is not (JsonValueKind.String or JsonValueKind.Null or JsonValueKind.Undefined))
+            return false;
+        var rawCondition = condition.ValueKind == JsonValueKind.String ? condition.GetString() : null;
+        if (!AdvisoryApplicability.TryParseDependencyCondition(rawCondition, out _))
+            return false;
+
+        dependency = new PluginDependency { Identifier = dependencyId, Condition = rawCondition };
+        return true;
+    }
+
+    static bool TryParseLegacyRequirement(
+        JsonElement requirement, string identifier, out PluginDependency[] dependencies, out string? error)
+    {
+        dependencies = [];
+        error = null;
+        if (requirement.ValueKind != JsonValueKind.Object || requirement.EnumerateObject().Count() != 2)
         {
             error = "requires must contain exactly one plugin identifier and its affectedVersions";
             return false;
@@ -150,14 +222,20 @@ public static class AdvisoryParser
 
         var dependency = GetString(requirement, "identifier");
         var affected = GetString(requirement, "affectedVersions");
-        if (string.IsNullOrWhiteSpace(dependency) || !AdvisoryApplicability.IsDistinctPluginPair(identifier, dependency))
+        if (string.IsNullOrWhiteSpace(dependency) || !AdvisoryApplicability.IsAllowedDependency(identifier, dependency) ||
+            string.Equals(dependency, AdvisoryApplicability.CoreIdentifier, StringComparison.OrdinalIgnoreCase))
             error = "conditional advisories must name two distinct plugin identifiers";
-        else if (!AdvisoryApplicability.TryParseCondition(affected, out _))
+        else if (!AdvisoryApplicability.TryParseCondition(affected, out var condition))
             error = $"requires.affectedVersions '{affected}' is not a valid version condition";
         else
-            requires = new AdvisoryDependency(dependency, affected!);
-        return requires is not null;
+            // Legacy requires never matched "!", even when the plugin was absent. Only a standalone
+            // "!" in a native dependency can match absence, so use a compound that also never matches.
+            dependencies = [new PluginDependency { Identifier = dependency, Condition = condition is VersionCondition.Not ? "! && !" : affected! }];
+        return dependencies.Length != 0;
     }
+
+    static bool IsProperty(string actual, string expected) =>
+        string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
 
     static string? GetString(JsonElement element, string name)
         => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

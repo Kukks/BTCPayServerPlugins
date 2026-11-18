@@ -42,10 +42,12 @@ The feed is the authority. Protect the advisory repository and its Pages deploym
       "id": "example-plugin-pair",
       "identifier": "BTCPayServer.Plugins.Example",
       "affectedVersions": ">=1.0.0 && <1.2.3",
-      "requires": {
-        "identifier": "BTCPayServer.Plugins.ExampleDependency",
-        "affectedVersions": ">=3.0.0 && <3.1.0"
-      },
+      "dependencies": [
+        {
+          "identifier": "BTCPayServer.Plugins.ExampleDependency",
+          "condition": ">=3.0.0 && <3.1.0"
+        }
+      ],
       "fixedVersion": "1.2.3",
       "severity": "high",
       "title": "Example plugin interaction advisory"
@@ -55,7 +57,8 @@ The feed is the authority. Protect the advisory repository and its Pages deploym
 ```
 
 - Use `advisories` for BTCPay Server itself and for a plugin affected independently. Use the plugin's manifest identifier or `BTCPayServer` for core.
-- Use `conditionalAdvisories` when one plugin is unsafe only alongside a specific version of another loaded plugin. Both ranges must match. The first plugin is the action target. Older readers of the direct array ignore conditional entries.
+- Use `conditionalAdvisories` for a plugin affected only in certain installations. Copy a plugin manifest's `dependencies` array, with `identifier` and `condition` on each entry. SecSwitch accepts the casing emitted by PluginPacker. The target range and every dependency condition must match. A blank or omitted dependency condition means the dependency must be loaded at any version, and `!` means it must be absent. Use `BTCPayServer` to match the running core version as a dependency. The advisory's top-level identifier is the action target.
+- SecSwitch still accepts the earlier `requires` object when reading preview feeds. Use `dependencies` in new advisories.
 - Use globally unique, stable IDs and BTCPay's `VersionCondition` syntax. Missing version components compare as zero, so `1.2.3` equals `1.2.3.0`. Severity is informational.
 - On a valid poll, removing an advisory withdraws it. A feed error preserves active lockdowns. A malformed entry keeps its known ID listed. An unidentified malformed entry prevents lifting a lockdown solely because its advisory disappeared.
 
