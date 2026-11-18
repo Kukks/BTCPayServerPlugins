@@ -7,7 +7,7 @@ namespace BTCPayServer.Plugins.SecSwitch.Models;
 public sealed class SecSwitchSettings
 {
     public const string ProposedFeedUrl = "https://btcpayserver.github.io/advisories/advisories.json";
-    const string LegacyPlaceholderFeedUrl = "https://raw.githubusercontent.com/btcpayserver/advisories/master/advisories.json";
+    static readonly Uri LegacyPlaceholderFeedUrl = new("https://raw.githubusercontent.com/btcpayserver/advisories/master/advisories.json");
 
     public bool Enabled { get; set; } = true;
     public string? FeedUrl { get; set; }
@@ -22,7 +22,7 @@ public sealed class SecSwitchSettings
         AutoUpdatePlugins?.Contains(identifier, StringComparer.OrdinalIgnoreCase) == true;
 
     public bool HasLegacyPlaceholderFeedUrl() =>
-        string.Equals(FeedUrl?.Trim(), LegacyPlaceholderFeedUrl, StringComparison.Ordinal);
+        Uri.TryCreate(FeedUrl?.Trim(), UriKind.Absolute, out var url) && url.Equals(LegacyPlaceholderFeedUrl);
 
     public string? GetFeedUrl()
     {

@@ -32,7 +32,7 @@ public class LockdownTests : IDisposable
     public LockdownTests()
     {
         _ledger = new LedgerStore(_settings);
-        _gate = new LockdownGate(_settings, _ledger, NullLogger<LockdownGate>.Instance);
+        _gate = new LockdownGate(_ledger, NullLogger<LockdownGate>.Instance);
         foreach (var file in new[] { "main/site.css", "vendor/jquery/jquery.js", "img/logo.svg", "fonts/a.woff2" })
         {
             var path = Path.Combine(_webRoot.FullName, file);
@@ -132,7 +132,7 @@ public class LockdownTests : IDisposable
     public async Task Overlapping_refreshes_cannot_let_a_stale_read_overwrite_a_newer_one()
     {
         var gated = new GatedSettings(_settings);
-        var gate = new LockdownGate(gated, new LedgerStore(gated), NullLogger<LockdownGate>.Instance);
+        var gate = new LockdownGate(new LedgerStore(gated), NullLogger<LockdownGate>.Instance);
         await _settings.UpdateSetting(new SecSwitchSettings { Enabled = true });
         await Lock();
 

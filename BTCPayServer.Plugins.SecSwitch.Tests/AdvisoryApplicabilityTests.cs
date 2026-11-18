@@ -89,19 +89,22 @@ public class AdvisoryApplicabilityTests
         Assert.False(AdvisoryApplicability.IsApplicable(advisory, state, out _, out _));
     }
 
-    [Fact]
-    public void Candidate_update_of_any_listed_dependency_is_checked()
+    [Theory]
+    [InlineData("btcpayserver", "2.0.0", "2.4.7", "2.4.8")]
+    [InlineData("Dependency", "1.9.0", "2.4.8", "2.1.0")]
+    public void Candidate_update_of_any_listed_dependency_is_checked(
+        string identifier, string dependency, string core, string candidate)
     {
         var advisory = NativeAdvisory("""
             [{"Identifier":"Dependency","Condition":">=2.0.0"},
              {"Identifier":"BTCPayServer","Condition":">=2.4.8"}]
             """);
         var state = new InstanceState(
-            new Dictionary<string, Version> { ["Plug"] = new(1, 2, 2), ["Dependency"] = new(2, 0) },
-            new Version(2, 4, 7), true);
+            new Dictionary<string, Version> { ["Plug"] = new(1, 2, 2), ["Dependency"] = Version.Parse(dependency) },
+            Version.Parse(core), true);
 
-        Assert.True(AdvisoryApplicability.IsApplicableAfterUpdate(advisory, state, "btcpayserver", new Version(2, 4, 8)));
-        Assert.False(AdvisoryApplicability.IsApplicableAfterUpdate(advisory, state, "Dependency", new Version(2, 1)));
+        Assert.False(AdvisoryApplicability.IsApplicable(advisory, state, out _, out _));
+        Assert.True(AdvisoryApplicability.IsApplicableAfterUpdate(advisory, state, identifier, Version.Parse(candidate)));
     }
 
     [Theory]
@@ -139,6 +142,21 @@ public class AdvisoryApplicabilityTests
         Assert.False(applicable);
         Assert.Null(installed);
         Assert.Contains(AdvisoryApplicability.IndeterminateVersionPhrase, reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_missing_dependency_rules_out_an_advisory_with_an_unknown_dependency_version(bool unknownFirst)
+    {
+        const string unknown = """{"Identifier":"BTCPayServer","Condition":">=2.4.7"}""";
+        const string missing = """{"Identifier":"Dependency"}""";
+        var dependencies = unknownFirst ? $"[{unknown},{missing}]" : $"[{missing},{unknown}]";
+        var advisory = NativeAdvisory(dependencies);
+
+        Assert.False(AdvisoryApplicability.IsApplicable(advisory, State(coreVersion: null), out var installed, out var reason));
+        Assert.Null(installed);
+        Assert.Contains("Dependency is not present", reason, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]

@@ -99,21 +99,35 @@ public static class AdvisoryApplicability
         }
 
         var reasons = new List<string> { $"Installed version {installedVersion} matches {advisory.AffectedVersions}." };
+        string? indeterminateReason = null;
         foreach (var dependency in advisory.Dependencies)
         {
-            if (!DependencyMatches(advisory.Identifier, dependency, state, update, out reason))
+            switch (DependencyMatches(advisory.Identifier, dependency, state, update, out reason))
             {
-                installedVersion = null;
-                return false;
+                case false:
+                    installedVersion = null;
+                    return false;
+                case null:
+                    indeterminateReason ??= reason;
+                    break;
+                default:
+                    reasons.Add(reason);
+                    break;
             }
-            reasons.Add(reason);
+        }
+
+        if (indeterminateReason is not null)
+        {
+            installedVersion = null;
+            reason = indeterminateReason;
+            return false;
         }
 
         reason = string.Join(" ", reasons);
         return true;
     }
 
-    static bool DependencyMatches(string target, PluginDependency dependency, InstanceState state,
+    static bool? DependencyMatches(string target, PluginDependency dependency, InstanceState state,
         (string Identifier, Version Version)? update, out string reason)
     {
         if (!IsAllowedDependency(target, dependency.Identifier) ||
@@ -139,7 +153,10 @@ public static class AdvisoryApplicability
             return true;
         }
         else if (version is null)
+        {
             reason = $"Installed version of dependency {dependency.Identifier} {IndeterminateVersionPhrase}.";
+            return null;
+        }
         else if (!condition!.IsFulfilled(Pad(version)))
             reason = $"Dependency {dependency.Identifier} {version} does not match {dependency.Condition}.";
         else

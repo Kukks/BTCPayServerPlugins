@@ -13,14 +13,41 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
     // Static: LedgerStore instances share one persisted ledger, so they must share one gate.
     static readonly SemaphoreSlim Gate = new(1, 1);
     static readonly SemaphoreSlim PolicyGate = new(1, 1);
+    // BTCPay's repository can fill its cache after a concurrent write invalidates it.
+    static readonly SemaphoreSlim PolicyCacheGate = new(1, 1);
+
+    public async Task<SecSwitchSettings> GetPolicyAsync()
+    {
+        await PolicyCacheGate.WaitAsync();
+        try
+        {
+            return await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
+        }
+        finally
+        {
+            PolicyCacheGate.Release();
+        }
+    }
+
+    internal async Task SavePolicyAsync(SecSwitchSettings settings)
+    {
+        await PolicyCacheGate.WaitAsync();
+        try
+        {
+            await settingsRepository.UpdateSetting(settings);
+        }
+        finally
+        {
+            PolicyCacheGate.Release();
+        }
+    }
 
     public async Task<T> WithPolicyAsync<T>(Func<SecSwitchSettings, Task<T>> action)
     {
         await PolicyGate.WaitAsync();
         try
         {
-            var settings = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
-            return await action(settings);
+            return await action(await GetPolicyAsync());
         }
         finally
         {
@@ -29,6 +56,19 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
     }
 
     public async Task<SecSwitchLedger> GetAsync()
+    {
+        await Gate.WaitAsync();
+        try
+        {
+            return await ReadAsync();
+        }
+        finally
+        {
+            Gate.Release();
+        }
+    }
+
+    async Task<SecSwitchLedger> ReadAsync()
     {
         var ledger = await settingsRepository.GetSettingAsync<SecSwitchLedger>() ?? new SecSwitchLedger();
         var entries = new Dictionary<string, LedgerEntry>(StringComparer.OrdinalIgnoreCase);
@@ -45,14 +85,20 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
     }
 
     // A suppression an admin made while a poll was in flight must survive the poll's own write.
-    public Task RecordAsync(LedgerEntry entry) => MutateAsync(ledger =>
+    public Task RecordAsync(LedgerEntry entry) => MutateAsync(ledger => RecordEntry(ledger, entry));
+
+    public Task<bool> RecordQueuedOutcomeAsync(LedgerEntry entry) => MutateAsync(ledger =>
+        (!ledger.Entries.TryGetValue(entry.AdvisoryId, out var current) || current.RecordedAt < entry.RecordedAt) &&
+        RecordEntry(ledger, entry));
+
+    static bool RecordEntry(SecSwitchLedger ledger, LedgerEntry entry)
     {
         entry.Suppressed |= ledger.Entries.TryGetValue(entry.AdvisoryId, out var current) && current.Suppressed;
         entry.NotificationPending = !entry.Suppressed &&
                                     entry.Status is LedgerStatus.Acted or LedgerStatus.NeedsDecision or LedgerStatus.NeedsAttention;
         ledger.Entries[entry.AdvisoryId] = entry;
         return true;
-    });
+    }
 
     /// <summary>
     /// Lock flags only mean something while SecSwitch is enabled and automatic; dropping them otherwise keeps
@@ -72,11 +118,14 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
         return locked.Count > 0;
     });
 
-    public Task RecordPollAsync(DateTimeOffset at, string? error, string? feedUrl = null) => MutateAsync(ledger =>
+    public Task RecordPollAsync(DateTimeOffset at, string? error, string? feedUrl = null, Guid? policyRevision = null,
+        int skippedEntries = 0) => MutateAsync(ledger =>
     {
         ledger.LastPollAt = at;
         ledger.LastPollError = error;
         ledger.LastPollFeedUrl = feedUrl;
+        ledger.LastPollPolicyRevision = policyRevision;
+        ledger.LastPollSkippedEntries = skippedEntries;
         return true;
     });
 
@@ -85,6 +134,14 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
         if (ledger.LastCoreUpdateAt is { } last && last >= at)
             return false;
         ledger.LastCoreUpdateAt = at;
+        return true;
+    });
+
+    public Task ReleaseCoreUpdateAsync(DateTimeOffset reservation, DateTimeOffset? previous) => MutateAsync(ledger =>
+    {
+        if (ledger.LastCoreUpdateAt != reservation)
+            return false;
+        ledger.LastCoreUpdateAt = previous;
         return true;
     });
 
@@ -114,7 +171,7 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
         await Gate.WaitAsync();
         try
         {
-            var ledger = await GetAsync();
+            var ledger = await ReadAsync();
             if (!mutation(ledger))
                 return false;
             await settingsRepository.UpdateSetting(ledger);

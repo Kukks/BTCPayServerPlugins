@@ -42,14 +42,32 @@ public class PeriodicTaskTests
         }
         var sink = new FakeSink { Pending = ["Plug"] };
         var executor = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
-        var lockdown = new LockdownGate(settings, ledger, NullLogger<LockdownGate>.Instance);
+        var lockdown = new LockdownGate(ledger, NullLogger<LockdownGate>.Instance);
         var monitor = new SecSwitchMonitor(executor, sink, ledger, lockdown, NullLogger<SecSwitchMonitor>.Instance);
-        var task = new SecSwitchPeriodicTask(settings, null!, monitor, ledger, executor, lockdown, null!, [], null!, sink,
+        var task = new SecSwitchPeriodicTask(null!, monitor, ledger, executor, lockdown, null!, [], null!, sink,
             NullLogger<SecSwitchPeriodicTask>.Instance);
 
         await task.Do(TestContext.Current.CancellationToken);
 
         Assert.Equal(expectedStops, sink.Stops);
+    }
+
+    [Fact]
+    public async Task A_disabled_poll_refreshes_a_cached_lockdown()
+    {
+        var settings = new FakeSettingsRepository();
+        var ledger = new LedgerStore(settings);
+        await ledger.RecordAsync(new LedgerEntry { AdvisoryId = "affected-core", LockedDown = true });
+        var lockdown = new LockdownGate(ledger, NullLogger<LockdownGate>.Instance);
+        Assert.True(await lockdown.IsActiveAsync());
+        await settings.UpdateSetting(new SecSwitchSettings { Enabled = false });
+        Assert.True(await lockdown.IsActiveAsync());
+        var task = new SecSwitchPeriodicTask(null!, null!, ledger, null!, lockdown, null!, [], null!, null!,
+            NullLogger<SecSwitchPeriodicTask>.Instance);
+
+        await task.Do(TestContext.Current.CancellationToken);
+
+        Assert.False(await lockdown.IsActiveAsync());
     }
 
     [Fact]

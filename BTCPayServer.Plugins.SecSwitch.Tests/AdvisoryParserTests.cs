@@ -90,7 +90,22 @@ public class AdvisoryParserTests
         var advisories = AdvisoryParser.ParseFeed(Feed("""{"id":"bad"}""", Valid), out var skipped);
 
         Assert.Equal("a1", Assert.Single(advisories).Id);
-        Assert.StartsWith("advisories[0]:", Assert.Single(skipped).Reason);
+        var rejected = Assert.Single(skipped);
+        Assert.Equal("bad", rejected.Id);
+        Assert.StartsWith("advisories[0]:", rejected.Reason);
+    }
+
+    [Theory]
+    [InlineData("high")]
+    [InlineData("invalid")]
+    public void Repeated_id_properties_make_the_entry_unidentified(string severity)
+    {
+        var entry = $$"""{"id":"core-1","id":"core-2","identifier":"BTCPayServer","affectedVersions":"<2.5.0","severity":"{{severity}}"}""";
+
+        var advisories = AdvisoryParser.ParseFeed(Feed(entry, Valid), out var skipped);
+
+        Assert.Equal("a1", Assert.Single(advisories).Id);
+        Assert.Null(Assert.Single(skipped).Id);
     }
 
     [Fact]

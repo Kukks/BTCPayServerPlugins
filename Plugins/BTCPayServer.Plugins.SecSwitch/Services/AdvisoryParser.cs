@@ -92,6 +92,9 @@ public static class AdvisoryParser
         string? id = null;
         try
         {
+            if (element.EnumerateObject().Where(property => property.NameEquals("id")).Take(2).Count() > 1)
+                return new Entry(null, path, conditional, null, "entry repeats its id property");
+
             id = GetString(element, "id");
             var advisory = ParseAdvisory(element, id, conditional, out var error);
             return new Entry(advisory, path, conditional, id, error);

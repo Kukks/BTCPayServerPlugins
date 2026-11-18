@@ -167,6 +167,21 @@ public class ActionExecutorTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Core_update_failure_records_whether_dispatch_is_uncertain(bool failedToStart)
+    {
+        _sink.CoreUpdateThrows = failedToStart
+            ? new CoreUpdateNotDispatchedException("The command did not start.")
+            : new InvalidOperationException("The command failed after starting.");
+
+        var outcome = await Executor().UpdateCoreAsync();
+
+        Assert.False(outcome.Succeeded);
+        Assert.Equal(!failedToStart, outcome.CoreUpdateMayBeRunning);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("..")]
@@ -317,7 +332,11 @@ public class ActionExecutorTests
     [InlineData("Plug", "1.2.2", true, null, false)]
     [InlineData("Other", "1.2.3", true, null, false)]
     [InlineData("Plug", "1.2.3", false, null, false)]
-    [InlineData("Plug", "1.2.3", true, "enable", false)]
+    [InlineData("Plug", "1.2.3", true, "enable", true)]
+    [InlineData("Plug", "1.2.3", true, "disable", false)]
+    [InlineData("Plug", "1.2.3", true, "delete enable", false)]
+    [InlineData("Plug", "1.2.3", true, "delete install", false)]
+    [InlineData("Plug", "1.2.3", true, "disable enable", true)]
     public async Task An_advisory_update_leaves_only_a_verified_exact_pending_fix_to_the_admin(
         string manifestId, string manifestVersion, bool havePackage, string? additionalCommand, bool verified)
     {
@@ -326,18 +345,73 @@ public class ActionExecutorTests
         if (havePackage)
             File.WriteAllText(Path.Combine(dir.Path, "Plug.btcpay"), "admin payload");
         PluginManager.QueueCommands(dir.Path, ("install", "Plug"));
-        if (additionalCommand is not null)
-            PluginManager.QueueCommands(dir.Path, (additionalCommand, "Plug"));
+        foreach (var command in additionalCommand?.Split(' ') ?? [])
+            PluginManager.QueueCommands(dir.Path, (command, "Plug"));
         var sink = SinkForPluginDirectory(dir.Path);
         Assert.Equal(verified, sink.HasVerifiedQueuedUpdate("Plug", "1.2.3"));
         var executor = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
 
-        var outcome = await executor.ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv(fixedVersion: "1.2.3"));
+        var commitCalls = 0;
+        var outcome = await executor.ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv(fixedVersion: "1.2.3"), commitUpdate: commit =>
+        {
+            commitCalls++;
+            return commit();
+        });
 
         Assert.True(outcome.Succeeded);
         Assert.Equal(verified, outcome.AlreadyQueued);
         Assert.Equal(!verified, outcome.RestartNeeded);
-        Assert.Equal(verified ? "install" : "disable", PluginManager.GetPendingCommands(dir.Path).Last().command);
+        Assert.Equal(verified ? 1 : 0, commitCalls);
+        var expectedLastCommand = verified ? additionalCommand?.Split(' ')[^1] ?? "install" : "disable";
+        Assert.Equal(expectedLastCommand, PluginManager.GetPendingCommands(dir.Path).Last().command);
+    }
+
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, true)]
+    public async Task An_exact_fix_queued_during_download_must_still_pass_the_commit_check(
+        bool authorized, bool downloadFails, bool queueChangesDuringCommit)
+    {
+        using var dir = new TempPluginDir("Plug", "Dep");
+        const string manifest = """{"identifier":"Plug","version":"1.2.3.0"}""";
+        var published = $$"""{"manifestInfo":{{manifest}}}""";
+        using var client = new HttpClient(new StubPluginBuilder(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path == "/api/v1/plugins/Plug")
+                return $"[{published}]";
+            if (!path.EndsWith("/download", StringComparison.Ordinal))
+                return published;
+
+            File.WriteAllText(Path.Combine(dir.Path, "Plug.btcpay"), "admin package");
+            File.WriteAllText(Path.Combine(dir.Path, "Plug.json"), manifest);
+            PluginManager.QueueCommands(dir.Path, ("install", "Plug"));
+            if (!authorized && !queueChangesDuringCommit)
+                PluginManager.QueueCommands(dir.Path, ("install", "Dep"));
+            if (downloadFails)
+                throw new InvalidOperationException("Download failed.");
+            return "SecSwitch package";
+        })) { BaseAddress = new Uri("https://plugins.example/") };
+        using var services = ServicesForPluginBuilder(client);
+        var sink = SinkForPluginDirectory(dir.Path, services.GetRequiredService<IServiceScopeFactory>());
+        var commitCalls = 0;
+
+        var outcome = await new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance)
+            .UpdatePluginAsync("Plug", "1.2.3.0", commit =>
+            {
+                commitCalls++;
+                if (queueChangesDuringCommit)
+                    PluginManager.QueueCommands(dir.Path, ("disable", "Plug"));
+                return sink.PendingPluginIdentifiers().Contains("Dep") ? Task.FromResult(false) : commit();
+            });
+
+        Assert.Equal(1, commitCalls);
+        Assert.Equal(authorized, outcome.Succeeded);
+        Assert.Equal(authorized, outcome.AlreadyQueued);
+        Assert.False(outcome.RestartNeeded);
+        Assert.Equal("admin package", File.ReadAllText(Path.Combine(dir.Path, "Plug.btcpay")));
     }
 
     [Fact]
@@ -392,13 +466,7 @@ public class ActionExecutorTests
             }
             return "SecSwitch package";
         })) { BaseAddress = new Uri("https://plugins.example/") };
-        var networks = new BTCPayNetworkProvider([], new NBXplorer.NBXplorerNetworkProvider(NBitcoin.ChainName.Regtest),
-            new Logging.Logs());
-        using var services = new ServiceCollection()
-            .AddSingleton(new PluginBuilderClient(client))
-            .AddSingleton(new PoliciesSettings())
-            .AddSingleton(new BTCPayServerEnvironment(null!, networks, null!, new BTCPayServerOptions()))
-            .BuildServiceProvider();
+        using var services = ServicesForPluginBuilder(client);
         var sink = SinkForPluginDirectory(dir.Path, services.GetRequiredService<IServiceScopeFactory>());
 
         if (adminQueued)
@@ -437,6 +505,17 @@ public class ActionExecutorTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(body(request)) });
+    }
+
+    static ServiceProvider ServicesForPluginBuilder(HttpClient client)
+    {
+        var networks = new BTCPayNetworkProvider([], new NBXplorer.NBXplorerNetworkProvider(NBitcoin.ChainName.Regtest),
+            new Logging.Logs());
+        return new ServiceCollection()
+            .AddSingleton(new PluginBuilderClient(client))
+            .AddSingleton(new PoliciesSettings())
+            .AddSingleton(new BTCPayServerEnvironment(null!, networks, null!, new BTCPayServerOptions()))
+            .BuildServiceProvider();
     }
 
     static BtcPayActionSink SinkForPluginDirectory(string pluginDirectory, IServiceScopeFactory? scopeFactory = null) =>

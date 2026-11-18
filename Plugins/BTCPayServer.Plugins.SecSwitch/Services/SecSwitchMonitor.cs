@@ -4,13 +4,15 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Plugins.SecSwitch.Models;
 using Microsoft.Extensions.Logging;
 
 namespace BTCPayServer.Plugins.SecSwitch.Services;
 
 /// <param name="CoreUpdateDispatched">True only when a core update was actually started, not merely recorded.</param>
-public sealed record ProcessResult(IReadOnlyList<LedgerEntry> Recorded, bool RestartNeeded, bool CoreUpdateDispatched = false);
+public sealed record ProcessResult(IReadOnlyList<LedgerEntry> Recorded, bool RestartNeeded, bool CoreUpdateDispatched = false,
+    bool CoreUpdateMayBeRunning = false);
 
 public sealed class SecSwitchMonitor(
     ActionExecutor executor,
@@ -25,46 +27,41 @@ public sealed class SecSwitchMonitor(
     /// </summary>
     public static readonly TimeSpan CoreUpdateWindow = TimeSpan.FromHours(24);
     readonly ConcurrentDictionary<string, LedgerEntry> _pendingAudit = new(StringComparer.OrdinalIgnoreCase);
-    long _unrecordedCoreDispatchTicks;
+    readonly ConcurrentDictionary<string, LedgerEntry> _queuedPluginChanges = new(StringComparer.OrdinalIgnoreCase);
 
-    sealed record Evaluation(LedgerEntry? Entry, bool RestartNeeded, bool Executed);
+    sealed record Evaluation(LedgerEntry? Entry, bool RestartNeeded, bool Executed, bool CoreUpdateMayBeRunning = false);
 
     public IReadOnlyList<LedgerEntry> PendingAuditEntries => _pendingAudit.Values.ToList();
+
+    public IReadOnlyList<LedgerEntry> GetPendingPluginChangeEntries(IEnumerable<string> pendingIdentifiers)
+    {
+        var pending = pendingIdentifiers.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var change in _queuedPluginChanges)
+            if (!pending.Contains(change.Key))
+                _queuedPluginChanges.TryRemove(change);
+        return _queuedPluginChanges.Values.ToList();
+    }
 
     public async Task RetryPendingAuditAsync()
     {
         foreach (var entry in PendingAuditEntries)
             await RecordQueuedChangeAsync(entry);
-        var ticks = Interlocked.Read(ref _unrecordedCoreDispatchTicks);
-        if (ticks != 0)
-            await RecordCoreDispatchAsync(new DateTimeOffset(ticks, TimeSpan.Zero));
     }
 
-    async Task RecordQueuedChangeAsync(LedgerEntry entry)
+    async Task RecordQueuedChangeAsync(LedgerEntry entry, bool newlyQueued = false)
     {
+        if (newlyQueued)
+            _queuedPluginChanges[entry.Identifier] = entry;
         try
         {
-            await ledger.RecordAsync(entry);
-            _pendingAudit.TryRemove(entry.AdvisoryId, out _);
+            await ledger.RecordQueuedOutcomeAsync(entry);
+            if (_pendingAudit.TryGetValue(entry.AdvisoryId, out var pending) && pending.RecordedAt <= entry.RecordedAt)
+                _pendingAudit.TryRemove(new KeyValuePair<string, LedgerEntry>(entry.AdvisoryId, pending));
         }
         catch (Exception e)
         {
-            _pendingAudit[entry.AdvisoryId] = entry;
+            _pendingAudit.AddOrUpdate(entry.AdvisoryId, entry, (_, pending) => pending.RecordedAt > entry.RecordedAt ? pending : entry);
             logger.LogError(e, "SecSwitch will retry recording its queued change for {AdvisoryId}", entry.AdvisoryId);
-        }
-    }
-
-    async Task RecordCoreDispatchAsync(DateTimeOffset at)
-    {
-        try
-        {
-            await ledger.RecordCoreUpdateAsync(at);
-            Interlocked.CompareExchange(ref _unrecordedCoreDispatchTicks, 0, at.UtcTicks);
-        }
-        catch (Exception e)
-        {
-            Interlocked.Exchange(ref _unrecordedCoreDispatchTicks, at.UtcTicks);
-            logger.LogError(e, "SecSwitch will retry recording the dispatched core update");
         }
     }
 
@@ -82,11 +79,13 @@ public sealed class SecSwitchMonitor(
         var entries = snapshot.Entries;
         var recorded = new List<LedgerEntry>();
         var unreadable = unreadableIds.ToList();
-        var queued = new HashSet<string>(sink.PendingPluginIdentifiers(), StringComparer.OrdinalIgnoreCase);
+        var queued = PendingChanges(snapshot);
         var changedBySecSwitch = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var restartNeeded = false;
         var coreUpdateRecent = CoreUpdateDispatchedRecently(snapshot.LastCoreUpdateAt);
         var coreUpdateDispatched = false;
+        var coreUpdateMayBeRunning = false;
+        var plannedDisables = PlannedDisables(advisories, state, settings, snapshot);
         var holdPluginChanges = LockdownGate.HasActiveLockdown(settings, snapshot) || settings is { Enabled: true, AutoApply: true } &&
             advisories.Any(a => IsCore(a.Identifier) && entries.GetValueOrDefault(a.Id) is not { Suppressed: true } &&
                                 AdvisoryApplicability.IsApplicable(a, state, out _, out _));
@@ -103,9 +102,9 @@ public sealed class SecSwitchMonitor(
 
                 var allowFix = unreadable.Count == 0 &&
                                (!Version.TryParse(advisory.FixedVersion, out var candidate) ||
-                                IsSafeUpdate(advisories, state, advisory.Identifier, candidate, queued));
+                                IsSafeUpdate(advisories, state, advisory.Identifier, candidate, queued, plannedDisables));
                 var evaluation = await EvaluateAsync(advisory, existing, state, settings, coreUpdateRecent,
-                    allowFix, changedBySecSwitch.Contains(advisory.Identifier), holdPluginChanges, advisories, ct);
+                    allowFix, changedBySecSwitch.Contains(advisory.Identifier), holdPluginChanges, advisories, plannedDisables, ct);
                 restartNeeded |= evaluation.RestartNeeded;
                 if (evaluation.RestartNeeded)
                 {
@@ -116,8 +115,11 @@ public sealed class SecSwitchMonitor(
                     continue;
 
                 var dispatched = evaluation.Executed && IsCoreUpdateEntry(entry);
-                coreUpdateRecent |= dispatched;
+                coreUpdateRecent |= dispatched || evaluation.CoreUpdateMayBeRunning;
                 coreUpdateDispatched |= dispatched;
+                coreUpdateMayBeRunning |= evaluation.CoreUpdateMayBeRunning;
+                if (coreUpdateRecent)
+                    queued.Add(AdvisoryApplicability.CoreIdentifier);
                 if (IsChange(existing, entry) || (evaluation.Executed && entry.Status == LedgerStatus.Acted))
                 {
                     if (await RecordForPolicyAsync(settings, entry, evaluation.RestartNeeded))
@@ -136,16 +138,23 @@ public sealed class SecSwitchMonitor(
             foreach (var stale in entries.Values.Where(e => !e.Suppressed && !listed.Contains(e.AdvisoryId) &&
                 (e.LockedDown || e.Status == LedgerStatus.NeedsDecision && !e.AdvisoryId.StartsWith("autoupdate:", StringComparison.OrdinalIgnoreCase))))
             {
-                stale.LockedDown = false;
-                stale.Status = LedgerStatus.Resolved;
-                stale.Reason = "The advisory is no longer listed in the feed.";
-                stale.RecordedAt = DateTimeOffset.UtcNow;
-                if (await RecordForPolicyAsync(settings, stale, pluginChangeQueued: false))
-                    recorded.Add(stale);
+                try
+                {
+                    stale.LockedDown = false;
+                    stale.Status = LedgerStatus.Resolved;
+                    stale.Reason = "The advisory is no longer listed in the feed.";
+                    stale.RecordedAt = DateTimeOffset.UtcNow;
+                    if (await RecordForPolicyAsync(settings, stale, pluginChangeQueued: false))
+                        recorded.Add(stale);
+                }
+                catch (Exception e)
+                {
+                    logger.LogError(e, "SecSwitch could not record the withdrawal of advisory {Id}", stale.AdvisoryId);
+                }
             }
         }
 
-        return new ProcessResult(recorded, restartNeeded, coreUpdateDispatched);
+        return new ProcessResult(recorded, restartNeeded, coreUpdateDispatched, coreUpdateMayBeRunning);
     }
 
     /// <summary>Updates plugins (and BTCPay Server through the host integration) to newer releases, once per target version.</summary>
@@ -159,7 +168,7 @@ public sealed class SecSwitchMonitor(
         var recorded = new List<LedgerEntry>();
         var restartNeeded = false;
 
-        var pending = new HashSet<string>(sink.PendingPluginIdentifiers(), StringComparer.OrdinalIgnoreCase);
+        var pending = PendingChanges(snapshot);
         var optedIn = state.InstalledPlugins
             .Where(p => settings.IsPluginAutoUpdateEnabled(p.Key) && !pending.Contains(p.Key) &&
                         !HasApplicableAdvisory(advisories, state, p.Key))
@@ -173,8 +182,8 @@ public sealed class SecSwitchMonitor(
                 !IsSafeUpdate(advisories, state, update.Identifier, update.Available, pending))
                 continue;
             var outcome = await UpdateOnceAsync(entries, update.Identifier, update.Available,
-                SecSwitchAction.UpdatePlugin, () => executor.UpdatePluginAsync(update.Identifier, update.Available.ToString(),
-                    AuthorizePluginUpdate(settings, advisories, state, update.Identifier, update.Available, ct)), recorded);
+                SecSwitchAction.UpdatePlugin, id => executor.UpdatePluginAsync(update.Identifier, update.Available.ToString(),
+                    AuthorizePluginUpdate(settings, advisories, state, id, update.Identifier, update.Available, [], ct)), recorded);
             if (outcome?.RestartNeeded == true)
             {
                 pending.Add(update.Identifier);
@@ -183,6 +192,7 @@ public sealed class SecSwitchMonitor(
         }
 
         var coreUpdateDispatched = false;
+        var coreUpdateMayBeRunning = false;
         if (!ct.IsCancellationRequested && settings.AutoUpdateCore && state.CanUpdateCore && state.CoreVersion is { } current &&
             !HasApplicableAdvisory(advisories, state, AdvisoryApplicability.CoreIdentifier) &&
             !CoreUpdateDispatchedRecently(snapshot.LastCoreUpdateAt) &&
@@ -192,11 +202,12 @@ public sealed class SecSwitchMonitor(
             !ct.IsCancellationRequested)
         {
             var outcome = await UpdateOnceAsync(entries, AdvisoryApplicability.CoreIdentifier, latest,
-                SecSwitchAction.UpdateCore, () => RunCoreUpdateAsync(settings, ct), recorded);
+                SecSwitchAction.UpdateCore, id => RunCoreUpdateAsync(settings, id, state, advisories, latest, [], ct), recorded);
             coreUpdateDispatched = outcome?.Succeeded == true;
+            coreUpdateMayBeRunning = outcome?.CoreUpdateMayBeRunning == true;
         }
 
-        return new ProcessResult(recorded, restartNeeded, coreUpdateDispatched);
+        return new ProcessResult(recorded, restartNeeded, coreUpdateDispatched, coreUpdateMayBeRunning);
     }
 
     static bool PolicyMatches(SecSwitchSettings expected, SecSwitchSettings current) =>
@@ -210,23 +221,27 @@ public sealed class SecSwitchMonitor(
                 return false;
             entry.LockedDown &= current.AutoApply;
             if (pluginChangeQueued)
-                await RecordQueuedChangeAsync(entry);
+                await RecordQueuedChangeAsync(entry, newlyQueued: true);
             else
                 await ledger.RecordAsync(entry);
-            if (IsCore(entry.Identifier))
+            if (entry is { LockedDown: true, Suppressed: false })
+                await lockdown.ActivateAsync();
+            else if (IsCore(entry.Identifier))
                 await lockdown.RefreshAsync();
             return true;
         });
 
     Func<Func<Task<bool>>, Task<bool>> AuthorizePluginUpdate(SecSwitchSettings expected,
-        IReadOnlyList<Advisory> advisories, InstanceState state, string identifier, Version version, CancellationToken ct) =>
+        IReadOnlyList<Advisory> advisories, InstanceState state, string id, string identifier, Version version,
+        IReadOnlyCollection<string> plannedDisables, CancellationToken ct) =>
         commit => ledger.WithPolicyAsync(async current =>
         {
             if (ct.IsCancellationRequested || !PolicyMatches(expected, current) ||
-                !current.IsPluginAutoUpdateEnabled(identifier) ||
-                LockdownGate.HasActiveLockdown(current, await ledger.GetAsync()) ||
-                !IsSafeUpdate(advisories, state, identifier, version,
-                    sink.PendingPluginIdentifiers().ToHashSet(StringComparer.OrdinalIgnoreCase)))
+                !current.IsPluginAutoUpdateEnabled(identifier))
+                return false;
+            var snapshot = await ledger.GetAsync();
+            if (IsSuppressed(snapshot, id) || LockdownGate.HasActiveLockdown(current, snapshot) ||
+                !IsSafeUpdate(advisories, state, identifier, version, PendingChanges(snapshot), plannedDisables))
                 return false;
             return await commit();
         });
@@ -240,15 +255,16 @@ public sealed class SecSwitchMonitor(
             return await DispatchCoreUpdateAsync(snapshot.LastCoreUpdateAt, ct);
         });
 
-    Task<ActionOutcome> RunCoreUpdateAsync(SecSwitchSettings expected, CancellationToken ct, LedgerEntry? advisory = null) =>
+    Task<ActionOutcome> RunCoreUpdateAsync(SecSwitchSettings expected, string id, InstanceState state,
+        IReadOnlyList<Advisory> advisories, Version candidate, IReadOnlyCollection<string> plannedDisables,
+        CancellationToken ct, LedgerEntry? advisory = null) =>
         ledger.WithPolicyAsync(async current =>
         {
             if (ct.IsCancellationRequested || !PolicyMatches(expected, current) || !current.AutoUpdateCore)
                 return new ActionOutcome(false, "The automatic core update was deferred.");
 
             var snapshot = await ledger.GetAsync();
-            if (advisory is null && LockdownGate.HasActiveLockdown(current, snapshot) ||
-                advisory is not null && snapshot.Entries.GetValueOrDefault(advisory.AdvisoryId) is { Suppressed: true })
+            if (IsSuppressed(snapshot, id) || advisory is null && LockdownGate.HasActiveLockdown(current, snapshot))
                 return new ActionOutcome(false, "The automatic core update was deferred.");
 
             if (advisory is { LockedDown: true })
@@ -267,11 +283,13 @@ public sealed class SecSwitchMonitor(
                     LockedDown = true
                 };
                 await ledger.RecordAsync(lockEntry);
-                await lockdown.RefreshAsync();
-                if (lockEntry.Suppressed || !await lockdown.IsActiveAsync())
+                if (lockEntry.Suppressed)
                     return new ActionOutcome(false, "Could not activate lockdown before updating BTCPay Server.");
+                await lockdown.ActivateAsync();
             }
 
+            if (!IsSafeUpdate(advisories, state, AdvisoryApplicability.CoreIdentifier, candidate, PendingChanges(snapshot), plannedDisables))
+                return new ActionOutcome(false, "The core update was deferred because a related plugin change might activate an advisory.");
             return await DispatchCoreUpdateAsync(snapshot.LastCoreUpdateAt, ct);
         });
 
@@ -283,11 +301,35 @@ public sealed class SecSwitchMonitor(
             return new ActionOutcome(false, "This host does not offer an update command. Update BTCPay Server on the deployment host.");
         if (CoreUpdateDispatchedRecently(lastDispatch))
             return new ActionOutcome(false, "A BTCPay Server update was already dispatched within the last day.");
-        var outcome = await executor.UpdateCoreAsync();
-        if (outcome.Succeeded)
-            await RecordCoreDispatchAsync(DateTimeOffset.UtcNow);
+        var reservation = DateTimeOffset.UtcNow;
+        await ledger.RecordCoreUpdateAsync(reservation);
+        var outcome = ct.IsCancellationRequested
+            ? new ActionOutcome(false, "The core update was cancelled before dispatch.")
+            : await executor.UpdateCoreAsync();
+        if (!outcome.Succeeded && !outcome.CoreUpdateMayBeRunning)
+        {
+            try
+            {
+                await ledger.ReleaseCoreUpdateAsync(reservation, lastDispatch);
+            }
+            catch (Exception e)
+            {
+                logger.LogError(e, "SecSwitch could not release the failed core update reservation");
+            }
+        }
         return outcome;
     }
+
+    HashSet<string> PendingChanges(SecSwitchLedger snapshot)
+    {
+        var pending = sink.PendingPluginIdentifiers().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (CoreUpdateDispatchedRecently(snapshot.LastCoreUpdateAt))
+            pending.Add(AdvisoryApplicability.CoreIdentifier);
+        return pending;
+    }
+
+    static bool IsSuppressed(SecSwitchLedger snapshot, string id) =>
+        snapshot.Entries.GetValueOrDefault(id) is { Suppressed: true };
 
     static bool IsCore(string identifier) => SameIdentifier(identifier, AdvisoryApplicability.CoreIdentifier);
 
@@ -296,19 +338,45 @@ public sealed class SecSwitchMonitor(
     static bool HasApplicableAdvisory(IEnumerable<Advisory> advisories, InstanceState state, string identifier) =>
         advisories.Any(a => SameIdentifier(a.Identifier, identifier) && AdvisoryApplicability.IsApplicable(a, state, out _, out _));
 
+    static HashSet<string> PlannedDisables(
+        IEnumerable<Advisory> advisories, InstanceState state, SecSwitchSettings settings, SecSwitchLedger snapshot) =>
+        settings is { Enabled: true, AutoApply: true }
+            ? advisories.Where(a => !IsCore(a.Identifier) && !IsSuppressed(snapshot, a.Id) &&
+                                    AdvisoryApplicability.IsApplicable(a, state, out _, out _))
+                .Select(a => a.Identifier).ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
     static bool IsSafeUpdate(
-        IEnumerable<Advisory> advisories, InstanceState state, string identifier, Version candidate, ISet<string> pending)
+        IEnumerable<Advisory> advisories, InstanceState state, string identifier, Version candidate, ISet<string> pending,
+        IReadOnlyCollection<string>? plannedDisables = null)
     {
         foreach (var advisory in advisories)
         {
+            var updatingTarget = SameIdentifier(advisory.Identifier, identifier);
+            if (!updatingTarget && !advisory.Dependencies.Any(d => SameIdentifier(d.Identifier, identifier)))
+                continue;
             if (AdvisoryApplicability.IsApplicableAfterUpdate(advisory, state, identifier, candidate))
                 return false;
-            // A pending command may change a related component on the same restart.
-            var updatingTarget = SameIdentifier(advisory.Identifier, identifier);
             if (advisory.Dependencies.Length != 0 &&
-                (updatingTarget || advisory.Dependencies.Any(d => SameIdentifier(d.Identifier, identifier))) &&
                 ((!updatingTarget && pending.Contains(advisory.Identifier)) ||
                  advisory.Dependencies.Any(d => !SameIdentifier(d.Identifier, identifier) && pending.Contains(d.Identifier))))
+                return false;
+            if (plannedDisables is not { Count: > 0 })
+                continue;
+            var absent = advisory.Dependencies
+                .Where(d => plannedDisables.Contains(d.Identifier, StringComparer.OrdinalIgnoreCase) &&
+                            AdvisoryApplicability.TryParseDependencyCondition(d.Condition, out var condition) &&
+                            condition is VersionCondition.Not)
+                .Select(d => d.Identifier)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (absent.Count == 0)
+                continue;
+            var afterDisables = state with
+            {
+                InstalledPlugins = state.InstalledPlugins.Where(p => !absent.Contains(p.Key))
+                    .ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase)
+            };
+            if (AdvisoryApplicability.IsApplicableAfterUpdate(advisory, afterDisables, identifier, candidate))
                 return false;
         }
         return true;
@@ -334,7 +402,8 @@ public sealed class SecSwitchMonitor(
 
     async Task<Evaluation> EvaluateAsync(
         Advisory advisory, LedgerEntry? existing, InstanceState state, SecSwitchSettings settings, bool coreUpdateRecent,
-        bool allowFix, bool pluginChangeQueued, bool holdPluginChanges, IReadOnlyList<Advisory> advisories, CancellationToken ct)
+        bool allowFix, bool pluginChangeQueued, bool holdPluginChanges, IReadOnlyList<Advisory> advisories,
+        IReadOnlyCollection<string> plannedDisables, CancellationToken ct)
     {
         var decision = PolicyResolver.Resolve(advisory, state, settings, allowFix);
         if (holdPluginChanges && decision.Action is SecSwitchAction.UpdatePlugin or SecSwitchAction.DisablePlugin)
@@ -392,44 +461,45 @@ public sealed class SecSwitchMonitor(
         }
 
         var commitUpdate = Version.TryParse(advisory.FixedVersion, out var candidate)
-            ? AuthorizePluginUpdate(settings, advisories, state, advisory.Identifier, candidate, ct)
+            ? AuthorizePluginUpdate(settings, advisories, state, advisory.Id, advisory.Identifier, candidate, plannedDisables, ct)
             : null;
         Task<ActionOutcome> CommitDisable(Func<ActionOutcome> commit) => ledger.WithPolicyAsync(async current =>
         {
-            if (ct.IsCancellationRequested || !PolicyMatches(settings, current) || !current.AutoApply ||
-                LockdownGate.HasActiveLockdown(current, await ledger.GetAsync()))
+            if (ct.IsCancellationRequested || !PolicyMatches(settings, current) || !current.AutoApply)
+                return new ActionOutcome(false, "The plugin disable was deferred because the kill switch policy changed.");
+            var snapshot = await ledger.GetAsync();
+            if (IsSuppressed(snapshot, advisory.Id) || LockdownGate.HasActiveLockdown(current, snapshot))
                 return new ActionOutcome(false, "The plugin disable was deferred because the kill switch policy changed.");
             if (allowFix && candidate is not null &&
                 AdvisoryApplicability.IsApplicable(advisory, state, out var installed, out _) &&
                 AdvisoryApplicability.HasUsableFix(advisory, installed!) &&
-                IsSafeUpdate(advisories, state, advisory.Identifier, candidate,
-                    sink.PendingPluginIdentifiers().ToHashSet(StringComparer.OrdinalIgnoreCase)) &&
+                IsSafeUpdate(advisories, state, advisory.Identifier, candidate, PendingChanges(snapshot), plannedDisables) &&
                 sink.HasVerifiedQueuedUpdate(advisory.Identifier, advisory.FixedVersion!))
                 return new ActionOutcome(true, "An administrator already queued the fixed version.", AlreadyQueued: true);
             return commit();
         });
 
         var outcome = decision.Action == SecSwitchAction.UpdateCore
-            ? await RunCoreUpdateAsync(settings, ct, entry)
+            ? await RunCoreUpdateAsync(settings, advisory.Id, state, advisories, candidate!, plannedDisables, ct, entry)
             : await executor.ExecuteAsync(decision.Action, advisory, settings.AutoApply, commitUpdate, CommitDisable);
         entry.Status = outcome.AlreadyQueued ? LedgerStatus.NeedsDecision :
             outcome.Succeeded ? LedgerStatus.Acted : LedgerStatus.NeedsAttention;
         entry.Reason = $"{entry.Reason} {outcome.Message}".Trim();
         if (!outcome.Succeeded)
             logger.LogError("SecSwitch could not apply {Action} for advisory {Id}: {Outcome}", decision.Action, advisory.Id, outcome.Message);
-        return new Evaluation(entry, outcome.RestartNeeded, true);
+        return new Evaluation(entry, outcome.RestartNeeded, true, outcome.CoreUpdateMayBeRunning);
     }
 
     async Task<ActionOutcome?> UpdateOnceAsync(
         IReadOnlyDictionary<string, LedgerEntry> entries, string identifier, Version version,
-        SecSwitchAction action, Func<Task<ActionOutcome>> run, List<LedgerEntry> recorded)
+        SecSwitchAction action, Func<string, Task<ActionOutcome>> run, List<LedgerEntry> recorded)
     {
         var id = $"autoupdate:{identifier}@{version}";
         entries.TryGetValue(id, out var existing);
         if (existing is { Suppressed: true } || (existing is { Status: LedgerStatus.Acted } && !CoreUpdateDue(existing)))
             return null;
 
-        var outcome = await run();
+        var outcome = await run(id);
         var entry = new LedgerEntry
         {
             AdvisoryId = id,
@@ -445,14 +515,14 @@ public sealed class SecSwitchMonitor(
         if (IsChange(existing, entry) || outcome.Succeeded)
         {
             if (outcome.RestartNeeded)
-                await RecordQueuedChangeAsync(entry);
+                await RecordQueuedChangeAsync(entry, newlyQueued: true);
             else
             {
                 try
                 {
                     await ledger.RecordAsync(entry);
                 }
-                catch (Exception e) when (action == SecSwitchAction.UpdateCore && outcome.Succeeded)
+                catch (Exception e) when (action == SecSwitchAction.UpdateCore && (outcome.Succeeded || outcome.CoreUpdateMayBeRunning))
                 {
                     logger.LogError(e, "SecSwitch could not record the audit outcome of a dispatched core update");
                 }
@@ -468,12 +538,8 @@ public sealed class SecSwitchMonitor(
     static bool CoreUpdateDue(LedgerEntry existing) =>
         IsCoreUpdateEntry(existing) && DateTimeOffset.UtcNow - existing.RecordedAt >= CoreUpdateWindow;
 
-    bool CoreUpdateDispatchedRecently(DateTimeOffset? lastDispatch)
-    {
-        var inMemoryTicks = Interlocked.Read(ref _unrecordedCoreDispatchTicks);
-        var cutoff = DateTimeOffset.UtcNow - CoreUpdateWindow;
-        return lastDispatch > cutoff || inMemoryTicks > cutoff.UtcTicks;
-    }
+    static bool CoreUpdateDispatchedRecently(DateTimeOffset? lastDispatch) =>
+        lastDispatch > DateTimeOffset.UtcNow - CoreUpdateWindow;
 
     static bool IsChange(LedgerEntry? existing, LedgerEntry entry) =>
         existing is null || existing.Status != entry.Status || existing.Action != entry.Action ||

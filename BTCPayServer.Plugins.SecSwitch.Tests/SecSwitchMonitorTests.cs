@@ -16,7 +16,7 @@ public class SecSwitchMonitorTests
     public SecSwitchMonitorTests()
     {
         _ledger = new LedgerStore(_settings);
-        _lockdown = new LockdownGate(_settings, _ledger, NullLogger<LockdownGate>.Instance);
+        _lockdown = new LockdownGate(_ledger, NullLogger<LockdownGate>.Instance);
     }
 
     SecSwitchMonitor Monitor() => new(
@@ -247,6 +247,23 @@ public class SecSwitchMonitorTests
         Assert.Empty(result.Recorded);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Suppression_during_download_prevents_both_the_update_and_the_fallback_disable(bool downloadSucceeds)
+    {
+        await Process([Adv()], settings: Settings(autoApply: false));
+        _sink.BeforePluginQueue = async () => await _ledger.WithPolicyAsync(_ => _ledger.SuppressAsync("adv-1"));
+        _sink.QueueUpdateResult = downloadSucceeds;
+
+        var result = await Process([Adv(fixedVersion: "1.2.3")], settings: Settings(autoUpdatePlugin: true));
+
+        Assert.False(result.RestartNeeded);
+        Assert.Empty(_sink.Updated);
+        Assert.Empty(_sink.Disabled);
+        Assert.True((await EntryFor("adv-1")).Suppressed);
+    }
+
     [Fact]
     public async Task An_unknown_core_version_needs_attention_and_never_locks_down()
     {
@@ -416,6 +433,60 @@ public class SecSwitchMonitorTests
         var result = await Process([CoreAdvisory("9.0.0")], State(canUpdateCore: true), Settings(autoUpdateCore: true));
 
         Assert.False(result.CoreUpdateDispatched);
+        Assert.True(result.CoreUpdateMayBeRunning);
+        Assert.NotNull((await _ledger.GetAsync()).LastCoreUpdateAt);
+    }
+
+    [Fact]
+    public async Task The_core_update_reservation_is_persisted_before_the_host_command_starts()
+    {
+        DateTimeOffset? reservedAtDispatch = null;
+        _sink.BeforeCoreUpdate = async () =>
+        {
+            reservedAtDispatch = (await _ledger.GetAsync()).LastCoreUpdateAt;
+            _settings.RejectLedgerWrites = true;
+        };
+        var state = State(canUpdateCore: true);
+        var settings = Settings(autoUpdateCore: true);
+
+        var result = await Process([CoreAdvisory("9.0.0")], state, settings);
+        _settings.RejectLedgerWrites = false;
+        var retry = await Process([CoreAdvisory("9.0.0")], state, settings);
+
+        Assert.True(result.CoreUpdateDispatched);
+        Assert.False(retry.CoreUpdateDispatched);
+        Assert.NotNull(reservedAtDispatch);
+        Assert.Equal(reservedAtDispatch, (await _ledger.GetAsync()).LastCoreUpdateAt);
+        Assert.Equal(1, _sink.CoreUpdates);
+    }
+
+    [Fact]
+    public async Task The_core_update_stays_undispatched_if_its_reservation_fails()
+    {
+        _settings.RejectLedgerWrite = ledger => ledger.LastCoreUpdateAt is not null;
+
+        var result = await Process([CoreAdvisory("9.0.0")], State(canUpdateCore: true), Settings(autoUpdateCore: true));
+
+        Assert.False(result.CoreUpdateDispatched);
+        Assert.Equal(0, _sink.CoreUpdates);
+        Assert.Null((await _ledger.GetAsync()).LastCoreUpdateAt);
+        Assert.True(await _lockdown.IsActiveAsync());
+    }
+
+    [Fact]
+    public async Task A_confirmed_failure_to_start_releases_the_core_update_reservation()
+    {
+        _sink.CoreUpdateThrows = new CoreUpdateNotDispatchedException("The program could not start.");
+        var state = State(canUpdateCore: true);
+        var settings = Settings(autoUpdateCore: true);
+
+        var failed = await Process([CoreAdvisory("9.0.0")], state, settings);
+        Assert.False(failed.CoreUpdateDispatched);
+        Assert.False(failed.CoreUpdateMayBeRunning);
+        Assert.Null((await _ledger.GetAsync()).LastCoreUpdateAt);
+
+        _sink.CoreUpdateThrows = null;
+        Assert.True((await Process([CoreAdvisory("9.0.0")], state, settings)).CoreUpdateDispatched);
     }
 
     [Fact]
@@ -534,6 +605,26 @@ public class SecSwitchMonitorTests
         var entry = Assert.Single(result.Recorded);
         Assert.Equal(LedgerStatus.Resolved, entry.Status);
         Assert.False(entry.LockedDown);
+    }
+
+    [Fact]
+    public async Task A_failed_withdrawal_write_cannot_hide_a_core_dispatch_or_a_queued_plugin_change()
+    {
+        var settings = Settings(autoApply: false, autoUpdatePlugin: true, autoUpdateCore: true);
+        var stale = Adv(id: "withdrawn");
+        var advisories = new[] { CoreAdvisory("9.0.0"), Adv(fixedVersion: "1.2.3") };
+        var state = State(canUpdateCore: true);
+        await Process([stale], state, settings);
+        _settings.RejectLedgerWrite = book => book.Entries.GetValueOrDefault(stale.Id)?.Status == LedgerStatus.Resolved;
+
+        var result = await Process(advisories, state, settings);
+
+        Assert.True(result.CoreUpdateDispatched);
+        Assert.True(result.RestartNeeded);
+        Assert.Equal(LedgerStatus.NeedsDecision, (await EntryFor(stale.Id)).Status);
+        _settings.RejectLedgerWrite = null;
+        await Process(advisories, state, settings);
+        Assert.Equal(LedgerStatus.Resolved, (await EntryFor(stale.Id)).Status);
     }
 
     [Fact]
@@ -702,6 +793,81 @@ public class SecSwitchMonitorTests
         Assert.Empty(monitor.PendingAuditEntries);
         Assert.Equal(LedgerStatus.Acted, (await EntryFor("autoupdate:Plug@1.3.0")).Status);
         Assert.Single(_sink.Updated);
+    }
+
+    [Fact]
+    public async Task Replaying_an_older_queue_outcome_retains_the_new_decision_and_restart_ownership()
+    {
+        var settings = Settings(autoUpdatePlugin: true);
+        await _settings.UpdateSetting(settings);
+        _sink.PluginUpdates = [new PluginUpdate("Plug", new Version(1, 3, 0))];
+        _sink.BeforePluginQueue = () =>
+        {
+            _settings.RejectLedgerWrites = true;
+            return Task.CompletedTask;
+        };
+        var monitor = Monitor();
+        await monitor.AutoUpdateAsync(State(), settings, [], TestContext.Current.CancellationToken);
+        var deferred = Assert.Single(monitor.PendingAuditEntries);
+        _settings.RejectLedgerWrites = false;
+        await _ledger.RecordAsync(new LedgerEntry
+        {
+            AdvisoryId = deferred.AdvisoryId,
+            Identifier = "Plug",
+            Status = LedgerStatus.NeedsDecision,
+            RecordedAt = deferred.RecordedAt.AddSeconds(1)
+        });
+        var newDecision = await EntryFor(deferred.AdvisoryId);
+        Assert.True(await _ledger.MarkNotifiedAsync(newDecision.AdvisoryId, newDecision.RecordedAt));
+
+        await monitor.RetryPendingAuditAsync();
+
+        Assert.Empty(monitor.PendingAuditEntries);
+        Assert.True(SecSwitchMonitor.HasPendingChanges(["Plug"], monitor.GetPendingPluginChangeEntries(["Plug"]), deferred.RecordedAt));
+        var saved = await EntryFor(deferred.AdvisoryId);
+        Assert.Equal(LedgerStatus.NeedsDecision, saved.Status);
+        Assert.False(saved.NotificationPending);
+    }
+
+    [Fact]
+    public async Task A_dispatched_core_update_blocks_related_plugin_fixes_but_allows_unrelated_fixes()
+    {
+        var state = new InstanceState(new Dictionary<string, Version>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Plug"] = new(1, 1, 0),
+            ["Other"] = new(1, 1, 0)
+        }, new Version(2, 4, 7), true);
+        var settings = Settings(autoApply: false, autoUpdateCore: true);
+        settings.AutoUpdatePlugins = ["Plug", "Other"];
+        var conditional = Adv(id: "future-core", affected: ">=1.2.3");
+        conditional.Dependencies = [new() { Identifier = "BTCPayServer", Condition = ">=2.4.8" }];
+
+        var result = await Process(
+            [Adv(fixedVersion: "1.2.3"), Adv(id: "other", identifier: "Other", fixedVersion: "1.2.3"), CoreAdvisory("9.0.0"), conditional],
+            state, settings);
+
+        Assert.True(result.CoreUpdateDispatched);
+        Assert.Equal([("Other", "1.2.3")], _sink.Updated);
+    }
+
+    [Fact]
+    public async Task A_planned_disable_blocks_a_fix_that_would_be_affected_without_the_dependency()
+    {
+        var state = new InstanceState(new Dictionary<string, Version>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Plug"] = new(1, 1, 0),
+            ["Other"] = new(1, 1, 0),
+            ["Unrelated"] = new(1, 1, 0)
+        }, null, false);
+        var missingDependency = Adv(id: "without-other", affected: ">=1.2.3");
+        missingDependency.Dependencies = [new() { Identifier = "Other", Condition = "!" }];
+
+        await Process([Adv(fixedVersion: "1.2.3"), missingDependency, Adv(id: "other", identifier: "Other"),
+                Adv(id: "unrelated", identifier: "Unrelated", fixedVersion: "1.2.3")],
+            state, new SecSwitchSettings { AutoUpdatePlugins = ["Plug", "Unrelated"] });
+
+        Assert.Contains("Other", _sink.Disabled);
+        Assert.Equal([("Unrelated", "1.2.3")], _sink.Updated);
     }
 
     [Fact]

@@ -118,13 +118,18 @@ public class LedgerStoreTests
 
         await store.RecordPollAsync(at, "404 Not Found");
         var failed = await store.GetAsync();
-        await store.RecordPollAsync(at.AddHours(1), null);
+        var revision = Guid.NewGuid();
+        await store.RecordPollAsync(at.AddHours(1), null, "https://example.test/advisories.json", revision, 2);
         var succeeded = await store.GetAsync();
+        await store.RecordPollAsync(at.AddHours(2), null);
 
         Assert.Equal(at, failed.LastPollAt);
         Assert.Equal("404 Not Found", failed.LastPollError);
         Assert.Equal(at.AddHours(1), succeeded.LastPollAt);
         Assert.Null(succeeded.LastPollError);
+        Assert.Equal(revision, succeeded.LastPollPolicyRevision);
+        Assert.Equal(2, succeeded.LastPollSkippedEntries);
+        Assert.Equal(0, (await store.GetAsync()).LastPollSkippedEntries);
     }
 
     [Fact]

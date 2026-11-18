@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -20,7 +21,11 @@ using Newtonsoft.Json;
 
 namespace BTCPayServer.Plugins.SecSwitch.Services;
 
-public sealed record ActionOutcome(bool Succeeded, string Message, bool RestartNeeded = false, bool AlreadyQueued = false);
+public sealed record ActionOutcome(bool Succeeded, string Message, bool RestartNeeded = false, bool AlreadyQueued = false,
+    bool CoreUpdateMayBeRunning = false);
+
+public sealed class CoreUpdateNotDispatchedException(string message, Exception? innerException = null)
+    : InvalidOperationException(message, innerException);
 
 public sealed record PluginUpdate(string Identifier, Version Available);
 
@@ -108,7 +113,8 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
         catch (Exception e)
         {
             logger.LogError(e, "SecSwitch core update failed");
-            return new ActionOutcome(false, $"Core update failed: {Sanitize(e.Message)}");
+            return new ActionOutcome(false, $"Core update failed: {Sanitize(e.Message)}",
+                CoreUpdateMayBeRunning: e is not CoreUpdateNotDispatchedException);
         }
     }
 
@@ -208,7 +214,7 @@ public sealed class BtcPayActionSink(
         var expectedVersion = Version.Parse(candidates[0]);
         var pending = PluginManager.GetPendingCommands(pluginDir);
         if (IsExactFixQueued(pluginDir, resolved, expectedVersion, pending))
-            return PluginUpdateQueueResult.AlreadyQueued;
+            return await ConfirmQueuedFixAsync();
         EnsureNoPendingChange(pending, resolved);
 
         using var scope = scopeFactory.CreateScope();
@@ -219,20 +225,20 @@ public sealed class BtcPayActionSink(
                 Options.Create(new DataDirectories { PluginDir = staging.FullName }));
             var manifest = await DownloadUpdateAsync(downloader, resolved, candidates);
             pending = PluginManager.GetPendingCommands(pluginDir);
-            if (IsExactFixQueued(pluginDir, resolved, expectedVersion, pending))
-                return PluginUpdateQueueResult.AlreadyQueued;
-            EnsureNoPendingChange(pending, resolved);
-            EnsureDependencies(manifest, downloader.Installed, pending);
+            if (!IsExactFixQueued(pluginDir, resolved, expectedVersion, pending))
+            {
+                EnsureNoPendingChange(pending, resolved);
+                EnsureDependencies(manifest, downloader.Installed, pending);
 
-            return await QueueStagedFilesAsync(pluginDir, staging.FullName, resolved, manifest, downloader.Installed, commitUpdate)
-                ? PluginUpdateQueueResult.Queued
-                : PluginUpdateQueueResult.PolicyChanged;
+                return await QueueStagedFilesAsync(pluginDir, staging.FullName, resolved, manifest, downloader.Installed, commitUpdate)
+                    ? PluginUpdateQueueResult.Queued
+                    : PluginUpdateQueueResult.PolicyChanged;
+            }
         }
         catch (Exception e) when (e is IOException or InvalidOperationException)
         {
-            if (IsExactFixQueued(pluginDir, resolved, expectedVersion, PluginManager.GetPendingCommands(pluginDir)))
-                return PluginUpdateQueueResult.AlreadyQueued;
-            throw;
+            if (!IsExactFixQueued(pluginDir, resolved, expectedVersion, PluginManager.GetPendingCommands(pluginDir)))
+                throw;
         }
         finally
         {
@@ -244,6 +250,17 @@ public sealed class BtcPayActionSink(
             {
                 logger.LogWarning(e, "Could not clean up the SecSwitch update staging directory");
             }
+        }
+
+        return await ConfirmQueuedFixAsync();
+
+        async Task<PluginUpdateQueueResult> ConfirmQueuedFixAsync()
+        {
+            Task<bool> VerifyAsync() =>
+                Task.FromResult(IsExactFixQueued(pluginDir, resolved, expectedVersion, PluginManager.GetPendingCommands(pluginDir)));
+
+            var verified = commitUpdate is null ? await VerifyAsync() : await commitUpdate(VerifyAsync);
+            return verified ? PluginUpdateQueueResult.AlreadyQueued : PluginUpdateQueueResult.PolicyChanged;
         }
     }
 
@@ -335,7 +352,10 @@ public sealed class BtcPayActionSink(
     static bool IsExactFixQueued(string pluginDir, string identifier, Version expectedVersion,
         IEnumerable<(string command, string plugin)> pending)
     {
-        if (LastPendingChange(pending, identifier, StringComparison.Ordinal) != "install" ||
+        var operations = pending.Where(entry => string.Equals(entry.plugin, identifier, StringComparison.Ordinal))
+            .Select(entry => entry.command).SkipWhile(command => command != "install").ToArray();
+        // The first install consumes the package, so a later delete cannot be repaired by another install.
+        if (operations.Length == 0 || operations[^1] is not ("install" or "enable") || operations.Contains("delete") ||
             !File.Exists(Path.Combine(pluginDir, identifier + PluginManager.BTCPayPluginSuffix)))
             return false;
 
@@ -487,12 +507,20 @@ public sealed class BtcPayActionSink(
     public async Task TriggerCoreUpdateAsync()
     {
         if (!CanUpdateCore)
-            throw new InvalidOperationException("The btcpay-host integration does not offer 'update'; cannot update BTCPay Server.");
+            throw new CoreUpdateNotDispatchedException("The btcpay-host integration does not offer 'update'; cannot update BTCPay Server.");
 
         var update = processRunner.RunHostCommand(HostCommands.Update, null, CoreUpdateTimeout);
         if (await Task.WhenAny(update, Task.Delay(CoreUpdateStartGrace)) == update)
         {
-            var result = await update;
+            HostCommandResult result;
+            try
+            {
+                result = await update;
+            }
+            catch (Win32Exception e) when (e.NativeErrorCode is 2 or 3)
+            {
+                throw new CoreUpdateNotDispatchedException($"Could not start 'btcpay-host update': {e.Message}", e);
+            }
             if (result.ExitCode != 0)
                 throw new InvalidOperationException($"'btcpay-host update' exited with code {result.ExitCode}: {result.Error}");
             logger.LogInformation("SecSwitch's 'btcpay-host update' finished quickly with exit code 0");

@@ -3,7 +3,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
-using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client;
 using BTCPayServer.Plugins.SecSwitch.Models;
 using BTCPayServer.Plugins.SecSwitch.Services;
@@ -18,7 +17,6 @@ namespace BTCPayServer.Plugins.SecSwitch.Controllers;
 [Authorize(Policy = Policies.CanModifyServerSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
 [Route("~/plugins/secswitch")]
 public class SecSwitchController(
-    ISettingsRepository settingsRepository,
     LedgerStore ledger,
     LockdownGate lockdown,
     ILogger<SecSwitchController> logger) : Controller
@@ -29,7 +27,7 @@ public class SecSwitchController(
         if (await lockdown.IsActiveAsync())
             return StatusCode(StatusCodes.Status503ServiceUnavailable);
 
-        var settings = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
+        var settings = await ledger.GetPolicyAsync();
         settings.FeedUrl = settings.GetFeedUrl();
         return View(settings);
     }
@@ -56,19 +54,23 @@ public class SecSwitchController(
             .ToArray();
 
         var saved = false;
+        var completed = false;
         var killSwitchEnabled = settings.Enabled && settings.AutoApply;
         try
         {
             var allowed = await ledger.WithPolicyAsync(async previous =>
             {
                 if (await HasActiveLockdownAsync(previous))
+                {
+                    await lockdown.ActivateAsync();
                     return false;
+                }
 
                 if (killSwitchEnabled && (!previous.Enabled || !previous.AutoApply))
                     await ledger.ClearLocksAsync("Cleared an earlier lockdown before re-enabling the kill switch.");
 
                 settings.PolicyRevision = Guid.NewGuid();
-                await settingsRepository.UpdateSetting(settings);
+                await ledger.SavePolicyAsync(settings);
                 saved = true;
 
                 if (!killSwitchEnabled)
@@ -78,7 +80,7 @@ public class SecSwitchController(
             if (!allowed)
                 return StatusCode(StatusCodes.Status503ServiceUnavailable);
 
-            TempData[WellKnownTempData.SuccessMessage] = "SecSwitch settings saved";
+            completed = true;
         }
         catch (Exception e)
         {
@@ -87,10 +89,13 @@ public class SecSwitchController(
                 ? "Settings saved and the kill switch is off. SecSwitch could not clear the previous lockdown record."
                 : "Could not save SecSwitch settings.";
         }
-        finally
+        if (await lockdown.RefreshAsync())
         {
-            await lockdown.RefreshAsync();
+            if (completed)
+                TempData[WellKnownTempData.SuccessMessage] = "SecSwitch settings saved";
         }
+        else if (completed)
+            TempData[WellKnownTempData.ErrorMessage] = "Settings saved. SecSwitch could not refresh the lockdown status and will retry automatically.";
 
         return RedirectToAction(nameof(Settings));
     }
@@ -121,7 +126,8 @@ public class SecSwitchController(
         }
 
         var done = await ledger.WithPolicyAsync(_ => ledger.SuppressAsync(advisoryId));
-        await lockdown.RefreshAsync();
+        if (!await lockdown.RefreshAsync() && done)
+            return Report(false, "", "Advisory suppressed. SecSwitch could not refresh the lockdown status and will retry automatically.");
         return Report(done, $"Advisory {advisoryId} suppressed on this instance.", $"No advisory '{advisoryId}' to suppress.");
     }
 

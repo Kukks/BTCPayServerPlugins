@@ -10,13 +10,14 @@ public sealed class FakeSettingsRepository : ISettingsRepository
 {
     readonly Dictionary<string, string> _store = new();
     public bool RejectLedgerWrites { get; set; }
+    public Func<SecSwitchLedger, bool>? RejectLedgerWrite { get; set; }
 
     public Task<T?> GetSettingAsync<T>(string? name = null) where T : class
         => Task.FromResult(_store.TryGetValue(name ?? typeof(T).FullName!, out var json) ? JsonConvert.DeserializeObject<T>(json) : null);
 
     public Task UpdateSetting<T>(T obj, string? name = null) where T : class
     {
-        if (RejectLedgerWrites && obj is SecSwitchLedger)
+        if (obj is SecSwitchLedger ledger && (RejectLedgerWrites || RejectLedgerWrite?.Invoke(ledger) == true))
             throw new InvalidOperationException("Ledger temporarily unavailable");
         _store[name ?? typeof(T).FullName!] = JsonConvert.SerializeObject(obj);
         return Task.CompletedTask;
@@ -40,6 +41,7 @@ public sealed class FakeSink : IActionSink
     public Exception? QueueUpdateThrows { get; set; }
     public Exception? CoreUpdateThrows { get; set; }
     public Func<Task>? BeforePluginQueue { get; set; }
+    public Func<Task>? BeforeCoreUpdate { get; set; }
     public Action? OnReadLatestCore { get; set; }
     public List<PluginUpdate> PluginUpdates { get; set; } = [];
     public Version? LatestCore { get; set; }
@@ -71,12 +73,13 @@ public sealed class FakeSink : IActionSink
             : PluginUpdateQueueResult.PolicyChanged;
     }
 
-    public Task TriggerCoreUpdateAsync()
+    public async Task TriggerCoreUpdateAsync()
     {
+        if (BeforeCoreUpdate is not null)
+            await BeforeCoreUpdate();
         if (CoreUpdateThrows is not null)
             throw CoreUpdateThrows;
         CoreUpdates++;
-        return Task.CompletedTask;
     }
 
     public void StopApplication() => Stops++;

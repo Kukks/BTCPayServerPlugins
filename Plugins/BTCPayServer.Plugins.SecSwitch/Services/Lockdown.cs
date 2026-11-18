@@ -3,7 +3,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
-using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Client;
 using BTCPayServer.Configuration;
 using BTCPayServer.Plugins.SecSwitch.Models;
@@ -20,7 +19,7 @@ using Microsoft.Extensions.Logging;
 namespace BTCPayServer.Plugins.SecSwitch.Services;
 
 /// <summary>In-memory view of "is a core advisory holding this server in lockdown", derived from the ledger.</summary>
-public sealed class LockdownGate(ISettingsRepository settingsRepository, LedgerStore ledger, ILogger<LockdownGate> logger)
+public sealed class LockdownGate(LedgerStore ledger, ILogger<LockdownGate> logger)
 {
     // Refreshes are serialized so the last one to finish is also the last one to have read: an hourly poll that
     // read the ledger before an admin lifted the lockdown must not write its stale answer after the admin's.
@@ -48,34 +47,53 @@ public sealed class LockdownGate(ISettingsRepository settingsRepository, LedgerS
         settings is { Enabled: true, AutoApply: true } &&
         ledger.Entries.Values.Any(e => e is { LockedDown: true, Suppressed: false });
 
-    public Task RefreshAsync() => RefreshAsync(onlyIfNotLoaded: false);
+    public Task<bool> RefreshAsync() => RefreshAsync(onlyIfNotLoaded: false);
 
-    async Task RefreshAsync(bool onlyIfNotLoaded)
+    internal async Task ActivateAsync()
     {
         await _refreshing.WaitAsync();
         try
         {
-            var previous = _state;
-            if (onlyIfNotLoaded && previous is not null)
-                return;
-            var settings = await settingsRepository.GetSettingAsync<SecSwitchSettings>();
-            var locked = settings is { Enabled: true, AutoApply: true } &&
-                         HasActiveLockdown(settings, await ledger.GetAsync());
-            if (previous?.Active == locked)
-                return;
-
-            _state = new RequestState(locked);
-            if (locked)
-                previous?.OrdinaryRequests.Cancel();
-        }
-        catch (Exception e)
-        {
-            logger.LogError(e, "SecSwitch could not finish refreshing its lockdown state");
+            SetState(active: true);
         }
         finally
         {
             _refreshing.Release();
         }
+    }
+
+    async Task<bool> RefreshAsync(bool onlyIfNotLoaded)
+    {
+        await _refreshing.WaitAsync();
+        try
+        {
+            if (onlyIfNotLoaded && _state is not null)
+                return true;
+            var settings = await ledger.GetPolicyAsync();
+            var locked = settings is { Enabled: true, AutoApply: true } &&
+                         HasActiveLockdown(settings, await ledger.GetAsync());
+            SetState(locked);
+            return true;
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "SecSwitch could not finish refreshing its lockdown state");
+            return false;
+        }
+        finally
+        {
+            _refreshing.Release();
+        }
+    }
+
+    void SetState(bool active)
+    {
+        var previous = _state;
+        if (previous?.Active == active)
+            return;
+        _state = new RequestState(active);
+        if (active)
+            previous?.OrdinaryRequests.Cancel();
     }
 }
 

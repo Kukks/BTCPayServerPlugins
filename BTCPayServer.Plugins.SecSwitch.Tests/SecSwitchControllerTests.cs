@@ -27,12 +27,12 @@ public class SecSwitchControllerTests
     public SecSwitchControllerTests()
     {
         _ledger = new LedgerStore(_settings);
-        _gate = new LockdownGate(_settings, _ledger, NullLogger<LockdownGate>.Instance);
+        _gate = new LockdownGate(_ledger, NullLogger<LockdownGate>.Instance);
         _controller = NewController();
     }
 
     SecSwitchController NewController() =>
-        new(_settings, _ledger, _gate, NullLogger<SecSwitchController>.Instance)
+        new(_ledger, _gate, NullLogger<SecSwitchController>.Instance)
         {
             TempData = new TempDataDictionary(new DefaultHttpContext(), new NullTempDataProvider())
         };
@@ -41,14 +41,22 @@ public class SecSwitchControllerTests
     {
         readonly FakeSettingsRepository _inner = new();
         public Func<Task>? BeforeLedgerWrite { get; set; }
+        public Func<Task>? BeforePolicyWrite { get; set; }
+        public Action? BeforePolicyRead { get; set; }
 
-        public Task<T?> GetSettingAsync<T>(string? name = null) where T : class =>
-            _inner.GetSettingAsync<T>(name);
+        public Task<T?> GetSettingAsync<T>(string? name = null) where T : class
+        {
+            if (typeof(T) == typeof(SecSwitchSettings))
+                BeforePolicyRead?.Invoke();
+            return _inner.GetSettingAsync<T>(name);
+        }
 
         public async Task UpdateSetting<T>(T obj, string? name = null) where T : class
         {
             if (obj is SecSwitchLedger && BeforeLedgerWrite is { } hook)
                 await hook();
+            if (obj is SecSwitchSettings && BeforePolicyWrite is { } policyHook)
+                await policyHook();
             await _inner.UpdateSetting(obj, name);
         }
 
@@ -133,6 +141,7 @@ public class SecSwitchControllerTests
     [InlineData("http://example.test/a.json")]
     [InlineData("/relative")]
     [InlineData("https://raw.githubusercontent.com/btcpayserver/advisories/master/advisories.json")]
+    [InlineData("https://RAW.githubusercontent.com:443/btcpayserver/advisories/master/advisories.json#feed")]
     public async Task Saving_an_invalid_or_retired_feed_url_is_rejected(string url)
     {
         var posted = new SecSwitchSettings { Enabled = true, FeedUrl = url };
@@ -278,6 +287,54 @@ public class SecSwitchControllerTests
 
         Assert.True((await _settings.GetSettingAsync<SecSwitchSettings>())!.AutoApply);
         Assert.False(await _gate.IsActiveAsync());
+    }
+
+    [Fact]
+    public async Task Policy_reads_wait_for_a_policy_write_before_filling_the_repository_cache()
+    {
+        Assert.False(await _gate.IsActiveAsync());
+        var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _settings.BeforePolicyWrite = () =>
+        {
+            writeStarted.TrySetResult();
+            return releaseWrite.Task;
+        };
+
+        var save = _controller.Settings(new SecSwitchSettings { Enabled = false });
+        Task<SecSwitchSettings> read;
+        try
+        {
+            await writeStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            read = _ledger.GetPolicyAsync();
+            Assert.False(read.IsCompleted);
+        }
+        finally
+        {
+            releaseWrite.TrySetResult();
+            await save;
+        }
+
+        var observed = await read;
+        Assert.False(observed.Enabled);
+        Assert.NotNull(observed.PolicyRevision);
+    }
+
+    [Fact]
+    public async Task A_refresh_failure_is_reported_without_discarding_a_saved_opt_out()
+    {
+        _settings.BeforePolicyWrite = () =>
+        {
+            _settings.BeforePolicyRead = () => throw new InvalidOperationException("Could not refresh the policy.");
+            return Task.CompletedTask;
+        };
+
+        Assert.IsType<RedirectToActionResult>(await _controller.Settings(new SecSwitchSettings { Enabled = false }));
+        _settings.BeforePolicyRead = null;
+
+        Assert.False((await _ledger.GetPolicyAsync()).Enabled);
+        Assert.Null(_controller.TempData[WellKnownTempData.SuccessMessage]);
+        Assert.Contains("will retry automatically", Assert.IsType<string>(_controller.TempData[WellKnownTempData.ErrorMessage]));
     }
 
     [Fact]

@@ -15,7 +15,6 @@ using Microsoft.Extensions.Logging;
 namespace BTCPayServer.Plugins.SecSwitch.Services;
 
 public sealed class SecSwitchPeriodicTask(
-    ISettingsRepository settingsRepository,
     IHttpClientFactory httpClientFactory,
     SecSwitchMonitor monitor,
     LedgerStore ledger,
@@ -33,12 +32,16 @@ public sealed class SecSwitchPeriodicTask(
 
     public async Task Do(CancellationToken cancellationToken)
     {
-        var settings = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
+        var settings = await ledger.GetPolicyAsync();
         if (!settings.Enabled)
+        {
+            await lockdown.RefreshAsync();
             return;
+        }
         await monitor.RetryPendingAuditAsync();
         if (settings.GetFeedUrl() is not { } url)
         {
+            await lockdown.RefreshAsync();
             if (!cancellationToken.IsCancellationRequested && !await lockdown.IsActiveAsync() && await HasPendingPluginChangesAsync())
                 executor.RequestRestart();
             return;
@@ -46,13 +49,13 @@ public sealed class SecSwitchPeriodicTask(
 
         var state = BuildState(installedPlugins, environment.Version, sink.CanUpdateCore);
         var restartNeeded = false;
-        var coreUpdateDispatched = false;
+        var coreUpdateMayBeRunning = false;
 
         FeedResult? feed = null;
         var pollError = await Run("advisory poll", async () =>
         {
             feed = await FetchAdvisoriesAsync(url, cancellationToken);
-            var current = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
+            var current = await ledger.GetPolicyAsync();
             if (!current.Enabled || !string.Equals(current.GetFeedUrl(), url, StringComparison.Ordinal))
             {
                 feed = null;
@@ -65,8 +68,9 @@ public sealed class SecSwitchPeriodicTask(
         {
             await Run("auto-update", async () =>
             {
-                var current = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
+                var current = await ledger.GetPolicyAsync();
                 if (!current.Enabled || !string.Equals(current.GetFeedUrl(), url, StringComparison.Ordinal) ||
+                    current.PolicyRevision != settings.PolicyRevision ||
                     (!current.AutoUpdateCore && current.AutoUpdatePlugins is not { Length: > 0 }))
                     return new ProcessResult([], false);
                 return await monitor.AutoUpdateAsync(state, current, feed.Advisories, cancellationToken);
@@ -75,14 +79,14 @@ public sealed class SecSwitchPeriodicTask(
 
         await lockdown.RefreshAsync();
         if (pollError is not null || feed is not null)
-            await RecordPollAsync(pollError, url);
+            await RecordPollAsync(pollError, url, settings.PolicyRevision, feed?.Skipped.Count ?? 0);
         await monitor.RetryPendingAuditAsync();
         await NotifyAsync();
 
         // A core update restarts BTCPay Server itself and applies queued plugin changes; stopping the process
         // while it runs could kill the update. If it never restarts the server, the changes are still pending
         // on a later poll and the restart is requested then.
-        if (!coreUpdateDispatched && !cancellationToken.IsCancellationRequested && !await lockdown.IsActiveAsync() &&
+        if (!coreUpdateMayBeRunning && !cancellationToken.IsCancellationRequested && !await lockdown.IsActiveAsync() &&
             (restartNeeded || await HasPendingPluginChangesAsync()))
             executor.RequestRestart();
 
@@ -92,7 +96,7 @@ public sealed class SecSwitchPeriodicTask(
             {
                 var result = await step();
                 restartNeeded |= result.RestartNeeded;
-                coreUpdateDispatched |= result.CoreUpdateDispatched;
+                coreUpdateMayBeRunning |= result.CoreUpdateDispatched || result.CoreUpdateMayBeRunning;
                 return null;
             }
             catch (Exception e) when (e is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
@@ -117,7 +121,7 @@ public sealed class SecSwitchPeriodicTask(
         try
         {
             var pending = sink.PendingPluginIdentifiers();
-            if (SecSwitchMonitor.HasPendingChanges(pending, monitor.PendingAuditEntries, ProcessStartedAt))
+            if (SecSwitchMonitor.HasPendingChanges(pending, monitor.GetPendingPluginChangeEntries(pending), ProcessStartedAt))
                 return true;
             return SecSwitchMonitor.HasPendingChanges(
                 pending, (await ledger.GetAsync()).Entries.Values, ProcessStartedAt);
@@ -129,11 +133,12 @@ public sealed class SecSwitchPeriodicTask(
         }
     }
 
-    async Task RecordPollAsync(Exception? error, string url)
+    async Task RecordPollAsync(Exception? error, string url, Guid? policyRevision, int skippedEntries)
     {
         try
         {
-            await ledger.RecordPollAsync(DateTimeOffset.UtcNow, error is null ? null : ActionExecutor.Sanitize(error.Message), url);
+            await ledger.RecordPollAsync(DateTimeOffset.UtcNow, error is null ? null : ActionExecutor.Sanitize(error.Message),
+                url, policyRevision, skippedEntries);
         }
         catch (Exception e)
         {

@@ -8,6 +8,8 @@ public sealed class SecSwitchLedger
     public Dictionary<string, LedgerEntry> Entries { get; set; } = [];
     public DateTimeOffset? LastPollAt { get; set; }
     public string? LastPollFeedUrl { get; set; }
+    public Guid? LastPollPolicyRevision { get; set; }
+    public int LastPollSkippedEntries { get; set; }
     public DateTimeOffset? LastCoreUpdateAt { get; set; }
 
     /// <summary>Null when the last poll succeeded.</summary>

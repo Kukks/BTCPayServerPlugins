@@ -44,11 +44,22 @@
         {
             <div class="alert alert-info" role="alert">SecSwitch has not polled this advisory feed yet.</div>
         }
+        else if (ledger.LastPollPolicyRevision != Model.PolicyRevision)
+        {
+            <div class="alert alert-info" role="alert">SecSwitch is waiting to check advisories under the current settings.</div>
+        }
         else if (ledger.LastPollError is not null)
         {
             <div class="alert alert-danger" role="alert">
                 The last poll of this advisory feed failed (@lastPollAt.ToString("u")): @ledger.LastPollError.
                 This server is not being checked against advisories until a poll succeeds.
+            </div>
+        }
+        else if (ledger.LastPollSkippedEntries > 0)
+        {
+            <div class="alert alert-warning" role="alert">
+                SecSwitch skipped @ledger.LastPollSkippedEntries malformed advisory entries in the last poll (@lastPollAt.ToString("u")).
+                Routine automatic updates were paused for this poll.
             </div>
         }
         else
