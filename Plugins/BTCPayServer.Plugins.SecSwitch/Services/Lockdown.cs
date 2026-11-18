@@ -84,7 +84,7 @@ public sealed class LockdownMiddleware(
             context.Response.Headers.RetryAfter = "3600";
             context.Response.ContentType = "text/plain; charset=utf-8";
             await context.Response.WriteAsync(
-                $"This server is offline while a security advisory is being resolved. Server administrators can sign in at {LoginPath}.");
+                $"BTCPay Server is temporarily unavailable while a security advisory is being resolved. Server administrators can sign in at {LoginPath}.");
             return;
         }
         await next(context);

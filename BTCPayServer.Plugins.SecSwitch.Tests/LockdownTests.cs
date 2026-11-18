@@ -205,7 +205,7 @@ public class LockdownTests : IDisposable
         Assert.False(reached);
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, context.Response.StatusCode);
         Assert.Equal("3600", context.Response.Headers.RetryAfter.ToString());
-        Assert.Contains("offline", await Body(context));
+        Assert.Contains("temporarily unavailable", await Body(context));
     }
 
     [Theory]

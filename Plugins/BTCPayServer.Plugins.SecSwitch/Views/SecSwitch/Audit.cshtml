@@ -5,43 +5,73 @@
 
     (string Badge, string Label) Describe(LedgerEntry entry) => entry switch
     {
-        { Suppressed: true } => ("bg-dark", "Suppressed"),
-        { Status: LedgerStatus.Acted } => ("bg-success", "Acted"),
-        { Status: LedgerStatus.NeedsDecision } => ("bg-warning text-dark", "Needs decision"),
-        { Status: LedgerStatus.NeedsAttention } => ("bg-warning text-dark", "Needs attention"),
-        { Status: LedgerStatus.Resolved } => ("bg-secondary", "Resolved"),
-        _ => ("bg-secondary", entry.Status)
+        { Suppressed: true } => ("text-bg-secondary", "Suppressed"),
+        { Status: LedgerStatus.Acted } => ("text-bg-success", "Acted"),
+        { Status: LedgerStatus.NeedsDecision } => ("bg-warning text-black", "Needs decision"),
+        { Status: LedgerStatus.NeedsAttention } => ("bg-warning text-black", "Needs attention"),
+        { Status: LedgerStatus.Resolved } => ("text-bg-secondary", "Resolved"),
+        _ => ("text-bg-secondary", entry.Status)
+    };
+
+    string ActionLabel(string action) => action switch
+    {
+        nameof(SecSwitchAction.DisablePlugin) => "Disable plugin",
+        nameof(SecSwitchAction.UpdatePlugin) => "Update plugin",
+        nameof(SecSwitchAction.UpdateCore) => "Update BTCPay Server",
+        nameof(SecSwitchAction.Lockdown) => "Lock down BTCPay Server",
+        nameof(SecSwitchAction.None) or nameof(SecSwitchAction.Notify) or null => "",
+        _ => action
     };
 }
 
 <div class="sticky-header"><h2>SecSwitch audit log</h2></div>
 <partial name="_StatusMessage" />
 
-<table class="table">
+<div class="table-responsive">
+<table class="table align-top">
     <thead>
     <tr>
-        <th>Recorded</th><th>Advisory</th><th>Target</th><th>Severity</th>
-        <th>Status</th><th>Action</th><th>Reason</th><th></th>
+        <th scope="col">Advisory</th>
+        <th scope="col">Status</th>
+        <th scope="col">Details</th>
+        <th scope="col">Recorded</th>
+        <th scope="col"><span class="visually-hidden">Actions</span></th>
     </tr>
     </thead>
     <tbody>
     @foreach (var entry in Model)
     {
         var (badge, label) = Describe(entry);
+        var action = ActionLabel(entry.Action);
+        var recorded = entry.RecordedAt.UtcDateTime;
         <tr>
-            <td>@entry.RecordedAt.ToString("u")</td>
-            <td><code>@entry.AdvisoryId</code><br />@entry.Title</td>
-            <td>@entry.Identifier</td>
-            <td>@entry.Severity</td>
-            <td>
-                <span class="badge @badge">@label</span>
-                @if (entry.LockedDown && !entry.Suppressed)
-                {
-                    <span class="badge bg-danger">Locked down</span>
-                }
+            <td class="text-break">
+                <div class="fw-semibold">@(string.IsNullOrWhiteSpace(entry.Title) ? entry.AdvisoryId : entry.Title)</div>
+                <div class="small">@entry.Identifier <span class="text-muted">(@entry.Severity severity)</span></div>
+                <code class="small text-muted">@entry.AdvisoryId</code>
             </td>
-            <td>@entry.Action</td>
-            <td>@entry.Reason</td>
+            <td>
+                <div class="d-flex flex-wrap gap-1">
+                    <span class="badge @badge">@label</span>
+                    @if (entry.LockedDown && !entry.Suppressed)
+                    {
+                        <span class="badge text-bg-danger">Locked down</span>
+                    }
+                </div>
+            </td>
+            <td class="text-break">
+                @if (action.Length > 0)
+                {
+                    <div class="fw-semibold">@action</div>
+                }
+                <div>@entry.Reason</div>
+            </td>
+            <td class="text-nowrap">
+                <time datetime="@recorded.ToString("O")">
+                    @recorded.ToString("yyyy-MM-dd")
+                    <span class="d-block small text-muted">@recorded.ToString("HH:mm:ss 'UTC'")</span>
+                </time>
+            </td>
             <td>
                 @if (!entry.Suppressed)
                 {
@@ -58,15 +88,8 @@
     }
     @if (Model.Count == 0)
     {
-        <tr><td colspan="8" class="text-muted">No advisory has applied to this instance yet.</td></tr>
+        <tr><td colspan="5" class="text-muted">No advisory has applied to this instance yet.</td></tr>
     }
     </tbody>
 </table>
-
-<ul class="text-muted small">
-    <li><strong>Acted</strong>: the action was applied. A failed action is shown as Needs attention, never as Acted.</li>
-    <li><strong>Needs decision</strong>: automatic actions are off; apply the action yourself.</li>
-    <li><strong>Needs attention</strong>: the installed version could not be determined, or the action failed. It is retried on every poll.</li>
-    <li><strong>Resolved</strong>: the advisory stopped applying or left the feed, so any lockdown it held was lifted.</li>
-    <li><strong>Locked down</strong>: while shown, only server admins can reach this server. Suppress the advisory to lift it by hand.</li>
-</ul>
+</div>

@@ -3,6 +3,7 @@ using BTCPayServer.Configuration;
 using BTCPayServer.Plugins.SecSwitch.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Newtonsoft.Json;
 using Xunit;
 
 namespace BTCPayServer.Plugins.SecSwitch.Tests;
@@ -62,7 +63,7 @@ public class SecSwitchNotificationTests
     }
 
     [Fact]
-    public void Body_mentions_the_advisory_and_the_outcome()
+    public void Body_summarizes_an_action_without_repeating_the_audit_details()
     {
         var n = new SecSwitchNotification
         {
@@ -72,22 +73,19 @@ public class SecSwitchNotificationTests
         var vm = new NotificationViewModel();
         ((INotificationHandler)MakeHandler()).FillViewModel(n, vm);
 
-        Assert.Contains("Stored XSS", vm.Body);
-        Assert.Contains("Queued disable of Plug", vm.Body);
+        Assert.Equal("SecSwitch took action · Stored XSS", vm.Body);
         Assert.Equal("secswitch", vm.Type);
     }
 
     [Fact]
-    public void Decision_required_notifications_are_marked_as_such()
+    public void A_persisted_advisory_requiring_review_renders_a_compact_warning()
     {
-        var n = new SecSwitchNotification
-        {
-            AdvisoryId = "a1", Title = "Stored XSS", Severity = "High",
-            Outcome = "Manual mode", NeedsDecision = true
-        };
+        var n = JsonConvert.DeserializeObject<SecSwitchNotification>(
+            """{"AdvisoryId":"a1","Title":"Stored XSS","Severity":"High","Outcome":"Manual mode","NeedsDecision":true}""");
         var vm = new NotificationViewModel();
-        ((INotificationHandler)MakeHandler()).FillViewModel(n, vm);
-        Assert.Contains("action required", vm.Body, StringComparison.OrdinalIgnoreCase);
+        ((INotificationHandler)MakeHandler()).FillViewModel(Assert.IsType<SecSwitchNotification>(n), vm);
+
+        Assert.Equal("⚠️ Review security advisory · Stored XSS", vm.Body);
     }
 
     [Fact]
@@ -103,18 +101,12 @@ public class SecSwitchNotificationTests
         var vm = new NotificationViewModel();
         var ex = Record.Exception(() => ((INotificationHandler)MakeHandler()).FillViewModel(n, vm));
         Assert.Null(ex);
-        Assert.NotNull(vm.Body);
+        Assert.Equal("SecSwitch took action", vm.Body);
     }
 
     [Fact]
     public void Sanitizes_control_characters_and_caps_length_before_reaching_the_body()
     {
-        // Title comes from a signed-but-still-attacker-authored advisory document; the signature
-        // proves provenance, not that the free-text field is short or clean. Outcome can embed a
-        // caught exception's Message. Neither may reach vm.Body unbounded or with control characters.
-        // Built from numeric char codes rather than literal/escaped characters in source: U+2028
-        // (line separator) is visually indistinguishable from a plain space in most editors (same
-        // reasoning as ActionExecutor.Sanitize's own comment) and a literal copy is easy to corrupt.
         var bel = (char)0x07;
         var lineSeparator = (char)0x2028;
         var hostileTitle = "Click" + bel + "Here" + lineSeparator + "Now" + new string('x', 500);
@@ -127,7 +119,8 @@ public class SecSwitchNotificationTests
 
         Assert.DoesNotContain(bel, vm.Body);
         Assert.DoesNotContain(lineSeparator, vm.Body);
-        Assert.True(vm.Body.Length < hostileTitle.Length);
+        Assert.EndsWith("...", vm.Body);
+        Assert.InRange(vm.Body.Length, 1, 120);
     }
 
     [Fact]

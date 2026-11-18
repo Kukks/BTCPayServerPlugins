@@ -74,7 +74,18 @@
     <div class="form-check mb-3">
         <input asp-for="AutoApply" type="checkbox" class="form-check-input" />
         <label asp-for="AutoApply" class="form-check-label">Apply the advisory kill switch</label>
-        <div class="form-text">SecSwitch can disable an affected plugin or restrict an affected server to server admins.</div>
+        <div class="form-text">SecSwitch can queue a restart to disable an affected plugin.</div>
+    </div>
+    <div class="alert alert-warning d-flex align-items-start gap-2 mb-4">
+        <vc:icon symbol="warning" css-class="mt-1 flex-shrink-0" />
+        <div>
+            <div class="fw-semibold">BTCPay Server lockdown</div>
+            <div>
+                With the kill switch on, an affected BTCPay Server keeps running and returns HTTP 503 to public requests.
+                Server admins can still sign in. Lockdown survives a restart and lifts when the advisory stops applying,
+                an admin suppresses it, or the kill switch is turned off.
+            </div>
+        </div>
     </div>
     <fieldset class="mb-4">
         <legend class="h6">Automatic updates</legend>
