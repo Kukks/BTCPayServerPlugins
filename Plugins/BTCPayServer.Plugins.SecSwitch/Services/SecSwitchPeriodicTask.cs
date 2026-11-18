@@ -34,8 +34,15 @@ public sealed class SecSwitchPeriodicTask(
     public async Task Do(CancellationToken cancellationToken)
     {
         var settings = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
-        if (!settings.Enabled || settings.GetFeedUrl() is not { } url)
+        if (!settings.Enabled)
             return;
+        await monitor.RetryPendingAuditAsync();
+        if (settings.GetFeedUrl() is not { } url)
+        {
+            if (!cancellationToken.IsCancellationRequested && await HasPendingPluginChangesAsync())
+                executor.RequestRestart();
+            return;
+        }
 
         var state = BuildState(installedPlugins, environment.Version, sink.CanUpdateCore);
         var restartNeeded = false;
@@ -54,20 +61,29 @@ public sealed class SecSwitchPeriodicTask(
             settings = current;
             return await monitor.ProcessAsync(feed.Advisories, feed.Skipped.Select(s => s.Id), state, settings, cancellationToken);
         });
-        if (pollError is null && feed is null)
-            return;
-        if (pollError is null && feed is { Skipped.Count: 0 } &&
-            (settings.AutoUpdateCore || settings.AutoUpdatePlugins is { Length: > 0 }))
-            await Run("auto-update", () => monitor.AutoUpdateAsync(state, settings, feed.Advisories, cancellationToken));
+        if (pollError is null && feed is { Skipped.Count: 0 })
+        {
+            await Run("auto-update", async () =>
+            {
+                var current = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
+                if (!current.Enabled || !string.Equals(current.GetFeedUrl(), url, StringComparison.Ordinal) ||
+                    (!current.AutoUpdateCore && current.AutoUpdatePlugins is not { Length: > 0 }))
+                    return new ProcessResult([], false);
+                return await monitor.AutoUpdateAsync(state, current, feed.Advisories, cancellationToken);
+            });
+        }
 
         await lockdown.RefreshAsync();
-        await RecordPollAsync(pollError);
+        if (pollError is not null || feed is not null)
+            await RecordPollAsync(pollError, url);
+        await monitor.RetryPendingAuditAsync();
         await NotifyAsync();
 
         // A core update restarts BTCPay Server itself and applies queued plugin changes; stopping the process
         // while it runs could kill the update. If it never restarts the server, the changes are still pending
         // on a later poll and the restart is requested then.
-        if ((restartNeeded || await HasPendingPluginChangesAsync()) && !coreUpdateDispatched)
+        if (!coreUpdateDispatched && !cancellationToken.IsCancellationRequested &&
+            (restartNeeded || await HasPendingPluginChangesAsync()))
             executor.RequestRestart();
 
         async Task<Exception?> Run(string name, Func<Task<ProcessResult>> step)
@@ -100,8 +116,11 @@ public sealed class SecSwitchPeriodicTask(
     {
         try
         {
+            var pending = sink.PendingPluginIdentifiers();
+            if (SecSwitchMonitor.HasPendingChanges(pending, monitor.PendingAuditEntries, ProcessStartedAt))
+                return true;
             return SecSwitchMonitor.HasPendingChanges(
-                sink.PendingPluginIdentifiers(), (await ledger.GetAsync()).Entries.Values, ProcessStartedAt);
+                pending, (await ledger.GetAsync()).Entries.Values, ProcessStartedAt);
         }
         catch (Exception e)
         {
@@ -110,11 +129,11 @@ public sealed class SecSwitchPeriodicTask(
         }
     }
 
-    async Task RecordPollAsync(Exception? error)
+    async Task RecordPollAsync(Exception? error, string url)
     {
         try
         {
-            await ledger.RecordPollAsync(DateTimeOffset.UtcNow, error is null ? null : ActionExecutor.Sanitize(error.Message));
+            await ledger.RecordPollAsync(DateTimeOffset.UtcNow, error is null ? null : ActionExecutor.Sanitize(error.Message), url);
         }
         catch (Exception e)
         {
@@ -138,6 +157,10 @@ public sealed class SecSwitchPeriodicTask(
         {
             try
             {
+                var entries = (await ledger.GetAsync()).Entries;
+                if (!entries.TryGetValue(entry.AdvisoryId, out var current) ||
+                    current.Suppressed || !current.NotificationPending || current.RecordedAt != entry.RecordedAt)
+                    continue;
                 await notificationSender.SendNotification(new AdminScope(), new SecSwitchNotification
                 {
                     AdvisoryId = entry.AdvisoryId,

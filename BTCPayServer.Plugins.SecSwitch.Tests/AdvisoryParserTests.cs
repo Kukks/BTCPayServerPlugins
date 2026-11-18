@@ -95,7 +95,9 @@ public class AdvisoryParserTests
         var advisories = AdvisoryParser.ParseFeed(Feed(Valid, second), out var skipped);
 
         Assert.Equal(AdvisorySeverity.High, Assert.Single(advisories).Severity);
-        Assert.Contains("duplicate", Assert.Single(skipped).Reason);
+        var duplicate = Assert.Single(skipped);
+        Assert.Equal("A1", duplicate.Id);
+        Assert.Contains("duplicate", duplicate.Reason);
     }
 
     [Fact]
@@ -160,6 +162,19 @@ public class AdvisoryParserTests
     }
 
     [Theory]
+    [InlineData("bad", """{"id":"bad","identifier":"Plug","affectedVersions":"<1.2.3","severity":"high","requires":{"identifier":"Dep","affectedVersions":"\uD800"}}""")]
+    [InlineData(null, """{"id":"\uD800","identifier":"Plug","affectedVersions":"<1.2.3","severity":"high","requires":{"identifier":"Dep","affectedVersions":"<2.0.0"}}""")]
+    public void Undecodable_text_skips_only_that_entry_and_preserves_any_readable_id(string? id, string entry)
+    {
+        var feed = $$"""{"advisories":[{{Valid}}],"conditionalAdvisories":[{{entry}},{{Conditional()}}]}""";
+
+        var advisories = AdvisoryParser.ParseFeed(Encoding.UTF8.GetBytes(feed), out var skipped);
+
+        Assert.Equal(["a1", "conditional"], advisories.Select(advisory => advisory.Id));
+        Assert.Equal(id, Assert.Single(skipped).Id);
+    }
+
+    [Theory]
     [InlineData(">=1.0.0 <1.2.3")]
     [InlineData("<1.0.0 || ")]
     [InlineData("<1.0.0 || ||")]
@@ -205,6 +220,8 @@ public class AdvisoryParserTests
     [InlineData("""{"advisories":null}""")]
     [InlineData("""{"advisories":[],"conditionalAdvisories":null}""")]
     [InlineData("""{"advisories":[],"conditionalAdvisories":{}}""")]
+    [InlineData("""{"advisories":[{"id":"core"}],"advisories":[]}""")]
+    [InlineData("""{"advisories":[],"conditionalAdvisories":[{"id":"combo"}],"conditionalAdvisories":[]}""")]
     public void A_malformed_envelope_throws(string json)
     {
         Assert.Throws<InvalidDataException>(() => AdvisoryParser.ParseFeed(Encoding.UTF8.GetBytes(json), out _));

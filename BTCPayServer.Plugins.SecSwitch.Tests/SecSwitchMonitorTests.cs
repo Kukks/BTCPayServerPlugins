@@ -9,20 +9,41 @@ namespace BTCPayServer.Plugins.SecSwitch.Tests;
 public class SecSwitchMonitorTests
 {
     readonly FakeSink _sink = new();
-    readonly LedgerStore _ledger = new(new FakeSettingsRepository());
+    readonly FakeSettingsRepository _settings = new();
+    readonly LedgerStore _ledger;
+
+    public SecSwitchMonitorTests() => _ledger = new LedgerStore(_settings);
 
     SecSwitchMonitor Monitor() => new(
         new ActionExecutor(_sink, NullLogger<ActionExecutor>.Instance), _sink, _ledger, NullLogger<SecSwitchMonitor>.Instance);
 
-    Task<ProcessResult> Process(
+    async Task<ProcessResult> Process(
         Advisory[] advisories, InstanceState? state = null, SecSwitchSettings? settings = null, string?[]? unreadable = null)
-        => Monitor().ProcessAsync(advisories, unreadable ?? [], state ?? State(), settings ?? Settings(), CancellationToken.None);
+    {
+        settings ??= Settings();
+        await _settings.UpdateSetting(settings);
+        return await Monitor().ProcessAsync(advisories, unreadable ?? [], state ?? State(), settings, CancellationToken.None);
+    }
 
     Task<ProcessResult> AutoUpdate(InstanceState? state = null, SecSwitchSettings? settings = null, Advisory[]? advisories = null)
-        => Monitor().AutoUpdateAsync(state ?? State(), settings ?? Settings(autoUpdatePlugin: true, autoUpdateCore: true),
-            advisories ?? [], CancellationToken.None);
+        => AutoUpdateWithCancellation(TestContext.Current.CancellationToken, state, settings, advisories);
+
+    async Task<ProcessResult> AutoUpdateWithCancellation(CancellationToken ct,
+        InstanceState? state = null, SecSwitchSettings? settings = null, Advisory[]? advisories = null)
+    {
+        settings ??= Settings(autoUpdatePlugin: true, autoUpdateCore: true);
+        await _settings.UpdateSetting(settings);
+        return await Monitor().AutoUpdateAsync(state ?? State(), settings, advisories ?? [], ct);
+    }
 
     async Task<LedgerEntry> EntryFor(string id) => (await _ledger.GetAsync()).Entries[id];
+
+    async Task SetCoreUpdateTime(DateTimeOffset at)
+    {
+        var state = await _ledger.GetAsync();
+        state.LastCoreUpdateAt = at;
+        await _settings.UpdateSetting(state);
+    }
 
     static Advisory CoreAdvisory(string? fixedVersion = null) =>
         Adv(id: "core-1", identifier: "BTCPayServer", affected: "<9.0.0", fixedVersion: fixedVersion);
@@ -52,6 +73,20 @@ public class SecSwitchMonitorTests
     }
 
     [Fact]
+    public async Task A_verified_manual_fix_stays_pending_even_without_the_plugins_auto_update_opt_in()
+    {
+        _sink.VerifiedQueuedUpdate = true;
+        _sink.Pending.Add("Plug");
+
+        var result = await Process([Adv(fixedVersion: "1.2.3")]);
+
+        Assert.Empty(_sink.Updated);
+        Assert.Empty(_sink.Disabled);
+        Assert.False(result.RestartNeeded);
+        Assert.Equal(LedgerStatus.NeedsDecision, (await EntryFor("adv-1")).Status);
+    }
+
+    [Fact]
     public async Task A_plugin_can_update_with_the_kill_switch_off_but_an_update_failure_cannot_disable_it()
     {
         var settings = Settings(autoApply: false, autoUpdatePlugin: true);
@@ -65,6 +100,34 @@ public class SecSwitchMonitorTests
         await Process(advisories, settings: settings);
         Assert.Equal(LedgerStatus.Acted, (await EntryFor("adv-1")).Status);
         Assert.Empty(_sink.Disabled);
+    }
+
+    [Fact]
+    public async Task Switching_off_the_kill_switch_during_a_download_prevents_a_fallback_disable()
+    {
+        _sink.BeforePluginQueue = () => _settings.UpdateSetting(new SecSwitchSettings
+        {
+            AutoApply = false,
+            AutoUpdatePlugins = ["Plug"],
+            PolicyRevision = Guid.NewGuid()
+        });
+        _sink.QueueUpdateResult = false;
+        var result = await Process([Adv(fixedVersion: "1.2.3")], settings: Settings(autoUpdatePlugin: true));
+
+        Assert.False(result.RestartNeeded);
+        Assert.Empty(_sink.Disabled);
+    }
+
+    [Fact]
+    public async Task Revoking_a_plugins_update_opt_in_during_a_download_prevents_commit()
+    {
+        _sink.BeforePluginQueue = () => _settings.UpdateSetting(new SecSwitchSettings { PolicyRevision = Guid.NewGuid() });
+        _sink.PluginUpdates = [new PluginUpdate("Plug", new Version(1, 3, 0))];
+
+        var result = await AutoUpdate(settings: Settings(autoUpdatePlugin: true));
+
+        Assert.False(result.RestartNeeded);
+        Assert.Empty(_sink.Updated);
     }
 
     [Fact]
@@ -224,6 +287,19 @@ public class SecSwitchMonitorTests
     }
 
     [Fact]
+    public async Task Turning_on_the_kill_switch_after_a_core_dispatch_preserves_the_cooldown()
+    {
+        var state = State(canUpdateCore: true);
+        var advisories = new[] { CoreAdvisory("9.0.0") };
+        await Process(advisories, state, Settings(autoApply: false, autoUpdateCore: true));
+        await Process(advisories, state, Settings(autoUpdateCore: true));
+        await Process(advisories, state, Settings(autoUpdateCore: true));
+
+        Assert.Equal(1, _sink.CoreUpdates);
+        Assert.True((await EntryFor("core-1")).LockedDown);
+    }
+
+    [Fact]
     public async Task A_lockdown_becomes_a_core_update_once_the_host_can_update_without_lifting_the_lockdown()
     {
         await Process([CoreAdvisory("9.0.0")], State(canUpdateCore: false), Settings(autoUpdateCore: true));
@@ -274,6 +350,19 @@ public class SecSwitchMonitorTests
     }
 
     [Fact]
+    public async Task Cancellation_after_reading_the_latest_core_version_does_not_dispatch()
+    {
+        using var cancellation = new CancellationTokenSource();
+        _sink.LatestCore = new Version(2, 5, 0);
+        _sink.OnReadLatestCore = cancellation.Cancel;
+
+        var result = await AutoUpdateWithCancellation(cancellation.Token, State(canUpdateCore: true));
+
+        Assert.False(result.CoreUpdateDispatched);
+        Assert.Equal(0, _sink.CoreUpdates);
+    }
+
+    [Fact]
     public async Task An_advisory_that_found_a_recent_core_update_is_a_lockdown_entry_and_does_not_extend_the_window()
     {
         _sink.LatestCore = new Version(2, 5, 0);
@@ -291,6 +380,7 @@ public class SecSwitchMonitorTests
         var auto = await EntryFor("autoupdate:BTCPayServer@2.5.0");
         auto.RecordedAt = DateTimeOffset.UtcNow - SecSwitchMonitor.CoreUpdateWindow - TimeSpan.FromMinutes(1);
         await _ledger.RecordAsync(auto);
+        await SetCoreUpdateTime(auto.RecordedAt);
         var retry = await Process([CoreAdvisory("9.0.0")], state, Settings(autoUpdateCore: true));
 
         Assert.True(retry.CoreUpdateDispatched);
@@ -412,6 +502,7 @@ public class SecSwitchMonitorTests
         var entry = await EntryFor("core-1");
         entry.RecordedAt = DateTimeOffset.UtcNow - SecSwitchMonitor.CoreUpdateWindow - TimeSpan.FromMinutes(1);
         await _ledger.RecordAsync(entry);
+        await SetCoreUpdateTime(entry.RecordedAt);
         var retry = await Process([CoreAdvisory("9.0.0")], state, Settings(autoUpdateCore: true));
 
         Assert.Equal(2, _sink.CoreUpdates);
@@ -465,6 +556,7 @@ public class SecSwitchMonitorTests
         var entry = await EntryFor("autoupdate:BTCPayServer@2.5.0");
         entry.RecordedAt = DateTimeOffset.UtcNow - SecSwitchMonitor.CoreUpdateWindow - TimeSpan.FromMinutes(1);
         await _ledger.RecordAsync(entry);
+        await SetCoreUpdateTime(entry.RecordedAt);
 
         await AutoUpdate(State(canUpdateCore: true));
 
@@ -510,6 +602,30 @@ public class SecSwitchMonitorTests
     }
 
     [Fact]
+    public async Task A_failed_audit_write_keeps_restart_intent_and_can_be_retried_without_queueing_again()
+    {
+        var settings = Settings(autoUpdatePlugin: true);
+        await _settings.UpdateSetting(settings);
+        _sink.PluginUpdates = [new PluginUpdate("Plug", new Version(1, 3, 0))];
+        _sink.BeforePluginQueue = () =>
+        {
+            _settings.RejectLedgerWrites = true;
+            return Task.CompletedTask;
+        };
+        var monitor = Monitor();
+
+        var result = await monitor.AutoUpdateAsync(State(), settings, [], TestContext.Current.CancellationToken);
+
+        Assert.True(result.RestartNeeded);
+        Assert.Single(monitor.PendingAuditEntries);
+        _settings.RejectLedgerWrites = false;
+        await monitor.RetryPendingAuditAsync();
+        Assert.Empty(monitor.PendingAuditEntries);
+        Assert.Equal(LedgerStatus.Acted, (await EntryFor("autoupdate:Plug@1.3.0")).Status);
+        Assert.Single(_sink.Updated);
+    }
+
+    [Fact]
     public async Task Routine_updates_defer_a_second_update_that_could_activate_a_conditional_advisory()
     {
         var state = new InstanceState(new Dictionary<string, Version>(StringComparer.OrdinalIgnoreCase)
@@ -530,6 +646,34 @@ public class SecSwitchMonitorTests
         await AutoUpdate(state, new SecSwitchSettings { AutoUpdatePlugins = ["Plug", "Other"] }, [advisory]);
 
         Assert.Equal([("Plug", "1.3.0")], _sink.Updated);
+    }
+
+    [Fact]
+    public async Task A_newly_queued_conditional_peer_is_checked_again_at_commit()
+    {
+        _sink.PluginUpdates = [new PluginUpdate("Plug", new Version(1, 3, 0))];
+        _sink.BeforePluginQueue = () =>
+        {
+            _sink.Pending.Add("Other");
+            return Task.CompletedTask;
+        };
+        var advisory = new Advisory
+        {
+            Id = "pair",
+            Identifier = "Plug",
+            AffectedVersions = ">=1.3.0",
+            Requires = new AdvisoryDependency("Other", ">=1.3.0")
+        };
+        var state = new InstanceState(new Dictionary<string, Version>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Plug"] = new(1, 1, 0),
+            ["Other"] = new(1, 1, 0)
+        }, null, false);
+
+        var result = await AutoUpdate(state, Settings(autoUpdatePlugin: true), [advisory]);
+
+        Assert.False(result.RestartNeeded);
+        Assert.Empty(_sink.Updated);
     }
 
     [Fact]

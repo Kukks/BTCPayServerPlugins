@@ -1,5 +1,7 @@
 using BTCPayServer.Abstractions.Models;
+using BTCPayServer.Plugins.SecSwitch.Models;
 using BTCPayServer.Plugins.SecSwitch.Services;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace BTCPayServer.Plugins.SecSwitch.Tests;
@@ -10,6 +12,31 @@ public class PeriodicTaskTests
     {
         public override string Identifier => id;
         public override Version Version => version;
+    }
+
+    [Fact]
+    public async Task A_pending_SecSwitch_change_can_restart_after_the_feed_URL_is_cleared()
+    {
+        var settings = new FakeSettingsRepository();
+        var ledger = new LedgerStore(settings);
+        await ledger.RecordAsync(new LedgerEntry
+        {
+            AdvisoryId = "affected-plugin",
+            Identifier = "Plug",
+            Action = nameof(SecSwitchAction.DisablePlugin),
+            Status = LedgerStatus.Acted,
+            RecordedAt = DateTimeOffset.UtcNow
+        });
+        var sink = new FakeSink { Pending = ["Plug"] };
+        var executor = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
+        var monitor = new SecSwitchMonitor(executor, sink, ledger, NullLogger<SecSwitchMonitor>.Instance);
+        var lockdown = new LockdownGate(settings, ledger, NullLogger<LockdownGate>.Instance);
+        var task = new SecSwitchPeriodicTask(settings, null!, monitor, ledger, executor, lockdown, null!, [], null!, sink,
+            NullLogger<SecSwitchPeriodicTask>.Instance);
+
+        await task.Do(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, sink.Stops);
     }
 
     [Fact]

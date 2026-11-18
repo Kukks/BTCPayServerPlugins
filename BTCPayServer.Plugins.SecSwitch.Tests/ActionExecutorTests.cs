@@ -127,6 +127,24 @@ public class ActionExecutorTests
         Assert.Empty(_sink.Disabled);
     }
 
+    [Theory]
+    [InlineData(SecSwitchAction.DisablePlugin)]
+    [InlineData(SecSwitchAction.UpdatePlugin)]
+    public async Task The_disable_commit_can_reject_direct_and_fallback_disables(SecSwitchAction action)
+    {
+        _sink.QueueUpdateResult = false;
+        var commitCalls = 0;
+        var outcome = await Executor().ExecuteAsync(action, Adv(fixedVersion: "1.2.3"), commitDisable: _ =>
+        {
+            commitCalls++;
+            return Task.FromResult(new ActionOutcome(false, "Kill switch is off."));
+        });
+
+        Assert.False(outcome.Succeeded);
+        Assert.Empty(_sink.Disabled);
+        Assert.Equal(1, commitCalls);
+    }
+
     [Fact]
     public async Task Core_update_triggers_the_host_update_and_needs_no_restart()
     {
@@ -281,6 +299,47 @@ public class ActionExecutorTests
         Assert.Equal(commands, PluginManager.GetPendingCommands(dir.Path).Select(command => command.command));
     }
 
+    [Theory]
+    [InlineData("delete")]
+    [InlineData("disable")]
+    public void A_pending_operation_for_a_case_variant_does_not_mitigate_the_exact_plugin(string pendingOperation)
+    {
+        using var dir = new TempPluginDir("Plug");
+        PluginManager.QueueCommands(dir.Path, (pendingOperation, "plug"));
+
+        Assert.True(SinkForPluginDirectory(dir.Path).QueueDisable("Plug"));
+
+        Assert.Equal([(pendingOperation, "plug"), ("disable", "Plug")], PluginManager.GetPendingCommands(dir.Path));
+    }
+
+    [Theory]
+    [InlineData("Plug", "1.2.3.0", true, null, true)]
+    [InlineData("Plug", "1.2.2", true, null, false)]
+    [InlineData("Other", "1.2.3", true, null, false)]
+    [InlineData("Plug", "1.2.3", false, null, false)]
+    [InlineData("Plug", "1.2.3", true, "enable", false)]
+    public async Task An_advisory_update_leaves_only_a_verified_exact_pending_fix_to_the_admin(
+        string manifestId, string manifestVersion, bool havePackage, string? additionalCommand, bool verified)
+    {
+        using var dir = new TempPluginDir("Plug");
+        File.WriteAllText(Path.Combine(dir.Path, "Plug.json"), $$"""{"identifier":"{{manifestId}}","version":"{{manifestVersion}}"}""");
+        if (havePackage)
+            File.WriteAllText(Path.Combine(dir.Path, "Plug.btcpay"), "admin payload");
+        PluginManager.QueueCommands(dir.Path, ("install", "Plug"));
+        if (additionalCommand is not null)
+            PluginManager.QueueCommands(dir.Path, (additionalCommand, "Plug"));
+        var sink = SinkForPluginDirectory(dir.Path);
+        Assert.Equal(verified, sink.HasVerifiedQueuedUpdate("Plug", "1.2.3"));
+        var executor = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
+
+        var outcome = await executor.ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv(fixedVersion: "1.2.3"));
+
+        Assert.True(outcome.Succeeded);
+        Assert.Equal(verified, outcome.AlreadyQueued);
+        Assert.Equal(!verified, outcome.RestartNeeded);
+        Assert.Equal(verified ? "install" : "disable", PluginManager.GetPendingCommands(dir.Path).Last().command);
+    }
+
     [Fact]
     public void Automatic_updates_require_compatible_loaded_dependencies_without_pending_changes()
     {
@@ -307,10 +366,11 @@ public class ActionExecutorTests
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task SecSwitch_stages_updates_without_replacing_an_admin_download(bool adminDownload, bool adminQueued)
+    [InlineData(false, false, true)]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, true)]
+    public async Task SecSwitch_stages_updates_without_replacing_an_admin_download(bool adminDownload, bool adminQueued, bool allowCommit)
     {
         using var dir = new TempPluginDir("Plug");
         const string published = """{"manifestInfo":{"identifier":"Plug","version":"1.2.3.0"}}""";
@@ -346,12 +406,30 @@ public class ActionExecutorTests
         else if (adminDownload)
             await Assert.ThrowsAsync<IOException>(() => sink.QueueUpdateAsync("Plug", "1.2.3"));
         else
-            Assert.True(await sink.QueueUpdateAsync("Plug", "1.2.3"));
+        {
+            var commitCalls = 0;
+            var queued = await sink.QueueUpdateAsync("Plug", "1.2.3", async commit =>
+            {
+                commitCalls++;
+                Assert.True(File.Exists(payloadPath));
+                Assert.True(File.Exists(manifestPath));
+                Assert.Empty(PluginManager.GetPendingCommands(dir.Path));
+                return allowCommit && await commit();
+            });
+            Assert.Equal(1, commitCalls);
+            Assert.Equal(allowCommit ? PluginUpdateQueueResult.Queued : PluginUpdateQueueResult.PolicyChanged, queued);
+        }
 
-        Assert.Equal(adminDownload ? "admin package" : "SecSwitch package", File.ReadAllText(payloadPath));
+        if (adminDownload || allowCommit)
+            Assert.Equal(adminDownload ? "admin package" : "SecSwitch package", File.ReadAllText(payloadPath));
+        else
+        {
+            Assert.False(File.Exists(payloadPath));
+            Assert.False(File.Exists(manifestPath));
+        }
         if (adminDownload)
             Assert.Equal("admin manifest", File.ReadAllText(manifestPath));
-        Assert.Equal(adminDownload && !adminQueued ? [] : [("install", "Plug")], PluginManager.GetPendingCommands(dir.Path));
+        Assert.Equal(adminQueued || (!adminDownload && allowCommit) ? [("install", "Plug")] : [], PluginManager.GetPendingCommands(dir.Path));
         Assert.Equal("Plug", Path.GetFileName(Assert.Single(Directory.GetDirectories(dir.Path))));
     }
 

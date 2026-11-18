@@ -9,12 +9,15 @@ namespace BTCPayServer.Plugins.SecSwitch.Tests;
 public sealed class FakeSettingsRepository : ISettingsRepository
 {
     readonly Dictionary<string, string> _store = new();
+    public bool RejectLedgerWrites { get; set; }
 
     public Task<T?> GetSettingAsync<T>(string? name = null) where T : class
         => Task.FromResult(_store.TryGetValue(name ?? typeof(T).FullName!, out var json) ? JsonConvert.DeserializeObject<T>(json) : null);
 
     public Task UpdateSetting<T>(T obj, string? name = null) where T : class
     {
+        if (RejectLedgerWrites && obj is SecSwitchLedger)
+            throw new InvalidOperationException("Ledger temporarily unavailable");
         _store[name ?? typeof(T).FullName!] = JsonConvert.SerializeObject(obj);
         return Task.CompletedTask;
     }
@@ -33,8 +36,11 @@ public sealed class FakeSink : IActionSink
 
     public bool QueueDisableResult { get; set; } = true;
     public bool QueueUpdateResult { get; set; } = true;
+    public bool VerifiedQueuedUpdate { get; set; }
     public Exception? QueueUpdateThrows { get; set; }
     public Exception? CoreUpdateThrows { get; set; }
+    public Func<Task>? BeforePluginQueue { get; set; }
+    public Action? OnReadLatestCore { get; set; }
     public List<PluginUpdate> PluginUpdates { get; set; } = [];
     public Version? LatestCore { get; set; }
     public List<string> Pending { get; set; } = [];
@@ -45,12 +51,24 @@ public sealed class FakeSink : IActionSink
         return QueueDisableResult;
     }
 
-    public Task<bool> QueueUpdateAsync(string identifier, string version)
+    public async Task<PluginUpdateQueueResult> QueueUpdateAsync(string identifier, string version,
+        Func<Func<Task<bool>>, Task<bool>>? commitUpdate = null)
     {
+        if (BeforePluginQueue is not null)
+            await BeforePluginQueue();
         if (QueueUpdateThrows is not null)
             throw QueueUpdateThrows;
-        Updated.Add((identifier, version));
-        return Task.FromResult(QueueUpdateResult);
+        if (!QueueUpdateResult)
+            return PluginUpdateQueueResult.Unavailable;
+
+        Task<bool> Queue()
+        {
+            Updated.Add((identifier, version));
+            return Task.FromResult(true);
+        }
+        return (commitUpdate is null ? await Queue() : await commitUpdate(Queue))
+            ? PluginUpdateQueueResult.Queued
+            : PluginUpdateQueueResult.PolicyChanged;
     }
 
     public Task TriggerCoreUpdateAsync()
@@ -64,12 +82,17 @@ public sealed class FakeSink : IActionSink
     public void StopApplication() => Stops++;
 
     public IReadOnlyCollection<string> PendingPluginIdentifiers() => Pending;
+    public bool HasVerifiedQueuedUpdate(string identifier, string version) => VerifiedQueuedUpdate;
 
     public Task<IReadOnlyList<PluginUpdate>> FindPluginUpdatesAsync(
         IReadOnlyDictionary<string, Version> installed, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<PluginUpdate>>(PluginUpdates);
 
-    public Task<Version?> GetLatestCoreVersionAsync(CancellationToken ct) => Task.FromResult(LatestCore);
+    public Task<Version?> GetLatestCoreVersionAsync(CancellationToken ct)
+    {
+        OnReadLatestCore?.Invoke();
+        return Task.FromResult(LatestCore);
+    }
 }
 
 public static class Fixtures

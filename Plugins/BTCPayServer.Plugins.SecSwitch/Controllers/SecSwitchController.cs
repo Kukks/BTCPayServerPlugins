@@ -8,13 +8,18 @@ using BTCPayServer.Plugins.SecSwitch.Models;
 using BTCPayServer.Plugins.SecSwitch.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace BTCPayServer.Plugins.SecSwitch.Controllers;
 
 [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie)]
 [Authorize(Policy = Policies.CanModifyServerSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
 [Route("~/plugins/secswitch")]
-public class SecSwitchController(ISettingsRepository settingsRepository, LedgerStore ledger, LockdownGate lockdown) : Controller
+public class SecSwitchController(
+    ISettingsRepository settingsRepository,
+    LedgerStore ledger,
+    LockdownGate lockdown,
+    ILogger<SecSwitchController> logger) : Controller
 {
     [HttpGet("")]
     public async Task<IActionResult> Settings()
@@ -29,7 +34,9 @@ public class SecSwitchController(ISettingsRepository settingsRepository, LedgerS
     public async Task<IActionResult> Settings(SecSwitchSettings settings)
     {
         var feedUrl = settings.GetFeedUrl();
-        if (feedUrl is not null && !AdvisoryFeed.IsSupportedFeedUrl(feedUrl))
+        if (settings.HasLegacyPlaceholderFeedUrl())
+            ModelState.AddModelError(nameof(settings.FeedUrl), "This placeholder URL has been retired. Enter a trusted advisory feed URL or leave the field blank.");
+        else if (feedUrl is not null && !AdvisoryFeed.IsSupportedFeedUrl(feedUrl))
             ModelState.AddModelError(nameof(settings.FeedUrl), "The advisory feed URL must be an absolute https:// URL.");
         if (!ModelState.IsValid)
             return View(settings);
@@ -39,11 +46,38 @@ public class SecSwitchController(ISettingsRepository settingsRepository, LedgerS
             .Where(identifier => !string.IsNullOrWhiteSpace(identifier))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        await settingsRepository.UpdateSetting(settings);
-        if (!settings.Enabled || !settings.AutoApply)
-            await ledger.ClearLocksAsync("The server admin turned off advisory checks or the kill switch.");
-        await lockdown.RefreshAsync();
-        TempData[WellKnownTempData.SuccessMessage] = "SecSwitch settings saved";
+
+        var saved = false;
+        var killSwitchEnabled = settings.Enabled && settings.AutoApply;
+        try
+        {
+            await ledger.WithPolicyAsync(async previous =>
+            {
+                if (killSwitchEnabled && (!previous.Enabled || !previous.AutoApply))
+                    await ledger.ClearLocksAsync("Cleared an earlier lockdown before re-enabling the kill switch.");
+
+                settings.PolicyRevision = Guid.NewGuid();
+                await settingsRepository.UpdateSetting(settings);
+                saved = true;
+
+                if (!killSwitchEnabled)
+                    await ledger.ClearLocksAsync("The server admin turned off advisory checks or the kill switch.");
+                return true;
+            });
+            TempData[WellKnownTempData.SuccessMessage] = "SecSwitch settings saved";
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "SecSwitch could not complete the settings change");
+            TempData[WellKnownTempData.ErrorMessage] = saved
+                ? "Settings saved and the kill switch is off. SecSwitch could not clear the previous lockdown record."
+                : "Could not save SecSwitch settings.";
+        }
+        finally
+        {
+            await lockdown.RefreshAsync();
+        }
+
         return RedirectToAction(nameof(Settings));
     }
 

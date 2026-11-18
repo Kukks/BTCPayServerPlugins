@@ -16,12 +16,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Newtonsoft.Json;
 
 namespace BTCPayServer.Plugins.SecSwitch.Services;
 
-public sealed record ActionOutcome(bool Succeeded, string Message, bool RestartNeeded = false);
+public sealed record ActionOutcome(bool Succeeded, string Message, bool RestartNeeded = false, bool AlreadyQueued = false);
 
 public sealed record PluginUpdate(string Identifier, Version Available);
+
+public enum PluginUpdateQueueResult { Unavailable, PolicyChanged, Queued, AlreadyQueued }
 
 public interface IActionSink
 {
@@ -30,7 +33,9 @@ public interface IActionSink
     /// <summary>Plugins with a queued disable, install or delete that only a restart applies.</summary>
     IReadOnlyCollection<string> PendingPluginIdentifiers();
     bool QueueDisable(string identifier);
-    Task<bool> QueueUpdateAsync(string identifier, string version);
+    bool HasVerifiedQueuedUpdate(string identifier, string version);
+    Task<PluginUpdateQueueResult> QueueUpdateAsync(string identifier, string version,
+        Func<Func<Task<bool>>, Task<bool>>? commitUpdate = null);
     Task TriggerCoreUpdateAsync();
     void StopApplication();
     Task<IReadOnlyList<PluginUpdate>> FindPluginUpdatesAsync(IReadOnlyDictionary<string, Version> installed, CancellationToken ct);
@@ -41,7 +46,8 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
 {
     static readonly Regex SafeIdentifierPattern = new(@"\A[A-Za-z0-9._-]{1,128}\z", RegexOptions.Compiled);
 
-    public async Task<ActionOutcome> ExecuteAsync(SecSwitchAction action, Advisory advisory, bool allowDisableFallback = true)
+    public async Task<ActionOutcome> ExecuteAsync(SecSwitchAction action, Advisory advisory, bool allowDisableFallback = true,
+        Func<Func<Task<bool>>, Task<bool>>? commitUpdate = null, Func<Func<ActionOutcome>, Task<ActionOutcome>>? commitDisable = null)
     {
         try
         {
@@ -53,9 +59,9 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
                 case SecSwitchAction.Lockdown:
                     return new ActionOutcome(true, "Server locked down: only server admins can reach it until the advisory no longer applies.");
                 case SecSwitchAction.DisablePlugin:
-                    return DisablePlugin(advisory.Identifier);
+                    return await DisablePluginAsync(advisory.Identifier, commitDisable);
                 case SecSwitchAction.UpdatePlugin:
-                    return await UpdateOrDisableAsync(advisory, allowDisableFallback);
+                    return await UpdateOrDisableAsync(advisory, allowDisableFallback, commitUpdate, commitDisable);
                 case SecSwitchAction.UpdateCore:
                     return await UpdateCoreAsync();
                 default:
@@ -69,15 +75,21 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
         }
     }
 
-    public async Task<ActionOutcome> UpdatePluginAsync(string identifier, string version)
+    public async Task<ActionOutcome> UpdatePluginAsync(string identifier, string version,
+        Func<Func<Task<bool>>, Task<bool>>? commitUpdate = null)
     {
         if (!IsSafeIdentifier(identifier))
             return new ActionOutcome(false, $"Refusing to update: plugin identifier '{Sanitize(identifier)}' is missing or unsafe.");
         try
         {
-            return await sink.QueueUpdateAsync(identifier, version)
-                ? new ActionOutcome(true, $"Queued update of {Sanitize(identifier)} to {Sanitize(version)}.", RestartNeeded: true)
-                : new ActionOutcome(false, $"Failed to queue update of {Sanitize(identifier)}: no installed plugin matches that identifier unambiguously.");
+            var target = $"{Sanitize(identifier)} {Sanitize(version)}";
+            return await sink.QueueUpdateAsync(identifier, version, commitUpdate) switch
+            {
+                PluginUpdateQueueResult.Queued => new ActionOutcome(true, $"Queued update to {target}.", RestartNeeded: true),
+                PluginUpdateQueueResult.AlreadyQueued => new ActionOutcome(true, $"The update to {target} is already queued. Restart BTCPay Server to apply it.", AlreadyQueued: true),
+                PluginUpdateQueueResult.PolicyChanged => new ActionOutcome(false, $"Current SecSwitch policy does not authorize the update to {target}."),
+                _ => new ActionOutcome(false, $"Failed to queue the update to {target}: no installed plugin matches that identifier unambiguously.")
+            };
         }
         catch (Exception e)
         {
@@ -102,20 +114,24 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
 
     public void RequestRestart() => sink.StopApplication();
 
-    async Task<ActionOutcome> UpdateOrDisableAsync(Advisory advisory, bool allowDisableFallback)
+    async Task<ActionOutcome> UpdateOrDisableAsync(Advisory advisory, bool allowDisableFallback,
+        Func<Func<Task<bool>>, Task<bool>>? commitUpdate, Func<Func<ActionOutcome>, Task<ActionOutcome>>? commitDisable)
     {
         if (string.IsNullOrWhiteSpace(advisory.FixedVersion))
             return allowDisableFallback
-                ? DisablePlugin(advisory.Identifier)
+                ? await DisablePluginAsync(advisory.Identifier, commitDisable)
                 : new ActionOutcome(false, "No fixed version is available for this advisory.");
 
-        var update = await UpdatePluginAsync(advisory.Identifier, advisory.FixedVersion);
+        var update = await UpdatePluginAsync(advisory.Identifier, advisory.FixedVersion, commitUpdate);
         if (update.Succeeded || !allowDisableFallback)
             return update;
 
-        var disable = DisablePlugin(advisory.Identifier);
+        var disable = await DisablePluginAsync(advisory.Identifier, commitDisable);
         return disable with { Message = $"{update.Message} Disabling instead: {disable.Message}" };
     }
+
+    Task<ActionOutcome> DisablePluginAsync(string identifier, Func<Func<ActionOutcome>, Task<ActionOutcome>>? commitDisable) =>
+        commitDisable is null ? Task.FromResult(DisablePlugin(identifier)) : commitDisable(() => DisablePlugin(identifier));
 
     ActionOutcome DisablePlugin(string identifier)
     {
@@ -163,24 +179,37 @@ public sealed class BtcPayActionSink(
             LogUnresolved("disable", identifier, ambiguous);
             return false;
         }
-        if (LastPendingChange(PluginManager.GetPendingCommands(pluginDir), resolved) is not ("disable" or "delete"))
+        if (LastPendingChange(PluginManager.GetPendingCommands(pluginDir), resolved, StringComparison.Ordinal) is not ("disable" or "delete"))
             PluginManager.DisablePlugin(pluginDir, resolved);
         return true;
     }
 
-    public async Task<bool> QueueUpdateAsync(string identifier, string version)
+    public bool HasVerifiedQueuedUpdate(string identifier, string version)
+    {
+        var pluginDir = dataDirectories.Value.PluginDir;
+        return Version.TryParse(version, out var expected) &&
+               TryResolveInstalledDirectory(pluginDir, identifier, out var resolved, out _) &&
+               IsExactFixQueued(pluginDir, resolved, AdvisoryApplicability.Pad(expected), PluginManager.GetPendingCommands(pluginDir));
+    }
+
+    public async Task<PluginUpdateQueueResult> QueueUpdateAsync(string identifier, string version,
+        Func<Func<Task<bool>>, Task<bool>>? commitUpdate = null)
     {
         var pluginDir = dataDirectories.Value.PluginDir;
         if (!TryResolveInstalledDirectory(pluginDir, identifier, out var resolved, out var ambiguous))
         {
             LogUnresolved("update", identifier, ambiguous);
-            return false;
+            return PluginUpdateQueueResult.Unavailable;
         }
 
-        EnsureNoPendingChange(PluginManager.GetPendingCommands(pluginDir), resolved);
         var candidates = UpdateCandidates(version);
         if (candidates.Count == 0)
             throw new InvalidOperationException($"'{ActionExecutor.Sanitize(version)}' is not a valid version.");
+        var expectedVersion = Version.Parse(candidates[0]);
+        var pending = PluginManager.GetPendingCommands(pluginDir);
+        if (IsExactFixQueued(pluginDir, resolved, expectedVersion, pending))
+            return PluginUpdateQueueResult.AlreadyQueued;
+        EnsureNoPendingChange(pending, resolved);
 
         using var scope = scopeFactory.CreateScope();
         var staging = Directory.CreateDirectory(Path.Combine(pluginDir, $".secswitch-{Guid.NewGuid():N}"));
@@ -189,13 +218,21 @@ public sealed class BtcPayActionSink(
             var downloader = ActivatorUtilities.CreateInstance<PluginService>(scope.ServiceProvider,
                 Options.Create(new DataDirectories { PluginDir = staging.FullName }));
             var manifest = await DownloadUpdateAsync(downloader, resolved, candidates);
-            var pending = PluginManager.GetPendingCommands(pluginDir);
+            pending = PluginManager.GetPendingCommands(pluginDir);
+            if (IsExactFixQueued(pluginDir, resolved, expectedVersion, pending))
+                return PluginUpdateQueueResult.AlreadyQueued;
             EnsureNoPendingChange(pending, resolved);
-            if (!CanInstallUpdate(manifest, downloader.Installed, pending.Select(command => command.plugin)))
-                throw new InvalidOperationException("The update's dependencies are missing, incompatible, or have pending changes.");
+            EnsureDependencies(manifest, downloader.Installed, pending);
 
-            await QueueStagedFilesAsync(pluginDir, staging.FullName, resolved);
-            return true;
+            return await QueueStagedFilesAsync(pluginDir, staging.FullName, resolved, manifest, downloader.Installed, commitUpdate)
+                ? PluginUpdateQueueResult.Queued
+                : PluginUpdateQueueResult.PolicyChanged;
+        }
+        catch (Exception e) when (e is IOException or InvalidOperationException)
+        {
+            if (IsExactFixQueued(pluginDir, resolved, expectedVersion, PluginManager.GetPendingCommands(pluginDir)))
+                return PluginUpdateQueueResult.AlreadyQueued;
+            throw;
         }
         finally
         {
@@ -228,7 +265,8 @@ public sealed class BtcPayActionSink(
         throw failure ?? new InvalidOperationException("No matching plugin package is available.");
     }
 
-    async Task QueueStagedFilesAsync(string pluginDir, string stagingDir, string identifier)
+    async Task<bool> QueueStagedFilesAsync(string pluginDir, string stagingDir, string identifier,
+        PluginService.AvailablePlugin update, Dictionary<string, Version> installed, Func<Func<Task<bool>>, Task<bool>>? commitUpdate)
     {
         var packageName = identifier + PluginManager.BTCPayPluginSuffix;
         var manifestName = identifier + ".json";
@@ -243,9 +281,11 @@ public sealed class BtcPayActionSink(
             manifest = new FileStream(manifestPath, FileMode.CreateNew, FileAccess.Write, FileShare.Delete);
             await CopyStagedAsync(packageName, package);
             await CopyStagedAsync(manifestName, manifest);
-            EnsureNoPendingChange(PluginManager.GetPendingCommands(pluginDir), identifier);
-            PluginManager.QueueCommands(pluginDir, ("install", identifier));
-            queued = true;
+            if (commitUpdate is null)
+                await QueueAsync();
+            else
+                await commitUpdate(QueueAsync);
+            return queued;
         }
         finally
         {
@@ -265,6 +305,16 @@ public sealed class BtcPayActionSink(
             await source.CopyToAsync(destination);
             await destination.FlushAsync();
         }
+
+        Task<bool> QueueAsync()
+        {
+            var pending = PluginManager.GetPendingCommands(pluginDir);
+            EnsureNoPendingChange(pending, identifier);
+            EnsureDependencies(update, installed, pending);
+            PluginManager.QueueCommands(pluginDir, ("install", identifier));
+            queued = true;
+            return Task.FromResult(true);
+        }
     }
 
     void DeleteStagedFile(string path)
@@ -279,13 +329,40 @@ public sealed class BtcPayActionSink(
         }
     }
 
-    static string? LastPendingChange(IEnumerable<(string command, string plugin)> pending, string identifier) =>
-        pending.LastOrDefault(command => string.Equals(command.plugin, identifier, StringComparison.OrdinalIgnoreCase)).command;
+    static string? LastPendingChange(IEnumerable<(string command, string plugin)> pending, string identifier, StringComparison comparison) =>
+        pending.LastOrDefault(command => string.Equals(command.plugin, identifier, comparison)).command;
+
+    static bool IsExactFixQueued(string pluginDir, string identifier, Version expectedVersion,
+        IEnumerable<(string command, string plugin)> pending)
+    {
+        if (LastPendingChange(pending, identifier, StringComparison.Ordinal) != "install" ||
+            !File.Exists(Path.Combine(pluginDir, identifier + PluginManager.BTCPayPluginSuffix)))
+            return false;
+
+        try
+        {
+            var manifest = JsonConvert.DeserializeObject<PluginService.AvailablePlugin>(
+                File.ReadAllText(Path.Combine(pluginDir, identifier + ".json")));
+            return manifest is { Version: { } version } && string.Equals(manifest.Identifier, identifier, StringComparison.Ordinal) &&
+                   AdvisoryApplicability.Pad(version) == expectedVersion;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return false;
+        }
+    }
 
     static void EnsureNoPendingChange(IEnumerable<(string command, string plugin)> pending, string identifier)
     {
-        if (LastPendingChange(pending, identifier) is not null)
+        if (LastPendingChange(pending, identifier, StringComparison.OrdinalIgnoreCase) is not null)
             throw new InvalidOperationException("A change for this plugin is already queued.");
+    }
+
+    static void EnsureDependencies(PluginService.AvailablePlugin manifest, Dictionary<string, Version> installed,
+        IEnumerable<(string command, string plugin)> pending)
+    {
+        if (!CanInstallUpdate(manifest, installed, pending.Select(command => command.plugin)))
+            throw new InvalidOperationException("The update's dependencies are missing, incompatible, or have pending changes.");
     }
 
     public static bool CanInstallUpdate(PluginService.AvailablePlugin manifest, Dictionary<string, Version> installed,

@@ -187,6 +187,7 @@ public class AdvisoryApplicabilityTests
     [InlineData(">=1.0.0 && <1.2.3", "1.2.2.5", true)]
     [InlineData(">=1.0.0 && <1.2.3", "1.2.3.1", false)]
     [InlineData("<1.0.0 || >=2.0.0", "2.0.0.0", true)]
+    [InlineData(">=1.0.0 && <2.0.0 || >=3.0.0 && <4.0.0", "3.1.0.0", true)]
     [InlineData("^1.2.0", "1.9.0.0", true)]
     public void Four_part_installed_versions_compare_correctly_against_three_part_conditions(
         string affected, string installed, bool expected)
@@ -226,6 +227,8 @@ public class AdvisoryApplicabilityTests
     [InlineData(">=1.0.0&&&&<2.0.0")]
     [InlineData("||<1.0.0")]
     [InlineData("&&<1.0.0")]
+    [InlineData("<1.0.0||&&>=2.0.0&&<3.0.0")]
+    [InlineData(">=2.0.0&&<3.0.0&&||<1.0.0")]
     public void Doubled_or_dangling_separators_are_rejected_because_core_drops_them_silently(string affected)
     {
         Assert.False(AdvisoryApplicability.TryParseCondition(affected, out _));

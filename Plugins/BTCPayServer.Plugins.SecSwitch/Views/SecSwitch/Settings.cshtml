@@ -11,6 +11,7 @@
 @inject IOptions<DataDirectories> DataDirectories
 @{
     ViewData["Title"] = "SecSwitch";
+    var feedUrl = Model.GetFeedUrl();
     var ledger = await Ledger.GetAsync();
     var pluginOptions = InstalledPlugins
         .Where(plugin => !plugin.SystemPlugin && BtcPayActionSink.TryResolveInstalledDirectory(
@@ -29,28 +30,31 @@
 </div>
 <partial name="_StatusMessage" />
 
-@if (Model.Enabled)
+@if (Model.Enabled && (!ViewData.ModelState.TryGetValue(nameof(Model.FeedUrl), out var feedField) || feedField.Errors.Count == 0))
 {
-    if (Model.GetFeedUrl() is null)
+    if (feedUrl is null)
     {
         <div class="alert alert-warning" role="alert">
             The official BTCPay advisory feed is pending publication. Set a trusted feed URL to start checking for advisories.
         </div>
     }
-    else if (ledger.LastPollAt is null)
+    else if (AdvisoryFeed.IsSupportedFeedUrl(feedUrl))
     {
-        <div class="alert alert-info" role="alert">SecSwitch has not polled the advisory feed yet.</div>
-    }
-    else if (ledger.LastPollError is not null)
-    {
-        <div class="alert alert-danger" role="alert">
-            The last poll of the advisory feed failed (@ledger.LastPollAt.Value.ToString("u")): @ledger.LastPollError.
-            This server is not being checked against advisories until a poll succeeds.
-        </div>
-    }
-    else
-    {
-        <p class="text-muted">Last successful poll: @ledger.LastPollAt.Value.ToString("u")</p>
+        if (ledger.LastPollAt is not { } lastPollAt || !string.Equals(ledger.LastPollFeedUrl, feedUrl, StringComparison.Ordinal))
+        {
+            <div class="alert alert-info" role="alert">SecSwitch has not polled this advisory feed yet.</div>
+        }
+        else if (ledger.LastPollError is not null)
+        {
+            <div class="alert alert-danger" role="alert">
+                The last poll of this advisory feed failed (@lastPollAt.ToString("u")): @ledger.LastPollError.
+                This server is not being checked against advisories until a poll succeeds.
+            </div>
+        }
+        else
+        {
+            <p class="text-muted">Last successful poll: @lastPollAt.ToString("u")</p>
+        }
     }
 }
 
@@ -74,7 +78,10 @@
     </div>
     <fieldset class="mb-4">
         <legend class="h6">Automatic updates</legend>
-        <p class="form-text">Choose which components SecSwitch may update. Automatic updates can restart BTCPay Server.</p>
+        <p class="form-text">
+            Automatic updates require advisory checks to be enabled and a successful poll of the configured feed.
+            Choose which components SecSwitch may update. Updates can restart BTCPay Server.
+        </p>
         <div class="form-check">
             <input asp-for="AutoUpdateCore" type="checkbox" class="form-check-input" />
             <label asp-for="AutoUpdateCore" class="form-check-label">BTCPay Server (requires host update support)</label>

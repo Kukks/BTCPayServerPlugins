@@ -12,7 +12,7 @@ public sealed record SkippedEntry(string? Id, string Reason);
 
 public static class AdvisoryParser
 {
-    sealed record Entry(JsonElement Element, string Path, bool Conditional, string? Id);
+    sealed record Entry(Advisory? Advisory, string Path, bool Conditional, string? Id, string? Error);
 
     /// <summary>
     /// Parses direct advisories and the optional <c>conditionalAdvisories</c> array. A malformed envelope throws; a malformed entry is skipped
@@ -33,18 +33,15 @@ public static class AdvisoryParser
 
         using (doc)
         {
-            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
-                !doc.RootElement.TryGetProperty("advisories", out var list) ||
-                list.ValueKind != JsonValueKind.Array)
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
                 throw new InvalidDataException("The advisory feed must be a JSON object with an \"advisories\" array.");
 
-            var entries = ReadEntries(list, "advisories", conditional: false);
-            if (doc.RootElement.TryGetProperty("conditionalAdvisories", out var conditionalList))
-            {
-                if (conditionalList.ValueKind != JsonValueKind.Array)
-                    throw new InvalidDataException("The advisory feed's \"conditionalAdvisories\" property must be an array.");
-                entries = entries.Concat(ReadEntries(conditionalList, "conditionalAdvisories", conditional: true));
-            }
+            var list = ReadArray(root, "advisories", required: true);
+            var conditionalList = ReadArray(root, "conditionalAdvisories");
+            var entries = ReadEntries(list, "advisories", conditional: false)
+                .Concat(ReadEntries(conditionalList, "conditionalAdvisories", conditional: true))
+                .ToList();
 
             // A collision involving a conditional entry makes both versions ambiguous. Keep that id listed
             // without acting on the direct version where a dependency constraint might have been intended.
@@ -59,10 +56,10 @@ public static class AdvisoryParser
             {
                 if (entry.Id is not null && ambiguousIds.Contains(entry.Id))
                     skipped.Add(new SkippedEntry(entry.Id, $"{entry.Path}: duplicate id '{entry.Id}'"));
-                else if (!TryParse(entry.Element, entry.Conditional, out var advisory, out var error))
-                    skipped.Add(new SkippedEntry(entry.Id, $"{entry.Path}: {error}"));
-                else if (!ids.Add(advisory!.Id))
-                    skipped.Add(new SkippedEntry(null, $"{entry.Path}: duplicate id '{advisory.Id}'"));
+                else if (entry.Advisory is not { } advisory)
+                    skipped.Add(new SkippedEntry(entry.Id, $"{entry.Path}: {entry.Error}"));
+                else if (!ids.Add(advisory.Id))
+                    skipped.Add(new SkippedEntry(advisory.Id, $"{entry.Path}: duplicate id '{advisory.Id}'"));
                 else
                     advisories.Add(advisory);
             }
@@ -70,21 +67,42 @@ public static class AdvisoryParser
         }
     }
 
-    static IEnumerable<Entry> ReadEntries(JsonElement list, string property, bool conditional) =>
-        list.EnumerateArray().Select((element, index) => new Entry(
-            element, $"{property}[{index}]", conditional,
-            element.ValueKind == JsonValueKind.Object ? GetString(element, "id") : null));
-
-    static bool TryParse(JsonElement element, bool conditional, out Advisory? advisory, out string? error)
+    static JsonElement ReadArray(JsonElement root, string name, bool required = false)
     {
-        advisory = null;
-        if (element.ValueKind != JsonValueKind.Object)
-        {
-            error = "entry must be a JSON object";
-            return false;
-        }
+        // TryGetProperty alone selects the last occurrence. An empty duplicate could look like a withdrawal.
+        if (root.EnumerateObject().Where(property => property.NameEquals(name)).Take(2).Count() > 1)
+            throw new InvalidDataException($"The advisory feed repeats its \"{name}\" property.");
+        if (root.TryGetProperty(name, out var array) ? array.ValueKind != JsonValueKind.Array : required)
+            throw new InvalidDataException($"The advisory feed's \"{name}\" property must be an array.");
+        return array;
+    }
 
-        var id = GetString(element, "id");
+    static IEnumerable<Entry> ReadEntries(JsonElement list, string property, bool conditional) =>
+        list.ValueKind == JsonValueKind.Array
+            ? list.EnumerateArray().Select((element, index) => ReadEntry(element, $"{property}[{index}]", conditional))
+            : [];
+
+    static Entry ReadEntry(JsonElement element, string path, bool conditional)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+            return new Entry(null, path, conditional, null, "entry must be a JSON object");
+
+        string? id = null;
+        try
+        {
+            id = GetString(element, "id");
+            var advisory = ParseAdvisory(element, id, conditional, out var error);
+            return new Entry(advisory, path, conditional, id, error);
+        }
+        catch (InvalidOperationException e)
+        {
+            // JsonDocument can read the envelope before GetString detects invalid Unicode in an entry.
+            return new Entry(null, path, conditional, id, $"entry contains undecodable JSON text: {e.Message}");
+        }
+    }
+
+    static Advisory? ParseAdvisory(JsonElement element, string? id, bool conditional, out string? error)
+    {
         var identifier = GetString(element, "identifier");
         var affected = GetString(element, "affectedVersions");
         var severityRaw = GetString(element, "severity");
@@ -93,11 +111,9 @@ public static class AdvisoryParser
         else if (string.IsNullOrWhiteSpace(identifier)) error = "missing required field: identifier";
         else if (!AdvisoryApplicability.TryParseCondition(affected, out _)) error = $"affectedVersions '{affected}' is not a valid version condition";
         else if (!TryParseSeverity(severityRaw, out var severity)) error = $"unrecognised severity '{severityRaw}'";
-        else if (!TryParseDependency(element, identifier, conditional, out var requires, out error)) return false;
-        else
+        else if (TryParseDependency(element, identifier, conditional, out var requires, out error))
         {
-            error = null;
-            advisory = new Advisory
+            return new Advisory
             {
                 Id = id,
                 Identifier = identifier,
@@ -108,7 +124,7 @@ public static class AdvisoryParser
                 Title = GetString(element, "title") ?? ""
             };
         }
-        return advisory is not null;
+        return null;
     }
 
     static bool TryParseDependency(

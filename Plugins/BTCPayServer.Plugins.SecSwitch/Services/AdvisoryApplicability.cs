@@ -145,7 +145,7 @@ public static class AdvisoryApplicability
         string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
 
     static bool HasEmptySegment(string text) =>
-        text.Split("||").Any(string.IsNullOrWhiteSpace) || text.Split("&&").Any(string.IsNullOrWhiteSpace);
+        text.Split(["||", "&&"], StringSplitOptions.None).Any(string.IsNullOrWhiteSpace);
 
     static bool ContainsBlankClause(VersionCondition condition) => condition switch
     {

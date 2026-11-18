@@ -1,18 +1,25 @@
+using System.Globalization;
 using BTCPayServer.Abstractions.Constants;
+using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Plugins.SecSwitch.Controllers;
 using BTCPayServer.Plugins.SecSwitch.Models;
 using BTCPayServer.Plugins.SecSwitch.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Abstractions;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Primitives;
 using Xunit;
 
 namespace BTCPayServer.Plugins.SecSwitch.Tests;
 
 public class SecSwitchControllerTests
 {
-    readonly FakeSettingsRepository _settings = new();
+    readonly SettingsRepositoryWithLedgerWriteHook _settings = new();
     readonly LedgerStore _ledger;
     readonly LockdownGate _gate;
     readonly SecSwitchController _controller;
@@ -21,10 +28,32 @@ public class SecSwitchControllerTests
     {
         _ledger = new LedgerStore(_settings);
         _gate = new LockdownGate(_settings, _ledger, NullLogger<LockdownGate>.Instance);
-        _controller = new SecSwitchController(_settings, _ledger, _gate)
+        _controller = NewController();
+    }
+
+    SecSwitchController NewController() =>
+        new(_settings, _ledger, _gate, NullLogger<SecSwitchController>.Instance)
         {
             TempData = new TempDataDictionary(new DefaultHttpContext(), new NullTempDataProvider())
         };
+
+    sealed class SettingsRepositoryWithLedgerWriteHook : ISettingsRepository
+    {
+        readonly FakeSettingsRepository _inner = new();
+        public Func<Task>? BeforeLedgerWrite { get; set; }
+
+        public Task<T?> GetSettingAsync<T>(string? name = null) where T : class =>
+            _inner.GetSettingAsync<T>(name);
+
+        public async Task UpdateSetting<T>(T obj, string? name = null) where T : class
+        {
+            if (obj is SecSwitchLedger && BeforeLedgerWrite is { } hook)
+                await hook();
+            await _inner.UpdateSetting(obj, name);
+        }
+
+        public Task<T> WaitSettingsChanged<T>(CancellationToken cancellationToken = default) where T : class =>
+            _inner.WaitSettingsChanged<T>(cancellationToken);
     }
 
     sealed class NullTempDataProvider : ITempDataProvider
@@ -73,13 +102,15 @@ public class SecSwitchControllerTests
     [Fact]
     public async Task Saving_valid_settings_persists_them_and_redirects()
     {
+        var postedRevision = Guid.NewGuid();
         var posted = new SecSwitchSettings
         {
             Enabled = true,
             AutoApply = false,
             FeedUrl = " https://example.test/a.json ",
             AutoUpdateCore = true,
-            AutoUpdatePlugins = ["BTCPayServer.Plugins.One", "btcpayserver.plugins.one", ""]
+            AutoUpdatePlugins = ["BTCPayServer.Plugins.One", "btcpayserver.plugins.one", ""],
+            PolicyRevision = postedRevision
         };
 
         var result = await _controller.Settings(posted);
@@ -93,13 +124,16 @@ public class SecSwitchControllerTests
         Assert.True(saved.IsPluginAutoUpdateEnabled("btcpayserver.plugins.one"));
         Assert.False(saved.IsPluginAutoUpdateEnabled("BTCPayServer.Plugins.Two"));
         Assert.Equal("https://example.test/a.json", saved.FeedUrl);
+        Assert.NotNull(saved.PolicyRevision);
+        Assert.NotEqual(postedRevision, saved.PolicyRevision);
         Assert.NotNull(_controller.TempData[WellKnownTempData.SuccessMessage]);
     }
 
     [Theory]
     [InlineData("http://example.test/a.json")]
     [InlineData("/relative")]
-    public async Task Saving_a_non_https_feed_url_is_rejected_and_nothing_is_persisted(string url)
+    [InlineData("https://raw.githubusercontent.com/btcpayserver/advisories/master/advisories.json")]
+    public async Task Saving_an_invalid_or_retired_feed_url_is_rejected(string url)
     {
         var posted = new SecSwitchSettings { Enabled = true, FeedUrl = url };
 
@@ -108,6 +142,45 @@ public class SecSwitchControllerTests
         Assert.Same(posted, Assert.IsType<ViewResult>(result).Model);
         Assert.False(_controller.ModelState.IsValid);
         Assert.Null(await _settings.GetSettingAsync<SecSwitchSettings>());
+    }
+
+    [Fact]
+    public async Task Mvc_binding_accepts_plugin_checkboxes_and_ignores_posted_policy_revision()
+    {
+        using var services = new ServiceCollection().AddLogging().AddMvcCore().Services.BuildServiceProvider();
+        var metadata = services.GetRequiredService<IModelMetadataProvider>().GetMetadataForType(typeof(SecSwitchSettings));
+        var fields = new Dictionary<string, StringValues>
+        {
+            [nameof(SecSwitchSettings.Enabled)] = "false",
+            [nameof(SecSwitchSettings.AutoApply)] = "false",
+            [nameof(SecSwitchSettings.AutoUpdateCore)] = new StringValues(["true", "false"]),
+            [nameof(SecSwitchSettings.AutoUpdatePlugins)] = new StringValues(["Example.Plugin.One", "Example.Plugin.Two"]),
+            [nameof(SecSwitchSettings.PolicyRevision)] = Guid.NewGuid().ToString()
+        };
+        var settings = await BindFormAsync();
+        Assert.False(settings.Enabled);
+        Assert.False(settings.AutoApply);
+        Assert.True(settings.AutoUpdateCore);
+        Assert.Equal(["Example.Plugin.One", "Example.Plugin.Two"], settings.AutoUpdatePlugins);
+        Assert.Null(settings.PolicyRevision);
+        await _controller.Settings(settings);
+        Assert.Equal(settings.AutoUpdatePlugins, (await _settings.GetSettingAsync<SecSwitchSettings>())!.AutoUpdatePlugins);
+
+        fields.Remove(nameof(SecSwitchSettings.AutoUpdatePlugins));
+        await _controller.Settings(await BindFormAsync());
+        Assert.Empty((await _settings.GetSettingAsync<SecSwitchSettings>())!.AutoUpdatePlugins);
+
+        async Task<SecSwitchSettings> BindFormAsync()
+        {
+            var context = new ActionContext(new DefaultHttpContext { RequestServices = services }, new RouteData(), new ActionDescriptor());
+            var values = new FormValueProvider(BindingSource.Form, new FormCollection(fields), CultureInfo.InvariantCulture);
+            var binding = DefaultModelBindingContext.CreateBindingContext(context, values, metadata, bindingInfo: null, modelName: "");
+            var binder = services.GetRequiredService<IModelBinderFactory>()
+                .CreateBinder(new ModelBinderFactoryContext { Metadata = metadata });
+            await binder.BindModelAsync(binding);
+            Assert.Equal(0, binding.ModelState.ErrorCount);
+            return Assert.IsType<SecSwitchSettings>(binding.Result.Model);
+        }
     }
 
     [Fact]
@@ -135,6 +208,71 @@ public class SecSwitchControllerTests
         Assert.False((await _ledger.GetAsync()).Entries["core-1"].LockedDown);
 
         await _controller.Settings(new SecSwitchSettings());
+        Assert.False(await _gate.IsActiveAsync());
+    }
+
+    [Fact]
+    public async Task Failed_cleanup_leaves_opt_out_effective_and_blocks_reenable_until_cleanup_succeeds()
+    {
+        await _settings.UpdateSetting(new SecSwitchSettings());
+        await Lock();
+        await _gate.RefreshAsync();
+        Assert.True(await _gate.IsActiveAsync());
+        _settings.BeforeLedgerWrite = () => throw new InvalidOperationException("Could not persist the ledger.");
+
+        Assert.IsType<RedirectToActionResult>(await _controller.Settings(new SecSwitchSettings { AutoApply = false }));
+        var optedOut = (await _settings.GetSettingAsync<SecSwitchSettings>())!;
+        Assert.False(optedOut.AutoApply);
+        Assert.NotNull(_controller.TempData[WellKnownTempData.ErrorMessage]);
+        Assert.False(await _gate.IsActiveAsync());
+        Assert.True((await _ledger.GetAsync()).Entries["core-1"].LockedDown);
+
+        var reenable = NewController();
+        Assert.IsType<RedirectToActionResult>(await reenable.Settings(new SecSwitchSettings()));
+        Assert.NotNull(reenable.TempData[WellKnownTempData.ErrorMessage]);
+        Assert.Equal(optedOut.PolicyRevision, (await _settings.GetSettingAsync<SecSwitchSettings>())!.PolicyRevision);
+        Assert.False(await _gate.IsActiveAsync());
+
+        _settings.BeforeLedgerWrite = null;
+        await NewController().Settings(new SecSwitchSettings());
+        var restored = (await _settings.GetSettingAsync<SecSwitchSettings>())!;
+        Assert.True(restored.AutoApply);
+        Assert.NotEqual(optedOut.PolicyRevision, restored.PolicyRevision);
+        Assert.False(await _gate.IsActiveAsync());
+        Assert.False((await _ledger.GetAsync()).Entries["core-1"].LockedDown);
+    }
+
+    [Fact]
+    public async Task Reenable_waits_for_in_progress_opt_out_cleanup()
+    {
+        await _settings.UpdateSetting(new SecSwitchSettings());
+        await Lock();
+        var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _settings.BeforeLedgerWrite = () =>
+        {
+            cleanupStarted.TrySetResult();
+            return releaseCleanup.Task;
+        };
+
+        var disable = _controller.Settings(new SecSwitchSettings { AutoApply = false });
+        Task<IActionResult>? enable = null;
+        try
+        {
+            await cleanupStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            enable = NewController().Settings(new SecSwitchSettings());
+            Assert.False(enable.IsCompleted);
+            Assert.False((await _settings.GetSettingAsync<SecSwitchSettings>())!.AutoApply);
+        }
+        finally
+        {
+            releaseCleanup.TrySetResult();
+            await disable;
+            if (enable is not null)
+                await enable;
+        }
+
+        Assert.True((await _settings.GetSettingAsync<SecSwitchSettings>())!.AutoApply);
         Assert.False(await _gate.IsActiveAsync());
     }
 

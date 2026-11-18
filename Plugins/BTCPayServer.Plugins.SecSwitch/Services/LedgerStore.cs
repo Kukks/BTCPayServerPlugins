@@ -12,6 +12,21 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
 {
     // Static: LedgerStore instances share one persisted ledger, so they must share one gate.
     static readonly SemaphoreSlim Gate = new(1, 1);
+    static readonly SemaphoreSlim PolicyGate = new(1, 1);
+
+    public async Task<T> WithPolicyAsync<T>(Func<SecSwitchSettings, Task<T>> action)
+    {
+        await PolicyGate.WaitAsync();
+        try
+        {
+            var settings = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
+            return await action(settings);
+        }
+        finally
+        {
+            PolicyGate.Release();
+        }
+    }
 
     public async Task<SecSwitchLedger> GetAsync()
     {
@@ -23,6 +38,9 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
                 entries[id] = entry;
         }
         ledger.Entries = entries;
+        ledger.LastCoreUpdateAt ??= entries.Values
+            .Where(e => e.Action == nameof(SecSwitchAction.UpdateCore) && e.Status == LedgerStatus.Acted)
+            .Max(e => (DateTimeOffset?)e.RecordedAt);
         return ledger;
     }
 
@@ -54,10 +72,19 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
         return locked.Count > 0;
     });
 
-    public Task RecordPollAsync(DateTimeOffset at, string? error) => MutateAsync(ledger =>
+    public Task RecordPollAsync(DateTimeOffset at, string? error, string? feedUrl = null) => MutateAsync(ledger =>
     {
         ledger.LastPollAt = at;
         ledger.LastPollError = error;
+        ledger.LastPollFeedUrl = feedUrl;
+        return true;
+    });
+
+    public Task RecordCoreUpdateAsync(DateTimeOffset at) => MutateAsync(ledger =>
+    {
+        if (ledger.LastCoreUpdateAt is { } last && last >= at)
+            return false;
+        ledger.LastCoreUpdateAt = at;
         return true;
     });
 
