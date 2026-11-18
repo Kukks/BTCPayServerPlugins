@@ -1,7 +1,17 @@
+@using BTCPayServer.Abstractions.Extensions
 @using BTCPayServer.Plugins.SecSwitch.Models
+@using BTCPayServer.Plugins.SecSwitch.Services
 @model List<LedgerEntry>
+@inject IActionSink ActionSink
 @{
-    ViewData["Title"] = "SecSwitch audit log";
+    var recoveryMode = ViewData["SecSwitchRecoveryMode"] is true;
+    ViewData["Title"] = recoveryMode ? "BTCPay recovery" : "SecSwitch audit log";
+    if (recoveryMode)
+    {
+        Layout = "_LayoutSimple";
+        ViewData["ShowFooter"] = false;
+        ViewData.SetBlazorAllowed(false);
+    }
 
     (string Badge, string Label) Describe(LedgerEntry entry) => entry switch
     {
@@ -24,8 +34,29 @@
     };
 }
 
-<div class="sticky-header"><h2>SecSwitch audit log</h2></div>
+<div class="sticky-header"><h2>@ViewData["Title"]</h2></div>
 <partial name="_StatusMessage" />
+
+@if (recoveryMode)
+{
+    <div class="alert alert-danger" role="alert">
+        <h3 class="h5 mb-2">BTCPay Server is locked down</h3>
+        <p class="mb-0">Review the active advisories before restoring public access. Lockdown survives a restart.</p>
+    </div>
+    <div class="mb-3">
+        @if (ActionSink.CanUpdateCore)
+        {
+            <form asp-action="Update" method="post">
+                <button type="submit" class="btn btn-primary">Update BTCPay Server</button>
+            </form>
+            <div class="form-text">The update can restart BTCPay Server. SecSwitch checks the installed version after the restart.</div>
+        }
+        else
+        {
+            <p class="mb-0">Update BTCPay Server from your deployment host, then return here to review the advisories.</p>
+        }
+    </div>
+}
 
 <div class="table-responsive">
 <table class="table align-top">
@@ -78,7 +109,7 @@
                     <a asp-action="SuppressConfirm" asp-route-advisoryId="@entry.AdvisoryId"
                        class="btn btn-sm btn-outline-secondary">Suppress</a>
                 }
-                else
+                else if (!recoveryMode)
                 {
                     <a asp-action="UnsuppressConfirm" asp-route-advisoryId="@entry.AdvisoryId"
                        class="btn btn-sm btn-outline-secondary">Un-suppress</a>

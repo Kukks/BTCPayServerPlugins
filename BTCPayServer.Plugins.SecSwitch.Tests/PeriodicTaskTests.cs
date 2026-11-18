@@ -14,8 +14,10 @@ public class PeriodicTaskTests
         public override Version Version => version;
     }
 
-    [Fact]
-    public async Task A_pending_SecSwitch_change_can_restart_after_the_feed_URL_is_cleared()
+    [Theory]
+    [InlineData(false, 1)]
+    [InlineData(true, 0)]
+    public async Task A_pending_SecSwitch_change_can_restart_without_a_feed_only_outside_lockdown(bool lockedDown, int expectedStops)
     {
         var settings = new FakeSettingsRepository();
         var ledger = new LedgerStore(settings);
@@ -27,16 +29,27 @@ public class PeriodicTaskTests
             Status = LedgerStatus.Acted,
             RecordedAt = DateTimeOffset.UtcNow
         });
+        if (lockedDown)
+        {
+            await settings.UpdateSetting(new SecSwitchSettings { Enabled = true, AutoApply = true });
+            await ledger.RecordAsync(new LedgerEntry
+            {
+                AdvisoryId = "affected-core",
+                Identifier = AdvisoryApplicability.CoreIdentifier,
+                Status = LedgerStatus.Acted,
+                LockedDown = true
+            });
+        }
         var sink = new FakeSink { Pending = ["Plug"] };
         var executor = new ActionExecutor(sink, NullLogger<ActionExecutor>.Instance);
-        var monitor = new SecSwitchMonitor(executor, sink, ledger, NullLogger<SecSwitchMonitor>.Instance);
         var lockdown = new LockdownGate(settings, ledger, NullLogger<LockdownGate>.Instance);
+        var monitor = new SecSwitchMonitor(executor, sink, ledger, lockdown, NullLogger<SecSwitchMonitor>.Instance);
         var task = new SecSwitchPeriodicTask(settings, null!, monitor, ledger, executor, lockdown, null!, [], null!, sink,
             NullLogger<SecSwitchPeriodicTask>.Instance);
 
         await task.Do(TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, sink.Stops);
+        Assert.Equal(expectedStops, sink.Stops);
     }
 
     [Fact]

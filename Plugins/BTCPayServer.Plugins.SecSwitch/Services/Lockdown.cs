@@ -12,6 +12,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -23,14 +25,28 @@ public sealed class LockdownGate(ISettingsRepository settingsRepository, LedgerS
     // Refreshes are serialized so the last one to finish is also the last one to have read: an hourly poll that
     // read the ledger before an admin lifted the lockdown must not write its stale answer after the admin's.
     readonly SemaphoreSlim _refreshing = new(1, 1);
-    volatile int _state; // 0 = not loaded yet, 1 = open, 2 = locked down
+    volatile RequestState? _state;
 
-    public async ValueTask<bool> IsActiveAsync()
+    sealed class RequestState(bool active)
     {
-        if (_state == 0)
-            await RefreshAsync(onlyIfNotLoaded: true);
-        return _state == 2;
+        public bool Active { get; } = active;
+        public CancellationTokenSource OrdinaryRequests { get; } = new();
     }
+
+    public async ValueTask<bool> IsActiveAsync() => (await GetRequestStateAsync()).Active;
+
+    internal async ValueTask<(bool Active, CancellationToken OrdinaryRequests)> GetRequestStateAsync()
+    {
+        if (_state is null)
+            await RefreshAsync(onlyIfNotLoaded: true);
+
+        var state = _state;
+        return state is null ? (true, CancellationToken.None) : (state.Active, state.OrdinaryRequests.Token);
+    }
+
+    public static bool HasActiveLockdown(SecSwitchSettings? settings, SecSwitchLedger ledger) =>
+        settings is { Enabled: true, AutoApply: true } &&
+        ledger.Entries.Values.Any(e => e is { LockedDown: true, Suppressed: false });
 
     public Task RefreshAsync() => RefreshAsync(onlyIfNotLoaded: false);
 
@@ -39,16 +55,22 @@ public sealed class LockdownGate(ISettingsRepository settingsRepository, LedgerS
         await _refreshing.WaitAsync();
         try
         {
-            if (onlyIfNotLoaded && _state != 0)
+            var previous = _state;
+            if (onlyIfNotLoaded && previous is not null)
                 return;
             var settings = await settingsRepository.GetSettingAsync<SecSwitchSettings>();
             var locked = settings is { Enabled: true, AutoApply: true } &&
-                         (await ledger.GetAsync()).Entries.Values.Any(e => e is { LockedDown: true, Suppressed: false });
-            _state = locked ? 2 : 1;
+                         HasActiveLockdown(settings, await ledger.GetAsync());
+            if (previous?.Active == locked)
+                return;
+
+            _state = new RequestState(locked);
+            if (locked)
+                previous?.OrdinaryRequests.Cancel();
         }
         catch (Exception e)
         {
-            logger.LogError(e, "SecSwitch could not read its lockdown state; leaving the server reachable");
+            logger.LogError(e, "SecSwitch could not finish refreshing its lockdown state");
         }
         finally
         {
@@ -67,45 +89,88 @@ public sealed class LockdownStartupFilter : IStartupFilter
     };
 }
 
-/// <summary>While locked down, answers 503 to everyone except server admins (and the sign-in flow they need).</summary>
+/// <summary>Restricts the web app to authentication and admin recovery while locked down.</summary>
 public sealed class LockdownMiddleware(
     RequestDelegate next, LockdownGate gate, BTCPayServerOptions options, IWebHostEnvironment environment)
 {
-    // Anonymous by design: the wallet calls the callback and the login page polls the check, both for LNURL-auth 2FA.
-    static readonly PathString[] LnurlAuthLoginPaths = ["/lnurlauth/login-check", "/lnurlauth/login-callback"];
+    static readonly PathString[] SignInReadPaths =
+        ["/login", "/login/second-login", "/login/authenticator", "/lnurlauth/login-check", "/lnurlauth/login-callback"];
+    static readonly PathString[] SignInPostPaths =
+        ["/login", "/login/lnurlauth", "/login/passkey/options", "/login/fido2", "/login/authenticator", "/logout"];
+    static readonly FileExtensionContentTypeProvider AssetTypes = new();
 
-    string LoginPath => (options.RootPath is { Length: > 1 } root ? root : "") + "/login";
+    string RootPrefix => options.RootPath is { Length: > 1 } root ? root : "";
+    string AuditPath => RootPrefix + "/plugins/secswitch/audit";
+    string LoginPath => QueryHelpers.AddQueryString(RootPrefix + "/login", "returnUrl", AuditPath);
 
     public async Task InvokeAsync(HttpContext context)
     {
-        if (await gate.IsActiveAsync() && !IsExempt(context.Request) && !await IsServerAdminAsync(context))
+        var (active, ordinaryRequests) = await gate.GetRequestStateAsync();
+        var path = GetRelativePath(context.Request.Path);
+        var read = HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method);
+        var post = HttpMethods.IsPost(context.Request.Method);
+        var signIn = read && SignInReadPaths.Contains(path) || post && SignInPostPaths.Contains(path);
+        var recovery = IsRecoveryRequest(path, read, post);
+        if (!active)
         {
-            context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-            context.Response.Headers.RetryAfter = "3600";
-            context.Response.ContentType = "text/plain; charset=utf-8";
-            await context.Response.WriteAsync(
-                $"BTCPay Server is temporarily unavailable while a security advisory is being resolved. Server administrators can sign in at {LoginPath}.");
+            using var abort = signIn || recovery ? default : ordinaryRequests.Register(context.Abort);
+            if (signIn || recovery || !ordinaryRequests.IsCancellationRequested)
+                await next(context);
             return;
         }
-        await next(context);
+
+        if (signIn || recovery && await IsServerAdminAsync(context))
+        {
+            await next(context);
+            return;
+        }
+
+        if (read && (path == "/" || path == "/plugins/secswitch") && await IsServerAdminAsync(context))
+        {
+            context.Response.Redirect(AuditPath);
+            return;
+        }
+
+        if (read && await TryServeAssetAsync(context, path))
+            return;
+
+        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        context.Response.Headers.RetryAfter = "3600";
+        context.Response.Headers.CacheControl = "no-store";
+        context.Response.ContentType = "text/plain; charset=utf-8";
+        if (!HttpMethods.IsHead(context.Request.Method))
+            await context.Response.WriteAsync(
+                $"BTCPay Server is temporarily unavailable while a security advisory is being resolved. Server administrators can sign in at {LoginPath}.");
     }
 
-    // This runs before core's Map(RootPath), so the root path is still part of the request path here.
-    // Static assets are exempt only when a file really exists under wwwroot: matching on a file extension alone
-    // would let any route with a free final segment (".../pos/x.js") through.
-    bool IsExempt(HttpRequest request)
-    {
-        var path = request.Path;
-        if (options.RootPath is { Length: > 1 } root && path.StartsWithSegments(root, out var remaining))
-            path = remaining;
+    static bool IsRecoveryRequest(PathString path, bool read, bool post) =>
+        read && path == "/plugins/secswitch/audit" ||
+        (read || post) && path == "/plugins/secswitch/suppress" ||
+        post && path == "/plugins/secswitch/update";
 
-        if (path.StartsWithSegments("/login") || path.StartsWithSegments("/logout"))
-            return true;
-        if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method))
+    PathString GetRelativePath(PathString path)
+    {
+        if (RootPrefix.Length == 0)
+            return path;
+        if (!path.StartsWithSegments(RootPrefix, out var remaining))
+            return PathString.Empty;
+        return remaining.HasValue ? remaining : "/";
+    }
+
+    // Serve real web-root files directly so a route resembling an asset cannot reach the application.
+    async Task<bool> TryServeAssetAsync(HttpContext context, PathString path)
+    {
+        if (path.Value is not { } value || !AssetTypes.TryGetContentType(value, out var contentType))
+            return false;
+        var file = environment.WebRootFileProvider.GetFileInfo(value);
+        if (!file.Exists || file.IsDirectory)
             return false;
 
-        return LnurlAuthLoginPaths.Any(p => path.Equals(p, StringComparison.OrdinalIgnoreCase)) ||
-               (path.HasValue && environment.WebRootFileProvider.GetFileInfo(path.Value).Exists);
+        context.Response.ContentType = contentType;
+        context.Response.ContentLength = file.Length;
+        if (!HttpMethods.IsHead(context.Request.Method))
+            await context.Response.SendFileAsync(file, context.RequestAborted);
+        return true;
     }
 
     // Authenticates the cookie explicitly: core's UseAuthentication has not run yet at this point.

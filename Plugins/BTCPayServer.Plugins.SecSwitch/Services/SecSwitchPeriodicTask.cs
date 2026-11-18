@@ -39,7 +39,7 @@ public sealed class SecSwitchPeriodicTask(
         await monitor.RetryPendingAuditAsync();
         if (settings.GetFeedUrl() is not { } url)
         {
-            if (!cancellationToken.IsCancellationRequested && await HasPendingPluginChangesAsync())
+            if (!cancellationToken.IsCancellationRequested && !await lockdown.IsActiveAsync() && await HasPendingPluginChangesAsync())
                 executor.RequestRestart();
             return;
         }
@@ -82,7 +82,7 @@ public sealed class SecSwitchPeriodicTask(
         // A core update restarts BTCPay Server itself and applies queued plugin changes; stopping the process
         // while it runs could kill the update. If it never restarts the server, the changes are still pending
         // on a later poll and the restart is requested then.
-        if (!coreUpdateDispatched && !cancellationToken.IsCancellationRequested &&
+        if (!coreUpdateDispatched && !cancellationToken.IsCancellationRequested && !await lockdown.IsActiveAsync() &&
             (restartNeeded || await HasPendingPluginChangesAsync()))
             executor.RequestRestart();
 

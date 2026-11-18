@@ -184,16 +184,20 @@ public class SecSwitchControllerTests
     }
 
     [Fact]
-    public async Task Disabling_SecSwitch_lifts_a_lockdown_immediately()
+    public async Task Settings_cannot_be_viewed_or_changed_during_lockdown()
     {
         await _settings.UpdateSetting(new SecSwitchSettings { Enabled = true });
         await Lock();
         await _gate.RefreshAsync();
         Assert.True(await _gate.IsActiveAsync());
 
-        await _controller.Settings(new SecSwitchSettings { Enabled = false });
+        var page = Assert.IsType<StatusCodeResult>(await _controller.Settings());
+        var save = Assert.IsType<StatusCodeResult>(await _controller.Settings(new SecSwitchSettings { Enabled = false }));
 
-        Assert.False(await _gate.IsActiveAsync());
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, page.StatusCode);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, save.StatusCode);
+        Assert.True((await _settings.GetSettingAsync<SecSwitchSettings>())!.Enabled);
+        Assert.True(await _gate.IsActiveAsync());
     }
 
     [Theory]
@@ -201,7 +205,7 @@ public class SecSwitchControllerTests
     [InlineData(true, false)]
     public async Task Disabling_checks_or_the_kill_switch_clears_stale_locks(bool enabled, bool autoApply)
     {
-        await _settings.UpdateSetting(new SecSwitchSettings { Enabled = true });
+        await _settings.UpdateSetting(new SecSwitchSettings { AutoApply = false });
         await Lock();
 
         await _controller.Settings(new SecSwitchSettings { Enabled = enabled, AutoApply = autoApply });
@@ -214,10 +218,10 @@ public class SecSwitchControllerTests
     [Fact]
     public async Task Failed_cleanup_leaves_opt_out_effective_and_blocks_reenable_until_cleanup_succeeds()
     {
-        await _settings.UpdateSetting(new SecSwitchSettings());
+        await _settings.UpdateSetting(new SecSwitchSettings { AutoApply = false });
         await Lock();
         await _gate.RefreshAsync();
-        Assert.True(await _gate.IsActiveAsync());
+        Assert.False(await _gate.IsActiveAsync());
         _settings.BeforeLedgerWrite = () => throw new InvalidOperationException("Could not persist the ledger.");
 
         Assert.IsType<RedirectToActionResult>(await _controller.Settings(new SecSwitchSettings { AutoApply = false }));
@@ -245,7 +249,7 @@ public class SecSwitchControllerTests
     [Fact]
     public async Task Reenable_waits_for_in_progress_opt_out_cleanup()
     {
-        await _settings.UpdateSetting(new SecSwitchSettings());
+        await _settings.UpdateSetting(new SecSwitchSettings { AutoApply = false });
         await Lock();
         var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -277,15 +281,15 @@ public class SecSwitchControllerTests
     }
 
     [Fact]
-    public async Task Clearing_the_feed_url_keeps_existing_lockdown_until_explicit_opt_out()
+    public async Task A_settings_write_cannot_replace_the_feed_after_a_lock_has_been_persisted()
     {
         await _settings.UpdateSetting(new SecSwitchSettings { FeedUrl = "https://example.test/a.json" });
+        Assert.False(await _gate.IsActiveAsync());
         await Lock();
-        await _gate.RefreshAsync();
 
-        var result = await _controller.Settings(new SecSwitchSettings { FeedUrl = "" });
-        Assert.IsType<RedirectToActionResult>(result);
-        Assert.Null((await _settings.GetSettingAsync<SecSwitchSettings>())!.FeedUrl);
+        var result = Assert.IsType<StatusCodeResult>(await _controller.Settings(new SecSwitchSettings { FeedUrl = "" }));
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, result.StatusCode);
+        Assert.Equal("https://example.test/a.json", (await _settings.GetSettingAsync<SecSwitchSettings>())!.FeedUrl);
 
         Assert.True(await _gate.IsActiveAsync());
         Assert.True((await _ledger.GetAsync()).Entries["core-1"].LockedDown);
@@ -304,13 +308,24 @@ public class SecSwitchControllerTests
     }
 
     [Fact]
+    public async Task Audit_uses_recovery_mode_during_lockdown()
+    {
+        await _settings.UpdateSetting(new SecSwitchSettings());
+        await Lock();
+
+        var result = Assert.IsType<ViewResult>(await _controller.Audit());
+
+        Assert.True(Assert.IsType<bool>(result.ViewData["SecSwitchRecoveryMode"]));
+    }
+
+    [Fact]
     public async Task Suppressing_the_advisory_that_holds_a_lockdown_lifts_it()
     {
         await _settings.UpdateSetting(new SecSwitchSettings { Enabled = true });
         await Lock();
         await _gate.RefreshAsync();
 
-        var result = await _controller.Suppress("core-1");
+        var result = await _controller.Suppress("core-1", acknowledgeRisk: true);
 
         Assert.Equal(nameof(SecSwitchController.Audit), Assert.IsType<RedirectToActionResult>(result).ActionName);
         Assert.True((await _ledger.GetAsync()).Entries["core-1"].Suppressed);
@@ -319,12 +334,42 @@ public class SecSwitchControllerTests
     }
 
     [Fact]
+    public async Task Suppression_without_risk_acknowledgement_keeps_the_lockdown()
+    {
+        await _settings.UpdateSetting(new SecSwitchSettings());
+        await Lock();
+
+        var result = Assert.IsType<RedirectToActionResult>(await _controller.Suppress("core-1"));
+
+        Assert.Equal(nameof(SecSwitchController.SuppressConfirm), result.ActionName);
+        Assert.Equal("core-1", result.RouteValues!["advisoryId"]);
+        Assert.NotNull(_controller.TempData[WellKnownTempData.ErrorMessage]);
+        Assert.False((await _ledger.GetAsync()).Entries["core-1"].Suppressed);
+        Assert.True(await _gate.IsActiveAsync());
+    }
+
+    [Fact]
     public async Task Suppressing_an_unknown_advisory_reports_an_error()
     {
-        await _controller.Suppress("nope");
+        await _controller.Suppress("nope", acknowledgeRisk: true);
 
         Assert.NotNull(_controller.TempData[WellKnownTempData.ErrorMessage]);
         Assert.Empty((await _ledger.GetAsync()).Entries);
+    }
+
+    [Fact]
+    public async Task An_existing_suppression_cannot_be_reversed_during_lockdown()
+    {
+        await _settings.UpdateSetting(new SecSwitchSettings());
+        await Lock();
+        await _ledger.RecordAsync(new LedgerEntry { AdvisoryId = "ignored", Suppressed = true });
+
+        var page = Assert.IsType<StatusCodeResult>(await _controller.UnsuppressConfirm("ignored"));
+        var save = Assert.IsType<StatusCodeResult>(await _controller.Unsuppress("ignored"));
+
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, page.StatusCode);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, save.StatusCode);
+        Assert.True((await _ledger.GetAsync()).Entries["ignored"].Suppressed);
     }
 
     [Fact]
@@ -353,6 +398,7 @@ public class SecSwitchControllerTests
         Assert.Equal(nameof(SecSwitchController.Suppress), model.FormAction);
         Assert.Equal("a1", model.FieldValue);
         Assert.Contains("a1", model.Description);
+        Assert.True(model.RequireAcknowledgement);
     }
 
     [Fact]

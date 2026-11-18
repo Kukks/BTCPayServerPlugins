@@ -7,7 +7,7 @@ SecSwitch checks an advisory feed every hour and sends matching advisories throu
 | Setting | Default | Behavior |
 | --- | --- | --- |
 | Check advisories and notify server admins | On | Poll the configured feed and report matching advisories and actions. |
-| Apply the advisory kill switch | On | Disable an affected plugin or restrict an affected BTCPay Server to signed-in server admins. |
+| Apply the advisory kill switch | On | Disable an affected plugin or put an affected BTCPay Server in recovery-only mode. |
 | Automatically update BTCPay Server | Off | Allow updates through the deployment's `btcpay-host update` command when available. |
 | Automatically update a plugin | Off for each plugin | Allow updates of that plugin through BTCPay's Plugin Builder. |
 
@@ -66,6 +66,10 @@ The feed is the authority. Protect the advisory repository and its Pages deploym
 
 Plugin changes apply on restart. SecSwitch asks the supervisor to restart BTCPay Server after queuing changes. A dispatched core update takes precedence over that restart during the same poll. Each core update dispatch has a 24-hour cooldown.
 
-During core lockdown, signing in as a server admin remains possible through the standard web UI. Checkout, storefronts, webhooks, and API-key requests receive HTTP 503. Background services continue. Lockdown lifts when SecSwitch observes a running version outside the affected range, the publisher withdraws the advisory, or an admin turns off the kill switch or suppresses the advisory. A withdrawn plugin advisory leaves re-enabling the plugin to an admin.
+During core lockdown, signed-in server admins can review advisories, suppress one after acknowledging the warning, or request an update where the deployment supports the host update command. Ordinary routes return HTTP 503, including for server admins. SecSwitch closes ordinary web connections already in progress when lockdown starts.
+
+SecSwitch keeps polling advisories and holds routine updates, plugin changes and pending plugin restarts during core lockdown. It records and activates the lock before dispatching an opted-in advisory fix for BTCPay Server. The lock survives a restart. It lifts when a successful poll shows the running version is outside the affected range, the publisher withdraws the advisory, or an admin suppresses the last advisory holding the lock. A withdrawn plugin advisory leaves re-enabling the plugin to an admin.
+
+BTCPay's built-in background services keep their existing lifecycle. This plugin enforces the web recovery boundary and its own actions. A deployment that needs to stop core or third-party background work can enforce that independently at the host.
 
 A bundled plugin without an on-disk package requires manual action. BTCPay Server may also disable externally installed plugins after an unrelated startup failure. A disabled SecSwitch stops checking the feed.

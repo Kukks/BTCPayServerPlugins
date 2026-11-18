@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Contracts;
@@ -7,6 +8,7 @@ using BTCPayServer.Client;
 using BTCPayServer.Plugins.SecSwitch.Models;
 using BTCPayServer.Plugins.SecSwitch.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
@@ -24,6 +26,9 @@ public class SecSwitchController(
     [HttpGet("")]
     public async Task<IActionResult> Settings()
     {
+        if (await lockdown.IsActiveAsync())
+            return StatusCode(StatusCodes.Status503ServiceUnavailable);
+
         var settings = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
         settings.FeedUrl = settings.GetFeedUrl();
         return View(settings);
@@ -33,6 +38,9 @@ public class SecSwitchController(
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Settings(SecSwitchSettings settings)
     {
+        if (await lockdown.IsActiveAsync())
+            return StatusCode(StatusCodes.Status503ServiceUnavailable);
+
         var feedUrl = settings.GetFeedUrl();
         if (settings.HasLegacyPlaceholderFeedUrl())
             ModelState.AddModelError(nameof(settings.FeedUrl), "This placeholder URL has been retired. Enter a trusted advisory feed URL or leave the field blank.");
@@ -51,8 +59,11 @@ public class SecSwitchController(
         var killSwitchEnabled = settings.Enabled && settings.AutoApply;
         try
         {
-            await ledger.WithPolicyAsync(async previous =>
+            var allowed = await ledger.WithPolicyAsync(async previous =>
             {
+                if (await HasActiveLockdownAsync(previous))
+                    return false;
+
                 if (killSwitchEnabled && (!previous.Enabled || !previous.AutoApply))
                     await ledger.ClearLocksAsync("Cleared an earlier lockdown before re-enabling the kill switch.");
 
@@ -64,6 +75,9 @@ public class SecSwitchController(
                     await ledger.ClearLocksAsync("The server admin turned off advisory checks or the kill switch.");
                 return true;
             });
+            if (!allowed)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable);
+
             TempData[WellKnownTempData.SuccessMessage] = "SecSwitch settings saved";
         }
         catch (Exception e)
@@ -83,19 +97,30 @@ public class SecSwitchController(
 
     [HttpGet("audit")]
     public async Task<IActionResult> Audit()
-        => View((await ledger.GetAsync()).Entries.Values.OrderByDescending(e => e.RecordedAt).ToList());
+    {
+        ViewData["SecSwitchRecoveryMode"] = await lockdown.IsActiveAsync();
+        return View((await ledger.GetAsync()).Entries.Values.OrderByDescending(e => e.RecordedAt).ToList());
+    }
 
     [HttpGet("suppress")]
     public Task<IActionResult> SuppressConfirm(string advisoryId) => ConfirmAsync(advisoryId, suppress: true);
 
     [HttpGet("unsuppress")]
-    public Task<IActionResult> UnsuppressConfirm(string advisoryId) => ConfirmAsync(advisoryId, suppress: false);
+    public async Task<IActionResult> UnsuppressConfirm(string advisoryId) => await lockdown.IsActiveAsync()
+        ? StatusCode(StatusCodes.Status503ServiceUnavailable)
+        : await ConfirmAsync(advisoryId, suppress: false);
 
     [HttpPost("suppress")]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Suppress(string advisoryId)
+    public async Task<IActionResult> Suppress(string advisoryId, bool acknowledgeRisk = false)
     {
-        var done = await ledger.SuppressAsync(advisoryId);
+        if (!acknowledgeRisk)
+        {
+            TempData[WellKnownTempData.ErrorMessage] = "Acknowledge the warning before suppressing this advisory.";
+            return RedirectToAction(nameof(SuppressConfirm), new { advisoryId });
+        }
+
+        var done = await ledger.WithPolicyAsync(_ => ledger.SuppressAsync(advisoryId));
         await lockdown.RefreshAsync();
         return Report(done, $"Advisory {advisoryId} suppressed on this instance.", $"No advisory '{advisoryId}' to suppress.");
     }
@@ -104,32 +129,47 @@ public class SecSwitchController(
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Unsuppress(string advisoryId)
     {
-        var done = await ledger.UnsuppressAsync(advisoryId);
-        return Report(done, $"Advisory {advisoryId} un-suppressed; it will be evaluated again on the next poll.",
+        var done = await ledger.WithPolicyAsync<bool?>(async settings =>
+            await HasActiveLockdownAsync(settings) ? null : await ledger.UnsuppressAsync(advisoryId));
+        if (done is not { } succeeded)
+            return StatusCode(StatusCodes.Status503ServiceUnavailable);
+
+        return Report(succeeded, $"Advisory '{advisoryId}' un-suppressed. SecSwitch will check it on the next poll.",
             $"Advisory '{advisoryId}' is not currently suppressed.");
     }
 
+    [HttpPost("update")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Update([FromServices] SecSwitchMonitor monitor, CancellationToken cancellationToken)
+    {
+        var outcome = await monitor.RecoverWithCoreUpdateAsync(cancellationToken);
+        return Report(outcome.Succeeded, outcome.Message, outcome.Message);
+    }
+
+    async Task<bool> HasActiveLockdownAsync(SecSwitchSettings settings) =>
+        settings is { Enabled: true, AutoApply: true } && LockdownGate.HasActiveLockdown(settings, await ledger.GetAsync());
+
     async Task<IActionResult> ConfirmAsync(string advisoryId, bool suppress)
     {
-        var found = (await ledger.GetAsync()).Entries.TryGetValue(advisoryId ?? "", out var entry);
-        if (!found || entry!.Suppressed == suppress)
+        if (!(await ledger.GetAsync()).Entries.TryGetValue(advisoryId ?? "", out var entry) || entry.Suppressed == suppress)
             return Report(false, "", suppress
                 ? $"No advisory '{advisoryId}' to suppress."
                 : $"Advisory '{advisoryId}' is not currently suppressed.");
 
+        ViewData["SecSwitchRecoveryMode"] = await lockdown.IsActiveAsync();
         return View("Confirm", new ConfirmActionViewModel
         {
             Title = suppress ? "Suppress advisory" : "Un-suppress advisory",
             Description = suppress
-                ? $"Suppress advisory \"{advisoryId}\" on this instance? SecSwitch will not act on it again until you " +
-                  "un-suppress it. If it is holding this server in lockdown, suppressing it lifts the lockdown."
+                ? $"Suppress advisory \"{entry.AdvisoryId}\" on this instance?"
                 : $"Un-suppress advisory \"{advisoryId}\"? SecSwitch will evaluate it again on the next poll and, if it " +
                   "still applies, act on it as your settings dictate.",
             FormAction = suppress ? nameof(Suppress) : nameof(Unsuppress),
             FieldName = "advisoryId",
-            FieldValue = advisoryId!,
-            ButtonLabel = suppress ? "Suppress" : "Un-suppress",
-            CancelAction = nameof(Audit)
+            FieldValue = entry.AdvisoryId,
+            ButtonLabel = suppress ? "Suppress advisory" : "Un-suppress",
+            CancelAction = nameof(Audit),
+            RequireAcknowledgement = suppress
         });
     }
 
@@ -148,5 +188,6 @@ public class SecSwitchController(
         public string FieldValue { get; set; } = "";
         public string ButtonLabel { get; set; } = "Confirm";
         public string CancelAction { get; set; } = "";
+        public bool RequireAcknowledgement { get; set; }
     }
 }

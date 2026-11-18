@@ -81,9 +81,9 @@
         <div>
             <div class="fw-semibold">BTCPay Server lockdown</div>
             <div>
-                With the kill switch on, an affected BTCPay Server keeps running and returns HTTP 503 to public requests.
-                Server admins can still sign in. Lockdown survives a restart and lifts when the advisory stops applying,
-                an admin suppresses it, or the kill switch is turned off.
+                With the kill switch on, an affected BTCPay Server enters recovery mode. Admins can sign in,
+                review advisories, suppress an advisory after confirming, or update BTCPay Server.
+                Ordinary requests return HTTP 503 and the lock survives a restart.
             </div>
         </div>
     </div>

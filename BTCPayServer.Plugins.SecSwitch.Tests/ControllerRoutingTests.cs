@@ -32,6 +32,7 @@ public class ControllerRoutingTests
     [InlineData("Audit", "GET", "audit")]
     [InlineData("SuppressConfirm", "GET", "suppress")]
     [InlineData("Suppress", "POST", "suppress")]
+    [InlineData("Update", "POST", "update")]
     [InlineData("UnsuppressConfirm", "GET", "unsuppress")]
     [InlineData("Unsuppress", "POST", "unsuppress")]
     public void Expected_actions_exist_with_the_correct_verb_and_route(string action, string verb, string template)

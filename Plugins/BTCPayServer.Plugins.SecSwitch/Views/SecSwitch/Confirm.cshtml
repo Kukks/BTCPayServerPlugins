@@ -1,12 +1,39 @@
+@using BTCPayServer.Abstractions.Extensions
 @model BTCPayServer.Plugins.SecSwitch.Controllers.SecSwitchController.ConfirmActionViewModel
-@{ ViewData["Title"] = Model.Title; }
+@{
+    ViewData["Title"] = Model.Title;
+    if (ViewData["SecSwitchRecoveryMode"] is true)
+    {
+        Layout = "_LayoutSimple";
+        ViewData["ShowFooter"] = false;
+        ViewData.SetBlazorAllowed(false);
+    }
+}
 
 <div class="sticky-header"><h2>@Model.Title</h2></div>
+<partial name="_StatusMessage" />
 
 <p>@Model.Description</p>
 
 <form method="post" asp-action="@Model.FormAction">
     <input type="hidden" name="@Model.FieldName" value="@Model.FieldValue" />
+    @if (Model.RequireAcknowledgement)
+    {
+        <div class="alert alert-danger mb-4">
+            <h3 class="h4 mb-2" id="suppress-warning-title">Suppressing this advisory can restore public access</h3>
+            <p id="suppress-warning-details">
+                SecSwitch will stop enforcing this advisory. The affected version remains installed.
+                Suppressing the last active lockdown advisory can immediately restore public access to BTCPay Server.
+            </p>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" required name="acknowledgeRisk" value="true"
+                       id="acknowledge-suppression-risk" aria-describedby="suppress-warning-details" />
+                <label class="form-check-label" for="acknowledge-suppression-risk">
+                    I understand the affected version remains installed and accept the risk.
+                </label>
+            </div>
+        </div>
+    }
     <button type="submit" class="btn btn-danger">@Model.ButtonLabel</button>
     <a asp-action="@Model.CancelAction" class="btn btn-secondary">Cancel</a>
 </form>

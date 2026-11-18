@@ -11,18 +11,25 @@ public class SecSwitchMonitorTests
     readonly FakeSink _sink = new();
     readonly FakeSettingsRepository _settings = new();
     readonly LedgerStore _ledger;
+    readonly LockdownGate _lockdown;
 
-    public SecSwitchMonitorTests() => _ledger = new LedgerStore(_settings);
+    public SecSwitchMonitorTests()
+    {
+        _ledger = new LedgerStore(_settings);
+        _lockdown = new LockdownGate(_settings, _ledger, NullLogger<LockdownGate>.Instance);
+    }
 
     SecSwitchMonitor Monitor() => new(
-        new ActionExecutor(_sink, NullLogger<ActionExecutor>.Instance), _sink, _ledger, NullLogger<SecSwitchMonitor>.Instance);
+        new ActionExecutor(_sink, NullLogger<ActionExecutor>.Instance), _sink, _ledger, _lockdown, NullLogger<SecSwitchMonitor>.Instance);
 
     async Task<ProcessResult> Process(
         Advisory[] advisories, InstanceState? state = null, SecSwitchSettings? settings = null, string?[]? unreadable = null)
     {
         settings ??= Settings();
+        state ??= State();
+        _sink.CanUpdateCore = state.CanUpdateCore;
         await _settings.UpdateSetting(settings);
-        return await Monitor().ProcessAsync(advisories, unreadable ?? [], state ?? State(), settings, CancellationToken.None);
+        return await Monitor().ProcessAsync(advisories, unreadable ?? [], state, settings, CancellationToken.None);
     }
 
     Task<ProcessResult> AutoUpdate(InstanceState? state = null, SecSwitchSettings? settings = null, Advisory[]? advisories = null)
@@ -32,8 +39,10 @@ public class SecSwitchMonitorTests
         InstanceState? state = null, SecSwitchSettings? settings = null, Advisory[]? advisories = null)
     {
         settings ??= Settings(autoUpdatePlugin: true, autoUpdateCore: true);
+        state ??= State();
+        _sink.CanUpdateCore = state.CanUpdateCore;
         await _settings.UpdateSetting(settings);
-        return await Monitor().AutoUpdateAsync(state ?? State(), settings, advisories ?? [], ct);
+        return await Monitor().AutoUpdateAsync(state, settings, advisories ?? [], ct);
     }
 
     async Task<LedgerEntry> EntryFor(string id) => (await _ledger.GetAsync()).Entries[id];
@@ -261,6 +270,76 @@ public class SecSwitchMonitorTests
         Assert.False(first.RestartNeeded);
         Assert.Empty(second.Recorded);
         Assert.True((await EntryFor("core-1")).LockedDown);
+    }
+
+    [Fact]
+    public async Task A_matching_core_advisory_holds_plugin_changes_even_when_it_appears_after_the_plugin_advisory()
+    {
+        var result = await Process([Adv(fixedVersion: "1.2.3"), CoreAdvisory()], settings: Settings(autoUpdatePlugin: true));
+
+        Assert.Equal("core-1", result.Recorded[0].AdvisoryId);
+        Assert.True(await _lockdown.IsActiveAsync());
+        Assert.Equal(LedgerStatus.NeedsDecision, (await EntryFor("adv-1")).Status);
+        Assert.Empty(_sink.Updated);
+        Assert.Empty(_sink.Disabled);
+        Assert.False(result.RestartNeeded);
+    }
+
+    [Fact]
+    public async Task Routine_core_and_plugin_updates_wait_during_lockdown()
+    {
+        await Process([CoreAdvisory()]);
+        _sink.PluginUpdates = [new PluginUpdate("Plug", new Version(1, 3, 0))];
+        _sink.LatestCore = new Version(2, 5, 0);
+
+        var result = await AutoUpdate(State(canUpdateCore: true));
+
+        Assert.Empty(result.Recorded);
+        Assert.Empty(_sink.Updated);
+        Assert.Equal(0, _sink.CoreUpdates);
+        Assert.False(result.RestartNeeded);
+    }
+
+    [Fact]
+    public async Task A_recovery_update_requires_an_active_lock_and_ignores_the_automatic_update_preference()
+    {
+        await Process([CoreAdvisory()], State(canUpdateCore: true), Settings(autoUpdateCore: false));
+        var monitor = Monitor();
+        var ct = TestContext.Current.CancellationToken;
+
+        Assert.True((await monitor.RecoverWithCoreUpdateAsync(ct)).Succeeded);
+        Assert.False((await monitor.RecoverWithCoreUpdateAsync(ct)).Succeeded);
+        Assert.Equal(1, _sink.CoreUpdates);
+        Assert.True(await _lockdown.IsActiveAsync());
+
+        await _ledger.SuppressAsync("core-1");
+        var suppressed = await monitor.RecoverWithCoreUpdateAsync(ct);
+
+        Assert.False(suppressed.Succeeded);
+        Assert.Contains("not in a SecSwitch lockdown", suppressed.Message);
+    }
+
+    [Fact]
+    public async Task A_recovery_update_requires_the_host_to_offer_an_update_command()
+    {
+        await Process([CoreAdvisory()]);
+
+        var outcome = await Monitor().RecoverWithCoreUpdateAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(outcome.Succeeded);
+        Assert.Contains("deployment host", outcome.Message);
+        Assert.Equal(0, _sink.CoreUpdates);
+    }
+
+    [Fact]
+    public async Task An_advisory_update_is_deferred_when_lockdown_cannot_be_persisted()
+    {
+        _settings.RejectLedgerWrites = true;
+
+        var result = await Process([CoreAdvisory("9.0.0")], State(canUpdateCore: true), Settings(autoUpdateCore: true));
+
+        Assert.False(result.CoreUpdateDispatched);
+        Assert.Equal(0, _sink.CoreUpdates);
     }
 
     [Fact]

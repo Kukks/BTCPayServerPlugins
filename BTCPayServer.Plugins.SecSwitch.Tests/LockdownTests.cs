@@ -10,6 +10,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -188,6 +190,12 @@ public class LockdownTests : IDisposable
     [InlineData("/api/v1/stores", "GET")]
     [InlineData("/i/abc", "GET")]
     [InlineData("/loginx", "GET")]
+    [InlineData("/login/forgot-password", "GET")]
+    [InlineData("/login/2fa", "POST")]
+    [InlineData("/register", "POST")]
+    [InlineData("/plugins/secswitch/audit", "GET")]
+    [InlineData("/plugins/secswitch/suppress", "POST")]
+    [InlineData("/plugins/secswitch/update", "POST")]
     [InlineData("/api/v1/data.json", "GET")]
     [InlineData("/x.js/evil", "GET")]
     [InlineData("/apps/abc/pos/x.js", "GET")]
@@ -212,23 +220,38 @@ public class LockdownTests : IDisposable
     [InlineData("/login", "GET")]
     [InlineData("/LOGIN", "GET")]
     [InlineData("/login", "POST")]
-    [InlineData("/login/2fa", "POST")]
-    [InlineData("/logout", "GET")]
-    [InlineData("/main/site.css", "GET")]
-    [InlineData("/main/site.css", "HEAD")]
-    [InlineData("/vendor/jquery/jquery.js", "GET")]
-    [InlineData("/img/logo.svg", "GET")]
-    [InlineData("/fonts/a.woff2", "GET")]
+    [InlineData("/login/second-login", "GET")]
+    [InlineData("/login/authenticator", "POST")]
+    [InlineData("/login/lnurlauth", "POST")]
+    [InlineData("/login/passkey/options", "POST")]
+    [InlineData("/login/fido2", "POST")]
+    [InlineData("/logout", "POST")]
     [InlineData("/lnurlauth/login-check", "GET")]
-    [InlineData("/lnurlauth/login-callback", "GET")]
     [InlineData("/LnurlAuth/Login-Callback", "GET")]
-    public async Task A_locked_gate_still_serves_the_sign_in_flow_and_real_static_files(string path, string method)
+    public async Task A_locked_gate_allows_the_native_sign_in_and_sign_out_routes(string path, string method)
     {
         await LockDown();
 
         var (_, reached) = await Send(path, method: method);
 
         Assert.True(reached);
+    }
+
+    [Theory]
+    [InlineData("/main/site.css", "GET")]
+    [InlineData("/main/site.css", "HEAD")]
+    [InlineData("/vendor/jquery/jquery.js", "GET")]
+    [InlineData("/img/logo.svg", "GET")]
+    [InlineData("/fonts/a.woff2", "GET")]
+    public async Task A_locked_gate_serves_real_assets_without_entering_the_application(string path, string method)
+    {
+        await LockDown();
+
+        var (context, reached) = await Send(path, method: method);
+
+        Assert.False(reached);
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(method == "HEAD" ? "" : "x", await Body(context));
     }
 
     [Theory]
@@ -247,18 +270,42 @@ public class LockdownTests : IDisposable
         Assert.False(reached);
     }
 
-    [Fact]
-    public async Task A_locked_gate_lets_a_server_admin_through_using_the_cookie_scheme()
+    [Theory]
+    [InlineData("/plugins/secswitch/audit", "GET")]
+    [InlineData("/plugins/secswitch/suppress", "GET")]
+    [InlineData("/plugins/secswitch/suppress", "POST")]
+    [InlineData("/plugins/secswitch/update", "POST")]
+    public async Task A_locked_gate_allows_recovery_using_the_server_admin_cookie(string path, string method)
     {
         await LockDown();
         _authentication.Principal = new ClaimsPrincipal(new ClaimsIdentity(AuthenticationSchemes.Cookie));
         _authorization.Allow = true;
 
-        var (_, reached) = await Send("/server/plugins");
+        var (_, reached) = await Send(path, method: method);
 
         Assert.True(reached);
         Assert.Equal(AuthenticationSchemes.Cookie, _authentication.RequestedScheme);
         Assert.Equal(Policies.CanModifyServerSettings, _authorization.RequestedPolicy);
+    }
+
+    [Theory]
+    [InlineData("/server/plugins", "GET")]
+    [InlineData("/api/v1/stores", "GET")]
+    [InlineData("/plugins/secswitch", "POST")]
+    [InlineData("/plugins/secswitch/unsuppress", "POST")]
+    [InlineData("/plugins/secswitch/update", "GET")]
+    [InlineData("/plugins/secswitch/audit/extra", "GET")]
+    [InlineData("/plugins/secswitch/audit", "POST")]
+    public async Task A_locked_gate_denies_ordinary_endpoints_even_to_a_server_admin(string path, string method)
+    {
+        await LockDown();
+        _authentication.Principal = new ClaimsPrincipal(new ClaimsIdentity(AuthenticationSchemes.Cookie));
+        _authorization.Allow = true;
+
+        var (context, reached) = await Send(path, method: method);
+
+        Assert.False(reached);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, context.Response.StatusCode);
     }
 
     [Fact]
@@ -268,15 +315,15 @@ public class LockdownTests : IDisposable
         _authentication.Principal = new ClaimsPrincipal(new ClaimsIdentity(AuthenticationSchemes.Cookie));
         _authorization.Allow = false;
 
-        var (context, reached) = await Send("/stores");
+        var (context, reached) = await Send("/plugins/secswitch/audit");
 
         Assert.False(reached);
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, context.Response.StatusCode);
     }
 
     [Theory]
-    [InlineData("/btcpay/login/2fa", true)]
-    [InlineData("/btcpay/main/site.css", true)]
+    [InlineData("/btcpay/login/authenticator", true)]
+    [InlineData("/login/authenticator", false)]
     [InlineData("/btcpay/api/v1/stores", false)]
     [InlineData("/btcpay/apps/abc/pos/x.js", false)]
     public async Task The_root_path_prefix_is_ignored_when_matching_exemptions(string path, bool exempt)
@@ -289,15 +336,60 @@ public class LockdownTests : IDisposable
     }
 
     [Theory]
-    [InlineData("/", "/login")]
-    [InlineData("/btcpay", "/btcpay/login")]
-    public async Task The_refusal_tells_an_admin_where_to_sign_in(string rootPath, string loginPath)
+    [InlineData("/", "/login", "/plugins/secswitch/audit")]
+    [InlineData("/btcpay", "/btcpay/login", "/btcpay/plugins/secswitch/audit")]
+    public async Task The_refusal_tells_an_admin_where_to_sign_in(string rootPath, string loginPath, string auditPath)
     {
         await LockDown();
 
         var (context, _) = await Send("/stores", rootPath);
 
-        Assert.Contains($"sign in at {loginPath}.", await Body(context));
+        Assert.Contains(QueryHelpers.AddQueryString(loginPath, "returnUrl", auditPath), await Body(context));
+    }
+
+    [Fact]
+    public async Task The_signed_in_home_page_redirects_to_recovery_under_the_root_path()
+    {
+        await LockDown();
+        _authentication.Principal = new ClaimsPrincipal(new ClaimsIdentity(AuthenticationSchemes.Cookie));
+        _authorization.Allow = true;
+
+        var (context, reached) = await Send("/btcpay", rootPath: "/btcpay");
+
+        Assert.False(reached);
+        Assert.Equal(StatusCodes.Status302Found, context.Response.StatusCode);
+        Assert.Equal("/btcpay/plugins/secswitch/audit", context.Response.Headers.Location);
+    }
+
+    [Fact]
+    public async Task Activation_aborts_an_ordinary_request_that_entered_while_unlocked()
+    {
+        await Configure();
+        using var request = new CancellationTokenSource();
+        var lifetime = new RequestLifetime(request);
+        var context = new DefaultHttpContext();
+        context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+        context.Request.Path = "/ordinary/connection";
+        context.Request.Method = "GET";
+        var downstream = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var middleware = new LockdownMiddleware(async running =>
+        {
+            downstream.SetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, running.RequestAborted);
+        }, _gate, new BTCPayServerOptions(), _environment);
+
+        var work = middleware.InvokeAsync(context);
+        await downstream.Task.WaitAsync(TestContext.Current.CancellationToken);
+        await LockDown();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => work);
+        Assert.True(request.IsCancellationRequested);
+    }
+
+    sealed class RequestLifetime(CancellationTokenSource request) : IHttpRequestLifetimeFeature
+    {
+        public CancellationToken RequestAborted { get; set; } = request.Token;
+        public void Abort() => request.Cancel();
     }
 
     [Fact]
