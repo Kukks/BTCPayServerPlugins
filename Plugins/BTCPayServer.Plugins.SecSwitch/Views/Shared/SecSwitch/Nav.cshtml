@@ -1,0 +1,12 @@
+@using BTCPayServer.Client
+@using BTCPayServer.Plugins.SecSwitch.Controllers
+@{
+    var isActive = ViewContext.RouteData.Values.TryGetValue("Controller", out var controller)
+                   && controller is not null
+                   && nameof(SecSwitchController).StartsWith(controller.ToString()!, StringComparison.InvariantCultureIgnoreCase);
+}
+
+<li class="nav-item nav-item-sub" permission="@Policies.CanModifyServerSettings">
+    <a class="nav-link @(isActive ? "active" : string.Empty)"
+       asp-controller="SecSwitch" asp-action="Settings" id="SecSwitchNav">SecSwitch</a>
+</li>

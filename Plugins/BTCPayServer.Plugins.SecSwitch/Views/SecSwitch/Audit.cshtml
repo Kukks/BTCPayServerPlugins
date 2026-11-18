@@ -1,0 +1,126 @@
+@using BTCPayServer.Abstractions.Extensions
+@using BTCPayServer.Plugins.SecSwitch.Models
+@using BTCPayServer.Plugins.SecSwitch.Services
+@model List<LedgerEntry>
+@inject IActionSink ActionSink
+@{
+    var recoveryMode = ViewData["SecSwitchRecoveryMode"] is true;
+    ViewData["Title"] = recoveryMode ? "BTCPay recovery" : "SecSwitch audit log";
+    if (recoveryMode)
+    {
+        Layout = "_LayoutSimple";
+        ViewData["ShowFooter"] = false;
+        ViewData.SetBlazorAllowed(false);
+    }
+
+    (string Badge, string Label) Describe(LedgerEntry entry) => entry switch
+    {
+        { Suppressed: true } => ("text-bg-secondary", "Suppressed"),
+        { Status: LedgerStatus.Acted } => ("text-bg-success", "Acted"),
+        { Status: LedgerStatus.NeedsDecision } => ("bg-warning text-black", "Needs decision"),
+        { Status: LedgerStatus.NeedsAttention } => ("bg-warning text-black", "Needs attention"),
+        { Status: LedgerStatus.Resolved } => ("text-bg-secondary", "Resolved"),
+        _ => ("text-bg-secondary", entry.Status)
+    };
+
+    string ActionLabel(string action) => action switch
+    {
+        nameof(SecSwitchAction.DisablePlugin) => "Disable plugin",
+        nameof(SecSwitchAction.UpdatePlugin) => "Update plugin",
+        nameof(SecSwitchAction.UpdateCore) => "Update BTCPay Server",
+        nameof(SecSwitchAction.Lockdown) => "Lock down BTCPay Server",
+        nameof(SecSwitchAction.None) or nameof(SecSwitchAction.Notify) or null => "",
+        _ => action
+    };
+}
+
+<div class="sticky-header"><h2>@ViewData["Title"]</h2></div>
+<partial name="_StatusMessage" />
+
+@if (recoveryMode)
+{
+    <div class="alert alert-danger" role="alert">
+        <h3 class="h5 mb-2">BTCPay Server is locked down</h3>
+        <p class="mb-0">Review the active advisories before restoring public access. Lockdown survives a restart.</p>
+    </div>
+    <div class="mb-3">
+        @if (ActionSink.CanUpdateCore)
+        {
+            <form asp-action="Update" method="post">
+                <button type="submit" class="btn btn-primary">Update BTCPay Server</button>
+            </form>
+            <div class="form-text">The update can restart BTCPay Server. SecSwitch checks the installed version after the restart.</div>
+        }
+        else
+        {
+            <p class="mb-0">Update BTCPay Server from your deployment host, then return here to review the advisories.</p>
+        }
+    </div>
+}
+
+<div class="table-responsive">
+<table class="table align-top">
+    <thead>
+    <tr>
+        <th scope="col">Advisory</th>
+        <th scope="col">Status</th>
+        <th scope="col">Details</th>
+        <th scope="col">Recorded</th>
+        <th scope="col"><span class="visually-hidden">Actions</span></th>
+    </tr>
+    </thead>
+    <tbody>
+    @foreach (var entry in Model)
+    {
+        var (badge, label) = Describe(entry);
+        var action = ActionLabel(entry.Action);
+        var recorded = entry.RecordedAt.UtcDateTime;
+        <tr>
+            <td class="text-break">
+                <div class="fw-semibold">@(string.IsNullOrWhiteSpace(entry.Title) ? entry.AdvisoryId : entry.Title)</div>
+                <div class="small">@entry.Identifier <span class="text-muted">(@entry.Severity severity)</span></div>
+                <code class="small text-muted">@entry.AdvisoryId</code>
+            </td>
+            <td>
+                <div class="d-flex flex-wrap gap-1">
+                    <span class="badge @badge">@label</span>
+                    @if (entry.LockedDown && !entry.Suppressed)
+                    {
+                        <span class="badge text-bg-danger">Locked down</span>
+                    }
+                </div>
+            </td>
+            <td class="text-break">
+                @if (action.Length > 0)
+                {
+                    <div class="fw-semibold">@action</div>
+                }
+                <div>@entry.Reason</div>
+            </td>
+            <td class="text-nowrap">
+                <time datetime="@recorded.ToString("O")">
+                    @recorded.ToString("yyyy-MM-dd")
+                    <span class="d-block small text-muted">@recorded.ToString("HH:mm:ss 'UTC'")</span>
+                </time>
+            </td>
+            <td>
+                @if (!entry.Suppressed)
+                {
+                    <a asp-action="SuppressConfirm" asp-route-advisoryId="@entry.AdvisoryId"
+                       class="btn btn-sm btn-outline-secondary">Suppress</a>
+                }
+                else if (!recoveryMode)
+                {
+                    <a asp-action="UnsuppressConfirm" asp-route-advisoryId="@entry.AdvisoryId"
+                       class="btn btn-sm btn-outline-secondary">Un-suppress</a>
+                }
+            </td>
+        </tr>
+    }
+    @if (Model.Count == 0)
+    {
+        <tr><td colspan="5" class="text-muted">No advisory has applied to this instance yet.</td></tr>
+    }
+    </tbody>
+</table>
+</div>

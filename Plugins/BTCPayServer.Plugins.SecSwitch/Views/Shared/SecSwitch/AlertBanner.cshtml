@@ -1,0 +1,54 @@
+@using BTCPayServer.Client
+@using BTCPayServer.Plugins.SecSwitch.Models
+@using BTCPayServer.Plugins.SecSwitch.Services
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Logging
+@inject LedgerStore Ledger
+@inject IAuthorizationService AuthorizationService
+@inject ILogger<LedgerStore> Logger
+@{
+    if (!(await AuthorizationService.AuthorizeAsync(User, Policies.CanModifyServerSettings)).Succeeded)
+    {
+        return;
+    }
+
+    // Nothing above this extension point catches exceptions, so a throwing banner would 500 every backend
+    // page - including the one an admin needs to disable SecSwitch.
+    var active = new List<LedgerEntry>();
+    try
+    {
+        active = (await Ledger.GetAsync()).Entries.Values
+            .Where(e => !e.Suppressed && (e.LockedDown || e.Status is LedgerStatus.NeedsDecision or LedgerStatus.NeedsAttention))
+            .ToList();
+    }
+    catch (Exception e)
+    {
+        Logger.LogError(e, "SecSwitch alert banner failed to read the ledger; hiding the banner for this page render");
+    }
+
+    var locked = active.Count(e => e.LockedDown);
+    var pending = active.Count(e => !e.LockedDown);
+}
+@if (locked > 0)
+{
+    <div class="alert alert-danger d-flex flex-wrap align-items-center justify-content-between gap-2 mb-0" role="alert">
+        <div class="d-flex align-items-start gap-2">
+            <vc:icon symbol="warning" css-class="mt-1 flex-shrink-0" />
+            <div>
+                <strong>BTCPay Server is locked down</strong>
+                <div class="small">Public requests return HTTP 503. Server admins can still sign in. Lockdown survives a restart.</div>
+            </div>
+        </div>
+        <a class="alert-link text-nowrap" asp-controller="SecSwitch" asp-action="Audit">Review advisories</a>
+    </div>
+}
+@if (pending > 0)
+{
+    <div class="alert alert-warning d-flex flex-wrap align-items-center justify-content-between gap-2 mb-0" role="alert">
+        <div class="d-flex align-items-center gap-2">
+            <vc:icon symbol="warning" css-class="flex-shrink-0" />
+            <strong>@pending security advisor@(pending == 1 ? "y needs" : "ies need") review</strong>
+        </div>
+        <a class="alert-link text-nowrap" asp-controller="SecSwitch" asp-action="Audit">Review advisories</a>
+    </div>
+}
