@@ -30,6 +30,8 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
     public Task RecordAsync(LedgerEntry entry) => MutateAsync(ledger =>
     {
         entry.Suppressed |= ledger.Entries.TryGetValue(entry.AdvisoryId, out var current) && current.Suppressed;
+        entry.NotificationPending = !entry.Suppressed &&
+                                    entry.Status is LedgerStatus.Acted or LedgerStatus.NeedsDecision or LedgerStatus.NeedsAttention;
         ledger.Entries[entry.AdvisoryId] = entry;
         return true;
     });
@@ -44,6 +46,7 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
         foreach (var entry in locked)
         {
             entry.LockedDown = false;
+            entry.NotificationPending = false;
             entry.Status = LedgerStatus.Resolved;
             entry.Reason = reason;
             entry.RecordedAt = DateTimeOffset.UtcNow;
@@ -55,6 +58,15 @@ public sealed class LedgerStore(ISettingsRepository settingsRepository)
     {
         ledger.LastPollAt = at;
         ledger.LastPollError = error;
+        return true;
+    });
+
+    public Task<bool> MarkNotifiedAsync(string advisoryId, DateTimeOffset recordedAt) => MutateAsync(ledger =>
+    {
+        if (!ledger.Entries.TryGetValue(advisoryId, out var entry) ||
+            !entry.NotificationPending || entry.RecordedAt != recordedAt)
+            return false;
+        entry.NotificationPending = false;
         return true;
     });
 

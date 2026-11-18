@@ -45,24 +45,25 @@ public static class AdvisoryApplicability
         TryParseCondition(advisory.AffectedVersions, out var condition) &&
         Pad(fix) > Pad(installed) && !condition!.IsFulfilled(Pad(fix));
 
-    public static bool IsApplicable(Advisory advisory, InstanceState state, out Version? installedVersion, out string reason)
-    {
-        installedVersion = null;
+    public static bool IsApplicable(Advisory advisory, InstanceState state, out Version? installedVersion, out string reason) =>
+        IsApplicable(advisory, state, null, out installedVersion, out reason);
 
-        if (string.Equals(advisory.Identifier, CoreIdentifier, StringComparison.OrdinalIgnoreCase))
+    /// <summary>Checks whether a candidate update would leave a related advisory applicable to the resulting versions.</summary>
+    public static bool IsApplicableAfterUpdate(Advisory advisory, InstanceState state, string identifier, Version version) =>
+        (SameIdentifier(advisory.Identifier, identifier) || SameIdentifier(advisory.Requires?.Identifier, identifier)) &&
+        IsApplicable(advisory, state, (identifier, version), out _, out _);
+
+    internal static bool IsDistinctPluginPair(string target, string dependency) =>
+        !SameIdentifier(target, CoreIdentifier) && !SameIdentifier(dependency, CoreIdentifier) &&
+        !SameIdentifier(target, dependency);
+
+    static bool IsApplicable(Advisory advisory, InstanceState state, (string Identifier, Version Version)? update,
+        out Version? installedVersion, out string reason)
+    {
+        if (!TryGetVersion(state, advisory.Identifier, update, out installedVersion))
         {
-            installedVersion = state.CoreVersion;
-        }
-        else
-        {
-            var match = state.InstalledPlugins.FirstOrDefault(kv =>
-                string.Equals(kv.Key, advisory.Identifier, StringComparison.OrdinalIgnoreCase));
-            if (match.Key is null)
-            {
-                reason = $"{advisory.Identifier} is not installed on this instance.";
-                return false;
-            }
-            installedVersion = match.Value;
+            reason = $"{advisory.Identifier} is not installed on this instance.";
+            return false;
         }
 
         if (installedVersion is null)
@@ -86,8 +87,62 @@ public static class AdvisoryApplicability
         }
 
         reason = $"Installed version {installedVersion} matches {advisory.AffectedVersions}.";
+        if (advisory.Requires is not { } dependency)
+            return true;
+
+        if (RequirementMatches(advisory.Identifier, dependency, state, update, out var dependencyReason))
+        {
+            reason += $" {dependencyReason}";
+            return true;
+        }
+
+        installedVersion = null;
+        reason = dependencyReason;
+        return false;
+    }
+
+    static bool RequirementMatches(string target, AdvisoryDependency dependency, InstanceState state,
+        (string Identifier, Version Version)? update, out string reason)
+    {
+        if (!IsDistinctPluginPair(target, dependency.Identifier) ||
+            !TryParseCondition(dependency.AffectedVersions, out var condition))
+            reason = "The required plugin or its affected version range is invalid.";
+        else if (!TryGetVersion(state, dependency.Identifier, update, out var version))
+            reason = $"Required plugin {dependency.Identifier} is not installed on this instance.";
+        else if (version is null)
+            reason = $"Installed version of required plugin {dependency.Identifier} {IndeterminateVersionPhrase}.";
+        else if (!condition!.IsFulfilled(Pad(version)))
+            reason = $"Required plugin {dependency.Identifier} {version} is not affected by {dependency.AffectedVersions}.";
+        else
+        {
+            reason = $"Required plugin {dependency.Identifier} {version} matches {dependency.AffectedVersions}.";
+            return true;
+        }
+        return false;
+    }
+
+    static bool TryGetVersion(InstanceState state, string identifier, (string Identifier, Version Version)? update,
+        out Version? version)
+    {
+        if (SameIdentifier(identifier, CoreIdentifier))
+        {
+            version = state.CoreVersion;
+        }
+        else
+        {
+            var match = state.InstalledPlugins.FirstOrDefault(kv => SameIdentifier(kv.Key, identifier));
+            version = match.Value;
+            if (match.Key is null)
+                return false;
+        }
+
+        if (update is { } candidate && SameIdentifier(identifier, candidate.Identifier))
+            version = candidate.Version;
         return true;
     }
+
+    static bool SameIdentifier(string? first, string second) =>
+        string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
 
     static bool HasEmptySegment(string text) =>
         text.Split("||").Any(string.IsNullOrWhiteSpace) || text.Split("&&").Any(string.IsNullOrWhiteSpace);

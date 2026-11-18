@@ -18,8 +18,9 @@ public class SecSwitchMonitorTests
         Advisory[] advisories, InstanceState? state = null, SecSwitchSettings? settings = null, string?[]? unreadable = null)
         => Monitor().ProcessAsync(advisories, unreadable ?? [], state ?? State(), settings ?? Settings(), CancellationToken.None);
 
-    Task<ProcessResult> AutoUpdate(InstanceState? state = null)
-        => Monitor().AutoUpdateAsync(state ?? State(), CancellationToken.None);
+    Task<ProcessResult> AutoUpdate(InstanceState? state = null, SecSwitchSettings? settings = null, Advisory[]? advisories = null)
+        => Monitor().AutoUpdateAsync(state ?? State(), settings ?? Settings(autoUpdatePlugin: true, autoUpdateCore: true),
+            advisories ?? [], CancellationToken.None);
 
     async Task<LedgerEntry> EntryFor(string id) => (await _ledger.GetAsync()).Entries[id];
 
@@ -39,6 +40,41 @@ public class SecSwitchMonitorTests
         Assert.Equal("DisablePlugin", entry.Action);
         Assert.False(entry.LockedDown);
         Assert.Equal(entry.AdvisoryId, (await EntryFor("adv-1")).AdvisoryId);
+    }
+
+    [Fact]
+    public async Task A_plugin_fix_is_never_installed_without_that_plugins_opt_in()
+    {
+        await Process([Adv(fixedVersion: "1.2.3")], settings: Settings(autoUpdateCore: true));
+
+        Assert.Empty(_sink.Updated);
+        Assert.Equal(["Plug"], _sink.Disabled);
+    }
+
+    [Fact]
+    public async Task A_plugin_can_update_with_the_kill_switch_off_but_an_update_failure_cannot_disable_it()
+    {
+        var settings = Settings(autoApply: false, autoUpdatePlugin: true);
+        var advisories = new[] { Adv(fixedVersion: "1.2.3") };
+        _sink.QueueUpdateResult = false;
+        await Process(advisories, settings: settings);
+        Assert.Empty(_sink.Disabled);
+        Assert.Equal(LedgerStatus.NeedsAttention, (await EntryFor("adv-1")).Status);
+
+        _sink.QueueUpdateResult = true;
+        await Process(advisories, settings: settings);
+        Assert.Equal(LedgerStatus.Acted, (await EntryFor("adv-1")).Status);
+        Assert.Empty(_sink.Disabled);
+    }
+
+    [Fact]
+    public async Task A_fix_affected_by_another_advisory_is_not_installed()
+    {
+        await Process([Adv(fixedVersion: "1.2.3"), Adv(id: "later", affected: ">=1.2.3 && <1.3.0")],
+            settings: Settings(autoUpdatePlugin: true));
+
+        Assert.Empty(_sink.Updated);
+        Assert.Equal(["Plug"], _sink.Disabled);
     }
 
     [Fact]
@@ -167,7 +203,7 @@ public class SecSwitchMonitorTests
     [Fact]
     public async Task A_core_advisory_with_a_fix_and_host_update_support_updates_and_stays_locked_down()
     {
-        var result = await Process([CoreAdvisory("9.0.0")], State(canUpdateCore: true));
+        var result = await Process([CoreAdvisory("9.0.0")], State(canUpdateCore: true), Settings(autoUpdateCore: true));
 
         Assert.Equal(1, _sink.CoreUpdates);
         Assert.False(result.RestartNeeded);
@@ -177,12 +213,23 @@ public class SecSwitchMonitorTests
     }
 
     [Fact]
+    public async Task An_opted_in_core_update_does_not_lock_down_when_the_kill_switch_is_off()
+    {
+        var result = await Process([CoreAdvisory("9.0.0")], State(canUpdateCore: true),
+            Settings(autoApply: false, autoUpdateCore: true));
+
+        Assert.Equal(1, _sink.CoreUpdates);
+        Assert.True(result.CoreUpdateDispatched);
+        Assert.False(Assert.Single(result.Recorded).LockedDown);
+    }
+
+    [Fact]
     public async Task A_lockdown_becomes_a_core_update_once_the_host_can_update_without_lifting_the_lockdown()
     {
-        await Process([CoreAdvisory("9.0.0")], State(canUpdateCore: false));
+        await Process([CoreAdvisory("9.0.0")], State(canUpdateCore: false), Settings(autoUpdateCore: true));
         Assert.Equal(0, _sink.CoreUpdates);
 
-        await Process([CoreAdvisory("9.0.0")], State(canUpdateCore: true));
+        await Process([CoreAdvisory("9.0.0")], State(canUpdateCore: true), Settings(autoUpdateCore: true));
 
         Assert.Equal(1, _sink.CoreUpdates);
         var entry = await EntryFor("core-1");
@@ -196,9 +243,9 @@ public class SecSwitchMonitorTests
         _sink.LatestCore = new Version(2, 5, 0);
         var state = State(canUpdateCore: true);
 
-        var advisory = await Process([CoreAdvisory("9.0.0")], state);
+        var advisory = await Process([CoreAdvisory("9.0.0")], state, Settings(autoUpdateCore: true));
         var auto = await AutoUpdate(state);
-        var held = await Process([Adv(id: "core-2", identifier: "BTCPayServer", affected: "<9.0.0", fixedVersion: "9.0.0")], state);
+        var held = await Process([Adv(id: "core-2", identifier: "BTCPayServer", affected: "<9.0.0", fixedVersion: "9.0.0")], state, Settings(autoUpdateCore: true));
 
         Assert.True(advisory.CoreUpdateDispatched);
         Assert.False(auto.CoreUpdateDispatched);
@@ -211,7 +258,7 @@ public class SecSwitchMonitorTests
     {
         _sink.CoreUpdateThrows = new InvalidOperationException("host update failed");
 
-        var result = await Process([CoreAdvisory("9.0.0")], State(canUpdateCore: true));
+        var result = await Process([CoreAdvisory("9.0.0")], State(canUpdateCore: true), Settings(autoUpdateCore: true));
 
         Assert.False(result.CoreUpdateDispatched);
     }
@@ -233,7 +280,7 @@ public class SecSwitchMonitorTests
         var state = State(canUpdateCore: true);
         await AutoUpdate(state);
 
-        var skipped = await Process([CoreAdvisory("9.0.0")], state);
+        var skipped = await Process([CoreAdvisory("9.0.0")], state, Settings(autoUpdateCore: true));
 
         Assert.False(skipped.CoreUpdateDispatched);
         var held = await EntryFor("core-1");
@@ -244,7 +291,7 @@ public class SecSwitchMonitorTests
         var auto = await EntryFor("autoupdate:BTCPayServer@2.5.0");
         auto.RecordedAt = DateTimeOffset.UtcNow - SecSwitchMonitor.CoreUpdateWindow - TimeSpan.FromMinutes(1);
         await _ledger.RecordAsync(auto);
-        var retry = await Process([CoreAdvisory("9.0.0")], state);
+        var retry = await Process([CoreAdvisory("9.0.0")], state, Settings(autoUpdateCore: true));
 
         Assert.True(retry.CoreUpdateDispatched);
         Assert.Equal(2, _sink.CoreUpdates);
@@ -288,7 +335,7 @@ public class SecSwitchMonitorTests
     {
         _sink.CoreUpdateThrows = new InvalidOperationException("host update failed");
 
-        await Process([CoreAdvisory("9.0.0")], State(canUpdateCore: true));
+        await Process([CoreAdvisory("9.0.0")], State(canUpdateCore: true), Settings(autoUpdateCore: true));
 
         var entry = await EntryFor("core-1");
         Assert.Equal(LedgerStatus.NeedsAttention, entry.Status);
@@ -344,27 +391,28 @@ public class SecSwitchMonitorTests
     }
 
     [Fact]
-    public async Task An_unreadable_entry_without_an_id_does_not_stand_in_for_the_missing_advisory()
+    public async Task An_unreadable_entry_without_an_id_cannot_clear_a_lockdown()
     {
         await Process([CoreAdvisory()]);
 
         var result = await Process([], unreadable: [null]);
 
-        Assert.Equal(LedgerStatus.Resolved, Assert.Single(result.Recorded).Status);
+        Assert.Empty(result.Recorded);
+        Assert.True((await EntryFor("core-1")).LockedDown);
     }
 
     [Fact]
     public async Task A_core_update_is_dispatched_again_only_after_the_window_has_passed()
     {
         var state = State(canUpdateCore: true);
-        await Process([CoreAdvisory("9.0.0")], state);
-        await Process([CoreAdvisory("9.0.0")], state);
+        await Process([CoreAdvisory("9.0.0")], state, Settings(autoUpdateCore: true));
+        await Process([CoreAdvisory("9.0.0")], state, Settings(autoUpdateCore: true));
         Assert.Equal(1, _sink.CoreUpdates);
 
         var entry = await EntryFor("core-1");
         entry.RecordedAt = DateTimeOffset.UtcNow - SecSwitchMonitor.CoreUpdateWindow - TimeSpan.FromMinutes(1);
         await _ledger.RecordAsync(entry);
-        var retry = await Process([CoreAdvisory("9.0.0")], state);
+        var retry = await Process([CoreAdvisory("9.0.0")], state, Settings(autoUpdateCore: true));
 
         Assert.Equal(2, _sink.CoreUpdates);
         Assert.Single(retry.Recorded);
@@ -377,7 +425,7 @@ public class SecSwitchMonitorTests
         _sink.LatestCore = new Version(2, 5, 0);
         var state = State(canUpdateCore: true);
 
-        await Process([CoreAdvisory("9.0.0")], state);
+        await Process([CoreAdvisory("9.0.0")], state, Settings(autoUpdateCore: true));
         await AutoUpdate(state);
 
         Assert.Equal(1, _sink.CoreUpdates);
@@ -390,7 +438,7 @@ public class SecSwitchMonitorTests
         var state = State(canUpdateCore: true);
 
         await AutoUpdate(state);
-        await Process([CoreAdvisory("9.0.0")], state);
+        await Process([CoreAdvisory("9.0.0")], state, Settings(autoUpdateCore: true));
 
         Assert.Equal(1, _sink.CoreUpdates);
         var entry = await EntryFor("core-1");
@@ -403,7 +451,7 @@ public class SecSwitchMonitorTests
     {
         var second = Adv(id: "core-2", identifier: "BTCPayServer", affected: "<9.0.0", fixedVersion: "9.0.0");
 
-        await Process([CoreAdvisory("9.0.0"), second], State(canUpdateCore: true));
+        await Process([CoreAdvisory("9.0.0"), second], State(canUpdateCore: true), Settings(autoUpdateCore: true));
 
         Assert.Equal(1, _sink.CoreUpdates);
         Assert.True((await EntryFor("core-2")).LockedDown);
@@ -449,6 +497,39 @@ public class SecSwitchMonitorTests
         Assert.True(first.RestartNeeded);
         Assert.False(second.RestartNeeded);
         Assert.Equal(LedgerStatus.Acted, (await EntryFor("autoupdate:Plug@1.3.0")).Status);
+    }
+
+    [Fact]
+    public async Task Routine_updates_do_not_install_an_affected_plugin_version_or_act_on_a_different_opt_in()
+    {
+        _sink.PluginUpdates = [new PluginUpdate("Plug", new Version(1, 3, 0))];
+        await AutoUpdate(settings: Settings(autoUpdateCore: true));
+        await AutoUpdate(advisories: [Adv(affected: ">=1.3.0 && <1.4.0")]);
+
+        Assert.Empty(_sink.Updated);
+    }
+
+    [Fact]
+    public async Task Routine_updates_defer_a_second_update_that_could_activate_a_conditional_advisory()
+    {
+        var state = new InstanceState(new Dictionary<string, Version>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Plug"] = new(1, 1, 0),
+            ["Other"] = new(1, 1, 0)
+        }, null, false);
+        _sink.PluginUpdates = [new PluginUpdate("Plug", new Version(1, 3, 0)), new PluginUpdate("Other", new Version(1, 3, 0))];
+        var advisory = new Advisory
+        {
+            Id = "pair",
+            Identifier = "Plug",
+            AffectedVersions = ">=1.3.0",
+            Requires = new AdvisoryDependency("Other", ">=1.3.0"),
+            Severity = AdvisorySeverity.High
+        };
+
+        await AutoUpdate(state, new SecSwitchSettings { AutoUpdatePlugins = ["Plug", "Other"] }, [advisory]);
+
+        Assert.Equal([("Plug", "1.3.0")], _sink.Updated);
     }
 
     [Fact]

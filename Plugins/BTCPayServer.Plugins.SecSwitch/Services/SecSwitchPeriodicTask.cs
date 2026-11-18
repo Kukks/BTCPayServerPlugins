@@ -33,22 +33,36 @@ public sealed class SecSwitchPeriodicTask(
 
     public async Task Do(CancellationToken cancellationToken)
     {
-        var settings = await settingsRepository.GetSettingAsync<SecSwitchSettings>();
-        if (settings is not { Enabled: true })
+        var settings = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
+        if (!settings.Enabled || settings.GetFeedUrl() is not { } url)
             return;
 
         var state = BuildState(installedPlugins, environment.Version, sink.CanUpdateCore);
-        var recorded = new List<LedgerEntry>();
         var restartNeeded = false;
         var coreUpdateDispatched = false;
 
-        var pollError = await Run("advisory poll", () => PollAdvisoriesAsync(settings, state, cancellationToken));
-        if (settings.AutoApply && settings.AutoUpdateAll)
-            await Run("auto-update", () => monitor.AutoUpdateAsync(state, cancellationToken));
+        FeedResult? feed = null;
+        var pollError = await Run("advisory poll", async () =>
+        {
+            feed = await FetchAdvisoriesAsync(url, cancellationToken);
+            var current = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
+            if (!current.Enabled || !string.Equals(current.GetFeedUrl(), url, StringComparison.Ordinal))
+            {
+                feed = null;
+                return new ProcessResult([], false);
+            }
+            settings = current;
+            return await monitor.ProcessAsync(feed.Advisories, feed.Skipped.Select(s => s.Id), state, settings, cancellationToken);
+        });
+        if (pollError is null && feed is null)
+            return;
+        if (pollError is null && feed is { Skipped.Count: 0 } &&
+            (settings.AutoUpdateCore || settings.AutoUpdatePlugins is { Length: > 0 }))
+            await Run("auto-update", () => monitor.AutoUpdateAsync(state, settings, feed.Advisories, cancellationToken));
 
         await lockdown.RefreshAsync();
         await RecordPollAsync(pollError);
-        await NotifyAsync(recorded);
+        await NotifyAsync();
 
         // A core update restarts BTCPay Server itself and applies queued plugin changes; stopping the process
         // while it runs could kill the update. If it never restarts the server, the changes are still pending
@@ -61,7 +75,6 @@ public sealed class SecSwitchPeriodicTask(
             try
             {
                 var result = await step();
-                recorded.AddRange(result.Recorded);
                 restartNeeded |= result.RestartNeeded;
                 coreUpdateDispatched |= result.CoreUpdateDispatched;
                 return null;
@@ -74,17 +87,13 @@ public sealed class SecSwitchPeriodicTask(
         }
     }
 
-    async Task<ProcessResult> PollAdvisoriesAsync(SecSwitchSettings settings, InstanceState state, CancellationToken ct)
+    async Task<FeedResult> FetchAdvisoriesAsync(string url, CancellationToken ct)
     {
-        if (!AdvisoryFeed.IsSupportedFeedUrl(settings.FeedUrl))
-            throw new InvalidOperationException(
-                $"The advisory feed URL is not usable ({ActionExecutor.Sanitize(settings.FeedUrl)}): it must be an absolute https:// URL.");
-
-        var feed = await AdvisoryFeed.FetchAsync(httpClientFactory.CreateClient(HttpClientName), settings.FeedUrl, ct);
+        var feed = await AdvisoryFeed.FetchAsync(httpClientFactory.CreateClient(HttpClientName), url, ct);
         foreach (var skipped in feed.Skipped)
             logger.LogWarning("SecSwitch skipped a malformed feed entry: {Reason}", ActionExecutor.Sanitize(skipped.Reason));
 
-        return await monitor.ProcessAsync(feed.Advisories, feed.Skipped.Select(s => s.Id), state, settings, ct);
+        return feed;
     }
 
     async Task<bool> HasPendingPluginChangesAsync()
@@ -113,9 +122,19 @@ public sealed class SecSwitchPeriodicTask(
         }
     }
 
-    async Task NotifyAsync(IEnumerable<LedgerEntry> recorded)
+    async Task NotifyAsync()
     {
-        foreach (var entry in recorded.Where(e => e.Status is LedgerStatus.Acted or LedgerStatus.NeedsDecision or LedgerStatus.NeedsAttention))
+        IReadOnlyList<LedgerEntry> pending;
+        try
+        {
+            pending = (await ledger.GetAsync()).Entries.Values.Where(e => e.NotificationPending && !e.Suppressed).ToList();
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "SecSwitch could not load pending admin notifications");
+            return;
+        }
+        foreach (var entry in pending)
         {
             try
             {
@@ -127,6 +146,7 @@ public sealed class SecSwitchPeriodicTask(
                     Outcome = entry.Reason,
                     NeedsDecision = entry.Status is LedgerStatus.NeedsDecision or LedgerStatus.NeedsAttention
                 });
+                await ledger.MarkNotifiedAsync(entry.AdvisoryId, entry.RecordedAt);
             }
             catch (Exception e)
             {

@@ -41,7 +41,7 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
 {
     static readonly Regex SafeIdentifierPattern = new(@"\A[A-Za-z0-9._-]{1,128}\z", RegexOptions.Compiled);
 
-    public async Task<ActionOutcome> ExecuteAsync(SecSwitchAction action, Advisory advisory)
+    public async Task<ActionOutcome> ExecuteAsync(SecSwitchAction action, Advisory advisory, bool allowDisableFallback = true)
     {
         try
         {
@@ -55,7 +55,7 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
                 case SecSwitchAction.DisablePlugin:
                     return DisablePlugin(advisory.Identifier);
                 case SecSwitchAction.UpdatePlugin:
-                    return await UpdateOrDisableAsync(advisory);
+                    return await UpdateOrDisableAsync(advisory, allowDisableFallback);
                 case SecSwitchAction.UpdateCore:
                     return await UpdateCoreAsync();
                 default:
@@ -102,13 +102,15 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
 
     public void RequestRestart() => sink.StopApplication();
 
-    async Task<ActionOutcome> UpdateOrDisableAsync(Advisory advisory)
+    async Task<ActionOutcome> UpdateOrDisableAsync(Advisory advisory, bool allowDisableFallback)
     {
         if (string.IsNullOrWhiteSpace(advisory.FixedVersion))
-            return DisablePlugin(advisory.Identifier);
+            return allowDisableFallback
+                ? DisablePlugin(advisory.Identifier)
+                : new ActionOutcome(false, "No fixed version is available for this advisory.");
 
         var update = await UpdatePluginAsync(advisory.Identifier, advisory.FixedVersion);
-        if (update.Succeeded)
+        if (update.Succeeded || !allowDisableFallback)
             return update;
 
         var disable = DisablePlugin(advisory.Identifier);
@@ -120,7 +122,7 @@ public sealed class ActionExecutor(IActionSink sink, ILogger<ActionExecutor> log
         if (!IsSafeIdentifier(identifier))
             return new ActionOutcome(false, $"Refusing to disable: plugin identifier '{Sanitize(identifier)}' is missing or unsafe.");
         return sink.QueueDisable(identifier)
-            ? new ActionOutcome(true, $"Queued disable of {Sanitize(identifier)}.", RestartNeeded: true)
+            ? new ActionOutcome(true, $"{Sanitize(identifier)} is queued to be disabled or removed at restart.", RestartNeeded: true)
             : new ActionOutcome(false, $"Failed to queue disable of {Sanitize(identifier)}: no installed plugin matches that identifier unambiguously.");
     }
 
@@ -155,48 +157,144 @@ public sealed class BtcPayActionSink(
 
     public bool QueueDisable(string identifier)
     {
-        if (!TryResolveInstalledDirectory(dataDirectories.Value.PluginDir, identifier, out var resolved, out var ambiguous))
+        var pluginDir = dataDirectories.Value.PluginDir;
+        if (!TryResolveInstalledDirectory(pluginDir, identifier, out var resolved, out var ambiguous))
         {
             LogUnresolved("disable", identifier, ambiguous);
             return false;
         }
-        PluginManager.DisablePlugin(dataDirectories.Value.PluginDir, resolved);
+        if (LastPendingChange(PluginManager.GetPendingCommands(pluginDir), resolved) is not ("disable" or "delete"))
+            PluginManager.DisablePlugin(pluginDir, resolved);
         return true;
     }
 
     public async Task<bool> QueueUpdateAsync(string identifier, string version)
     {
-        if (!TryResolveInstalledDirectory(dataDirectories.Value.PluginDir, identifier, out var resolved, out var ambiguous))
+        var pluginDir = dataDirectories.Value.PluginDir;
+        if (!TryResolveInstalledDirectory(pluginDir, identifier, out var resolved, out var ambiguous))
         {
             LogUnresolved("update", identifier, ambiguous);
             return false;
         }
 
+        EnsureNoPendingChange(PluginManager.GetPendingCommands(pluginDir), resolved);
         var candidates = UpdateCandidates(version);
         if (candidates.Count == 0)
             throw new InvalidOperationException($"'{ActionExecutor.Sanitize(version)}' is not a valid version.");
 
         using var scope = scopeFactory.CreateScope();
-        var pluginService = scope.ServiceProvider.GetRequiredService<PluginService>();
+        var staging = Directory.CreateDirectory(Path.Combine(pluginDir, $".secswitch-{Guid.NewGuid():N}"));
+        try
+        {
+            var downloader = ActivatorUtilities.CreateInstance<PluginService>(scope.ServiceProvider,
+                Options.Create(new DataDirectories { PluginDir = staging.FullName }));
+            var manifest = await DownloadUpdateAsync(downloader, resolved, candidates);
+            var pending = PluginManager.GetPendingCommands(pluginDir);
+            EnsureNoPendingChange(pending, resolved);
+            if (!CanInstallUpdate(manifest, downloader.Installed, pending.Select(command => command.plugin)))
+                throw new InvalidOperationException("The update's dependencies are missing, incompatible, or have pending changes.");
+
+            await QueueStagedFilesAsync(pluginDir, staging.FullName, resolved);
+            return true;
+        }
+        finally
+        {
+            try
+            {
+                staging.Delete(recursive: true);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                logger.LogWarning(e, "Could not clean up the SecSwitch update staging directory");
+            }
+        }
+    }
+
+    static async Task<PluginService.AvailablePlugin> DownloadUpdateAsync(PluginService downloader, string identifier,
+        IReadOnlyList<string> candidates)
+    {
         InvalidOperationException? failure = null;
         foreach (var candidate in candidates)
         {
             try
             {
-                await pluginService.DownloadRemotePlugin(resolved, candidate);
-                failure = null;
-                break;
+                return await downloader.DownloadRemotePlugin(identifier, candidate);
             }
             catch (InvalidOperationException e)
             {
                 failure = e;
             }
         }
-        if (failure is not null)
-            throw failure;
+        throw failure ?? new InvalidOperationException("No matching plugin package is available.");
+    }
 
-        pluginService.InstallPlugin(resolved);
-        return true;
+    async Task QueueStagedFilesAsync(string pluginDir, string stagingDir, string identifier)
+    {
+        var packageName = identifier + PluginManager.BTCPayPluginSuffix;
+        var manifestName = identifier + ".json";
+        var packagePath = Path.Combine(pluginDir, packageName);
+        var manifestPath = Path.Combine(pluginDir, manifestName);
+        // Keep the live files locked through queueing. Delete sharing lets us clean up our own files on failure.
+        await using var package = new FileStream(packagePath, FileMode.CreateNew, FileAccess.Write, FileShare.Delete);
+        FileStream? manifest = null;
+        var queued = false;
+        try
+        {
+            manifest = new FileStream(manifestPath, FileMode.CreateNew, FileAccess.Write, FileShare.Delete);
+            await CopyStagedAsync(packageName, package);
+            await CopyStagedAsync(manifestName, manifest);
+            EnsureNoPendingChange(PluginManager.GetPendingCommands(pluginDir), identifier);
+            PluginManager.QueueCommands(pluginDir, ("install", identifier));
+            queued = true;
+        }
+        finally
+        {
+            if (!queued)
+            {
+                if (manifest is not null)
+                    DeleteStagedFile(manifestPath);
+                DeleteStagedFile(packagePath);
+            }
+            if (manifest is not null)
+                await manifest.DisposeAsync();
+        }
+
+        async Task CopyStagedAsync(string name, FileStream destination)
+        {
+            await using var source = File.OpenRead(Path.Combine(stagingDir, name));
+            await source.CopyToAsync(destination);
+            await destination.FlushAsync();
+        }
+    }
+
+    void DeleteStagedFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(e, "Could not clean up a staged SecSwitch update file");
+        }
+    }
+
+    static string? LastPendingChange(IEnumerable<(string command, string plugin)> pending, string identifier) =>
+        pending.LastOrDefault(command => string.Equals(command.plugin, identifier, StringComparison.OrdinalIgnoreCase)).command;
+
+    static void EnsureNoPendingChange(IEnumerable<(string command, string plugin)> pending, string identifier)
+    {
+        if (LastPendingChange(pending, identifier) is not null)
+            throw new InvalidOperationException("A change for this plugin is already queued.");
+    }
+
+    public static bool CanInstallUpdate(PluginService.AvailablePlugin manifest, Dictionary<string, Version> installed,
+        IEnumerable<string> pendingIdentifiers)
+    {
+        var pending = pendingIdentifiers.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return manifest.Dependencies is { } dependencies &&
+               dependencies.All(d => d is not null && !string.IsNullOrWhiteSpace(d.Identifier) && !pending.Contains(d.Identifier)) &&
+               PluginManager.DependenciesMet(dependencies, installed);
     }
 
     /// <summary>The download needs an exact match and the plugin builder publishes four-part versions.</summary>

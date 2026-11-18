@@ -1,8 +1,27 @@
 @model BTCPayServer.Plugins.SecSwitch.Models.SecSwitchSettings
-@inject BTCPayServer.Plugins.SecSwitch.Services.LedgerStore Ledger
+@using System
+@using System.Linq
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Configuration
+@using BTCPayServer.Plugins.SecSwitch.Models
+@using BTCPayServer.Plugins.SecSwitch.Services
+@using Microsoft.Extensions.Options
+@inject LedgerStore Ledger
+@inject System.Collections.Generic.IEnumerable<IBTCPayServerPlugin> InstalledPlugins
+@inject IOptions<DataDirectories> DataDirectories
 @{
     ViewData["Title"] = "SecSwitch";
     var ledger = await Ledger.GetAsync();
+    var pluginOptions = InstalledPlugins
+        .Where(plugin => !plugin.SystemPlugin && BtcPayActionSink.TryResolveInstalledDirectory(
+            DataDirectories.Value.PluginDir, plugin.Identifier, out _, out _))
+        .Select(plugin => new { plugin.Identifier, plugin.Name })
+        .Concat((Model.AutoUpdatePlugins ?? [])
+            .Where(identifier => !string.IsNullOrWhiteSpace(identifier))
+            .Select(identifier => new { Identifier = identifier, Name = $"{identifier} (unavailable)" }))
+        .DistinctBy(plugin => plugin.Identifier, StringComparer.OrdinalIgnoreCase)
+        .OrderBy(plugin => plugin.Name, StringComparer.CurrentCultureIgnoreCase)
+        .ToArray();
 }
 
 <div class="sticky-header">
@@ -10,14 +29,15 @@
 </div>
 <partial name="_StatusMessage" />
 
-<div class="alert alert-warning" role="alert">
-    SecSwitch trusts the advisory feed completely: whoever controls the feed can make this server disable plugins,
-    update itself or go into lockdown. Review these settings carefully before enabling.
-</div>
-
 @if (Model.Enabled)
 {
-    if (ledger.LastPollAt is null)
+    if (Model.GetFeedUrl() is null)
+    {
+        <div class="alert alert-warning" role="alert">
+            The official BTCPay advisory feed is pending publication. Set a trusted feed URL to start checking for advisories.
+        </div>
+    }
+    else if (ledger.LastPollAt is null)
     {
         <div class="alert alert-info" role="alert">SecSwitch has not polled the advisory feed yet.</div>
     }
@@ -37,32 +57,40 @@
 <form method="post">
     <div class="form-check mb-3">
         <input asp-for="Enabled" type="checkbox" class="form-check-input" />
-        <label asp-for="Enabled" class="form-check-label">Enable SecSwitch</label>
+        <label asp-for="Enabled" class="form-check-label">Check advisories and notify server admins</label>
     </div>
     <div class="form-group mb-3">
         <label asp-for="FeedUrl" class="form-label">Advisory feed URL</label>
-        <input asp-for="FeedUrl" class="form-control" />
-        <div class="form-text">Must be an absolute <code>https://</code> URL. Redirects are not followed.</div>
+        <input asp-for="FeedUrl" class="form-control" placeholder="@SecSwitchSettings.ProposedFeedUrl" />
+        <div class="form-text">
+            Use a direct <code>https://</code> URL. Choose a publisher you trust to issue advisories that can trigger the kill switch.
+        </div>
         <span asp-validation-for="FeedUrl" class="text-danger"></span>
     </div>
     <div class="form-check mb-3">
         <input asp-for="AutoApply" type="checkbox" class="form-check-input" />
-        <label asp-for="AutoApply" class="form-check-label">
-            Apply actions automatically (unchecked = notify only)
-        </label>
+        <label asp-for="AutoApply" class="form-check-label">Apply the advisory kill switch</label>
+        <div class="form-text">SecSwitch can disable an affected plugin or restrict an affected server to server admins.</div>
     </div>
-    <div class="form-check mb-3">
-        <input asp-for="PreferUpdateOverDisable" type="checkbox" class="form-check-input" />
-        <label asp-for="PreferUpdateOverDisable" class="form-check-label">
-            Update to the fixed version when an advisory names one, instead of disabling the plugin
-        </label>
-    </div>
-    <div class="form-check mb-4">
-        <input asp-for="AutoUpdateAll" type="checkbox" class="form-check-input" />
-        <label asp-for="AutoUpdateAll" class="form-check-label">
-            Also update plugins, and BTCPay Server itself through the host integration, to any newer release (requires automatic actions)
-        </label>
-    </div>
+    <fieldset class="mb-4">
+        <legend class="h6">Automatic updates</legend>
+        <p class="form-text">Choose which components SecSwitch may update. Automatic updates can restart BTCPay Server.</p>
+        <div class="form-check">
+            <input asp-for="AutoUpdateCore" type="checkbox" class="form-check-input" />
+            <label asp-for="AutoUpdateCore" class="form-check-label">BTCPay Server (requires host update support)</label>
+        </div>
+        @for (var index = 0; index < pluginOptions.Length; index++)
+        {
+            var plugin = pluginOptions[index];
+            var inputId = $"sec-switch-auto-update-{index}";
+            <div class="form-check">
+                <input name="@nameof(Model.AutoUpdatePlugins)" value="@plugin.Identifier"
+                       id="@inputId" type="checkbox" class="form-check-input"
+                       checked="@Model.IsPluginAutoUpdateEnabled(plugin.Identifier)" />
+                <label for="@inputId" class="form-check-label">@plugin.Name</label>
+            </div>
+        }
+    </fieldset>
 
     <button type="submit" class="btn btn-primary">Save</button>
     <a asp-action="Audit" class="btn btn-secondary">Audit log</a>

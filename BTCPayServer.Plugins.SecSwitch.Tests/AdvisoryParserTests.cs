@@ -10,8 +10,13 @@ public class AdvisoryParserTests
     const string Valid =
         """{"id":"a1","identifier":"Plug","affectedVersions":">=1.0.0 && <1.2.3","fixedVersion":"1.2.3","severity":"high","title":"T"}""";
 
+    const string ValidRequirement = """{"identifier":"Dependency","affectedVersions":"<=2.0.0"}""";
+
     static byte[] Feed(params string[] entries) =>
         Encoding.UTF8.GetBytes("{\"advisories\":[" + string.Join(",", entries) + "]}");
+
+    static string Conditional(string requirement = ValidRequirement, string id = "conditional") =>
+        $$"""{"id":"{{id}}","identifier":"Plug","affectedVersions":">=1.0.0 && <1.2.3","severity":"high","requires":{{requirement}}}""";
 
     [Fact]
     public void Parses_a_valid_advisory()
@@ -93,6 +98,67 @@ public class AdvisoryParserTests
         Assert.Contains("duplicate", Assert.Single(skipped).Reason);
     }
 
+    [Fact]
+    public void Direct_and_conditional_entries_can_share_the_same_feed()
+    {
+        var feed = $$"""{"advisories":[{{Valid}}],"conditionalAdvisories":[{{Conditional()}}]}""";
+
+        var advisories = AdvisoryParser.ParseFeed(Encoding.UTF8.GetBytes(feed), out var skipped);
+
+        Assert.Equal(["a1", "conditional"], advisories.Select(advisory => advisory.Id));
+        Assert.Empty(skipped);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("{}")]
+    [InlineData("""{"identifier":"Dependency","affectedVersions":"<=2.0.0 || "}""")]
+    [InlineData("""{"identifier":"pLuG","affectedVersions":"<=2.0.0"}""")]
+    [InlineData("""{"identifier":"btcpayserver","affectedVersions":"<=2.0.0"}""")]
+    [InlineData("""{"identifier":"Dependency","affectedVersions":"<=2.0.0","other":true}""")]
+    public void Invalid_conditional_requirements_are_skipped_with_their_id_retained(string requirement)
+    {
+        var feed = $$"""{"advisories":[],"conditionalAdvisories":[{{Conditional(requirement)}}]}""";
+
+        var advisories = AdvisoryParser.ParseFeed(Encoding.UTF8.GetBytes(feed), out var skipped);
+
+        Assert.Empty(advisories);
+        Assert.Equal("conditional", Assert.Single(skipped).Id);
+    }
+
+    [Fact]
+    public void A_conditional_advisory_in_the_direct_array_cannot_trigger_an_unconditional_action()
+    {
+        var advisories = AdvisoryParser.ParseFeed(Feed(Conditional()), out var skipped);
+
+        Assert.Empty(advisories);
+        Assert.Equal("conditional", Assert.Single(skipped).Id);
+    }
+
+    [Fact]
+    public void A_core_advisory_cannot_depend_on_a_plugin()
+    {
+        var entry = Conditional().Replace("\"Plug\"", "\"BTCpayserver\"");
+        var feed = $$"""{"advisories":[],"conditionalAdvisories":[{{entry}}]}""";
+
+        var advisories = AdvisoryParser.ParseFeed(Encoding.UTF8.GetBytes(feed), out var skipped);
+
+        Assert.Empty(advisories);
+        Assert.Equal("conditional", Assert.Single(skipped).Id);
+    }
+
+    [Fact]
+    public void A_duplicate_across_arrays_does_not_trigger_either_version_of_the_advisory()
+    {
+        var feed = $$"""{"advisories":[{{Valid}}],"conditionalAdvisories":[{{Conditional(id: "A1")}}]}""";
+
+        var advisories = AdvisoryParser.ParseFeed(Encoding.UTF8.GetBytes(feed), out var skipped);
+
+        Assert.Empty(advisories);
+        Assert.Contains(skipped, entry => entry.Id == "A1" && entry.Reason.Contains("duplicate"));
+    }
+
     [Theory]
     [InlineData(">=1.0.0 <1.2.3")]
     [InlineData("<1.0.0 || ")]
@@ -137,6 +203,8 @@ public class AdvisoryParserTests
     [InlineData("{}")]
     [InlineData("""{"advisories":{}}""")]
     [InlineData("""{"advisories":null}""")]
+    [InlineData("""{"advisories":[],"conditionalAdvisories":null}""")]
+    [InlineData("""{"advisories":[],"conditionalAdvisories":{}}""")]
     public void A_malformed_envelope_throws(string json)
     {
         Assert.Throws<InvalidDataException>(() => AdvisoryParser.ParseFeed(Encoding.UTF8.GetBytes(json), out _));

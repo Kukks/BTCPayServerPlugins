@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
@@ -17,20 +18,30 @@ public class SecSwitchController(ISettingsRepository settingsRepository, LedgerS
 {
     [HttpGet("")]
     public async Task<IActionResult> Settings()
-        => View(await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings());
+    {
+        var settings = await settingsRepository.GetSettingAsync<SecSwitchSettings>() ?? new SecSwitchSettings();
+        settings.FeedUrl = settings.GetFeedUrl();
+        return View(settings);
+    }
 
     [HttpPost("")]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Settings(SecSwitchSettings settings)
     {
-        if (!AdvisoryFeed.IsSupportedFeedUrl(settings.FeedUrl))
+        var feedUrl = settings.GetFeedUrl();
+        if (feedUrl is not null && !AdvisoryFeed.IsSupportedFeedUrl(feedUrl))
             ModelState.AddModelError(nameof(settings.FeedUrl), "The advisory feed URL must be an absolute https:// URL.");
         if (!ModelState.IsValid)
             return View(settings);
 
+        settings.FeedUrl = feedUrl;
+        settings.AutoUpdatePlugins = (settings.AutoUpdatePlugins ?? [])
+            .Where(identifier => !string.IsNullOrWhiteSpace(identifier))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         await settingsRepository.UpdateSetting(settings);
         if (!settings.Enabled || !settings.AutoApply)
-            await ledger.ClearLocksAsync("SecSwitch was disabled or switched to manual mode, so its lockdown was lifted.");
+            await ledger.ClearLocksAsync("The server admin turned off advisory checks or the kill switch.");
         await lockdown.RefreshAsync();
         TempData[WellKnownTempData.SuccessMessage] = "SecSwitch settings saved";
         return RedirectToAction(nameof(Settings));

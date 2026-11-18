@@ -1,3 +1,4 @@
+using System.Text;
 using BTCPayServer.Plugins.SecSwitch.Models;
 using BTCPayServer.Plugins.SecSwitch.Services;
 using Xunit;
@@ -7,6 +8,72 @@ namespace BTCPayServer.Plugins.SecSwitch.Tests;
 
 public class AdvisoryApplicabilityTests
 {
+    const string ConditionalFeed = """
+        {
+          "advisories": [],
+          "conditionalAdvisories": [{
+            "id": "combination", "identifier": "Plug", "affectedVersions": "<1.2.3", "severity": "high",
+            "requires": {"identifier": "Dependency", "affectedVersions": ">=2.0.0 && <2.1.0"}
+          }]
+        }
+        """;
+
+    [Theory]
+    [InlineData("1.2.2.0", "2.0.0.0", true)]
+    [InlineData("1.2.3.0", "2.0.0.0", false)]
+    [InlineData("1.2.2.0", "2.1.0.0", false)]
+    [InlineData("1.2.2.0", null, false)]
+    public void Both_loaded_plugins_must_be_in_their_respective_ranges(
+        string targetVersion, string? dependencyVersion, bool expected)
+    {
+        var advisory = Assert.Single(AdvisoryParser.ParseFeed(Encoding.UTF8.GetBytes(ConditionalFeed), out _));
+        var plugins = new Dictionary<string, Version> { ["PLUG"] = Version.Parse(targetVersion) };
+        if (dependencyVersion is not null)
+            plugins.Add("dependency", Version.Parse(dependencyVersion));
+
+        var state = new InstanceState(plugins, Version.Parse("2.4.7"), false);
+        var applicable = AdvisoryApplicability.IsApplicable(advisory, state, out var installed, out var reason);
+
+        Assert.Equal(expected, applicable);
+        Assert.Equal(expected ? Version.Parse(targetVersion) : null, installed);
+        if (expected)
+            Assert.Contains("Dependency 2.0.0.0", reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void An_unknown_dependency_version_is_indeterminate()
+    {
+        var advisory = Assert.Single(AdvisoryParser.ParseFeed(Encoding.UTF8.GetBytes(ConditionalFeed), out _));
+        var state = new InstanceState(
+            new Dictionary<string, Version> { ["Plug"] = Version.Parse("1.2.2.0"), ["Dependency"] = null! },
+            Version.Parse("2.4.7"), false);
+
+        var applicable = AdvisoryApplicability.IsApplicable(advisory, state, out var installed, out var reason);
+
+        Assert.False(applicable);
+        Assert.Null(installed);
+        Assert.Contains(AdvisoryApplicability.IndeterminateVersionPhrase, reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("Plug", "1.2.1", "2.0.0", "1.2.2", true)]
+    [InlineData("Plug", "1.2.2", "2.0.0", "1.2.3", false)]
+    [InlineData("dependency", "1.2.2", "1.9.0", "2.0.0", true)]
+    [InlineData("dependency", "1.2.3", "1.9.0", "2.0.0", false)]
+    [InlineData("Dependency", "1.2.2", "2.0.0", "2.1.0", false)]
+    [InlineData("Other", "1.2.2", "2.0.0", "2.0.0", false)]
+    public void Candidate_updates_are_checked_against_both_affected_plugins(
+        string identifier, string target, string dependency, string candidate, bool expected)
+    {
+        var advisory = Assert.Single(AdvisoryParser.ParseFeed(Encoding.UTF8.GetBytes(ConditionalFeed), out _));
+        var state = new InstanceState(
+            new Dictionary<string, Version> { ["Plug"] = Version.Parse(target), ["Dependency"] = Version.Parse(dependency) },
+            Version.Parse("2.4.7"), false);
+
+        Assert.Equal(expected,
+            AdvisoryApplicability.IsApplicableAfterUpdate(advisory, state, identifier, Version.Parse(candidate)));
+    }
+
     [Fact]
     public void Applicable_when_installed_version_is_in_range()
     {

@@ -88,8 +88,8 @@ public static class Fixtures
             coreVersion is null ? null : Version.Parse(coreVersion), canUpdateCore);
 
     public static SecSwitchSettings Settings(
-        bool enabled = true, bool autoApply = true, bool preferUpdate = true, bool autoUpdateAll = false) => new()
+        bool enabled = true, bool autoApply = true, bool autoUpdatePlugin = false, bool autoUpdateCore = false) => new()
     {
-        Enabled = enabled, AutoApply = autoApply, PreferUpdateOverDisable = preferUpdate, AutoUpdateAll = autoUpdateAll
+        Enabled = enabled, AutoApply = autoApply, AutoUpdateCore = autoUpdateCore, AutoUpdatePlugins = autoUpdatePlugin ? ["Plug"] : []
     };
 }

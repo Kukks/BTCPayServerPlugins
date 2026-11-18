@@ -88,6 +88,26 @@ public class LedgerStoreTests
         var entry = (await store.GetAsync()).Entries["a1"];
         Assert.True(entry.Suppressed);
         Assert.Equal(LedgerStatus.Acted, entry.Status);
+        Assert.False(entry.NotificationPending);
+    }
+
+    [Fact]
+    public async Task A_notification_stays_pending_until_delivery_of_the_current_outcome_is_acknowledged()
+    {
+        var store = new LedgerStore(_repository);
+        var first = new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero);
+        var entry = Entry(status: LedgerStatus.NeedsAttention);
+        entry.RecordedAt = first;
+        await store.RecordAsync(entry);
+        Assert.True((await store.GetAsync()).Entries["a1"].NotificationPending);
+
+        entry.RecordedAt = first.AddHours(1);
+        entry.Status = LedgerStatus.Acted;
+        await store.RecordAsync(entry);
+        Assert.False(await store.MarkNotifiedAsync("a1", first));
+        Assert.True((await store.GetAsync()).Entries["a1"].NotificationPending);
+        Assert.True(await store.MarkNotifiedAsync("a1", entry.RecordedAt));
+        Assert.False((await store.GetAsync()).Entries["a1"].NotificationPending);
     }
 
     [Fact]

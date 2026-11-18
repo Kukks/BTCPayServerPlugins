@@ -37,9 +37,10 @@ public class PolicyResolverTests
     }
 
     [Fact]
-    public void Plugin_with_a_fix_is_updated_by_default()
+    public void A_fix_requires_an_explicit_opt_in_for_that_plugin()
     {
-        Assert.Equal(SecSwitchAction.UpdatePlugin, Resolve(Adv(fixedVersion: "1.2.3"), State()).Action);
+        Assert.Equal(SecSwitchAction.DisablePlugin, Resolve(Adv(fixedVersion: "1.2.3"), State()).Action);
+        Assert.Equal(SecSwitchAction.UpdatePlugin, Resolve(Adv(fixedVersion: "1.2.3"), State(), Settings(autoUpdatePlugin: true)).Action);
     }
 
     [Fact]
@@ -49,9 +50,9 @@ public class PolicyResolverTests
     }
 
     [Fact]
-    public void Preferring_disable_overrides_an_available_fix()
+    public void Opting_in_two_foreign_targets_does_not_opt_in_the_affected_plugin()
     {
-        var decision = Resolve(Adv(fixedVersion: "1.2.3"), State(), Settings(preferUpdate: false));
+        var decision = Resolve(Adv(fixedVersion: "1.2.3"), State(), new SecSwitchSettings { AutoUpdatePlugins = ["Other", "Third"], AutoUpdateCore = true });
 
         Assert.Equal(SecSwitchAction.DisablePlugin, decision.Action);
     }
@@ -65,19 +66,19 @@ public class PolicyResolverTests
     {
         var advisory = Adv(identifier: "BTCPayServer", affected: "<9.0.0", fixedVersion: hasFix ? "9.0.0" : null);
 
-        Assert.Equal(expected, Resolve(advisory, State(canUpdateCore: canUpdate)).Action);
+        Assert.Equal(expected, Resolve(advisory, State(canUpdateCore: canUpdate), Settings(autoUpdateCore: true)).Action);
     }
 
     [Fact]
-    public void Preferring_disable_does_not_stop_a_core_update()
+    public void Core_requires_its_own_opt_in_even_when_a_plugin_is_opted_in()
     {
         var advisory = Adv(identifier: "BTCPayServer", affected: "<9.0.0", fixedVersion: "9.0.0");
 
-        Assert.Equal(SecSwitchAction.UpdateCore, Resolve(advisory, State(canUpdateCore: true), Settings(preferUpdate: false)).Action);
+        Assert.Equal(SecSwitchAction.Lockdown, Resolve(advisory, State(canUpdateCore: true), Settings(autoUpdatePlugin: true)).Action);
     }
 
     [Theory]
-    [InlineData("Plug", "<1.2.3", "1.2.3", SecSwitchAction.UpdatePlugin)]
+    [InlineData("Plug", "<1.2.3", "1.2.3", SecSwitchAction.DisablePlugin)]
     [InlineData("Plug", "<1.2.3", null, SecSwitchAction.DisablePlugin)]
     [InlineData("BTCPayServer", "<9.0.0", null, SecSwitchAction.Lockdown)]
     public void Manual_mode_downgrades_any_action_to_notify_and_keeps_the_intended_one(
@@ -87,7 +88,7 @@ public class PolicyResolverTests
 
         Assert.Equal(SecSwitchAction.Notify, decision.Action);
         Assert.Equal(intended, decision.IntendedAction);
-        Assert.Contains(intended.ToString(), decision.Reason);
+        Assert.Contains("kill switch is off", decision.Reason);
     }
 
     [Theory]
@@ -97,7 +98,7 @@ public class PolicyResolverTests
     [InlineData("not a version")]
     public void A_fixed_version_that_would_downgrade_or_stay_affected_is_ignored_and_the_plugin_is_disabled(string fixedVersion)
     {
-        var decision = Resolve(Adv(fixedVersion: fixedVersion), State("1.1.0"));
+        var decision = Resolve(Adv(fixedVersion: fixedVersion), State("1.1.0"), Settings(autoUpdatePlugin: true));
 
         Assert.Equal(SecSwitchAction.DisablePlugin, decision.Action);
         Assert.Contains("is ignored", decision.Reason);
@@ -117,8 +118,8 @@ public class PolicyResolverTests
     {
         const string affected = ">=1.0.0 && <=1.2.3";
 
-        Assert.Equal(SecSwitchAction.DisablePlugin, Resolve(Adv(affected: affected, fixedVersion: "1.2.3"), State("1.2.3.0")).Action);
-        Assert.Equal(SecSwitchAction.UpdatePlugin, Resolve(Adv(affected: affected, fixedVersion: "1.2.4"), State("1.2.3.0")).Action);
+        Assert.Equal(SecSwitchAction.DisablePlugin, Resolve(Adv(affected: affected, fixedVersion: "1.2.3"), State("1.2.3.0"), Settings(autoUpdatePlugin: true)).Action);
+        Assert.Equal(SecSwitchAction.UpdatePlugin, Resolve(Adv(affected: affected, fixedVersion: "1.2.4"), State("1.2.3.0"), Settings(autoUpdatePlugin: true)).Action);
     }
 
     [Theory]
@@ -129,7 +130,7 @@ public class PolicyResolverTests
     {
         var advisory = Adv(identifier: "BTCPayServer", affected: "<9.0.0", fixedVersion: fixedVersion);
 
-        Assert.Equal(SecSwitchAction.Lockdown, Resolve(advisory, State(canUpdateCore: true)).Action);
+        Assert.Equal(SecSwitchAction.Lockdown, Resolve(advisory, State(canUpdateCore: true), Settings(autoUpdateCore: true)).Action);
     }
 
     [Fact]

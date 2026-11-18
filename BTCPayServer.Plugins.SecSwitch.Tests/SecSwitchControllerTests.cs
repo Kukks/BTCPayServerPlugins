@@ -41,30 +41,57 @@ public class SecSwitchControllerTests
     {
         var model = Assert.IsType<SecSwitchSettings>(Assert.IsType<ViewResult>(await _controller.Settings()).Model);
 
-        Assert.False(model.Enabled);
-        Assert.Equal(SecSwitchSettings.DefaultFeedUrl, model.FeedUrl);
+        Assert.True(model.Enabled);
+        Assert.Null(model.GetFeedUrl());
         Assert.True(model.AutoApply);
-        Assert.True(model.PreferUpdateOverDisable);
-        Assert.False(model.AutoUpdateAll);
+        Assert.False(model.AutoUpdateCore);
+        Assert.Empty(model.AutoUpdatePlugins);
     }
 
     [Fact]
-    public void The_default_feed_url_is_a_usable_https_url()
+    public async Task Legacy_settings_preserve_the_kill_switch_preference_without_opt_in_to_updates()
     {
-        Assert.True(AdvisoryFeed.IsSupportedFeedUrl(SecSwitchSettings.DefaultFeedUrl));
+        const string legacySettings = """
+            {
+                "enabled": true,
+                "autoApply": false,
+                "autoUpdateAll": true,
+                "preferUpdateOverDisable": true,
+                "feedUrl": "https://raw.githubusercontent.com/btcpayserver/advisories/master/advisories.json"
+            }
+            """;
+        await _settings.UpdateSetting(Newtonsoft.Json.JsonConvert.DeserializeObject<SecSwitchSettings>(legacySettings)!);
+
+        var model = Assert.IsType<SecSwitchSettings>(Assert.IsType<ViewResult>(await _controller.Settings()).Model);
+        Assert.True(model.Enabled);
+        Assert.False(model.AutoApply);
+        Assert.False(model.AutoUpdateCore);
+        Assert.Empty(model.AutoUpdatePlugins);
+        Assert.Null(model.FeedUrl);
     }
 
     [Fact]
     public async Task Saving_valid_settings_persists_them_and_redirects()
     {
-        var posted = new SecSwitchSettings { Enabled = true, FeedUrl = "https://example.test/a.json", AutoUpdateAll = true };
+        var posted = new SecSwitchSettings
+        {
+            Enabled = true,
+            AutoApply = false,
+            FeedUrl = " https://example.test/a.json ",
+            AutoUpdateCore = true,
+            AutoUpdatePlugins = ["BTCPayServer.Plugins.One", "btcpayserver.plugins.one", ""]
+        };
 
         var result = await _controller.Settings(posted);
 
         Assert.Equal(nameof(SecSwitchController.Settings), Assert.IsType<RedirectToActionResult>(result).ActionName);
         var saved = (await _settings.GetSettingAsync<SecSwitchSettings>())!;
         Assert.True(saved.Enabled);
-        Assert.True(saved.AutoUpdateAll);
+        Assert.False(saved.AutoApply);
+        Assert.True(saved.AutoUpdateCore);
+        Assert.Equal(["BTCPayServer.Plugins.One"], saved.AutoUpdatePlugins);
+        Assert.True(saved.IsPluginAutoUpdateEnabled("btcpayserver.plugins.one"));
+        Assert.False(saved.IsPluginAutoUpdateEnabled("BTCPayServer.Plugins.Two"));
         Assert.Equal("https://example.test/a.json", saved.FeedUrl);
         Assert.NotNull(_controller.TempData[WellKnownTempData.SuccessMessage]);
     }
@@ -72,7 +99,6 @@ public class SecSwitchControllerTests
     [Theory]
     [InlineData("http://example.test/a.json")]
     [InlineData("/relative")]
-    [InlineData("")]
     public async Task Saving_a_non_https_feed_url_is_rejected_and_nothing_is_persisted(string url)
     {
         var posted = new SecSwitchSettings { Enabled = true, FeedUrl = url };
@@ -92,7 +118,7 @@ public class SecSwitchControllerTests
         await _gate.RefreshAsync();
         Assert.True(await _gate.IsActiveAsync());
 
-        await _controller.Settings(new SecSwitchSettings { Enabled = false, FeedUrl = SecSwitchSettings.DefaultFeedUrl });
+        await _controller.Settings(new SecSwitchSettings { Enabled = false });
 
         Assert.False(await _gate.IsActiveAsync());
     }
@@ -100,26 +126,28 @@ public class SecSwitchControllerTests
     [Theory]
     [InlineData(false, true)]
     [InlineData(true, false)]
-    public async Task Disabling_or_going_manual_clears_stale_locks_so_they_cannot_resurface(bool enabled, bool autoApply)
+    public async Task Disabling_checks_or_the_kill_switch_clears_stale_locks(bool enabled, bool autoApply)
     {
         await _settings.UpdateSetting(new SecSwitchSettings { Enabled = true });
         await Lock();
 
-        await _controller.Settings(new SecSwitchSettings { Enabled = enabled, AutoApply = autoApply, FeedUrl = SecSwitchSettings.DefaultFeedUrl });
+        await _controller.Settings(new SecSwitchSettings { Enabled = enabled, AutoApply = autoApply });
         Assert.False((await _ledger.GetAsync()).Entries["core-1"].LockedDown);
 
-        await _controller.Settings(new SecSwitchSettings { Enabled = true, AutoApply = true, FeedUrl = SecSwitchSettings.DefaultFeedUrl });
+        await _controller.Settings(new SecSwitchSettings());
         Assert.False(await _gate.IsActiveAsync());
     }
 
     [Fact]
-    public async Task Saving_settings_that_stay_enabled_and_automatic_keeps_the_lockdown()
+    public async Task Clearing_the_feed_url_keeps_existing_lockdown_until_explicit_opt_out()
     {
-        await _settings.UpdateSetting(new SecSwitchSettings { Enabled = true });
+        await _settings.UpdateSetting(new SecSwitchSettings { FeedUrl = "https://example.test/a.json" });
         await Lock();
         await _gate.RefreshAsync();
 
-        await _controller.Settings(new SecSwitchSettings { Enabled = true, AutoApply = true, AutoUpdateAll = true, FeedUrl = SecSwitchSettings.DefaultFeedUrl });
+        var result = await _controller.Settings(new SecSwitchSettings { FeedUrl = "" });
+        Assert.IsType<RedirectToActionResult>(result);
+        Assert.Null((await _settings.GetSettingAsync<SecSwitchSettings>())!.FeedUrl);
 
         Assert.True(await _gate.IsActiveAsync());
         Assert.True((await _ledger.GetAsync()).Entries["core-1"].LockedDown);

@@ -31,6 +31,7 @@ public sealed class LedgerEntry
     public string Reason { get; set; } = "";
     public DateTimeOffset RecordedAt { get; set; }
     public bool Suppressed { get; set; }
+    public bool NotificationPending { get; set; }
 
     /// <summary>True while this entry keeps the server in lockdown; cleared once the advisory stops applying.</summary>
     public bool LockedDown { get; set; }

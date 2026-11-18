@@ -1,7 +1,10 @@
+using BTCPayServer.Configuration;
 using BTCPayServer.Plugins.SecSwitch.Models;
 using BTCPayServer.Plugins.SecSwitch.Services;
+using BTCPayServer.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 using static BTCPayServer.Plugins.SecSwitch.Tests.Fixtures;
 
@@ -107,6 +110,20 @@ public class ActionExecutorTests
         var outcome = await Executor().UpdatePluginAsync("Plug", "1.2.3");
 
         Assert.False(outcome.Succeeded);
+        Assert.Empty(_sink.Disabled);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("1.2.3")]
+    public async Task An_advisory_update_leaves_the_plugin_enabled_when_disable_fallback_is_off(string? fixedVersion)
+    {
+        _sink.QueueUpdateResult = false;
+        var outcome = await Executor().ExecuteAsync(SecSwitchAction.UpdatePlugin, Adv(fixedVersion: fixedVersion),
+            allowDisableFallback: false);
+
+        Assert.False(outcome.Succeeded);
+        Assert.False(outcome.RestartNeeded);
         Assert.Empty(_sink.Disabled);
     }
 
@@ -233,6 +250,120 @@ public class ActionExecutorTests
         Assert.Contains(typeof(IServiceScopeFactory), parameters);
         Assert.DoesNotContain(typeof(BTCPayServer.Plugins.PluginService), parameters);
     }
+
+    [Theory]
+    [InlineData("install")]
+    [InlineData("disable")]
+    [InlineData("delete")]
+    [InlineData("enable")]
+    public async Task An_update_leaves_pending_plugin_changes_alone(string pendingOperation)
+    {
+        using var dir = new TempPluginDir("Plug");
+        PluginManager.QueueCommands(dir.Path, (pendingOperation, "plug"));
+        var sink = SinkForPluginDirectory(dir.Path);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => sink.QueueUpdateAsync("Plug", "1.2.3"));
+
+        Assert.Contains("already queued", error.Message);
+        Assert.Equal((pendingOperation, "plug"), Assert.Single(PluginManager.GetPendingCommands(dir.Path)));
+    }
+
+    [Theory]
+    [InlineData("disable", "disable")]
+    [InlineData("delete", "delete")]
+    [InlineData("install", "install", "disable")]
+    public void Disabling_a_plugin_keeps_any_existing_pending_operation(string pendingOperation, params string[] commands)
+    {
+        using var dir = new TempPluginDir("Plug");
+        PluginManager.QueueCommands(dir.Path, (pendingOperation, "Plug"));
+
+        Assert.True(SinkForPluginDirectory(dir.Path).QueueDisable("Plug"));
+        Assert.Equal(commands, PluginManager.GetPendingCommands(dir.Path).Select(command => command.command));
+    }
+
+    [Fact]
+    public void Automatic_updates_require_compatible_loaded_dependencies_without_pending_changes()
+    {
+        var manifest = new PluginService.AvailablePlugin
+        {
+            Dependencies =
+            [
+                new() { Identifier = "BTCPayServer", Condition = ">=2.4.7" },
+                new() { Identifier = "Dependency", Condition = ">=1.2.3" }
+            ]
+        };
+        var installed = new Dictionary<string, Version>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["BTCPayServer"] = new(2, 4, 7),
+            ["Dependency"] = new(1, 2, 3)
+        };
+
+        Assert.True(BtcPayActionSink.CanInstallUpdate(manifest, installed, []));
+        Assert.False(BtcPayActionSink.CanInstallUpdate(manifest, installed, ["dependency"]));
+        installed["Dependency"] = new(1, 2, 2);
+        Assert.False(BtcPayActionSink.CanInstallUpdate(manifest, installed, []));
+        installed.Remove("Dependency");
+        Assert.False(BtcPayActionSink.CanInstallUpdate(manifest, installed, []));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task SecSwitch_stages_updates_without_replacing_an_admin_download(bool adminDownload, bool adminQueued)
+    {
+        using var dir = new TempPluginDir("Plug");
+        const string published = """{"manifestInfo":{"identifier":"Plug","version":"1.2.3.0"}}""";
+        var payloadPath = Path.Combine(dir.Path, "Plug.btcpay");
+        var manifestPath = Path.Combine(dir.Path, "Plug.json");
+        using var client = new HttpClient(new StubPluginBuilder(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path == "/api/v1/plugins/Plug")
+                return $"[{published}]";
+            if (!path.EndsWith("/download", StringComparison.Ordinal))
+                return published;
+            if (adminDownload)
+            {
+                File.WriteAllText(payloadPath, "admin package");
+                File.WriteAllText(manifestPath, "admin manifest");
+                if (adminQueued)
+                    PluginManager.QueueCommands(dir.Path, ("install", "Plug"));
+            }
+            return "SecSwitch package";
+        })) { BaseAddress = new Uri("https://plugins.example/") };
+        var networks = new BTCPayNetworkProvider([], new NBXplorer.NBXplorerNetworkProvider(NBitcoin.ChainName.Regtest),
+            new Logging.Logs());
+        using var services = new ServiceCollection()
+            .AddSingleton(new PluginBuilderClient(client))
+            .AddSingleton(new PoliciesSettings())
+            .AddSingleton(new BTCPayServerEnvironment(null!, networks, null!, new BTCPayServerOptions()))
+            .BuildServiceProvider();
+        var sink = SinkForPluginDirectory(dir.Path, services.GetRequiredService<IServiceScopeFactory>());
+
+        if (adminQueued)
+            await Assert.ThrowsAsync<InvalidOperationException>(() => sink.QueueUpdateAsync("Plug", "1.2.3"));
+        else if (adminDownload)
+            await Assert.ThrowsAsync<IOException>(() => sink.QueueUpdateAsync("Plug", "1.2.3"));
+        else
+            Assert.True(await sink.QueueUpdateAsync("Plug", "1.2.3"));
+
+        Assert.Equal(adminDownload ? "admin package" : "SecSwitch package", File.ReadAllText(payloadPath));
+        if (adminDownload)
+            Assert.Equal("admin manifest", File.ReadAllText(manifestPath));
+        Assert.Equal(adminDownload && !adminQueued ? [] : [("install", "Plug")], PluginManager.GetPendingCommands(dir.Path));
+        Assert.Equal("Plug", Path.GetFileName(Assert.Single(Directory.GetDirectories(dir.Path))));
+    }
+
+    sealed class StubPluginBuilder(Func<HttpRequestMessage, string> body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(body(request)) });
+    }
+
+    static BtcPayActionSink SinkForPluginDirectory(string pluginDirectory, IServiceScopeFactory? scopeFactory = null) =>
+        new(scopeFactory!, null!, Options.Create(new DataDirectories { PluginDir = pluginDirectory }),
+            null!, null!, null!, null!, NullLogger<BtcPayActionSink>.Instance);
 
     sealed class TempPluginDir : IDisposable
     {
